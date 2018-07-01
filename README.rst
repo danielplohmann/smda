@@ -8,6 +8,7 @@ The output is a collection of functions, basic blocks, and instructions with the
 Optionally, references to the Windows API can be inferred by using the ApiScout method.
 
 To get an impression how to work with the library, check the demo script:
+
 * analyze.py -- example usage: perform disassembly and optionally store results in JSON to a given output path.
 
 The code should be fully compatible with Python 2 and 3.
@@ -16,7 +17,7 @@ Further explanation on the innerworkings follow in separate publications but wil
 Version History
 ---------------
 
-* 2018-07-01: Initial Release.
+ * 2018-07-01: Initial Release.
 
 
 Credits
