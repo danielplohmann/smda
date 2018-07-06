@@ -13,6 +13,7 @@ class FunctionCandidate(object):
         self.finished = False
         self.analysis_aborted = False
         self.abortion_reason = ""
+        self._score = None
 
     def hasCommonFunctionStart(self):
         for length in sorted([int(l) for l in COMMON_PROLOGUES], reverse=True):
@@ -31,13 +32,16 @@ class FunctionCandidate(object):
     def addCallRef(self, source_addr):
         if source_addr not in self.call_ref_sources:
             self.call_ref_sources.append(source_addr)
+        self._score = None
 
     def removeCallRefs(self, source_addrs):
         for addr in source_addrs:
             self.call_ref_sources.remove(addr)
+        self._score = None
 
     def setLanguageSpec(self, lang_spec):
         self.lang_spec = lang_spec
+        self._score = None
 
     def setAnalysisAborted(self, reason):
         self.finished = True
@@ -49,8 +53,8 @@ class FunctionCandidate(object):
 
     def isFinished(self):
         return self.finished
-
-    def getScore(self):
+        
+    def calculateScore(self):
         score = 0
         # TODO: Review this scoring mechanism and replace intuition with science :)
         score += 1 if self.lang_spec is not None else 0
@@ -58,6 +62,11 @@ class FunctionCandidate(object):
         call_ref_score = 1 + int(len(self.call_ref_sources) / 10)
         score += call_ref_score if self.call_ref_sources else 0
         return score
+        
+    def getScore(self):
+        if self._score is None:
+            self._score = self.calculateScore()
+        return self._score
 
     def __lt__(self, other):
         own_score = self.getScore()
@@ -77,3 +86,4 @@ class FunctionCandidate(object):
         characteristics = is_ref + is_prologue + is_lang_spec + is_finished + is_aborted
         ref_summary = "{}".format(len(self.call_ref_sources)) if len(self.call_ref_sources) != 1 else "{}: 0x{:x}".format(len(self.call_ref_sources), self.call_ref_sources[0])
         return "0x{:x}: {} -> {} (total score: {}), inref: {} | {}".format(self.addr, hexlify(self.bytes), prologue_score, self.getScore(), ref_summary, characteristics)
+

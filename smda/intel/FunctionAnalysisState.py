@@ -24,6 +24,8 @@ class FunctionAnalysisState(object):
         self.data_bytes = set([])
         self.data_refs = set([])
         self.code_refs = set([])
+        self.code_refs_from = {}
+        self.code_refs_to = {}
         self.suspicious_ins_count = 0
         self.is_jmp = False
         self.is_next_instruction_reachable = True
@@ -58,13 +60,17 @@ class FunctionAnalysisState(object):
         for byte in range(i.size):
             self.processed_bytes.add(i.address + byte)
         if self.is_next_instruction_reachable:
-            self.code_refs.update([(i.address, i.address + i.size)])
-            if self.is_jmp:
-                self.jump_targets.update([i.address + i.size])
+            self.addCodeRef(i.address, i.address + i.size, self.is_jmp)
         self.is_jmp = False
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.update([(addr_from, addr_to)])
+        refs_from = self.code_refs_from.get(addr_from, set([]))
+        refs_from.update([addr_to])
+        self.code_refs_from[addr_from] = refs_from
+        refs_to = self.code_refs_to.get(addr_to, set([]))
+        refs_to.update([addr_from])
+        self.code_refs_to[addr_to] = refs_to
         if by_jump:
             self.is_jmp = True
             self.jump_targets.update([addr_to])
@@ -157,12 +163,10 @@ class FunctionAnalysisState(object):
         if self.blocks:
             return self.blocks
         self.instructions.sort()
-        blocks = []
         ins = {i[0]:ind for ind, i in enumerate(self.instructions)}
-        refs_out = {fr:[t for (f, t) in self.code_refs if f == fr] for (fr, to) in self.code_refs}
-        refs_in = {to:[f for (f, t) in self.code_refs if t == to] for (fr, to) in self.code_refs}
         potential_starts = set([self.start_addr])
         potential_starts.update(list(self.jump_targets))
+        blocks = []
         for start in sorted(potential_starts):
             if not start in ins:
                 continue
@@ -171,12 +175,12 @@ class FunctionAnalysisState(object):
                 current = self.instructions[i]
                 block.append(current)
                 # if one code reference is to another address than the next
-                if current[0] in refs_out:
+                if current[0] in self.code_refs_from:
                     if not current[2] in CALL_INS and not i == len(self.instructions) - 1:
-                        if any([r != self.instructions[i+1][0] for r in refs_out[current[0]]]):
+                        if any([r != self.instructions[i+1][0] for r in self.code_refs_from[current[0]]]):
                             break
-                if not i == len(self.instructions) - 1 and self.instructions[i+1][0] in refs_in:
-                    if len(refs_in[self.instructions[i+1][0]]) > 1 or self.instructions[i+1][0] in potential_starts:
+                if not i == len(self.instructions) - 1 and self.instructions[i+1][0] in self.code_refs_to:
+                    if len(self.code_refs_to[self.instructions[i+1][0]]) > 1 or self.instructions[i+1][0] in potential_starts:
                         break
                 if current[2] in END_INS:
                     break

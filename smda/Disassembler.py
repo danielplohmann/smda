@@ -24,6 +24,10 @@ class Disassembler(object):
         self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr)
         signal.alarm(0)
         return self.disassembly
+        
+    def getDisassemblyState(self):
+        # TODO 2018-07-03: return phase (function candidates / gap analysis) and progress (queue state / gap offset)
+        return
 
     def getDisassemblyReport(self, disassembly=None):
         report = {}
