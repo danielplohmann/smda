@@ -80,16 +80,15 @@ class FunctionAnalysisState(object):
         for i in range(size):
             self.data_bytes.update([addr_to + i])
 
-    def identifyCallConflicts(self, candidates):
+    def identifyCallConflicts(self, all_refs):
         conflicts = {}
-        for candidate_addr, candidate in candidates.items():
-            if not (candidate.isFinished() or candidate.getScore() == 0):
-                unique_call_refs_sources = set(candidate.call_ref_sources)
-                covered_sources = unique_call_refs_sources.intersection(self.processed_bytes)
-                function_conflicts = covered_sources.difference(self.instruction_start_bytes)
-                if function_conflicts:
-                    logging.debug("Found call candidate target conflict to already recognized code at 0x%08x: %s (removing them from the queue).", candidate_addr, ", ".join(["0x{:x}".format(addr) for addr in function_conflicts]))
-                    conflicts[candidate_addr] = function_conflicts
+        non_instruction_start_bytes = self.processed_bytes.difference(self.instruction_start_bytes)
+        conflict_addrs = set(all_refs.keys()).intersection(non_instruction_start_bytes)
+        for candidate_source_ref in conflict_addrs:
+            candidate = all_refs[candidate_source_ref]
+            if candidate not in conflicts:
+                conflicts[candidate] = []
+            conflicts[candidate].append(candidate_source_ref)
         return conflicts
 
     def _finalizeRegularAnalysis(self):

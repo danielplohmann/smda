@@ -36,7 +36,8 @@ class FunctionCandidate(object):
 
     def removeCallRefs(self, source_addrs):
         for addr in source_addrs:
-            self.call_ref_sources.remove(addr)
+            if addr in self.call_ref_sources:
+                self.call_ref_sources.remove(addr)
         self._score = None
 
     def setLanguageSpec(self, lang_spec):

@@ -18,7 +18,9 @@ class FunctionCandidateManager(object):
         self.lang_analyzer = LanguageAnalyzer()
         self.disassembly = disassembly
         self.candidates = {}
+        self._all_call_refs = {}
         self.cached_candidates = None
+        self._candidate_offsets = []
         self.candidate_index = 0
         self.bitness = bitness
         if bitness not in [32, 64]:
@@ -60,7 +62,7 @@ class FunctionCandidateManager(object):
 
     def updateCandidates(self, state):
         if self.config.HIGH_ACCURACY:
-            conflicts = state.identifyCallConflicts(self.candidates)
+            conflicts = state.identifyCallConflicts(self._all_call_refs)
             if conflicts:
                 for candidate_addr, conflict in conflicts.items():
                     self.candidates[candidate_addr].removeCallRefs(conflict)
@@ -85,7 +87,7 @@ class FunctionCandidateManager(object):
             logging.debug("  No candidates found.")
 
     def getFunctionStartCandidates(self):
-        return [c.addr for c in self.cached_candidates]
+        return self._candidate_offsets
 
     def initGapSearch(self):
         if self.gap_pointer is None:
@@ -203,6 +205,7 @@ class FunctionCandidateManager(object):
         if addr not in self.candidates:
             start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
             self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+            self._all_call_refs[source_ref] = addr
         self.candidates[addr].addCallRef(source_ref)
 
     def addLanguageSpecCandidate(self, addr, lang_spec):
@@ -242,6 +245,8 @@ class FunctionCandidateManager(object):
         self.locateLangSpecCandidates()
         self.locateStubChainCandidates()
         LOGGER.debug("Located %d function candidates", len(self.candidates))
+        # increase lookup speed with static list
+        self._candidate_offsets = [c.addr for c in self.candidates.values()]
         self.cached_candidates = list(self.candidates.values())
         self.candidate_queue = PriorityQueue(content=self.cached_candidates)
 
