@@ -16,7 +16,7 @@ LOG_FORMAT = "%(asctime)-15s: %(name)-32s - %(message)s"
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 
 ### SMDA disassembler config
-TIMEOUT = 60
+TIMEOUT = 120
 HIGH_ACCURACY = True
 RESOLVE_TAILCALLS = True
 RESOLVE_REGISTER_CALLS = True

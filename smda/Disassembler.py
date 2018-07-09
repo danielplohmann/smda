@@ -1,14 +1,9 @@
 import hashlib
-import signal
 import datetime
+import time
 
-from smda.common.SmdaExceptions import TimeoutException
 from .DisassemblyStatistics import DisassemblyStatistics
 from .intel.IntelDisassembler import IntelDisassembler
-
-
-def signal_handler(signum, frame):
-    raise TimeoutException("timed out")
 
 
 class Disassembler(object):
@@ -17,17 +12,19 @@ class Disassembler(object):
         self.config = config
         self.disassembler = IntelDisassembler(config)
         self.disassembly = None
+        self._start_time = None
+        self._timeout = 0
+
+    def _callbackAnalysisTimeout(self):
+        if not self._timeout:
+            return False
+        return time.time() - self._start_time > self._timeout
 
     def disassemble(self, binary, base_addr, timeout=0):
-        signal.signal(signal.SIGALRM, signal_handler)
-        signal.alarm(timeout)
-        self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr)
-        signal.alarm(0)
+        self._start_time = time.time()
+        self._timeout = timeout
+        self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr, self._callbackAnalysisTimeout)
         return self.disassembly
-        
-    def getDisassemblyState(self):
-        # TODO 2018-07-03: return phase (function candidates / gap analysis) and progress (queue state / gap offset)
-        return
 
     def getDisassemblyReport(self, disassembly=None):
         report = {}
@@ -45,10 +42,9 @@ class Disassembler(object):
             "message": "Analysis finished regularly.",
             "sha256": hashlib.sha256(disassembly.binary).hexdigest(),
             "version": self.config.VERSION,
-            "status": "ok",
+            "status": disassembly.getAnalysisOutcome(),
             "summary": stats.calculate(),
             "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": disassembly.collectCfg(),
         }
         return report
-

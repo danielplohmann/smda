@@ -20,10 +20,7 @@ def disassembleFile(filePath):
         disassembly = disasm.disassemble(file_content, base_addr, timeout=config.TIMEOUT)
         report = disasm.getDisassemblyReport(disassembly)
         report["filename"] = os.path.basename(filePath)
-        print(str(disassembly))
-    except TimeoutException as exc:
-        print("-> the analysis took too long to finish.")
-        report = {"status":"timeout", "message":"Analysis took to long", "execution_time": config.TIMEOUT}
+        print(disassembly)
     except Exception as exc:
         print("-> an error occured (", str(exc), ").")
         report = {"status":"error", "message":traceback.format_exc(exc), "execution_time": time.clock() - start}

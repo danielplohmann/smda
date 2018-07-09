@@ -8,6 +8,7 @@ class DisassemblyResult(object):
     def __init__(self, bitness=32):
         self.analysis_start_ts = datetime.datetime.utcnow()
         self.analysis_end_ts = self.analysis_start_ts
+        self.analysis_timeout = False
         self.binary = ""
         self.bitness = bitness
         self.code_map = {}
@@ -33,6 +34,12 @@ class DisassemblyResult(object):
 
     def getAnalysisDuration(self):
         return (self.analysis_end_ts - self.analysis_start_ts).seconds + (self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000
+
+    def getAnalysisOutcome(self):
+        outcome = "ok"
+        if self.analysis_timeout:
+            outcome = "timeout"
+        return outcome
 
     def getFunctions(self):
         return sorted(self.functions.keys())
@@ -60,7 +67,7 @@ class DisassemblyResult(object):
         if instruction_addr in self.instructions:
             return self.instructions[instruction_addr][0]
         return ""
-        
+
     def collectCfg(self):
         function_results = {}
         for function_offset in sorted(self.functions):
@@ -179,7 +186,6 @@ class DisassemblyResult(object):
                 if ins[0] in self.addr_to_api:
                     api_refs[ins[0]] = self.addr_to_api[ins[0]]
         return api_refs
-        
-    def __str__(self):
-        return "-> {:5.2f}s | {:5d} Func".format(self.getAnalysisDuration(), len(self.functions))
 
+    def __str__(self):
+        return "-> {:5.2f}s | {:5d} Func (status: {})".format(self.getAnalysisDuration(), len(self.functions), self.getAnalysisOutcome())

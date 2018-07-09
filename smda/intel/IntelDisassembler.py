@@ -295,7 +295,7 @@ class IntelDisassembler(object):
         self.fc_manager.updateCandidates(state)
         return state.getBlocks()
 
-    def analyzeBuffer(self, binary, base_addr):
+    def analyzeBuffer(self, binary, base_addr, cbAnalysisTimeout):
         LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", len(binary), base_addr)
         self.disassembly = DisassemblyResult()
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
@@ -313,11 +313,15 @@ class IntelDisassembler(object):
         self._initCapstone(self.bitness)
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
+            if cbAnalysisTimeout():
+                break
             function_blocks = self.analyzeFunction(candidate.addr)
         LOGGER.debug("Finished heuristical analysis, functions: %d", len(self.disassembly.functions))
         # second pass, analyze remaining gaps for additional candidates in an iterative way
         gap_candidate = self.fc_manager.nextGapCandidate()
         while gap_candidate is not None:
+            if cbAnalysisTimeout():
+                break
             LOGGER.debug("based on gap, performing function analysis of 0x%08x", gap_candidate)
             function_blocks = self.analyzeFunction(gap_candidate, as_gap=True)
             if function_blocks:
@@ -333,4 +337,6 @@ class IntelDisassembler(object):
             self.tailcall_analyzer.resolveTailcalls(self)
         self.disassembly.failed_analysis_addr = self.fc_manager.getAbortedCandidates()
         self.disassembly.analysis_end_ts = datetime.datetime.utcnow()
+        if cbAnalysisTimeout():
+            self.disassembly.analysis_timeout = True
         return self.disassembly

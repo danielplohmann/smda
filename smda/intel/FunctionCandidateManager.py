@@ -85,7 +85,6 @@ class FunctionCandidateManager(object):
             logging.debug("  No candidates found.")
 
     def getFunctionStartCandidates(self):
-        # self._logCandidateStats()
         return [c.addr for c in self.cached_candidates]
 
     def initGapSearch(self):
