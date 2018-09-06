@@ -20,10 +20,10 @@ class Disassembler(object):
             return False
         return time.time() - self._start_time > self._timeout
 
-    def disassemble(self, binary, base_addr, timeout=0):
+    def disassemble(self, binary, base_addr, bitness=None, timeout=0):
         self._start_time = time.time()
         self._timeout = timeout
-        self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr, self._callbackAnalysisTimeout)
+        self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr, bitness, self._callbackAnalysisTimeout)
         return self.disassembly
 
     def getDisassemblyReport(self, disassembly=None):

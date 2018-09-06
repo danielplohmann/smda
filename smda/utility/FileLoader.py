@@ -10,14 +10,14 @@ class FileLoader(object):
         self._map_file = map_file
         self.file_loaders = [PeFileLoader, ElfFileLoader]
         self._loadFile()
-        
+
     def _loadRawFileContent(self):
         binary = ""
         if os.path.isfile(self._file_path):
             with open(self._file_path, "rb") as inf:
                 binary = inf.read()
         return binary
-        
+
     def _loadFile(self):
         if self._map_file:
             data = self._loadRawFileContent()
@@ -27,7 +27,6 @@ class FileLoader(object):
                     break
         else:
             self._data = self._loadRawFileContent()
-        
+
     def getData(self):
         return self._data
-

@@ -10,12 +10,18 @@ LOGGER = logging.getLogger(__name__)
 class ApiResolver(object):
     """ Minimal WinAPI reference resolver, extracted from ApiScout """
 
-    def __init__(self, db_filepath):
+    def __init__(self, db_filepaths):
         self.has_64bit = False
         self.api_map = {}
-        self._loadDbFile(db_filepath)
+        self._os_name = None
+        for os_name, db_filepath in db_filepaths.items():
+            self._loadDbFile(os_name, db_filepath)
+            self._os_name = os_name
 
-    def _loadDbFile(self, db_filepath):
+    def setOsName(self, os_name):
+        self._os_name = os_name
+
+    def _loadDbFile(self, os_name, db_filepath):
         api_db = {}
         if os.path.isfile(db_filepath):
             with open(db_filepath, "r") as f_json:
@@ -39,10 +45,7 @@ class ApiResolver(object):
                 virtual_address = base_address + export["address"]
                 api_map[virtual_address] = (dll_name, api_name)
         LOGGER.info("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
-        self.api_map = api_map
+        self.api_map[os_name] = api_map
 
     def resolveApiByAddress(self, absolute_addr):
-        api_entry = ("", "")
-        if absolute_addr in self.api_map:
-            api_entry = self.api_map[absolute_addr]
-        return api_entry
+        return self.api_map[self._os_name].get(absolute_addr, ("", ""))

@@ -2,14 +2,12 @@ import argparse
 import json
 import os
 import re
-import sys
 import time
 import traceback
 
 import config
 from smda.Disassembler import Disassembler
 from smda.utility.FileLoader import FileLoader
-from smda.common.SmdaExceptions import TimeoutException
 
 
 def parseBaseAddrFromArgs(args):
@@ -24,7 +22,7 @@ def parseBaseAddrFromArgs(args):
 
 def disassembleFile(file_path, base_addr, map_file=False):
     print("now analyzing {}".format(file_path))
-    loader = FileLoader(file_path, base_addr=base_addr, map_file=map_file)
+    loader = FileLoader(file_path, map_file=map_file)
     file_content = loader.getData()
     disasm = Disassembler(config)
     start = time.clock()
@@ -40,21 +38,22 @@ def disassembleFile(file_path, base_addr, map_file=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Demo: Use SMDA to disassemble a given file (loaded memory view), optionally map it first and/or write the output to a file.')
-    parser.add_argument('-m', '--map_file', action='store_true', default=False, help='Perform mapping of the file as normalization.')
-    parser.add_argument('-b', '--base_addr', type=str, default='', help='Set base address to given value (int or 0x-hex format).')
-    parser.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
-    parser.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
+    PARSER = argparse.ArgumentParser(description='Demo: Use SMDA to disassemble a given file (loaded memory view), optionally map it first and/or write the output to a file.')
+    PARSER.add_argument('-m', '--map_file', action='store_true', default=False, help='Perform mapping of the file as normalization.')
+    PARSER.add_argument('-b', '--base_addr', type=str, default='', help='Set base address to given value (int or 0x-hex format).')
+    PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
+    PARSER.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
 
-    args = parser.parse_args()
-    if args.input_path:
+    ARGS = PARSER.parse_args()
+    if ARGS.input_path:
         REPORT = {}
-        if os.path.isfile(args.input_path):
-            base_addr = parseBaseAddrFromArgs(args)
-            REPORT = disassembleFile(args.input_path, base_addr, map_file=args.map_file)
-        if args.output_path:
-            with open(args.output_path, "w") as fout:
+        INPUT_FILENAME = ""
+        if os.path.isfile(ARGS.input_path):
+            BASE_ADDR = parseBaseAddrFromArgs(ARGS)
+            INPUT_FILENAME = os.path.basename(ARGS.input_path)
+            REPORT = disassembleFile(ARGS.input_path, BASE_ADDR, map_file=ARGS.map_file)
+        if REPORT and os.path.isdir(ARGS.output_path):
+            with open(ARGS.output_path + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
                 json.dump(REPORT, fout, indent=1, sort_keys=True)
     else:
-        parser.print_help()
-
+        PARSER.print_help()

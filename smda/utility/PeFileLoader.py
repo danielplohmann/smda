@@ -1,12 +1,11 @@
 
 
 class PeFileLoader(object):
-        
+
     @staticmethod
-    def _isCompatible(data):
+    def isCompatible(data):
         raise NotImplementedError
-        
+
     @staticmethod
     def mapData(data):
         raise NotImplementedError
-

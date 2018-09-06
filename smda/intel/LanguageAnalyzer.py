@@ -82,7 +82,7 @@ class LanguageAnalyzer(object):
         #(T-Strings start with a capital T, followed by any capital letter)
         t_objects = {}
         for match in re.finditer(b"(?P<length>.)(?P<t_string>T[A-Z][a-zA-Z0-9]{4,128})", binary):
-            if not len(match.group("t_string") - ord(match.group("length"))) in [-3, -2, -1, 0, 1, 2, 3]:  # ord(match.group("length")) != len(match.group("t_string")):
+            if not len(match.group("t_string")) - ord(match.group("length")) in [-3, -2, -1, 0, 1, 2, 3]:  # ord(match.group("length")) != len(match.group("t_string")):
                 continue
             t_object_name = match.group("t_string")[:ord(match.group("length"))]
             addresses = []

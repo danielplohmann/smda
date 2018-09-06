@@ -13,7 +13,7 @@ LOGGER = logging.getLogger(__name__)
 
 class FunctionCandidateManager(object):
 
-    def __init__(self, config, disassembly, bitness=0):
+    def __init__(self, config, disassembly, bitness=None):
         self.config = config
         self.lang_analyzer = LanguageAnalyzer()
         self.disassembly = disassembly
@@ -24,7 +24,7 @@ class FunctionCandidateManager(object):
         self.candidate_index = 0
         self.bitness = bitness
         if bitness not in [32, 64]:
-            bitness_analyzer = BitnessAnalyzer(common_function_starts_filepath=self.config.COMMON_FUNCTION_STARTS_FILE)
+            bitness_analyzer = BitnessAnalyzer()
             self.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
         self.disassembly.language = self.lang_analyzer.identify(self.disassembly)
         self.locateCandidates()
@@ -133,6 +133,8 @@ class FunctionCandidateManager(object):
                 LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)
                 return None
             gap_offset = self.gap_pointer - self.disassembly.base_addr
+            if gap_offset >= len(self.disassembly.binary):
+                return None
             # some compilers aggressively emit these kinds of nops between functions
             if self.disassembly.binary[gap_offset:gap_offset + 3] in GAP_SEQUENCES["3"]:
                 LOGGER.debug("nextGapCandidate() found 3 byte nop - gap_ptr += 3: 0x%08x", self.gap_pointer)
@@ -142,7 +144,10 @@ class FunctionCandidateManager(object):
                 LOGGER.debug("nextGapCandidate() found 2 byte nop - gap_ptr += 2: 0x%08x", self.gap_pointer)
                 self.gap_pointer += 2
                 continue
-            byte = self.disassembly.binary[gap_offset]
+            try:
+                byte = self.disassembly.binary[gap_offset]
+            except:
+                print("0x%08x" % self.disassembly.base_addr, "0x%08x" % len(self.disassembly.binary), "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             if isinstance(byte, int):
                 byte = chr(byte)
             if byte in GAP_SEQUENCES["1"]:

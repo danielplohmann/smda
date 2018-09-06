@@ -20,19 +20,19 @@ LOGGER = logging.getLogger(__name__)
 
 class IntelDisassembler(object):
 
-    def __init__(self, config, bitness=32):
+    def __init__(self, config, bitness=None):
         self.config = config
         self.bitness = bitness
-        self.capstone = self._initCapstone(bitness)
-        self.api_resolver = ApiResolver(config.API_COLLECTION_FILE)
+        self.capstone = self._initCapstone()
+        self.api_resolver = ApiResolver(config.API_COLLECTION_FILES)
         self.fc_manager = None
         self.tailcall_analyzer = None
         self.indcall_analyzer = None
         self.disassembly = DisassemblyResult()
 
-    def _initCapstone(self, bitness):
+    def _initCapstone(self):
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
-        if bitness == 64:
+        if self.bitness == 64:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
 
     def dereferenceDword(self, addr):
@@ -295,8 +295,9 @@ class IntelDisassembler(object):
         self.fc_manager.updateCandidates(state)
         return state.getBlocks()
 
-    def analyzeBuffer(self, binary, base_addr, cbAnalysisTimeout):
+    def analyzeBuffer(self, binary, base_addr, bitness, cbAnalysisTimeout):
         LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", len(binary), base_addr)
+        self.bitness = bitness
         self.disassembly = DisassemblyResult()
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
         self.disassembly.binary = binary
@@ -306,11 +307,11 @@ class IntelDisassembler(object):
         self.fc_manager = FunctionCandidateManager(self.config, self.disassembly, self.bitness)
         if not self.bitness:
             self.bitness = self.fc_manager.bitness
-            LOGGER.debug("Automatically Recognized Bitness as: %d", self.bitness)
+            LOGGER.info("Automatically Recognized Bitness as: %d", self.bitness)
         else:
             LOGGER.debug("Using forced Bitness as: %d", self.bitness)
         self.disassembly.bitness = self.bitness
-        self._initCapstone(self.bitness)
+        self._initCapstone()
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
             if cbAnalysisTimeout():
