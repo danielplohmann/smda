@@ -39,7 +39,9 @@ class Disassembler(object):
             "base_addr": disassembly.base_addr,
             "bitness": disassembly.bitness,
             "execution_time": disassembly.getAnalysisDuration(),
-            "message": "Analysis finished regularly.",
+            "meta" : {
+                "message": "Analysis finished regularly."
+            },
             "sha256": hashlib.sha256(disassembly.binary).hexdigest(),
             "version": self.config.VERSION,
             "status": disassembly.getAnalysisOutcome(),

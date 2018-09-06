@@ -83,7 +83,8 @@ class DisassemblyResult(object):
                 "outrefs": self.getOutRefs(function_offset),
                 "blockrefs": self.getBlockRefs(function_offset),
                 "apirefs": self.getApiRefs(function_offset),
-                "blocks": blocks
+                "blocks": blocks,
+                "label": ""
             }
             function_results[function_offset] = function_doc
         return function_results

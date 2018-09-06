@@ -23,7 +23,7 @@ def disassembleFile(filePath):
         print(disassembly)
     except Exception as exc:
         print("-> an error occured (", str(exc), ").")
-        report = {"status":"error", "message":traceback.format_exc(exc), "execution_time": time.clock() - start}
+        report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": time.clock() - start}
     return report
 
 
