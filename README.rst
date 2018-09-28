@@ -17,6 +17,7 @@ Further explanation on the innerworkings follow in separate publications but wil
 Version History
 ---------------
 
+ * 2018-09-28: We now have functional PE/ELF loaders.
  * 2018-07-09: Performance improvements.
  * 2018-07-01: Initial Release.
 
