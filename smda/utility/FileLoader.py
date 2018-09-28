@@ -8,6 +8,7 @@ class FileLoader(object):
     def __init__(self, file_path, map_file=False):
         self._file_path = file_path
         self._map_file = map_file
+        self._data = b""
         self.file_loaders = [PeFileLoader, ElfFileLoader]
         self._loadFile()
 
@@ -19,14 +20,14 @@ class FileLoader(object):
         return binary
 
     def _loadFile(self):
+        data = self._loadRawFileContent()
         if self._map_file:
-            data = self._loadRawFileContent()
             for loader in self.file_loaders:
                 if loader.isCompatible(data):
                     self._data = loader.mapData(data)
                     break
         else:
-            self._data = self._loadRawFileContent()
+            self._data = data
 
     def getData(self):
         return self._data
