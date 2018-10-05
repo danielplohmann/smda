@@ -34,7 +34,7 @@ class IntelDisassembler(object):
     def addLabelProvider(self, new_label_provider):
         self.label_providers.append(new_label_provider)
 
-    def _resolveApi(self, address):
+    def resolveApi(self, address):
         for provider in self.label_providers:
             if not provider.isApiProvider(): continue
             result = provider.getApi(address)
@@ -43,7 +43,7 @@ class IntelDisassembler(object):
         # No provider was able to resolve the used API
         return ("", "")
 
-    def _resolveSymbol(self, address):
+    def resolveSymbol(self, address):
         for provider in self.label_providers:
             if not provider.isSymbolProvider(): continue
             result = provider.getSymbol(address)
@@ -132,7 +132,7 @@ class IntelDisassembler(object):
 
     def _updateApiTarget(self, from_addr, to_addr):
         # identify API calls on the fly
-        dll, api = self._resolveApi(to_addr)
+        dll, api = self.resolveApi(to_addr)
         if dll and api:
             self._updateApiInformation(from_addr, to_addr, dll, api)
         else:

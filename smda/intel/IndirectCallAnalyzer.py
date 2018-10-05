@@ -77,7 +77,7 @@ class IndirectCallAnalyzer(object):
                 self.state.setLeaf(False)
                 LOGGER.debug("candidate: {}, register: {}".format(candidate, ins[3]), registers)
                 if candidate:
-                    dll, api = self.disassembler.api_resolver.resolveApiByAddress(candidate)
+                    dll, api = self.disassembler.resolveApi(candidate)
                     if dll and api:
                         LOGGER.debug("successfully resolved: %s %s", dll, api)
                         api_entry = {"referencing_addr": [], "dll_name": dll, "api_name": api}
