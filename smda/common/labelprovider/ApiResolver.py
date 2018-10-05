@@ -3,11 +3,13 @@
 import os
 import json
 
+from .AbstractLabelProvider import AbstractLabelProvider
+
 import logging
 LOGGER = logging.getLogger(__name__)
 
 
-class ApiResolver(object):
+class ApiResolver(AbstractLabelProvider):
     """ Minimal WinAPI reference resolver, extracted from ApiScout """
 
     def __init__(self, db_filepaths):
@@ -47,5 +49,10 @@ class ApiResolver(object):
         LOGGER.info("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
         self.api_map[os_name] = api_map
 
-    def resolveApiByAddress(self, absolute_addr):
-        return self.api_map[self._os_name].get(absolute_addr, ("", ""))
+    def isApiProvider(self):
+        """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
+        return True
+
+    def getApi(self, absolute_addr):
+        """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
+        return self.api_map[self._os_name].get(absolute_addr, None)
