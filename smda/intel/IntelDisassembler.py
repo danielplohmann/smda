@@ -8,7 +8,7 @@ import struct
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
 from smda.DisassemblyResult import DisassemblyResult
-from smda.common.ApiResolver import ApiResolver
+from smda.common.labelprovider.ApiResolver import ApiResolver
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -24,11 +24,33 @@ class IntelDisassembler(object):
         self.config = config
         self.bitness = bitness
         self.capstone = self._initCapstone()
-        self.api_resolver = ApiResolver(config.API_COLLECTION_FILES)
+        self.label_providers = list()
+        self.addLabelProvider(ApiResolver(config.API_COLLECTION_FILES))
         self.fc_manager = None
         self.tailcall_analyzer = None
         self.indcall_analyzer = None
         self.disassembly = DisassemblyResult()
+
+    def addLabelProvider(self, new_label_provider):
+        self.label_providers.append(new_label_provider)
+
+    def _resolveApi(self, address):
+        for provider in self.label_providers:
+            if not provider.isApiProvider(): continue
+            result = provider.getApi(address)
+            if result: return result
+
+        # No provider was able to resolve the used API
+        return ("", "")
+
+    def _resolveSymbol(self, address):
+        for provider in self.label_providers:
+            if not provider.isSymbolProvider(): continue
+            result = provider.getSymbol(address)
+            if result: return result
+
+        # No provider was able to resolve the used symbol
+        return ""
 
     def _initCapstone(self):
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -110,7 +132,7 @@ class IntelDisassembler(object):
 
     def _updateApiTarget(self, from_addr, to_addr):
         # identify API calls on the fly
-        dll, api = self.api_resolver.resolveApiByAddress(to_addr)
+        dll, api = self._resolveApi(to_addr)
         if dll and api:
             self._updateApiInformation(from_addr, to_addr, dll, api)
         else:
