@@ -9,6 +9,7 @@ class FileLoader(object):
         self._file_path = file_path
         self._map_file = map_file
         self._data = b""
+        self._base_addr = 0
         self.file_loaders = [PeFileLoader, ElfFileLoader]
         self._loadFile()
 
@@ -25,9 +26,13 @@ class FileLoader(object):
             for loader in self.file_loaders:
                 if loader.isCompatible(data):
                     self._data = loader.mapData(data)
+                    self._base_addr = loader.getBaseAddress(data)
                     break
         else:
             self._data = data
 
     def getData(self):
         return self._data
+
+    def getBaseAddress(self):
+        return self._base_addr

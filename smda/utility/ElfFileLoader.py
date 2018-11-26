@@ -15,13 +15,12 @@ class ElfFileLoader(object):
         return data[:4] == b"\x7FELF"
 
     @staticmethod
-    def mapData(binary):
+    def getBaseAddress(binary):
         # ELFFile needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
         filepointer = io.BytesIO(binary)
         mapped_binary = bytearray([])
         elffile = ELFFile(filepointer)
-
         # Determine base address of binary
         #
         base_addr = 0
@@ -32,12 +31,23 @@ class ElfFileLoader(object):
                 break
         if len(candidates) > 1:
             base_addr = min(candidates)
+        return base_addr
+
+    @staticmethod
+    def mapData(binary):
+        # ELFFile needs a file-like object...
+        # Attention: for Python 2.x use the cStringIO package for StringIO
+        filepointer = io.BytesIO(binary)
+        mapped_binary = bytearray([])
+        elffile = ELFFile(filepointer)
+        base_addr = ElfFileLoader.getBaseAddress(binary)
 
         # find begin of the first and end of the last section
         max_virt_section_offset = 0
         min_raw_section_offset = 0xFFFFFFFF
         for section in elffile.iter_sections():
-            # print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
+            # print(dir(section))
+            print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
             if section.header.sh_addr:
                 max_virt_section_offset = max(max_virt_section_offset, section.header.sh_size + section.header.sh_addr)
                 min_raw_section_offset = min(min_raw_section_offset, section.header.sh_addr)
@@ -56,3 +66,4 @@ class ElfFileLoader(object):
     @staticmethod
     def getBitness(binary):
         return ELFFile(io.BytesIO(binary)).elfclass
+

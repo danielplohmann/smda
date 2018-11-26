@@ -70,22 +70,78 @@ COMMON_PROLOGUES = {
 }
 
 #TODO: 2018-06-27 expand the coverage in this list
+# https://stackoverflow.com/questions/25545470/long-multi-byte-nops-commonly-understood-macros-or-other-notation
 GAP_SEQUENCES = {
-    "1": [
-        "\x90",  # nop
+    1: [
+        "\x90",  # NOP1_OVERRIDE_NOP - AMD / nop - INTEL
         "\xCC"  # int3
     ],
-    "2": [
+    2: [
+        b"\x66\x90",  # NOP2_OVERRIDE_NOP - AMD / nop - INTEL
         b"\x8b\xc0",
         b"\x8b\xff",  # mov edi, edi
         b"\x8d\x00",  # lea eax, dword ptr [eax]
         b"\x86\xc0",  # xchg al, al
     ],
-    "3": [
+    3: [
+        b"\x0f\x1f\x00",  # NOP3_OVERRIDE_NOP - AMD / nop - INTEL
         b"\x8d\x40\x00",  # lea eax, dword ptr [eax]
         b"\x8d\x00\x00",  # lea eax, dword ptr [eax]
         b"\x8d\x49\x00",  # lea ecx, dword ptr [ecx]
         b"\x8d\x64\x24",  # lea esp, dword ptr [esp]
+        b"\x8d\x76\x00",
+        b"\x66\x66\x90"
+    ],
+    4: [
+        b"\x0f\x1f\x40\x00",  # NOP4_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\x8d\x74\x26\x00",
+        b"\x66\x66\x66\x90"
+    ],
+    5: [
+        b"\x0f\x1f\x44\x00\x00",  # NOP5_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\x90\x8d\x74\x26\x00"
+    ],
+    6: [
+        b"\x66\x0f\x1f\x44\x00\x00",  # NOP6_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\x8d\xb6\x00\x00\x00\x00"
+    ],
+    7: [
+        b"\x0f\x1f\x80\x00\x00\x00\x00",  # NOP7_OVERRIDE_NOP - AMD / nop - INTEL,
+        b"\x8d\xb4\x26\x00\x00\x00\x00",
+        b"\x8D\xBC\x27\x00\x00\x00\x00"
+    ],
+    8: [
+        b"\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP8_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\x90\x8d\xb4\x26\x00\x00\x00\x00"
+    ],
+    9: [
+        b"\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP9_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\x89\xf6\x8d\xbc\x27\x00\x00\x00\x00"
+    ],
+    10: [
+        b"\x66\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP10_OVERRIDE_NOP - AMD
+        b"\x8d\x76\x00\x8d\xbc\x27\x00\x00\x00\x00",
+        b"\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+    ],
+    11: [
+        b"\x66\x66\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP11_OVERRIDE_NOP - AMD
+        b"\x8d\x74\x26\x00\x8d\xbc\x27\x00\x00\x00\x00",
+        b"\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+    ],
+    12: [
+        b"\x8d\xb6\x00\x00\x00\x00\x8d\xbf\x00\x00\x00\x00",
+        b"\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+    ],
+    13: [
+        b"\x8d\xb6\x00\x00\x00\x00\x8d\xbc\x27\x00\x00\x00\x00",
+        b"\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+    ],
+    14: [
+        b"\x8d\xb4\x26\x00\x00\x00\x00\x8d\xbc\x27\x00\x00\x00\x00",
+        b"\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+    ],
+    15: [
+        b"\x66\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
     ]
 }
 

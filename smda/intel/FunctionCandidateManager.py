@@ -135,25 +135,27 @@ class FunctionCandidateManager(object):
             gap_offset = self.gap_pointer - self.disassembly.base_addr
             if gap_offset >= len(self.disassembly.binary):
                 return None
-            # some compilers aggressively emit these kinds of nops between functions
-            if self.disassembly.binary[gap_offset:gap_offset + 3] in GAP_SEQUENCES["3"]:
-                LOGGER.debug("nextGapCandidate() found 3 byte nop - gap_ptr += 3: 0x%08x", self.gap_pointer)
-                self.gap_pointer += 3
+            found_multi_byte_nop = False
+            for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
+                if self.disassembly.binary[gap_offset:gap_offset + gap_length] in GAP_SEQUENCES[gap_length]:
+                    LOGGER.debug("nextGapCandidate() found %d byte nop - gap_ptr += %d: 0x%08x", gap_length, gap_length, self.gap_pointer)
+                    self.gap_pointer += gap_length
+                    found_multi_byte_nop = True
+                    break
+            if found_multi_byte_nop:
                 continue
-            if self.disassembly.binary[gap_offset:gap_offset + 2] in GAP_SEQUENCES["2"]:
-                LOGGER.debug("nextGapCandidate() found 2 byte nop - gap_ptr += 2: 0x%08x", self.gap_pointer)
-                self.gap_pointer += 2
-                continue
+            # compatibility with python2/3...
             try:
                 byte = self.disassembly.binary[gap_offset]
             except:
                 print("0x%08x" % self.disassembly.base_addr, "0x%08x" % len(self.disassembly.binary), "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             if isinstance(byte, int):
                 byte = chr(byte)
-            if byte in GAP_SEQUENCES["1"]:
+            if byte in GAP_SEQUENCES[1]:
                 LOGGER.debug("nextGapCandidate() found 0xCC or 0x90 - gap_ptr += 1: 0x%08x", self.gap_pointer)
                 self.gap_pointer += 1
                 continue
+            # we know this place from data already
             if self.gap_pointer in self.disassembly.data_map:
                 LOGGER.debug("nextGapCandidate() gap_ptr is already inside data map: 0x%08x", self.gap_pointer)
                 self.gap_pointer += 1

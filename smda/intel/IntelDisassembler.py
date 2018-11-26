@@ -190,6 +190,7 @@ class IntelDisassembler(object):
                 self._updateApiTarget(i.address, dereferenced)
         elif i.op_str.strip().startswith("dword ptr ["):
             # case = "SWITCH"
+            # TODO 2018-11-26 instead of direct size bruteforcing, use backtracking to cmp instruction to derive jump table size first, fall back to bruteforcing
             addr_switch_array = self.getReferencedAddr(i.op_str)
             switch_addresses = self._resolveSwitch(addr_switch_array)
             for switch_index, switch_destination in enumerate(switch_addresses):
@@ -217,8 +218,22 @@ class IntelDisassembler(object):
                     state.addBlockToQueue(int(i.op_str, 16))
             state.addCodeRef(i.address, int(i.op_str, 16), by_jump=True)
         else:
-            # this case seemingly occurs negliably rare and is hard to handle (uses this pointers, function parameters and return results etc)
-            # case = "FALLTHROUGH-ELSE"
+            # TODO 2018-11-26 implement parsing for this alternative jump table style (gcc, O0)
+            # example A:
+            # .text:addr                 cmp     edi, 0C5h       ; switch 198 cases
+            # .text:addr                 ja      loc_default     ; jumptable default case
+            # .text:addr                 mov     eax, ds:off_jmptable[edi*4]
+            # .text:addr                 jmp     eax             ; switch jump
+            # ---
+            # example B:
+            # .text:addr                 cmp     [ebp+var_stack], 0Fh
+            # .text:addr                 ja      loc_default
+            # .text:addr                 mov     eax, [ebp+var_stack]
+            # .text:addr                 shl     eax, 2
+            # .text:addr                 add     eax, off_jmptable
+            # .text:addr                 mov     eax, [eax]
+            # .text:addr                 jmp     eax
+            # case = "SWITCH-ELSE"
             pass
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)

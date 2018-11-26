@@ -66,7 +66,7 @@ class PeFileLoader(object):
         return PeFileLoader.BITNESS_MAP.get(bitness_id, 0)
 
     @staticmethod
-    def getBaseAddressFromPeHeader(binary):
+    def getBaseAddress(binary):
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset:
             if pe_offset and len(binary) >= pe_offset + 0x38:
