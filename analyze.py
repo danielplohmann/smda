@@ -23,6 +23,9 @@ def parseBaseAddrFromArgs(args):
 def disassembleFile(file_path, base_addr, map_file=False):
     print("now analyzing {}".format(file_path))
     loader = FileLoader(file_path, map_file=map_file)
+    # override base address in case we have to map the binary
+    if map_file:
+        base_addr = loader.getBaseAddress()
     file_content = loader.getData()
     disasm = Disassembler(config)
     start = time.clock()
