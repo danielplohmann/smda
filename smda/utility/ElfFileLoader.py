@@ -46,8 +46,7 @@ class ElfFileLoader(object):
         max_virt_section_offset = 0
         min_raw_section_offset = 0xFFFFFFFF
         for section in elffile.iter_sections():
-            # print(dir(section))
-            print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
+            # print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
             if section.header.sh_addr:
                 max_virt_section_offset = max(max_virt_section_offset, section.header.sh_size + section.header.sh_addr)
                 min_raw_section_offset = min(min_raw_section_offset, section.header.sh_addr)
