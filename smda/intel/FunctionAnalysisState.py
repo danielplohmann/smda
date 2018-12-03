@@ -80,6 +80,14 @@ class FunctionAnalysisState(object):
         for i in range(size):
             self.data_bytes.update([addr_to + i])
 
+    def backtrackInstructions(self, addr_from, num_instructions):
+        backtracked = []
+        for instruction in sorted(self.instructions, key=lambda x: x[0]):
+            if instruction[0] >= addr_from:
+                break
+            backtracked.append(instruction)
+        return backtracked[-num_instructions:]
+
     def identifyCallConflicts(self, all_refs):
         conflicts = {}
         non_instruction_start_bytes = self.processed_bytes.difference(self.instruction_start_bytes)
