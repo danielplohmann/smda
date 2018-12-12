@@ -98,6 +98,63 @@ class IntelDisassembler(object):
             LOGGER.debug("0x%08x found %d bytes.", current_offset, len(indirect_switch_bytes))
         return indirect_switch_bytes
 
+    def _resolveUnlikelyJumpCase(self, i, state):
+            """ 
+                resolve GCC style jump tables (not implemented/tested for x64 yet).
+                There are generally two typical patterns here:
+                A) multiplicative
+                    cmp     eax, jumptable_size
+                    ja      loc_default
+                    mov     eax, ds:off_jumptable[eax*4]
+                    jmp     eax
+                B) additive
+                    cmp     [ebp+arg_4], jumptable_size
+                    ja      loc_default
+                    mov     eax, [ebp+arg_4]
+                    shl     eax, 2
+                    add     eax, off_jumptable
+                    mov     eax, [eax]
+                    jmp     eax
+            """
+            register = i.op_str.strip().lower()
+            jumptable_size = None  # int(state.instructions[-3][3].split(",")[-1].strip(), base=16) + 1
+            backtracked = state.backtrackInstructions(i.address, 10)
+            for instr in backtracked[::-1]:
+                if instr[2] == "cmp" and re.match(r"[^,]+, (([0-9])|(0x[0-9a-f]+))", instr[3]):
+                    jumptable_size = int(instr[3].split(",")[-1].strip(), base=16) + 1
+                    break
+
+            # ensure that we found a jumptable size
+            if not jumptable_size:
+                return
+
+            data_ref_instruction_addr = None
+            off_jumptable = None
+            for instr in backtracked[::-1]:
+                if instr[2] == "mov" and re.match(r"[^,]+, dword ptr \[[^ ]+ \+ 0x[0-9a-f]+\]", instr[3]):
+                    data_ref_instruction_addr = instr[0]
+                    off_jumptable = self.getReferencedAddr(instr[3])
+                    break
+                elif instr[2] == "add" and instr[3].startswith(register):
+                    data_ref_instruction_addr = instr[0]
+                    off_jumptable = self.getReferencedAddr(instr[3])
+                    break
+
+            # ensure that we found the respective mov-instruction
+            if not off_jumptable:
+                return
+            state.addDataRef(data_ref_instruction_addr, off_jumptable, size=4)
+            if self.disassembly.isAddrWithinMemoryImage(off_jumptable):
+                for index in range(jumptable_size):
+                    rebased = off_jumptable - self.disassembly.base_addr
+                    try:
+                        entry = struct.unpack("I", self.disassembly.binary[rebased + index * 4:rebased + index * 4 + 4])[0]
+                    except:
+                        continue
+                    if self.disassembly.isAddrWithinMemoryImage(entry):
+                        state.addBlockToQueue(entry)
+                        state.addCodeRef(i.address, entry, by_jump=True)
+
     def _analyzeCallInstruction(self, i, state):
         state.setLeaf(False)
         # case = "FALLTHROUGH"
@@ -218,22 +275,7 @@ class IntelDisassembler(object):
                     state.addBlockToQueue(int(i.op_str, 16))
             state.addCodeRef(i.address, int(i.op_str, 16), by_jump=True)
         else:
-            # TODO 2018-11-26 implement parsing for this alternative jump table style (gcc, O0)
-            # example A:
-            # .text:addr                 cmp     edi, 0C5h       ; switch 198 cases
-            # .text:addr                 ja      loc_default     ; jumptable default case
-            # .text:addr                 mov     eax, ds:off_jmptable[edi*4]
-            # .text:addr                 jmp     eax             ; switch jump
-            # ---
-            # example B:
-            # .text:addr                 cmp     [ebp+var_stack], 0Fh
-            # .text:addr                 ja      loc_default
-            # .text:addr                 mov     eax, [ebp+var_stack]
-            # .text:addr                 shl     eax, 2
-            # .text:addr                 add     eax, off_jmptable
-            # .text:addr                 mov     eax, [eax]
-            # .text:addr                 jmp     eax
-            # case = "SWITCH-ELSE"
+            self._resolveUnlikelyJumpCase(i, state)
             pass
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
