@@ -5,6 +5,8 @@ import logging
 import re
 import struct
 
+import lief
+
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
 from smda.DisassemblyResult import DisassemblyResult
@@ -374,6 +376,33 @@ class IntelDisassembler(object):
         self.fc_manager.updateCandidates(state)
         return state.getBlocks()
 
+    def _parseSymbols(self, symbols, func_symbols):
+        func_name = ""
+
+        for symbol in symbols:
+            if symbol.is_function:
+                if symbol.value != 0:
+                    try:
+                        func_name = symbol.demangled_name
+                    except:
+                        func_name = symbol.name
+
+                    func_symbols[symbol.value] = func_name
+
+    def _getFuncSymbols(self, binary):
+        #addr:func_name
+        func_symbols = {}
+        #works both for PE and ELF
+        lief_binary = lief.parse(raw=binary)
+
+        self._parseSymbols(lief_binary.static_symbols, func_symbols)
+        self._parseSymbols(lief_binary.dynamic_symbols, func_symbols)
+
+        for reloc in lief_binary.relocations:
+            func_symbols[reloc.address] = reloc.symbol.name
+
+        return func_symbols, lief_binary.imagebase
+
     def analyzeBuffer(self, binary, base_addr, bitness, cbAnalysisTimeout):
         LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", len(binary), base_addr)
         self.bitness = bitness
@@ -384,6 +413,11 @@ class IntelDisassembler(object):
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = IndirectCallAnalyzer(self)
         self.fc_manager = FunctionCandidateManager(self.config, self.disassembly, self.bitness)
+
+        #load symbols using pylief libary
+        LOGGER.debug("Loading symbols")
+        self.disassembly.func_symbols, self.disassembly.lief_imagebase = self._getFuncSymbols(binary)
+
         if not self.bitness:
             self.bitness = self.fc_manager.bitness
             LOGGER.info("Automatically Recognized Bitness as: %d", self.bitness)
