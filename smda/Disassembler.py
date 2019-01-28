@@ -1,12 +1,11 @@
-import hashlib
 import datetime
+import hashlib
+import os
 import time
-
-import lief
 
 from .DisassemblyStatistics import DisassemblyStatistics
 from .intel.IntelDisassembler import IntelDisassembler
-
+from smda.utility.FileLoader import FileLoader
 
 class Disassembler(object):
 
@@ -22,6 +21,35 @@ class Disassembler(object):
             return False
         return time.time() - self._start_time > self._timeout
 
+    def disassembleFile(self, file_path):
+        loader = FileLoader(file_path, map_file=True)
+        base_addr = loader.getBaseAddress()
+        file_content = loader.getData()
+        start = time.clock()
+        try:
+            self.disassembler.setFilePath(file_path)
+            disassembly = self.disassemble(file_content, base_addr, timeout=self.config.TIMEOUT)
+            report = self.getDisassemblyReport(disassembly)
+            report["filename"] = os.path.basename(file_path)
+            print(disassembly)
+        except Exception as exc:
+            print("-> an error occured (", str(exc), ").")
+            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": time.clock() - start}
+        return report
+
+    def disassembleBuffer(self, file_content, base_addr):
+        start = time.clock()
+        try:
+            self.disassembler.setFilePath("")
+            disassembly = self.disassemble(file_content, base_addr, timeout=self.config.TIMEOUT)
+            report = self.getDisassemblyReport(disassembly)
+            report["filename"] = ""
+            print(disassembly)
+        except Exception as exc:
+            print("-> an error occured (", str(exc), ").")
+            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": time.clock() - start}
+        return report
+
     def disassemble(self, binary, base_addr, bitness=None, timeout=0):
         self._start_time = time.time()
         self._timeout = timeout
@@ -36,7 +64,6 @@ class Disassembler(object):
             else:
                 return {}
         stats = DisassemblyStatistics(disassembly)
-
         report = {
             "architecture": "intel",
             "base_addr": disassembly.base_addr,

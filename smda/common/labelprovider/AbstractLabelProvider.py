@@ -8,8 +8,13 @@ LOGGER = logging.getLogger(__name__)
 
 class AbstractLabelProvider:
 
-    def __init__(self):
-        pass
+    def __init__(self, config):
+        raise NotImplementedError
+
+    @abstractmethod
+    def update(self, file_path, binary):
+        """If the LabelProvider needs to parse from the given target, update() can be used to populate the provider """
+        raise NotImplementedError
 
     @abstractmethod
     def getApi(self, address):

@@ -32,9 +32,7 @@ class DisassemblyResult(object):
         self.addr_to_api = {}
         self.base_addr = 0
         # address:name
-        self.func_symbols = {}
-        # TODO: Daniel check  this, maybe there is a better way?
-        self.lief_imagebase = 0
+        self.function_symbols = {}
 
     def getAnalysisDuration(self):
         return (self.analysis_end_ts - self.analysis_start_ts).seconds + (self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000
@@ -82,14 +80,13 @@ class DisassemblyResult(object):
                     instructions.append([ins[0], "".join(["%02x" % c for c in ins[4]]), str(ins[2]), str(ins[3])])
                 blocks[instructions[0][0]] = instructions
             function_doc = {
-                "func_name": self.func_symbols.get(self.lief_imagebase + function_offset, ""),
                 "offset": function_offset,
                 "inrefs": self.getInRefs(function_offset),
                 "outrefs": self.getOutRefs(function_offset),
                 "blockrefs": self.getBlockRefs(function_offset),
                 "apirefs": self.getApiRefs(function_offset),
-                "blocks": blocks,
-                "label": ""
+                "label": self.function_symbols.get(function_offset, ""),
+                "blocks": blocks
             }
             function_results[function_offset] = function_doc
         return function_results

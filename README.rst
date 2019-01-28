@@ -16,6 +16,7 @@ Further explanation on the innerworkings follow in separate publications but wil
 
 Version History
 ---------------
+ * 2019-01-28: ELF symbols for functions are now being resolved, if present in the file. Also "-m" parameter changed to "-p" to imply parsing instead of just mapping (THX: @VPaulV).
  * 2018-12-12: all gcc jump table styles are now parsed correctly. 
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.

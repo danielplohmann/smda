@@ -13,10 +13,12 @@ API_COLLECTION_FILES = {
 }
 
 ### global logging-config setup
+# Only do basicConfig if no handlers have been configured
 LOG_PATH = "./"
 LOG_LEVEL = logging.INFO
 LOG_FORMAT = "%(asctime)-15s: %(name)-32s - %(message)s"
-logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
+if len(logging._handlerList) == 0:
+    logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 
 ### SMDA disassembler config
 TIMEOUT = 120

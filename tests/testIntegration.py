@@ -18,6 +18,8 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super(SmdaIntegrationTestSuite, cls).setUpClass()
+        # remove the win7 library as asprox had been dumped on win_xp
+        config.API_COLLECTION_FILES.pop("win_7")
         disasm = Disassembler(config)
         with open(os.path.join(config.PROJECT_ROOT, "tests", "asprox_0x008D0000_xored"), "rb") as f_binary:
             binary = f_binary.read()

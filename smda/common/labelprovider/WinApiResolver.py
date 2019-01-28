@@ -9,16 +9,20 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
-class ApiResolver(AbstractLabelProvider):
+class WinApiResolver(AbstractLabelProvider):
     """ Minimal WinAPI reference resolver, extracted from ApiScout """
 
-    def __init__(self, db_filepaths):
-        self.has_64bit = False
-        self.api_map = {}
+    def __init__(self, config):
+        self._config = config
+        self._has_64bit = False
+        self._api_map = {}
         self._os_name = None
-        for os_name, db_filepath in db_filepaths.items():
+        for os_name, db_filepath in self._config.API_COLLECTION_FILES.items():
             self._loadDbFile(os_name, db_filepath)
             self._os_name = os_name
+            
+    def update(self, file_path, binary):
+        return
 
     def setOsName(self, os_name):
         self._os_name = os_name
@@ -42,12 +46,13 @@ class ApiResolver(AbstractLabelProvider):
                     api_name = "None<{}>".format(export["ordinal"])
                 dll_name = "_".join(dll_entry.split("_")[2:])
                 bitness = api_db["dlls"][dll_entry]["bitness"]
-                self.has_64bit |= bitness == 64
+                self._has_64bit |= bitness == 64
                 base_address = api_db["dlls"][dll_entry]["base_address"]
                 virtual_address = base_address + export["address"]
                 api_map[virtual_address] = (dll_name, api_name)
         LOGGER.info("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
-        self.api_map[os_name] = api_map
+        self._api_map[os_name] = api_map
+        print(api_map)
 
     def isApiProvider(self):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
@@ -55,4 +60,4 @@ class ApiResolver(AbstractLabelProvider):
 
     def getApi(self, absolute_addr):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
-        return self.api_map[self._os_name].get(absolute_addr, None)
+        return self._api_map[self._os_name].get(absolute_addr, None)

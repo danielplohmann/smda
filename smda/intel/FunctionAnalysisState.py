@@ -35,6 +35,7 @@ class FunctionAnalysisState(object):
         self.is_tailcall_function = False
         self.is_leaf_function = True
         self.is_recursive = False
+        self.label = ""
 
     def chooseNextBlock(self):
         self.is_block_ending_instruction = False
@@ -103,6 +104,7 @@ class FunctionAnalysisState(object):
         fn_min = min([ins[0] for ins in self.instructions])
         fn_max = max([ins[0] + ins[1] for ins in self.instructions])
 
+        self.disassembly.function_symbols[self.start_addr] = self.label
         self.disassembly.function_borders[self.start_addr] = (fn_min, fn_max)
         for ins in self.instructions:
             self.disassembly.instructions[ins[0]] = (ins[2], ins[1])

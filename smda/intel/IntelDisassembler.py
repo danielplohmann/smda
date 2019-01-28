@@ -5,12 +5,11 @@ import logging
 import re
 import struct
 
-import lief
-
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
 from smda.DisassemblyResult import DisassemblyResult
-from smda.common.labelprovider.ApiResolver import ApiResolver
+from smda.common.labelprovider.WinApiResolver import WinApiResolver
+from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -25,24 +24,36 @@ class IntelDisassembler(object):
     def __init__(self, config, bitness=None):
         self.config = config
         self.bitness = bitness
+        self._file_path = ""
         self.capstone = self._initCapstone()
-        self.label_providers = list()
-        self.addLabelProvider(ApiResolver(config.API_COLLECTION_FILES))
+        self.label_providers = []
+        self._addLabelProviders()
         self.fc_manager = None
         self.tailcall_analyzer = None
         self.indcall_analyzer = None
         self.disassembly = DisassemblyResult()
 
-    def addLabelProvider(self, new_label_provider):
-        self.label_providers.append(new_label_provider)
+    def _initCapstone(self):
+        self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
+        if self.bitness == 64:
+            self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
+
+    def setFilePath(self, file_path):
+        self._file_path = file_path
+
+    def _addLabelProviders(self):
+        self.label_providers.append(WinApiResolver(self.config))
+        self.label_providers.append(ElfSymbolProvider(self.config))
+
+    def _updateLabelProviders(self, binary):
+        for provider in self.label_providers:
+            provider.update(self._file_path, binary)
 
     def resolveApi(self, address):
         for provider in self.label_providers:
             if not provider.isApiProvider(): continue
             result = provider.getApi(address)
             if result: return result
-
-        # No provider was able to resolve the used API
         return ("", "")
 
     def resolveSymbol(self, address):
@@ -50,14 +61,7 @@ class IntelDisassembler(object):
             if not provider.isSymbolProvider(): continue
             result = provider.getSymbol(address)
             if result: return result
-
-        # No provider was able to resolve the used symbol
         return ""
-
-    def _initCapstone(self):
-        self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
-        if self.bitness == 64:
-            self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
 
     def dereferenceDword(self, addr):
         if self.disassembly.isAddrWithinMemoryImage(addr):
@@ -368,6 +372,7 @@ class IntelDisassembler(object):
                     LOGGER.debug("No block submitted with no ins, last instruction: 0x%08x || %s",
                                  start_addr,
                                  self.fc_manager.getFunctionCandidate(start_addr))
+        state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis(as_gap)
         if analysis_result and self.config.RESOLVE_REGISTER_CALLS:
             self.indcall_analyzer.resolveRegisterCalls(state)
@@ -376,36 +381,10 @@ class IntelDisassembler(object):
         self.fc_manager.updateCandidates(state)
         return state.getBlocks()
 
-    def _parseSymbols(self, symbols, func_symbols):
-        func_name = ""
-
-        for symbol in symbols:
-            if symbol.is_function:
-                if symbol.value != 0:
-                    try:
-                        func_name = symbol.demangled_name
-                    except:
-                        func_name = symbol.name
-
-                    func_symbols[symbol.value] = func_name
-
-    def _getFuncSymbols(self, binary):
-        #addr:func_name
-        func_symbols = {}
-        #works both for PE and ELF
-        lief_binary = lief.parse(raw=binary)
-
-        self._parseSymbols(lief_binary.static_symbols, func_symbols)
-        self._parseSymbols(lief_binary.dynamic_symbols, func_symbols)
-
-        for reloc in lief_binary.relocations:
-            func_symbols[reloc.address] = reloc.symbol.name
-
-        return func_symbols, lief_binary.imagebase
-
     def analyzeBuffer(self, binary, base_addr, bitness, cbAnalysisTimeout):
         LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", len(binary), base_addr)
         self.bitness = bitness
+        self._updateLabelProviders(binary)
         self.disassembly = DisassemblyResult()
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
         self.disassembly.binary = binary
@@ -413,10 +392,6 @@ class IntelDisassembler(object):
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = IndirectCallAnalyzer(self)
         self.fc_manager = FunctionCandidateManager(self.config, self.disassembly, self.bitness)
-
-        #load symbols using pylief libary
-        LOGGER.debug("Loading symbols")
-        self.disassembly.func_symbols, self.disassembly.lief_imagebase = self._getFuncSymbols(binary)
 
         if not self.bitness:
             self.bitness = self.fc_manager.bitness

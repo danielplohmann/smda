@@ -1,8 +1,7 @@
 import struct
 import logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
-LOG = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class PeFileLoader(object):
@@ -71,7 +70,7 @@ class PeFileLoader(object):
         if pe_offset:
             if pe_offset and len(binary) >= pe_offset + 0x38:
                 base_addr = struct.unpack("I", binary[pe_offset + 0x34:pe_offset + 0x38])[0]
-                LOG.debug("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
+                LOGGER.info("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
                 return base_addr
         return 0
 
