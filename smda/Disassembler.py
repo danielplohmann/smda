@@ -2,6 +2,8 @@ import hashlib
 import datetime
 import time
 
+import lief
+
 from .DisassemblyStatistics import DisassemblyStatistics
 from .intel.IntelDisassembler import IntelDisassembler
 
@@ -34,6 +36,7 @@ class Disassembler(object):
             else:
                 return {}
         stats = DisassemblyStatistics(disassembly)
+
         report = {
             "architecture": "intel",
             "base_addr": disassembly.base_addr,
