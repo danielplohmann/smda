@@ -37,11 +37,11 @@ class Disassembler(object):
             report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": time.clock() - start}
         return report
 
-    def disassembleBuffer(self, file_content, base_addr):
+    def disassembleBuffer(self, file_content, base_addr, bitness=None):
         start = time.clock()
         try:
             self.disassembler.setFilePath("")
-            disassembly = self.disassemble(file_content, base_addr, timeout=self.config.TIMEOUT)
+            disassembly = self.disassemble(file_content, base_addr, bitness, timeout=self.config.TIMEOUT)
             report = self.getDisassemblyReport(disassembly)
             report["filename"] = ""
             print(disassembly)
