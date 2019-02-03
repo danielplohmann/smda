@@ -192,3 +192,4 @@ class DisassemblyResult(object):
 
     def __str__(self):
         return "-> {:5.2f}s | {:5d} Func (status: {})".format(self.getAnalysisDuration(), len(self.functions), self.getAnalysisOutcome())
+

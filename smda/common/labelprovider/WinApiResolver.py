@@ -52,7 +52,6 @@ class WinApiResolver(AbstractLabelProvider):
                 api_map[virtual_address] = (dll_name, api_name)
         LOGGER.info("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
         self._api_map[os_name] = api_map
-        print(api_map)
 
     def isApiProvider(self):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
