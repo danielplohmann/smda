@@ -13,26 +13,30 @@ LOGGER = logging.getLogger(__name__)
 
 class FunctionCandidateManager(object):
 
-    def __init__(self, config, disassembly, bitness=None):
+    def __init__(self, config):
         self.config = config
         self.lang_analyzer = LanguageAnalyzer()
-        self.disassembly = disassembly
+        self.disassembly = None
+        self.bitness = None
         self.candidates = {}
-        self._all_call_refs = {}
         self.cached_candidates = None
         self._candidate_offsets = []
         self.candidate_index = 0
-        self.bitness = bitness
-        if bitness not in [32, 64]:
-            bitness_analyzer = BitnessAnalyzer()
-            self.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
-        self.disassembly.language = self.lang_analyzer.identify(self.disassembly)
-        self.locateCandidates()
+        self._all_call_refs = {}
         # gap filling
         self.function_gaps = None
         self.max_function_addr = 0
         self.gap_pointer = None
         self.previously_analyzed_gap = 0
+
+    def init(self, disassembly, bitness=None):
+        self.disassembly = disassembly
+        self.disassembly.language = self.lang_analyzer.identify(self.disassembly)
+        self.bitness = bitness
+        if bitness not in [32, 64]:
+            bitness_analyzer = BitnessAnalyzer()
+            self.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
+        self.locateCandidates()
 
     def getBitMask(self):
         if self.bitness == 64:
@@ -227,6 +231,13 @@ class FunctionCandidateManager(object):
             self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
             return True
         return False
+
+    def addSymbolCandidates(self, addrs):
+        for addr in addrs:
+            if addr not in self.candidates:
+                start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
+                self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+            self.candidates[addr].setIsSymbol(True)
 
     def resolvePointerReference(self, offset):
         if self.bitness == 32:

@@ -55,3 +55,6 @@ class ElfSymbolProvider(AbstractLabelProvider):
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
+
+    def getFunctionSymbols(self):
+        return self._func_symbols

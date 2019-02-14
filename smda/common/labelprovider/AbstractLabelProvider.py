@@ -30,8 +30,13 @@ class AbstractLabelProvider:
     def isApiProvider(self):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
         return False
-    
+
     @abstractmethod
     def isSymbolProvider(self):
         """Returns whether the get_symbol(..) function of the AbstractLabelProvider is functional"""
         return False
+
+    @abstractmethod
+    def getFunctionSymbols(self):
+        """Return all function symbol data """
+        return {}

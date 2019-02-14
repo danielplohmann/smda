@@ -11,6 +11,7 @@ class FunctionCandidate(object):
         self.bytes = function_bytes
         self.call_ref_sources = []
         self.finished = False
+        self.is_symbol = False
         self.analysis_aborted = False
         self.abortion_reason = ""
         self._score = None
@@ -44,6 +45,9 @@ class FunctionCandidate(object):
         self.lang_spec = lang_spec
         self._score = None
 
+    def setIsSymbol(self, is_symbol):
+        self.is_symbol = is_symbol
+
     def setAnalysisAborted(self, reason):
         self.finished = True
         self.analysis_aborted = True
@@ -54,16 +58,17 @@ class FunctionCandidate(object):
 
     def isFinished(self):
         return self.finished
-        
+
     def calculateScore(self):
         score = 0
         # TODO: Review this scoring mechanism and replace intuition with science :)
+        score += 1000 if self.is_symbol else 0
         score += 1 if self.lang_spec is not None else 0
         score += self.getFunctionStartScore()
         call_ref_score = 1 + int(len(self.call_ref_sources) / 10)
         score += call_ref_score if self.call_ref_sources else 0
         return score
-        
+
     def getScore(self):
         if self._score is None:
             self._score = self.calculateScore()

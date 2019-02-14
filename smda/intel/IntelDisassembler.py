@@ -24,14 +24,15 @@ class IntelDisassembler(object):
     def __init__(self, config, bitness=None):
         self.config = config
         self.bitness = bitness
+        self.capstone = None
         self._file_path = ""
-        self.capstone = self._initCapstone()
         self.label_providers = []
         self._addLabelProviders()
         self.fc_manager = None
         self.tailcall_analyzer = None
         self.indcall_analyzer = None
         self.disassembly = DisassemblyResult()
+        self._initCapstone()
 
     def _initCapstone(self):
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -62,6 +63,14 @@ class IntelDisassembler(object):
             result = provider.getSymbol(address)
             if result: return result
         return ""
+
+    def getSymbolCandidates(self):
+        symbol_offsets = set([])
+        for provider in self.label_providers:
+            if not provider.isSymbolProvider(): continue
+            function_symbols = provider.getFunctionSymbols()
+            symbol_offsets.update(list(function_symbols.keys()))
+        return list(symbol_offsets)
 
     def dereferenceDword(self, addr):
         if self.disassembly.isAddrWithinMemoryImage(addr):
@@ -391,7 +400,10 @@ class IntelDisassembler(object):
         self.disassembly.base_addr = base_addr
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = IndirectCallAnalyzer(self)
-        self.fc_manager = FunctionCandidateManager(self.config, self.disassembly, self.bitness)
+        self.fc_manager = FunctionCandidateManager(self.config)
+        self.fc_manager.init(self.disassembly, self.bitness)
+        if self.config.USE_SYMBOLS_AS_CANDIDATES:
+            self.fc_manager.addSymbolCandidates(self.getSymbolCandidates())
 
         if not self.bitness:
             self.bitness = self.fc_manager.bitness
