@@ -26,7 +26,7 @@ TIMEOUT = 120
 # maximum number of bytes to allocate while loading
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
 # improve disassembly by resolving references through data flows
+USE_SYMBOLS_AS_CANDIDATES = True
 HIGH_ACCURACY = True
 RESOLVE_TAILCALLS = True
 RESOLVE_REGISTER_CALLS = True
-
