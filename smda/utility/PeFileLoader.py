@@ -1,6 +1,8 @@
 import struct
 import logging
 
+import config
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -48,7 +50,7 @@ class PeFileLoader(object):
                     max_virt_section_offset = max(max_virt_section_offset, section_info["virt_size"] + section_info["virt_offset"])
                     if section_info["raw_offset"] > 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
-            if max_virt_section_offset:
+            if max_virt_section_offset and max_virt_section_offset < config.MAX_IMAGE_SIZE:
                 mapped_binary = bytearray([0] * max_virt_section_offset)
                 mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
             for section_info in section_infos:

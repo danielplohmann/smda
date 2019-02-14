@@ -30,6 +30,11 @@ class ElfSymbolProvider(AbstractLabelProvider):
         self._func_symbols = {}
         if not file_path:
             return
+        data = ""
+        with open(file_path, "rb") as fin:
+            data = fin.read()
+        if not data[:4] == b"\x7FELF":
+            return
         lief_binary = lief.parse(file_path)
         # TODO split resolution into API/dynamic part and local symbols
         self._parseSymbols(lief_binary.static_symbols)
