@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import os
 import time
+import traceback
 
 from .DisassemblyStatistics import DisassemblyStatistics
 from .intel.IntelDisassembler import IntelDisassembler
@@ -68,12 +69,13 @@ class Disassembler(object):
             "architecture": "intel",
             "base_addr": disassembly.base_addr,
             "bitness": disassembly.bitness,
+            "buffer_size": len(disassembly.binary),
             "execution_time": disassembly.getAnalysisDuration(),
             "meta" : {
                 "message": "Analysis finished regularly."
             },
             "sha256": hashlib.sha256(disassembly.binary).hexdigest(),
-            "version": self.config.VERSION,
+            "smda_version": self.config.VERSION,
             "status": disassembly.getAnalysisOutcome(),
             "summary": stats.calculate(),
             "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S"),

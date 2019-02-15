@@ -85,7 +85,9 @@ class DisassemblyResult(object):
                 "outrefs": self.getOutRefs(function_offset),
                 "blockrefs": self.getBlockRefs(function_offset),
                 "apirefs": self.getApiRefs(function_offset),
-                "label": self.function_symbols.get(function_offset, ""),
+                "meta": {
+                    "label": self.function_symbols.get(function_offset, ""),
+                },
                 "blocks": blocks
             }
             function_results[function_offset] = function_doc
@@ -192,4 +194,3 @@ class DisassemblyResult(object):
 
     def __str__(self):
         return "-> {:5.2f}s | {:5d} Func (status: {})".format(self.getAnalysisDuration(), len(self.functions), self.getAnalysisOutcome())
-
