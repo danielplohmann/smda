@@ -25,7 +25,7 @@ class FileLoader(object):
         if self._map_file:
             for loader in self.file_loaders:
                 if loader.isCompatible(data):
-                    self._data = loader.mapData(data)
+                    self._data = loader.mapBinary(data)
                     self._base_addr = loader.getBaseAddress(data)
                     break
         else:

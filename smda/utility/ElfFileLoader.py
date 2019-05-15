@@ -1,15 +1,24 @@
 import logging
 import io
 
-import lief
+if len(logging._handlerList) == 0:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
+LOG = logging.getLogger(__name__)
 
-LOGGER = logging.getLogger(__name__)
+LIEF_AVAILABLE = False
+try:
+    import numpy as np
+    LIEF_AVAILABLE = True
+except:
+    LOG.warning("LIEF not available, will not be able to parse data from ELF files.")
 
 
 class ElfFileLoader(object):
 
     @staticmethod
     def isCompatible(data):
+        if not LIEF_AVAILABLE:
+            return False
         # check for ELF magic
         return data[:4] == b"\x7FELF"
 
@@ -28,12 +37,12 @@ class ElfFileLoader(object):
         return base_addr
 
     @staticmethod
-    def mapData(binary):
+    def mapBinary(binary):
         # ELFFile needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
         elffile = lief.parse(bytearray(binary))
         base_addr = ElfFileLoader.getBaseAddress(binary)
-        LOGGER.info("Assuming base address 0x%x for inference of reference counts (based on ELF header)", base_addr)
+        LOG.info("Assuming base address 0x%x for inference of reference counts (based on ELF header)", base_addr)
 
         # find begin of the first and end of the last section
         max_virt_section_offset = 0

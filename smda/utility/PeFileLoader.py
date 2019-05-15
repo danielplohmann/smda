@@ -3,8 +3,9 @@ import logging
 
 import config
 
-LOGGER = logging.getLogger(__name__)
-
+if len(logging._handlerList) == 0:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
+LOG = logging.getLogger(__name__)
 
 class PeFileLoader(object):
 
@@ -15,7 +16,7 @@ class PeFileLoader(object):
         return data[:2] == b"MZ"
 
     @staticmethod
-    def mapData(binary):
+    def mapBinary(binary):
         # This is a pretty rough implementation but does the job for now
         mapped_binary = bytearray([])
         pe_offset = PeFileLoader.getPeOffset(binary)
@@ -48,13 +49,16 @@ class PeFileLoader(object):
             if section_infos:
                 for section_info in section_infos:
                     max_virt_section_offset = max(max_virt_section_offset, section_info["virt_size"] + section_info["virt_offset"])
+                    max_virt_section_offset = max(max_virt_section_offset, section_info["raw_size"] + section_info["virt_offset"])
                     if section_info["raw_offset"] > 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
             if max_virt_section_offset and max_virt_section_offset < config.MAX_IMAGE_SIZE:
                 mapped_binary = bytearray([0] * max_virt_section_offset)
                 mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
             for section_info in section_infos:
-                mapped_binary[section_info["virt_offset"]:section_info["virt_offset"] + section_info["virt_size"]] = binary[section_info["raw_offset"]:section_info["raw_offset"] + section_info["raw_size"]]
+                mapped_binary[section_info["virt_offset"]:section_info["virt_offset"] + section_info["raw_size"]] = binary[section_info["raw_offset"]:section_info["raw_offset"] + section_info["raw_size"]]
+                LOG.debug("Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)", section_info["section_index"], section_info["raw_offset"], section_info["raw_size"], section_info["virt_offset"], section_info["virt_size"])
+        LOG.debug("Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes", len(binary), num_sections, len(mapped_binary))
         return bytes(mapped_binary)
 
     @staticmethod
@@ -72,7 +76,7 @@ class PeFileLoader(object):
         if pe_offset:
             if pe_offset and len(binary) >= pe_offset + 0x38:
                 base_addr = struct.unpack("I", binary[pe_offset + 0x34:pe_offset + 0x38])[0]
-                LOGGER.info("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
+                LOG.info("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
                 return base_addr
         return 0
 
