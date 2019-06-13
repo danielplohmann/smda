@@ -85,8 +85,8 @@ class DisassemblyResult(object):
                 "outrefs": self.getOutRefs(function_offset),
                 "blockrefs": self.getBlockRefs(function_offset),
                 "apirefs": self.getApiRefs(function_offset),
-                "meta": {
-                    "label": self.function_symbols.get(function_offset, ""),
+                "metadata": {
+                    "function_name": self.function_symbols.get(function_offset, "")
                 },
                 "blocks": blocks
             }

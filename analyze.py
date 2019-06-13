@@ -37,6 +37,7 @@ def readFileContent(file_path):
 if __name__ == "__main__":
     PARSER = argparse.ArgumentParser(description='Demo: Use SMDA to disassemble a given file (loaded memory view), optionally map it first and/or write the output to a file.')
     PARSER.add_argument('-p', '--parse_header', action='store_true', default=False, help='Parse header/symbols and perform mapping of the file as normalization.')
+    PARSER.add_argument('-d', '--pdb_path', type=str, default='', help='If available, use a PDB file to enhance disassembly (function offsets and names).')
     PARSER.add_argument('-b', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
     PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
     PARSER.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
@@ -50,7 +51,7 @@ if __name__ == "__main__":
             print("now analyzing {}".format(ARGS.input_path))
             INPUT_FILENAME = os.path.basename(ARGS.input_path)
             if ARGS.parse_header:
-                REPORT = disassembler.disassembleFile(ARGS.input_path)
+                REPORT = disassembler.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
             else:
                 BUFFER = readFileContent(ARGS.input_path)
                 BASE_ADDR = parseBaseAddrFromArgs(ARGS)

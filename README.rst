@@ -14,10 +14,15 @@ To get an impression how to work with the library, check the demo script:
 The code should be fully compatible with Python 2 and 3.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
+To take full advantage of SMDA's capabilities, optionally install:
+* lief 
+* pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
+
 Version History
 ---------------
+ * 2019-06-13: PDB symbols for functions are now resolved if given a PDB file using parameter "-d" (THX to @VPaulV).
  * 2019-05-15: Fixed a bug in PE mapper where buffer would be shortened because of misinterpretation of section sizes.
- * 2019-01-28: ELF symbols for functions are now being resolved, if present in the file. Also "-m" parameter changed to "-p" to imply parsing instead of just mapping (THX: @VPaulV).
+ * 2019-01-28: ELF symbols for functions are now resolved, if present in the file. Also "-m" parameter changed to "-p" to imply parsing instead of just mapping (THX: @VPaulV).
  * 2018-12-12: all gcc jump table styles are now parsed correctly. 
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
@@ -29,5 +34,6 @@ Credits
 =======
 
 Thanks to Steffen Enders for his extensive contributions to this project.
+Thanks to Paul Hordiienko for adding symbol parsing support (ELF PDB).
 
 Pull requests welcome! :)

@@ -22,13 +22,14 @@ class Disassembler(object):
             return False
         return time.time() - self._start_time > self._timeout
 
-    def disassembleFile(self, file_path):
+    def disassembleFile(self, file_path, pdb_path=""):
         loader = FileLoader(file_path, map_file=True)
         base_addr = loader.getBaseAddress()
         file_content = loader.getData()
         start = time.clock()
         try:
             self.disassembler.setFilePath(file_path)
+            self.disassembler.addPdbFile(pdb_path, base_addr)
             disassembly = self.disassemble(file_content, base_addr, timeout=self.config.TIMEOUT)
             report = self.getDisassemblyReport(disassembly)
             report["filename"] = os.path.basename(file_path)

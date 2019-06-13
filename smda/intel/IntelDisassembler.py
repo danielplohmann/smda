@@ -10,6 +10,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 from smda.DisassemblyResult import DisassemblyResult
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -45,10 +46,16 @@ class IntelDisassembler(object):
     def _addLabelProviders(self):
         self.label_providers.append(WinApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
+        self.label_providers.append(PdbSymbolProvider(self.config))
 
-    def _updateLabelProviders(self, binary):
+    def _updateLabelProviders(self, binary, base_addr):
         for provider in self.label_providers:
-            provider.update(self._file_path, binary)
+            provider.update(self._file_path, binary, base_addr)
+
+    def addPdbFile(self, pdb_path, base_addr):
+        if pdb_path and base_addr:
+            for provider in self.label_providers:
+                provider.update(pdb_path, b"", base_addr)
 
     def resolveApi(self, address):
         for provider in self.label_providers:
@@ -393,7 +400,7 @@ class IntelDisassembler(object):
     def analyzeBuffer(self, binary, base_addr, bitness, cbAnalysisTimeout):
         LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", len(binary), base_addr)
         self.bitness = bitness
-        self._updateLabelProviders(binary)
+        self._updateLabelProviders(binary, base_addr)
         self.disassembly = DisassemblyResult()
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
         self.disassembly.binary = binary

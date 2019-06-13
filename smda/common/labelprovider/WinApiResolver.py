@@ -21,7 +21,7 @@ class WinApiResolver(AbstractLabelProvider):
             self._loadDbFile(os_name, db_filepath)
             self._os_name = os_name
             
-    def update(self, file_path, binary):
+    def update(self, file_path, binary, base_addr):
         return
 
     def setOsName(self, os_name):
