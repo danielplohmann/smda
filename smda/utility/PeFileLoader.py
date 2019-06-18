@@ -58,7 +58,7 @@ class PeFileLoader(object):
             for section_info in section_infos:
                 mapped_binary[section_info["virt_offset"]:section_info["virt_offset"] + section_info["raw_size"]] = binary[section_info["raw_offset"]:section_info["raw_offset"] + section_info["raw_size"]]
                 LOG.debug("Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)", section_info["section_index"], section_info["raw_offset"], section_info["raw_size"], section_info["virt_offset"], section_info["virt_size"])
-        LOG.debug("Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes", len(binary), num_sections, len(mapped_binary))
+            LOG.debug("Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes", len(binary), num_sections, len(mapped_binary))
         return bytes(mapped_binary)
 
     @staticmethod
