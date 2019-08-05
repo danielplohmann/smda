@@ -402,6 +402,7 @@ class IntelDisassembler(object):
         self.bitness = bitness
         self._updateLabelProviders(binary, base_addr)
         self.disassembly = DisassemblyResult()
+        self.disassembly.architecture = "intel"
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
         self.disassembly.binary = binary
         self.disassembly.base_addr = base_addr
