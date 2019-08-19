@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import traceback
 LOGGER = logging.getLogger(__name__)
 
 try:
@@ -41,8 +42,11 @@ class PdbSymbolProvider(AbstractLabelProvider):
             data = fin.read()
         if not data[:15] == b"Microsoft C/C++" or pdbparse is None:
             return
-        pdb = pdbparse.parse(file_path)
-        self._parseSymbols(pdb)
+        try:
+            pdb = pdbparse.parse(file_path)
+            self._parseSymbols(pdb)
+        except Exception as exc:
+            LOGGER.error("Failed parsing \"%s\" with exception type: %s" % (file_path, type(exc)))
 
 
     def _parseSymbols(self, pdb):

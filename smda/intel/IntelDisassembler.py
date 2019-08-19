@@ -53,6 +53,7 @@ class IntelDisassembler(object):
             provider.update(self._file_path, binary, base_addr)
 
     def addPdbFile(self, pdb_path, base_addr):
+        LOGGER.info("adding PDB file: %s", pdb_path)
         if pdb_path and base_addr:
             for provider in self.label_providers:
                 provider.update(pdb_path, b"", base_addr)

@@ -20,6 +20,7 @@ To take full advantage of SMDA's capabilities, optionally install:
 
 Version History
 ---------------
+ * 2019-08-19: Minor fix for crashes caused by PDB parser.
  * 2019-06-13: PDB symbols for functions are now resolved if given a PDB file using parameter "-d" (THX to @VPaulV).
  * 2019-05-15: Fixed a bug in PE mapper where buffer would be shortened because of misinterpretation of section sizes.
  * 2019-01-28: ELF symbols for functions are now resolved, if present in the file. Also "-m" parameter changed to "-p" to imply parsing instead of just mapping (THX: @VPaulV).
