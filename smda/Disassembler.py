@@ -6,13 +6,18 @@ import traceback
 
 from .DisassemblyStatistics import DisassemblyStatistics
 from .intel.IntelDisassembler import IntelDisassembler
+from .ida.IdaExporter import IdaExporter
 from smda.utility.FileLoader import FileLoader
 
 class Disassembler(object):
 
-    def __init__(self, config):
+    def __init__(self, config, backend="intel"):
         self.config = config
-        self.disassembler = IntelDisassembler(config)
+        self.disassembler = None
+        if backend == "intel":
+            self.disassembler = IntelDisassembler(config)
+        elif backend == "IDA":
+            self.disassembler = IdaExporter(config)
         self.disassembly = None
         self._start_time = None
         self._timeout = 0
@@ -67,12 +72,12 @@ class Disassembler(object):
                 return {}
         stats = DisassemblyStatistics(disassembly)
         report = {
-            "architecture": "intel",
+            "architecture": disassembly.architecture,
             "base_addr": disassembly.base_addr,
             "bitness": disassembly.bitness,
             "buffer_size": len(disassembly.binary),
             "execution_time": disassembly.getAnalysisDuration(),
-            "meta" : {
+            "metadata" : {
                 "message": "Analysis finished regularly."
             },
             "sha256": hashlib.sha256(disassembly.binary).hexdigest(),

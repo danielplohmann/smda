@@ -9,6 +9,7 @@ class DisassemblyResult(object):
         self.analysis_start_ts = datetime.datetime.utcnow()
         self.analysis_end_ts = self.analysis_start_ts
         self.analysis_timeout = False
+        self.architecture = ""
         self.binary = ""
         self.bitness = bitness
         self.code_map = {}
@@ -35,7 +36,7 @@ class DisassemblyResult(object):
         self.function_symbols = {}
 
     def getAnalysisDuration(self):
-        return (self.analysis_end_ts - self.analysis_start_ts).seconds + (self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000
+        return (self.analysis_end_ts - self.analysis_start_ts).seconds + ((self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0)
 
     def getAnalysisOutcome(self):
         outcome = "ok"
@@ -132,11 +133,19 @@ class DisassemblyResult(object):
         self.data_refs_to[addr_to] = refs_to
 
     def getBlockRefs(self, func_addr):
+        """ blocks refs should stay within function context, thus kill all references outside function """
         block_refs = {}
+        ins_addrs = set([])
+        for block in self.functions[func_addr]:
+            for ins in block:
+                ins_addr = ins[0]
+                ins_addrs.add(ins_addr)
         for block in self.functions[func_addr]:
             last_ins_addr = block[-1][0]
             if last_ins_addr in self.code_refs_from:
-                block_refs[block[0][0]] = sorted(list(self.code_refs_from[last_ins_addr]))
+                verified_refs = sorted(list(ins_addrs.intersection(self.code_refs_from[last_ins_addr])))
+                if verified_refs:
+                    block_refs[block[0][0]] = verified_refs
         return block_refs
 
     def getInRefs(self, func_addr):
@@ -169,6 +178,30 @@ class DisassemblyResult(object):
             out_refs[ref[0]].append(ref[1])
         out_refs = [ref for ref in image_refs if ref[1] not in ins_addrs]
         return out_refs
+
+    def isRecursiveFunction(self, func_addr):
+        ins_addrs = set([])
+        out_refs = set([])
+        for block in self.functions[func_addr]:
+            for ins in block:
+                ins_addr = ins[0]
+                ins_addrs.add(ins_addr)
+                if ins_addr in self.code_refs_from:
+                    for to_addr in self.code_refs_from[ins_addr]:
+                        out_refs.add(to_addr)
+        return func_addr in out_refs
+
+    def isLeafFunction(self, func_addr):
+        ins_addrs = set([])
+        out_refs = set([])
+        for block in self.functions[func_addr]:
+            for ins in block:
+                ins_addr = ins[0]
+                ins_addrs.add(ins_addr)
+                if ins_addr in self.code_refs_from:
+                    for to_addr in self.code_refs_from[ins_addr]:
+                        out_refs.add(to_addr)
+        return len(out_refs.difference(ins_addrs)) == 0
 
     def _initApiRefs(self):
         for api_offset in self.apis:
