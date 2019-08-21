@@ -37,6 +37,7 @@ class DisassemblyStatistics(object):
             "num_instructions": self._countInstructions(),
             "num_api_calls": self._countApiCalls(),
             "num_function_calls": self._countFunctionCalls(),
-            "num_disassembly_errors": len(self._disassembly.failed_analysis_addr),
+            "num_disassembly_failed_functions": len(self._disassembly.failed_analysis_addr),
+            "num_disassembly_failed_instructions": len(self._disassembly.errors)
         }
         return summary

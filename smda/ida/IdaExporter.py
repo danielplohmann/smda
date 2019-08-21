@@ -26,7 +26,17 @@ class IdaExporter(object):
 
     def _convertIdaInsToSmda(self, offset, instruction_bytes):
         cache = [i for i in self.capstone.disasm(instruction_bytes, offset)]
-        smda_ins = (cache[0].address, cache[0].size, cache[0].mnemonic, cache[0].op_str, cache[0].bytes)
+        if cache:
+            smda_ins = (cache[0].address, cache[0].size, cache[0].mnemonic, cache[0].op_str, cache[0].bytes)
+        else:
+            # record error and emit placeholder instruction
+            bytes_as_hex = "".join(["%02x" % c for c in bytearray(instruction_bytes)])
+            print("missing capstone disassembly output at 0x%x (%s)" % (offset, bytes_as_hex))
+            self.disassembly.errors[offset] = {
+                "type": "capstone disassembly failure",
+                "instruction_bytes": bytes_as_hex
+            }
+            smda_ins = (offset, len(instruction_bytes), "error", "error", bytearray(instruction_bytes))
         return smda_ins
 
     def analyzeBuffer(self, binary=None, base_addr=None, bitness=None, cbAnalysisTimeout=None):

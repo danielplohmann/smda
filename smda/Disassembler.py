@@ -76,6 +76,7 @@ class Disassembler(object):
             "base_addr": disassembly.base_addr,
             "bitness": disassembly.bitness,
             "buffer_size": len(disassembly.binary),
+            "disassembly_errors": disassembly.errors,
             "execution_time": disassembly.getAnalysisDuration(),
             "metadata" : {
                 "message": "Analysis finished regularly."

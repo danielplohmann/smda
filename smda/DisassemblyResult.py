@@ -14,6 +14,8 @@ class DisassemblyResult(object):
         self.bitness = bitness
         self.code_map = {}
         self.data_map = set([])
+        # key: offset, value: {"type": <str>, "instruction_bytes": <hexstr>}
+        self.errors = {}
         # stored as key:
         self.functions = {}
         self.recursive_functions = set([])

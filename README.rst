@@ -20,6 +20,7 @@ To take full advantage of SMDA's capabilities, optionally install:
 
 Version History
 ---------------
+ * 2019-08-20: IdaExporter is now handling failed instruction conversion via capstone properly.
  * 2019-08-19: Minor fix for crashes caused by PDB parser.
  * 2019-08-05: SMDA can now export reports from IDA Pro (requires capstone to be available for idapython).
  * 2019-06-13: PDB symbols for functions are now resolved if given a PDB file using parameter "-d" (THX to @VPaulV).
