@@ -7,7 +7,7 @@ LOG = logging.getLogger(__name__)
 
 LIEF_AVAILABLE = False
 try:
-    import numpy as np
+    import lief
     LIEF_AVAILABLE = True
 except:
     LOG.warning("LIEF not available, will not be able to parse data from ELF files.")
