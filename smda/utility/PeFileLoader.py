@@ -72,13 +72,16 @@ class PeFileLoader(object):
 
     @staticmethod
     def getBaseAddress(binary):
+        base_addr = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
-        if pe_offset:
-            if pe_offset and len(binary) >= pe_offset + 0x38:
+        if pe_offset and len(binary) >= pe_offset + 0x38:
+            if PeFileLoader.getBitness(binary) == 32:
                 base_addr = struct.unpack("I", binary[pe_offset + 0x34:pe_offset + 0x38])[0]
-                LOG.info("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
-                return base_addr
-        return 0
+            elif PeFileLoader.getBitness(binary) == 64:
+                base_addr = struct.unpack("L", binary[pe_offset + 0x30:pe_offset + 0x38])[0]
+        if base_addr:
+            LOG.info("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
+        return base_addr
 
     @staticmethod
     def getPeOffset(binary):
