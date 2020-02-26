@@ -1,4 +1,3 @@
 nose
 capstone
-pyelftools
 lief
