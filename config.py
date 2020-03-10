@@ -21,7 +21,7 @@ if len(logging._handlerList) == 0:
     logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 
 ### SMDA disassembler config
-# maximum time for disassembly to complete
+# maximum time in seconds for disassembly to complete
 TIMEOUT = 120
 # maximum number of bytes to allocate while loading
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
