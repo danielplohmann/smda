@@ -20,6 +20,7 @@ To take full advantage of SMDA's capabilities, optionally install:
 
 Version History
 ---------------
+ * 2020-03-10: Various minor fixes and QoL improvements.
  * 2019-08-20: IdaExporter is now handling failed instruction conversion via capstone properly.
  * 2019-08-19: Minor fix for crashes caused by PDB parser.
  * 2019-08-05: SMDA can now export reports from IDA Pro (requires capstone to be available for idapython).
