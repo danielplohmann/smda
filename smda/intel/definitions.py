@@ -5,7 +5,7 @@ LOOP_INS = ["loop", "loopne", "loope"]
 JMP_INS = ["jmp", "ljmp"]
 CALL_INS = ["call", "lcall"]
 RET_INS = ["ret", "retn", "retf", "iret"]
-END_INS = ["ret", "retn", "retf", "iret", "int3"]
+END_INS = ["ret", "retn", "retf", "iret", "int3", "hlt"]
 REGS_32BIT = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
 DOUBLE_ZERO = bytearray(b"\x00\x00")
 
@@ -82,6 +82,7 @@ GAP_SEQUENCES = {
         b"\x8b\xff",  # mov edi, edi
         b"\x8d\x00",  # lea eax, dword ptr [eax]
         b"\x86\xc0",  # xchg al, al
+        b"\x66\x2e",  # NOP2_OVERRIDE_NOP - AMD / nop - INTEL
     ],
     3: [
         b"\x0f\x1f\x00",  # NOP3_OVERRIDE_NOP - AMD / nop - INTEL
@@ -163,6 +164,6 @@ COMMON_START_BYTES = {
         "33": 56,
         "44": 18,
         "45": 17,
-        "e9": 16
+        "e9": 16,
     }
 }

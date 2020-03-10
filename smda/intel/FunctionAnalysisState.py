@@ -125,7 +125,7 @@ class FunctionAnalysisState(object):
 
     def finalizeAnalysis(self, as_gap=False):
         if as_gap:
-            LOGGER.debug("0x%08x had sanity state: %s (%d ins)", self.start_addr, self.is_sanely_ending, len(self.instructions))
+            LOGGER.info("0x%08x had sanity state: %s (%d ins)", self.start_addr, self.is_sanely_ending, len(self.instructions))
         if as_gap and not self.is_sanely_ending:
             if len(self.instructions) == 1 and self.instructions[0][2] == "jmp":
                 ins_offset = self.instructions[0][0] - self.disassembly.base_addr

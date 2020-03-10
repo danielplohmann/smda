@@ -92,4 +92,3 @@ class FunctionCandidate(object):
         characteristics = is_ref + is_prologue + is_lang_spec + is_finished + is_aborted
         ref_summary = "{}".format(len(self.call_ref_sources)) if len(self.call_ref_sources) != 1 else "{}: 0x{:x}".format(len(self.call_ref_sources), self.call_ref_sources[0])
         return "0x{:x}: {} -> {} (total score: {}), inref: {} | {}".format(self.addr, hexlify(self.bytes), prologue_score, self.getScore(), ref_summary, characteristics)
-

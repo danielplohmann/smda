@@ -10,6 +10,7 @@ class FileLoader(object):
         self._map_file = map_file
         self._data = b""
         self._base_addr = 0
+        self._bitness = 0
         self.file_loaders = [PeFileLoader, ElfFileLoader]
         self._loadFile()
 
@@ -27,6 +28,7 @@ class FileLoader(object):
                 if loader.isCompatible(data):
                     self._data = loader.mapBinary(data)
                     self._base_addr = loader.getBaseAddress(data)
+                    self._bitness = loader.getBitness(data)
                     break
         else:
             self._data = data
@@ -36,3 +38,6 @@ class FileLoader(object):
 
     def getBaseAddress(self):
         return self._base_addr
+
+    def getBitness(self):
+        return self._bitness

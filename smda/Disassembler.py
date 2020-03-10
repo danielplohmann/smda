@@ -33,12 +33,14 @@ class Disassembler(object):
     def disassembleFile(self, file_path, pdb_path=""):
         loader = FileLoader(file_path, map_file=True)
         base_addr = loader.getBaseAddress()
+        bitness = loader.getBitness()
         file_content = loader.getData()
         start = datetime.datetime.utcnow()
         try:
             self.disassembler.setFilePath(file_path)
             self.disassembler.addPdbFile(pdb_path, base_addr)
-            disassembly = self.disassemble(file_content, base_addr, timeout=self.config.TIMEOUT)
+            print("Disassembler uses base address: 0x%x and bitness: %dbit" % (base_addr, bitness))
+            disassembly = self.disassemble(file_content, base_addr, bitness=bitness, timeout=self.config.TIMEOUT)
             report = self.getDisassemblyReport(disassembly)
             report["filename"] = os.path.basename(file_path)
             print(disassembly)
