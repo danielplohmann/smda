@@ -1,7 +1,6 @@
 import datetime
 import hashlib
 import os
-import time
 import traceback
 
 from .DisassemblyStatistics import DisassemblyStatistics
@@ -22,16 +21,20 @@ class Disassembler(object):
         self._start_time = None
         self._timeout = 0
 
+    def _getDurationInSeconds(self, start_ts, end_ts):
+        return (self.analysis_end_ts - self.analysis_start_ts).seconds + ((self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0)
+
     def _callbackAnalysisTimeout(self):
         if not self._timeout:
             return False
-        return time.time() - self._start_time > self._timeout
+        time_diff = datetime.datetime.utcnow() - self._start_time
+        return time_diff.seconds >= self._timeout
 
     def disassembleFile(self, file_path, pdb_path=""):
         loader = FileLoader(file_path, map_file=True)
         base_addr = loader.getBaseAddress()
         file_content = loader.getData()
-        start = time.clock()
+        start = datetime.datetime.utcnow()
         try:
             self.disassembler.setFilePath(file_path)
             self.disassembler.addPdbFile(pdb_path, base_addr)
@@ -41,11 +44,11 @@ class Disassembler(object):
             print(disassembly)
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
-            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": time.clock() - start}
+            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": self._getDurationInSeconds(start, datetime.datetime.utcnow())}
         return report
 
     def disassembleBuffer(self, file_content, base_addr, bitness=None):
-        start = time.clock()
+        start = datetime.datetime.utcnow()
         try:
             self.disassembler.setFilePath("")
             disassembly = self.disassemble(file_content, base_addr, bitness, timeout=self.config.TIMEOUT)
@@ -54,11 +57,11 @@ class Disassembler(object):
             print(disassembly)
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
-            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": time.clock() - start}
+            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": self._getDurationInSeconds(start, datetime.datetime.utcnow())}
         return report
 
     def disassemble(self, binary, base_addr, bitness=None, timeout=0):
-        self._start_time = time.time()
+        self._start_time = datetime.datetime.utcnow()
         self._timeout = timeout
         self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr, bitness, self._callbackAnalysisTimeout)
         return self.disassembly
