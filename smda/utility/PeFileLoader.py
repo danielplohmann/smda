@@ -91,6 +91,15 @@ class PeFileLoader(object):
         return 0
 
     @staticmethod
+    def getOEP(binary):
+        oep_rva = 0
+        if PeFileLoader.checkPe(binary):
+            pe_offset = PeFileLoader.getPeOffset(binary)
+            if pe_offset and len(binary) >= pe_offset + 0x2c:
+                oep_rva = struct.unpack("I", binary[pe_offset + 0x28:pe_offset + 0x2C])[0]
+        return oep_rva
+
+    @staticmethod
     def checkPe(binary):
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 6:

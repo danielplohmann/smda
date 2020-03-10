@@ -14,7 +14,7 @@ except:
     LOGGER.warn("3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available.")
 
 from .AbstractLabelProvider import AbstractLabelProvider
-
+from smda.utility.PeFileLoader import PeFileLoader
 
 class DummyOmap(object):
     def remap(self, addr):
@@ -33,6 +33,11 @@ class PdbSymbolProvider(AbstractLabelProvider):
     def isSymbolProvider(self):
         return True
 
+    def _parseOep(self, data):
+        oep_rva = PeFileLoader.getOEP(data)
+        if oep_rva:
+            self._func_symbols[self._base_addr + oep_rva] = "original_entry_point"
+
     def update(self, file_path, binary, base_addr):
         self._base_addr = base_addr
         if not file_path:
@@ -40,6 +45,7 @@ class PdbSymbolProvider(AbstractLabelProvider):
         data = ""
         with open(file_path, "rb") as fin:
             data = fin.read()
+        self._parseOep(data)
         if not data[:15] == b"Microsoft C/C++" or pdbparse is None:
             return
         try:
