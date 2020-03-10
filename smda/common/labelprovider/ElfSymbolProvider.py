@@ -45,7 +45,8 @@ class ElfSymbolProvider(AbstractLabelProvider):
         self._parseSymbols(lief_binary.static_symbols)
         self._parseSymbols(lief_binary.dynamic_symbols)
         for reloc in lief_binary.relocations:
-            self._func_symbols[reloc.address] = reloc.symbol.name
+            if reloc.has_symbol:
+                self._func_symbols[reloc.address] = reloc.symbol.name
 
     def _parseSymbols(self, symbols):
         for symbol in symbols:
