@@ -69,4 +69,9 @@ class ElfFileLoader(object):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(bytearray(binary))
         machine_type = elffile.header.machine_type
-        return 64 if lief.ELF.ARCH.x86_64 else 32
+        if machine_type == lief.ELF.ARCH.x86_64:
+            return 64
+        elif machine_type == lief.ELF.ARCH.i386:
+            return 32
+        return 0
+
