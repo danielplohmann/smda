@@ -65,3 +65,4 @@ ENV/
 config.ini
 figures
 reports
+analyze_*.py
