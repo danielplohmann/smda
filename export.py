@@ -27,7 +27,7 @@ if __name__ == "__main__":
     if BACKEND == "IDA":
         DISASSEMBLER = Disassembler(config, backend=BACKEND)
         REPORT = DISASSEMBLER.disassembleBuffer(None, None)
-        output_path = idc.get_idb_path()
+        output_path = idautils.GetIdbDir()
         with open(output_path + ".smda", "wb") as fout:
             json.dump(REPORT, fout, indent=1, sort_keys=True)
             LOGGER.info("Output saved to: %s.smda", output_path)
