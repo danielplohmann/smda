@@ -168,7 +168,8 @@ class DisassemblyResult(object):
                     for to_addr in self.code_refs_from[ins_addr]:
                         code_refs.append([ins_addr, to_addr])
         # function may be recursive
-        ins_addrs.remove(func_addr)
+        if func_addr in ins_addrs:
+            ins_addrs.remove(func_addr)
         # reduce outrefs to addresses within the memory image
         max_addr = self.base_addr + len(self.binary)
         image_refs = [ref for ref in code_refs if self.base_addr <= ref[1] <= max_addr]
