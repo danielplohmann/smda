@@ -35,3 +35,4 @@ class BackendInterface(object):
 
     def getApiOffsets(self):
         raise NotImplementedError
+
