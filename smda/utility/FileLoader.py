@@ -11,6 +11,7 @@ class FileLoader(object):
         self._data = b""
         self._base_addr = 0
         self._bitness = 0
+        self._code_areas = []
         self.file_loaders = [PeFileLoader, ElfFileLoader]
         self._loadFile()
 
@@ -29,6 +30,7 @@ class FileLoader(object):
                     self._data = loader.mapBinary(data)
                     self._base_addr = loader.getBaseAddress(data)
                     self._bitness = loader.getBitness(data)
+                    self._code_areas = loader.getCodeAreas(data)
                     break
         else:
             self._data = data
@@ -41,3 +43,6 @@ class FileLoader(object):
 
     def getBitness(self):
         return self._bitness
+
+    def getCodeAreas(self):
+        return self._code_areas

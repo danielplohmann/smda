@@ -42,11 +42,16 @@ class ElfSymbolProvider(AbstractLabelProvider):
         lief_binary = lief.parse(file_path)
         self._parseOep(lief_binary)
         # TODO split resolution into API/dynamic part and local symbols
+        self._parseExports(lief_binary)
         self._parseSymbols(lief_binary.static_symbols)
         self._parseSymbols(lief_binary.dynamic_symbols)
         for reloc in lief_binary.relocations:
             if reloc.has_symbol:
                 self._func_symbols[reloc.address] = reloc.symbol.name
+
+    def _parseExports(self, binary):
+        for function in binary.exported_functions:
+            self._func_symbols[function.address] = function.name
 
     def _parseSymbols(self, symbols):
         for symbol in symbols:

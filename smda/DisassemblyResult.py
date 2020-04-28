@@ -12,12 +12,14 @@ class DisassemblyResult(object):
         self.architecture = ""
         self.binary = ""
         self.bitness = bitness
+        self.identified_alignment = 0
         self.code_map = {}
         self.data_map = set([])
         # key: offset, value: {"type": <str>, "instruction_bytes": <hexstr>}
         self.errors = {}
         # stored as key:
         self.functions = {}
+        self.pic_hashes = {}
         self.recursive_functions = set([])
         self.leaf_functions = set([])
         self.failed_analysis_addr = []
@@ -36,6 +38,12 @@ class DisassemblyResult(object):
         self.base_addr = 0
         # address:name
         self.function_symbols = {}
+        self.candidates = {}
+        self._confidence_threshold = 0.0
+        self.code_areas = []
+
+    def setConfidenceThreshold(self, threshold):
+        self._confidence_threshold = threshold
 
     def getAnalysisDuration(self):
         return (self.analysis_end_ts - self.analysis_start_ts).seconds + ((self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0)
@@ -65,6 +73,15 @@ class DisassemblyResult(object):
             bblocks.append(bblock)
         return bblocks
 
+    def getBlocksAsDict(self, function_addr):
+        blocks = {}
+        for block in self.functions[function_addr]:
+            instructions = []
+            for ins in block:
+                instructions.append([ins[0], "".join(["%02x" % c for c in ins[4]]), str(ins[2]), str(ins[3])])
+            blocks[instructions[0][0]] = instructions
+        return blocks
+
     def getInstructions(self, block):
         return block.instructions
 
@@ -76,31 +93,31 @@ class DisassemblyResult(object):
     def collectCfg(self):
         function_results = {}
         for function_offset in sorted(self.functions):
-            blocks = {}
-            for block in self.functions[function_offset]:
-                instructions = []
-                for ins in block:
-                    instructions.append([ins[0], "".join(["%02x" % c for c in ins[4]]), str(ins[2]), str(ins[3])])
-                blocks[instructions[0][0]] = instructions
-            function_doc = {
-                "offset": function_offset,
-                "inrefs": self.getInRefs(function_offset),
-                "outrefs": self.getOutRefs(function_offset),
-                "blockrefs": self.getBlockRefs(function_offset),
-                "apirefs": self.getApiRefs(function_offset),
-                "metadata": {
-                    "function_name": self.function_symbols.get(function_offset, "")
-                },
-                "blocks": blocks
-            }
-            function_results[function_offset] = function_doc
+            if self.candidates[function_offset].getConfidence() >= self._confidence_threshold:
+                blocks = self.getBlocksAsDict(function_offset)
+                function_doc = {
+                    "offset": function_offset,
+                    "inrefs": self.getInRefs(function_offset),
+                    "outrefs": self.getOutRefs(function_offset),
+                    "blockrefs": self.getBlockRefs(function_offset),
+                    "apirefs": self.getApiRefs(function_offset),
+                    "metadata": {
+                        "function_name": self.function_symbols.get(function_offset, ""),
+                        "characteristics": self.candidates[function_offset].getCharacteristics(),
+                        "confidence": self.candidates[function_offset].getConfidence(),
+                        "tfidf": self.candidates[function_offset].getTfIdf(),
+                        "pic_hash": self.pic_hashes[function_offset]
+                    },
+                    "blocks": blocks
+                }
+                function_results[function_offset] = function_doc
         return function_results
 
     def isCode(self, addr):
         return addr in self.code_map
 
     def isAddrWithinMemoryImage(self, destination):
-        return destination > self.base_addr and destination < (self.base_addr + len(self.binary))
+        return destination >= self.base_addr and destination < (self.base_addr + len(self.binary))
 
     def addCodeRefs(self, addr_from, addr_to):
         refs_from = self.code_refs_from.get(addr_from, set([]))
@@ -154,7 +171,7 @@ class DisassemblyResult(object):
         in_refs = []
         if func_addr in self.code_refs_to:
             in_refs = list(self.code_refs_to[func_addr])
-        return in_refs
+        return sorted(in_refs)
 
     def getOutRefs(self, func_addr):
         ins_addrs = set([])
@@ -180,7 +197,7 @@ class DisassemblyResult(object):
                 out_refs[ref[0]] = []
             out_refs[ref[0]].append(ref[1])
         out_refs = [ref for ref in image_refs if ref[1] not in ins_addrs]
-        return out_refs
+        return sorted(out_refs)
 
     def isRecursiveFunction(self, func_addr):
         ins_addrs = set([])

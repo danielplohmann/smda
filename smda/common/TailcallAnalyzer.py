@@ -71,12 +71,14 @@ class TailcallAnalyzer(object):
             if function.start_addr == start_addr: return function
 
     def __printIntervals(self, intervals):
+        # return
         if len(intervals) < 25:
             for one, two in intervals:
                 print("  0x{:x} -> 0x{:x}".format(one, two))
         else: print("Function has too many intervals to display")
 
     def resolveTailcalls(self, disassembler, verbose=False):
+        newly_created_functions = set([])
         for tailcall in self.getTailcalls():
             if verbose: print("Processing tailcall:\n{}".format(json.dumps(tailcall, indent=2, sort_keys=True)))
             # remove the information from the function-analysis state of the disassembly
@@ -94,6 +96,7 @@ class TailcallAnalyzer(object):
 
             # analyze the tailcall destination as function
             disassembler.analyzeFunction(tailcall["destination_addr"])
+            newly_created_functions.add(tailcall["destination_addr"])
             function = self.__getFunctionByStartAddr(tailcall["destination_addr"])
             if function and not tailcall["destination_function"] in function.instruction_start_bytes:
                 # analyze the (previously) broken function a second time
@@ -102,7 +105,8 @@ class TailcallAnalyzer(object):
                     function = self.__getFunctionByStartAddr(tailcall["destination_function"])
                     function.is_tailcall_function = True
                 except:
-                    print ("0x{:x} -> 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
+                    pass
+                    # print ("0x{:x} -> 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
             elif verbose:
                 print ("**** 0x{:x} IS NOW PART OF 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
 
@@ -113,4 +117,4 @@ class TailcallAnalyzer(object):
                 if new_function: self.__printIntervals(self.__getFunctionIntervals(new_function))
                 print("Re-disassembled old function:")
                 if function: self.__printIntervals(self.__getFunctionIntervals(function))
-
+        return sorted(list(newly_created_functions))

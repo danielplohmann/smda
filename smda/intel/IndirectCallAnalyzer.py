@@ -86,6 +86,9 @@ class IndirectCallAnalyzer(object):
                         if not self.current_calling_addr in api_entry["referencing_addr"]:
                             api_entry["referencing_addr"].append(self.current_calling_addr)
                         self.disassembly.apis[candidate] = api_entry
+                    elif self.disassembly.isAddrWithinMemoryImage(candidate):
+                        LOGGER.debug("successfully resolved: 0x%x", candidate)
+                        self.disassembler.fc_manager.addCandidate(candidate, reference_source=self.current_calling_addr)
                     else:
                         LOGGER.debug("candidate not resolved")
                 return True

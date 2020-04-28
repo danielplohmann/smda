@@ -1,11 +1,17 @@
 import struct
 import logging
 
-import config
 
 if len(logging._handlerList) == 0:
     logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
 LOG = logging.getLogger(__name__)
+
+LIEF_AVAILABLE = False
+try:
+    import lief
+    LIEF_AVAILABLE = True
+except:
+    LOG.warning("LIEF not available, will not be able to parse data from PE files.")
 
 class PeFileLoader(object):
 
@@ -13,6 +19,8 @@ class PeFileLoader(object):
 
     @staticmethod
     def isCompatible(data):
+        if not LIEF_AVAILABLE:
+            return False
         return data[:2] == b"MZ"
 
     @staticmethod
@@ -52,7 +60,8 @@ class PeFileLoader(object):
                     max_virt_section_offset = max(max_virt_section_offset, section_info["raw_size"] + section_info["virt_offset"])
                     if section_info["raw_offset"] > 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
-            if max_virt_section_offset and max_virt_section_offset < config.MAX_IMAGE_SIZE:
+            # support up to 100MB for now.
+            if max_virt_section_offset and max_virt_section_offset < 100 * 1024 * 1024:
                 mapped_binary = bytearray([0] * max_virt_section_offset)
                 mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
             for section_info in section_infos:
@@ -106,3 +115,39 @@ class PeFileLoader(object):
             bitness = struct.unpack("H", binary[pe_offset + 4:pe_offset + 4 + 2])[0]
             return bitness in PeFileLoader.BITNESS_MAP
         return False
+
+    @staticmethod
+    def __getCodeAreas(binary):
+        # TODO limit to executable sections
+        code_areas = []
+        mapped_binary = PeFileLoader.mapBinary(binary)
+        base_addr = PeFileLoader.getBaseAddress(binary)
+        code_areas.append([base_addr, base_addr + len(mapped_binary)])
+        return code_areas
+
+    @staticmethod
+    def getCodeAreas(binary):
+        pefile = lief.parse(bytearray(binary))
+        code_areas = []
+        base_address = PeFileLoader.getBaseAddress(binary)
+        for section in pefile.sections:
+            if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
+                section_start = base_address + section.virtual_address
+                section_size = section.virtual_size
+                if section_size % 0x1000 != 0:
+                    section_size += 0x1000 - (section_size % 0x1000)
+                section_end = section_start + section_size
+                code_areas.append([section_start, section_end])
+        # merge areas if possible
+        code_areas = sorted(code_areas)
+        result = []
+        index = 0
+        while index < len(code_areas) - 1:
+            this_area = code_areas[index]
+            next_area = code_areas[index + 1]
+            if this_area[1] != next_area[0]:
+                result.append(this_area)
+                index += 1
+            else:
+                code_areas = code_areas[:index] + [[this_area[0], next_area[1]]] + code_areas[index + 2:]
+        return code_areas

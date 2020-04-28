@@ -31,6 +31,7 @@ class FunctionAnalysisState(object):
         self.is_next_instruction_reachable = True
         self.is_block_ending_instruction = False
         self.is_sanely_ending = False
+        self.has_collision = False
         # set a flag that this tailcall has already been resolved so it does not have to be reanalyzed several times
         self.is_tailcall_function = False
         self.is_leaf_function = True
@@ -108,9 +109,9 @@ class FunctionAnalysisState(object):
         self.disassembly.function_borders[self.start_addr] = (fn_min, fn_max)
         for ins in self.instructions:
             self.disassembly.instructions[ins[0]] = (ins[2], ins[1])
-            for byte in range(ins[1]):
-                self.disassembly.code_map[ins[0] + byte] = ins[0]
-                self.disassembly.ins2fn[ins[0] + byte] = self.start_addr
+            for offset in range(ins[1]):
+                self.disassembly.code_map[ins[0] + offset] = ins[0]
+                self.disassembly.ins2fn[ins[0] + offset] = self.start_addr
         for cref in self.code_refs:
             self.disassembly.addCodeRefs(cref[0], cref[1])
         for dref in self.data_refs:
@@ -125,7 +126,9 @@ class FunctionAnalysisState(object):
 
     def finalizeAnalysis(self, as_gap=False):
         if as_gap:
-            LOGGER.debug("0x%08x had sanity state: %s (%d ins)", self.start_addr, self.is_sanely_ending, len(self.instructions))
+            LOGGER.debug("0x%08x had sanity state: %s (%d ins, blocks: %d)", self.start_addr, self.is_sanely_ending, len(self.instructions), self.num_blocks_analyzed)
+            #for instruction in sorted(self.instructions):
+            #    print("0x%08x: %s %s" % (instruction[0], instruction[2], instruction[3]))
         if as_gap and not self.is_sanely_ending:
             if len(self.instructions) == 1 and self.instructions[0][2] == "jmp":
                 ins_offset = self.instructions[0][0] - self.disassembly.base_addr
@@ -225,6 +228,9 @@ class FunctionAnalysisState(object):
     def setSanelyEnding(self, is_sanely_ending):
         self.is_sanely_ending = is_sanely_ending
 
+    def setCollision(self, is_colliding):
+        self.has_collision = is_colliding
+
     def setRecursion(self, is_recursive):
         self.is_recursive = is_recursive
 
@@ -232,7 +238,7 @@ class FunctionAnalysisState(object):
         self.is_leaf_function = is_leaf
 
     def __str__(self):
-        result = "0x{:x} | current: 0x{:x} | blocks: {} | queue: {} | processed: {} | crefs: {} | drefs: {} | suspicious: {}".format(
+        result = "0x{:x} | current: 0x{:x} | blocks: {} | queue: {} | processed: {} | crefs: {} | drefs: {} | suspicious: {} | ending: {}".format(
             self.start_addr,
             self.block_start,
             len(self.getBlocks()),
@@ -240,6 +246,7 @@ class FunctionAnalysisState(object):
             ",".join(["0x%x" % b for b in sorted(list(self.processed_blocks))]),
             len(self.code_refs),
             len(self.data_refs),
-            self.suspicious_ins_count
+            self.suspicious_ins_count,
+            self.is_sanely_ending
         )
         return result

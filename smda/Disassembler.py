@@ -35,15 +35,16 @@ class Disassembler(object):
         base_addr = loader.getBaseAddress()
         bitness = loader.getBitness()
         file_content = loader.getData()
+        code_areas = loader.getCodeAreas()
         start = datetime.datetime.utcnow()
         try:
             self.disassembler.setFilePath(file_path)
             self.disassembler.addPdbFile(pdb_path, base_addr)
-            print("Disassembler uses base address: 0x%x and bitness: %dbit" % (base_addr, bitness))
+            self.disassembler.setCodeAreas(code_areas)
             disassembly = self.disassemble(file_content, base_addr, bitness=bitness, timeout=self.config.TIMEOUT)
-            report = self.getDisassemblyReport(disassembly)
-            report["filename"] = os.path.basename(file_path)
             print(disassembly)
+            report = self.getDisassemblyReport(disassembly)
+            report["metadata"]["filename"] = os.path.basename(file_path)
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
             report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": self._getDurationInSeconds(start, datetime.datetime.utcnow())}
@@ -54,9 +55,9 @@ class Disassembler(object):
         try:
             self.disassembler.setFilePath("")
             disassembly = self.disassemble(file_content, base_addr, bitness, timeout=self.config.TIMEOUT)
-            report = self.getDisassemblyReport(disassembly)
-            report["filename"] = ""
             print(disassembly)
+            report = self.getDisassemblyReport(disassembly)
+            report["metadata"]["filename"] = ""
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
             report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": self._getDurationInSeconds(start, datetime.datetime.utcnow())}
@@ -81,16 +82,20 @@ class Disassembler(object):
             "base_addr": disassembly.base_addr,
             "bitness": disassembly.bitness,
             "buffer_size": len(disassembly.binary),
+            "code_areas": disassembly.code_areas,
             "disassembly_errors": disassembly.errors,
             "execution_time": disassembly.getAnalysisDuration(),
+            "identified_alignment": disassembly.identified_alignment,
             "metadata" : {
-                "message": "Analysis finished regularly."
+                "message": "Analysis finished regularly.",
+                "family": "",
+                "filename": "",
+                "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S"),
             },
             "sha256": hashlib.sha256(disassembly.binary).hexdigest(),
             "smda_version": self.config.VERSION,
             "status": disassembly.getAnalysisOutcome(),
             "summary": stats.calculate(),
-            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": disassembly.collectCfg(),
         }
         return report
