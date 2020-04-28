@@ -1,5 +1,5 @@
-SMDA
-====
+
+# SMDA
 
 SMDA is a minimalist recursive disassembler library that is optimized for accurate Control Flow Graph (CFG) recovery from memory dumps.
 It is based on Capstone (http://www.capstone-engine.org/) and currently supports x86/x64 Intel machine code.
@@ -18,9 +18,9 @@ To take full advantage of SMDA's capabilities, optionally install:
 * lief 
 * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
-Version History
----------------
- * 2020-04-28: several 
+## Version History
+
+ * 2020-04-28: Several improvements, including: x64 jump table handling, better data flow handling for calls using registers and tailcalls, extended list of common prologues based on much more groundtruth data, extended padding instruction list for gap function discovery, adjusted weights in candidate priority score, filtering code areas based on section tables, using exported symbols as candidates, new function output metadata: confidence score based on instruction mnemonic histogram, PIC hash based on escaped binary instruction sequence
  * 2020-03-10: Various minor fixes and QoL improvements.
  * 2019-08-20: IdaExporter is now handling failed instruction conversion via capstone properly.
  * 2019-08-19: Minor fix for crashes caused by PDB parser.
@@ -35,10 +35,10 @@ Version History
  * 2018-07-01: Initial Release.
 
 
-Credits
-=======
+## Credits
 
 Thanks to Steffen Enders for his extensive contributions to this project.
 Thanks to Paul Hordiienko for adding symbol parsing support (ELF PDB).
 
 Pull requests welcome! :)
+
