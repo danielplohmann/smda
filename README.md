@@ -15,8 +15,8 @@ The code should be fully compatible with Python 2 and 3.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
 To take full advantage of SMDA's capabilities, optionally install:
-* lief 
-* pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
+ * lief 
+ * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
 
