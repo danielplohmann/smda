@@ -19,7 +19,7 @@ class BitnessAnalyzer(object):
 
     def determineBitnessFromDisassembly(self, disassembly):
         LOGGER.debug("Running Bitness test on binary data of DisassemblyResult")
-        return self.determineBitness(binary=disassembly.binary)
+        return self.determineBitness(binary=disassembly.binary_info.binary)
 
     def determineBitness(self, binary):
         candidate_first_bytes = {"32": Counter(), "64": Counter()}

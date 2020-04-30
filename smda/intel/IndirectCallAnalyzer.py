@@ -21,10 +21,9 @@ class IndirectCallAnalyzer(object):
         return []
 
     def getDword(self, addr):
-        rel_addr = addr - self.disassembly.base_addr
         if not self.disassembly.isAddrWithinMemoryImage(addr):
             return None
-        return struct.unpack("I", self.disassembly.binary[rel_addr:rel_addr + 4])[0]
+        return struct.unpack("I", self.disassembly.getBytes(addr, 4))[0]
 
     def process_block(self, analysis_state, block, registers, register_name, processed, depth):
         if not block:

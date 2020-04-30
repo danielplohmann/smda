@@ -5,11 +5,12 @@ from .IntelInstructionEscaper import IntelInstructionEscaper
 
 class FunctionCandidate(object):
 
-    def __init__(self, addr, function_bytes, bitness=32):
-        self.bitness = bitness
+    def __init__(self, binary_info, addr):
+        self.bitness = binary_info.bitness
         self.addr = addr
+        rel_start_addr = addr - binary_info.base_addr
+        self.bytes = binary_info.binary[rel_start_addr:rel_start_addr + 5]
         self.lang_spec = None
-        self.bytes = function_bytes
         self.call_ref_sources = []
         self.finished = False
         self.is_symbol = False

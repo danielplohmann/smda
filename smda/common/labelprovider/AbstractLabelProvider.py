@@ -12,7 +12,7 @@ class AbstractLabelProvider:
         raise NotImplementedError
 
     @abstractmethod
-    def update(self, file_path, binary, base_addr):
+    def update(self, binary_info):
         """If the LabelProvider needs to parse from the given target, update() can be used to populate the provider """
         raise NotImplementedError
 

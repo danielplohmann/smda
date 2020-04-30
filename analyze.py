@@ -4,24 +4,21 @@ import logging
 import os
 import re
 
-import config
+from smda.SmdaConfig import SmdaConfig
 from smda.Disassembler import Disassembler
-
-LOGGER = logging.getLogger(__name__)
-
 
 def parseBaseAddrFromArgs(args):
     if args.base_addr:
         parsed_base_addr = int(args.base_addr, 16) if args.base_addr.startswith("0x") else int(args.base_addr)
-        LOGGER.info("using provided base address: 0x%08x %d", parsed_base_addr, parsed_base_addr)
+        logging.info("using provided base address: 0x%08x %d", parsed_base_addr, parsed_base_addr)
         return parsed_base_addr
     # try to infer base addr from filename:
     baddr_match = re.search(re.compile("0x(?P<base_addr>[0-9a-fA-F]{8,16})$"), args.input_path)
     if baddr_match:
         parsed_base_addr = int(baddr_match.group("base_addr"), 16)
-        LOGGER.info("Parsed base address from file name: 0x%08x %d", parsed_base_addr, parsed_base_addr)
+        logging.info("Parsed base address from file name: 0x%08x %d", parsed_base_addr, parsed_base_addr)
         return parsed_base_addr
-    LOGGER.warning("No base address recognized, using 0.")
+    logging.warning("No base address recognized, using 0.")
     return 0
 
 
@@ -42,20 +39,27 @@ if __name__ == "__main__":
 
     ARGS = PARSER.parse_args()
     if ARGS.input_path:
-        REPORT = {}
+        SMDA_REPORT = None
         INPUT_FILENAME = ""
         if os.path.isfile(ARGS.input_path):
+            # optionally create and set up a config, e.g. when using ApiScout profiles for WinAPI import usage discovery
+            config = SmdaConfig()
+            config.API_COLLECTION_FILES = {
+                "win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])
+            }
             DISASSEMBLER = Disassembler(config)
             print("now analyzing {}".format(ARGS.input_path))
             INPUT_FILENAME = os.path.basename(ARGS.input_path)
             if ARGS.parse_header:
-                REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
+                SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
             else:
                 BUFFER = readFileContent(ARGS.input_path)
                 BASE_ADDR = parseBaseAddrFromArgs(ARGS)
-                REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR)
-        if REPORT and os.path.isdir(ARGS.output_path):
+                SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR)
+                SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
+            print(SMDA_REPORT)
+        if SMDA_REPORT and os.path.isdir(ARGS.output_path):
             with open(ARGS.output_path + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
-                json.dump(REPORT, fout, indent=1, sort_keys=True)
+                json.dump(SMDA_REPORT.toDict(), fout, indent=1, sort_keys=True)
     else:
         PARSER.print_help()

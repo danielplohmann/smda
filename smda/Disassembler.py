@@ -7,22 +7,28 @@ from .DisassemblyStatistics import DisassemblyStatistics
 from .intel.IntelDisassembler import IntelDisassembler
 from .ida.IdaExporter import IdaExporter
 from smda.utility.FileLoader import FileLoader
+from smda.SmdaConfig import SmdaConfig
+from smda.common.BinaryInfo import BinaryInfo
+from smda.common.SmdaReport import SmdaReport
 
 class Disassembler(object):
 
-    def __init__(self, config, backend="intel"):
+    def __init__(self, config=None, backend="intel"):
+        if config is None:
+            config = SmdaConfig()
         self.config = config
         self.disassembler = None
         if backend == "intel":
-            self.disassembler = IntelDisassembler(config)
+            self.disassembler = IntelDisassembler(self.config)
         elif backend == "IDA":
-            self.disassembler = IdaExporter(config)
-        self.disassembly = None
+            self.disassembler = IdaExporter(self.config)
         self._start_time = None
         self._timeout = 0
+        # cache the last DisassemblyResult
+        self.disassembly = None
 
     def _getDurationInSeconds(self, start_ts, end_ts):
-        return (self.analysis_end_ts - self.analysis_start_ts).seconds + ((self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0)
+        return (end_ts - start_ts).seconds + ((end_ts - start_ts).microseconds / 1000000.0)
 
     def _callbackAnalysisTimeout(self):
         if not self._timeout:
@@ -32,70 +38,43 @@ class Disassembler(object):
 
     def disassembleFile(self, file_path, pdb_path=""):
         loader = FileLoader(file_path, map_file=True)
-        base_addr = loader.getBaseAddress()
-        bitness = loader.getBitness()
         file_content = loader.getData()
-        code_areas = loader.getCodeAreas()
+        binary_info = BinaryInfo(file_content)
+        binary_info.file_path = file_path
+        binary_info.base_addr = loader.getBaseAddress()
+        binary_info.bitness = loader.getBitness()
+        binary_info.code_areas = loader.getCodeAreas()
         start = datetime.datetime.utcnow()
         try:
-            self.disassembler.setFilePath(file_path)
-            self.disassembler.addPdbFile(pdb_path, base_addr)
-            self.disassembler.setCodeAreas(code_areas)
-            disassembly = self.disassemble(file_content, base_addr, bitness=bitness, timeout=self.config.TIMEOUT)
-            print(disassembly)
-            report = self.getDisassemblyReport(disassembly)
-            report["metadata"]["filename"] = os.path.basename(file_path)
+            self.disassembler.addPdbFile(binary_info, pdb_path)
+            smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
-            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": self._getDurationInSeconds(start, datetime.datetime.utcnow())}
-        return report
+            smda_report = self._createErrorReport(start, exc)
+        return smda_report
 
     def disassembleBuffer(self, file_content, base_addr, bitness=None):
         start = datetime.datetime.utcnow()
         try:
-            self.disassembler.setFilePath("")
-            disassembly = self.disassemble(file_content, base_addr, bitness, timeout=self.config.TIMEOUT)
-            print(disassembly)
-            report = self.getDisassemblyReport(disassembly)
-            report["metadata"]["filename"] = ""
+            binary_info = BinaryInfo(file_content)
+            binary_info.base_addr = base_addr
+            binary_info.bitness = bitness
+            smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
-            report = {"status":"error", "meta": {"traceback": traceback.format_exc(exc)}, "execution_time": self._getDurationInSeconds(start, datetime.datetime.utcnow())}
-        return report
+            smda_report = self._createErrorReport(start, exc)
+        return smda_report
 
-    def disassemble(self, binary, base_addr, bitness=None, timeout=0):
+    def _disassemble(self, binary_info, timeout=0):
         self._start_time = datetime.datetime.utcnow()
         self._timeout = timeout
-        self.disassembly = self.disassembler.analyzeBuffer(binary, base_addr, bitness, self._callbackAnalysisTimeout)
-        return self.disassembly
+        self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
+        return SmdaReport(self.disassembly)
 
-    def getDisassemblyReport(self, disassembly=None):
-        report = {}
-        if disassembly is None:
-            if self.disassembly is not None:
-                disassembly = self.disassembly
-            else:
-                return {}
-        stats = DisassemblyStatistics(disassembly)
-        report = {
-            "architecture": disassembly.architecture,
-            "base_addr": disassembly.base_addr,
-            "bitness": disassembly.bitness,
-            "buffer_size": len(disassembly.binary),
-            "code_areas": disassembly.code_areas,
-            "disassembly_errors": disassembly.errors,
-            "execution_time": disassembly.getAnalysisDuration(),
-            "identified_alignment": disassembly.identified_alignment,
-            "metadata" : {
-                "message": "Analysis finished regularly.",
-                "family": "",
-                "filename": "",
-                "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S"),
-            },
-            "sha256": hashlib.sha256(disassembly.binary).hexdigest(),
-            "smda_version": self.config.VERSION,
-            "status": disassembly.getAnalysisOutcome(),
-            "summary": stats.calculate(),
-            "xcfg": disassembly.collectCfg(),
-        }
+    def _createErrorReport(self, start, exception):
+        report = SmdaReport()
+        report.smda_version = self.config.VERSION
+        report.status = "error"
+        report.execution_time = self._getDurationInSeconds(start, datetime.datetime.utcnow())
+        report.message = traceback.format_exc(exception)
         return report

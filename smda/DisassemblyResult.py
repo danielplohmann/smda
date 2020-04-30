@@ -1,4 +1,5 @@
 import datetime
+import struct
 
 from smda.common.BasicBlock import BasicBlock
 
@@ -9,9 +10,7 @@ class DisassemblyResult(object):
         self.analysis_start_ts = datetime.datetime.utcnow()
         self.analysis_end_ts = self.analysis_start_ts
         self.analysis_timeout = False
-        self.architecture = ""
-        self.binary = ""
-        self.bitness = bitness
+        self.binary_info = None
         self.identified_alignment = 0
         self.code_map = {}
         self.data_map = set([])
@@ -19,7 +18,6 @@ class DisassemblyResult(object):
         self.errors = {}
         # stored as key:
         self.functions = {}
-        self.pic_hashes = {}
         self.recursive_functions = set([])
         self.leaf_functions = set([])
         self.failed_analysis_addr = []
@@ -35,15 +33,37 @@ class DisassemblyResult(object):
         # key: address of API in target DLL, value: {referencing_addr, api_name, dll_name}
         self.apis = {}
         self.addr_to_api = {}
-        self.base_addr = 0
         # address:name
         self.function_symbols = {}
         self.candidates = {}
         self._confidence_threshold = 0.0
         self.code_areas = []
+        self.smda_version = ""
+
+    def getByte(self, addr):
+        if self.isAddrWithinMemoryImage(addr):
+            return self.binary_info.binary[addr - self.binary_info.base_addr]
+
+    def getRawByte(self, offset):
+        return self.binary_info.binary[offset]
+
+    def getBytes(self, addr, num_bytes):
+        if self.isAddrWithinMemoryImage(addr):
+            rel_start_addr = addr - self.binary_info.base_addr
+            return self.binary_info.binary[rel_start_addr:rel_start_addr + num_bytes]
+
+    def getRawBytes(self, offset, num_bytes):
+        return self.binary_info.binary[offset:offset + num_bytes]
+
+    def setBinary(self, binary):
+        self.binary = binary
+        self.binary_size = len(binary)
 
     def setConfidenceThreshold(self, threshold):
         self._confidence_threshold = threshold
+
+    def getConfidenceThreshold(self):
+        return self._confidence_threshold
 
     def getAnalysisDuration(self):
         return (self.analysis_end_ts - self.analysis_start_ts).seconds + ((self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0)
@@ -90,34 +110,21 @@ class DisassemblyResult(object):
             return self.instructions[instruction_addr][0]
         return ""
 
-    def collectCfg(self):
-        function_results = {}
-        for function_offset in sorted(self.functions):
-            if self.candidates[function_offset].getConfidence() >= self._confidence_threshold:
-                blocks = self.getBlocksAsDict(function_offset)
-                function_doc = {
-                    "offset": function_offset,
-                    "inrefs": self.getInRefs(function_offset),
-                    "outrefs": self.getOutRefs(function_offset),
-                    "blockrefs": self.getBlockRefs(function_offset),
-                    "apirefs": self.getApiRefs(function_offset),
-                    "metadata": {
-                        "function_name": self.function_symbols.get(function_offset, ""),
-                        "characteristics": self.candidates[function_offset].getCharacteristics(),
-                        "confidence": self.candidates[function_offset].getConfidence(),
-                        "tfidf": self.candidates[function_offset].getTfIdf(),
-                        "pic_hash": self.pic_hashes[function_offset]
-                    },
-                    "blocks": blocks
-                }
-                function_results[function_offset] = function_doc
-        return function_results
-
     def isCode(self, addr):
         return addr in self.code_map
 
     def isAddrWithinMemoryImage(self, destination):
-        return destination >= self.base_addr and destination < (self.base_addr + len(self.binary))
+        if destination is not None:
+            return destination >= self.binary_info.base_addr and destination < (self.binary_info.base_addr + self.binary_info.binary_size)
+        return False
+
+    def dereferenceDword(self, addr):
+        if self.isAddrWithinMemoryImage(addr):
+            rel_start_addr = addr - self.binary_info.base_addr
+            rel_end_addr = rel_start_addr + 4
+            extracted_dword = self.binary_info.binary[rel_start_addr:rel_end_addr]
+            return struct.unpack("I", extracted_dword)[0]
+        return None
 
     def addCodeRefs(self, addr_from, addr_to):
         refs_from = self.code_refs_from.get(addr_from, set([]))
@@ -188,16 +195,15 @@ class DisassemblyResult(object):
         if func_addr in ins_addrs:
             ins_addrs.remove(func_addr)
         # reduce outrefs to addresses within the memory image
-        max_addr = self.base_addr + len(self.binary)
-        image_refs = [ref for ref in code_refs if self.base_addr <= ref[1] <= max_addr]
+        max_addr = self.binary_info.base_addr + self.binary_info.binary_size
+        image_refs = [ref for ref in code_refs if self.binary_info.base_addr <= ref[1] <= max_addr]
         for ref in image_refs:
             if ref[1] in ins_addrs:
                 continue
             if ref[0] not in out_refs:
                 out_refs[ref[0]] = []
             out_refs[ref[0]].append(ref[1])
-        out_refs = [ref for ref in image_refs if ref[1] not in ins_addrs]
-        return sorted(out_refs)
+        return {src: sorted(dst) for src, dst in out_refs.items()}
 
     def isRecursiveFunction(self, func_addr):
         ins_addrs = set([])

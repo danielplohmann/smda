@@ -8,7 +8,6 @@ from smda.utility.PriorityQueue import PriorityQueue
 from .definitions import DEFAULT_PROLOGUES, GAP_SEQUENCES
 from .LanguageAnalyzer import LanguageAnalyzer
 from .FunctionCandidate import FunctionCandidate
-from .BitnessAnalyzer import BitnessAnalyzer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,15 +34,12 @@ class FunctionCandidateManager(object):
         self.previously_analyzed_gap = 0
         self.capstone = None
 
-    def init(self, disassembly, bitness=None, codeAreas=None):
-        if codeAreas:
-            self._code_areas = codeAreas
+    def init(self, disassembly):
+        if disassembly.binary_info.code_areas:
+            self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
         self.disassembly.language = self.lang_analyzer.identify(self.disassembly)
-        self.bitness = bitness
-        if bitness not in [32, 64]:
-            bitness_analyzer = BitnessAnalyzer()
-            self.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
+        self.bitness = disassembly.binary_info.bitness
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
         if self.bitness == 64:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
@@ -104,9 +100,7 @@ class FunctionCandidateManager(object):
     def addCandidate(self, addr, is_gap=False, reference_source=None):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+        self.ensureCandidate(addr)
         self.candidates[addr].setIsGapCandidate(is_gap)
         if reference_source:
             self.candidates[addr].addCallRef(reference_source)
@@ -240,17 +234,17 @@ class FunctionCandidateManager(object):
             self.gap_pointer = start_gap_pointer
         LOGGER.debug("nextGapCandidate() finding new gap candidate, current gap_ptr: 0x%08x", self.gap_pointer)
         while True:
-            if self.disassembly.base_addr + len(self.disassembly.binary) < self.gap_pointer:
+            if self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size < self.gap_pointer:
                 LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)
                 return None
-            gap_offset = self.gap_pointer - self.disassembly.base_addr
-            if gap_offset >= len(self.disassembly.binary):
+            gap_offset = self.gap_pointer - self.disassembly.binary_info.base_addr
+            if gap_offset >= self.disassembly.binary_info.binary_size:
                 return None
             # compatibility with python2/3...
             try:
-                byte = self.disassembly.binary[gap_offset]
+                byte = self.disassembly.getRawByte(gap_offset)
             except:
-                print("0x%08x" % self.disassembly.base_addr, "0x%08x" % len(self.disassembly.binary), "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
+                print("0x%08x" % self.disassembly.binary_info.base_addr, "0x%08x" % self.disassembly.binary_info.binary_size, "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             # try to find padding symbols and skip them
             if isinstance(byte, int):
                 byte = struct.pack("B", byte)
@@ -259,7 +253,7 @@ class FunctionCandidateManager(object):
                 self.gap_pointer += 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
-            ins_buf = [i for i in self.capstone.disasm(self.disassembly.binary[gap_offset:gap_offset + 15], gap_offset)]
+            ins_buf = [i for i in self.capstone.disasm(self.disassembly.getRawBytes(gap_offset, 15), gap_offset)]
             if ins_buf and ins_buf[0].mnemonic == "nop":
                 nop_instruction = ins_buf[0].mnemonic + " " + ins_buf[0].op_str
                 nop_length = len(ins_buf[0].bytes)
@@ -269,7 +263,7 @@ class FunctionCandidateManager(object):
             # try to find effective NOPs and skip them.
             found_multi_byte_nop = False
             for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
-                if self.disassembly.binary[gap_offset:gap_offset + gap_length] in GAP_SEQUENCES[gap_length]:
+                if self.disassembly.getRawBytes(gap_offset, gap_length) in GAP_SEQUENCES[gap_length]:
                     LOGGER.debug("nextGapCandidate() found %d byte effective nop - gap_ptr += %d: 0x%08x", gap_length, gap_length, self.gap_pointer)
                     self.gap_pointer += gap_length
                     found_multi_byte_nop = True
@@ -287,7 +281,7 @@ class FunctionCandidateManager(object):
                 continue
             # we may have a candidate here
             LOGGER.debug("nextGapCandidate() using 0x%08x as candidate", self.gap_pointer)
-            start_byte = self.disassembly.binary[gap_offset]
+            start_byte = self.disassembly.getRawByte(gap_offset)
             has_common_prologue = True  # start_byte in FunctionCandidate(self.gap_pointer, start_byte, self.bitness).common_gap_starts[self.bitness]
             if self.previously_analyzed_gap == self.gap_pointer:
                 LOGGER.debug("--- HRM, nextGapCandidate() gap_ptr at: 0x%08x was previously analyzed", self.gap_pointer)
@@ -320,83 +314,70 @@ class FunctionCandidateManager(object):
     def checkCodePadding(self):
         pattern_count = 0
         pattern_functions = []
-        for pattern in re.finditer(r"((\xCC){2,}|(\x90){2,})", self.disassembly.binary):
+        for pattern in re.finditer(r"((\xCC){2,}|(\x90){2,})", self.disassembly.binary_info.binary):
             pattern_count += 1
             pattern_functions.append(pattern.span()[1] + 1)
 
-    def dereferenceDword(self, addr):
-        if self.disassembly.isAddrWithinMemoryImage(addr):
-            extracted_dword = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 4]
-            return struct.unpack("I", extracted_dword)[0]
-        return self.getBitMask()
+    def ensureCandidate(self, addr):
+        """ create candidate if it does not exist yet, returns True if newly created, else False """
+        if addr not in self.candidates:
+            self.candidates[addr] = FunctionCandidate(self.disassembly.binary_info, addr)
+            return True
+        return False
 
     def addGapCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+        self.ensureCandidate(addr)
         self.candidates[addr].setIsGapCandidate(True)
 
     def addTailcallCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+        self.ensureCandidate(addr)
         self.candidates[addr].setIsTailcallCandidate(True)
 
     def addReferenceCandidate(self, addr, source_ref):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+        if self.ensureCandidate(addr):
             self._all_call_refs[source_ref] = addr
         self.candidates[addr].addCallRef(source_ref)
 
     def addLanguageSpecCandidate(self, addr, lang_spec):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+        self.ensureCandidate(addr)
         self.candidates[addr].setLanguageSpec(lang_spec)
 
     def addPrologueCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
-            return True
-        return False
+        return self.ensureCandidate(addr)
 
     def addSymbolCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
-        if addr not in self.candidates:
-            start_bytes = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 5]
-            self.candidates[addr] = FunctionCandidate(addr, start_bytes, self.bitness)
+        self.ensureCandidate(addr)
         self.candidates[addr].setIsSymbol(True)
         self.candidates[addr].setInitialCandidate(True)
 
     def resolvePointerReference(self, offset):
         if self.bitness == 32:
-            addr_block = self.disassembly.binary[offset + 2:offset + 2 + 4]
+            addr_block = self.disassembly.getRawBytes(offset + 2, 4)
             function_pointer = struct.unpack("I", addr_block)[0]
-            return self.dereferenceDword(function_pointer)
+            return self.disassembly.dereferenceDword(function_pointer)
         if self.bitness == 64:
-            addr_block = self.disassembly.binary[offset + 2:offset + 2 + 4]
+            addr_block = self.disassembly.getRawBytes(offset + 2, 4)
             function_pointer = struct.unpack("i", addr_block)[0]
             # we need to calculate RIP + offset + 7 (48 ff 25 ** ** ** **)
-            if self.disassembly.binary[offset:offset + 2] == "\xFF\x25":
+            if self.disassembly.getRawBytes(offset, 2) == "\xFF\x25":
                 function_pointer += offset + 7
-            elif self.disassembly.binary[offset:offset + 2] == "\xFF\x15":
+            elif self.disassembly.getRawBytes(offset, 2) == "\xFF\x15":
                 function_pointer += offset + 6
             else:
                 raise Exception("resolvePointerReference: should only be used on call/jmp * ptr")
-            return self.disassembly.base_addr + function_pointer
+            return self.disassembly.binary_info.base_addr + function_pointer
         raise Exception("resolvePointerReference: undefined bitness")
 
     def _identifyAlignment(self):
@@ -405,12 +386,13 @@ class FunctionCandidateManager(object):
             num_candidates = sum([1 for addr, candidate in self.candidates.items() if len(candidate.call_ref_sources) > 1])
             num_aligned_16_candidates = sum([1 for addr, candidate in self.candidates.items() if len(candidate.call_ref_sources) > 1 and candidate.alignment == 16])
             num_aligned_4_candidates = sum([1 for addr, candidate in self.candidates.items() if len(candidate.call_ref_sources) > 1 and candidate.alignment >= 4])
-            alignment_16_ratio = 1.0 * num_aligned_16_candidates / num_candidates
-            alignment_4_ratio = 1.0 * num_aligned_4_candidates / num_candidates
-            if num_candidates > 20 and alignment_4_ratio > 0.95:
-                identified_alignment = 4
-            if num_candidates > 20 and alignment_16_ratio > 0.95:
-                identified_alignment = 16
+            if num_candidates:
+                alignment_16_ratio = 1.0 * num_aligned_16_candidates / num_candidates
+                alignment_4_ratio = 1.0 * num_aligned_4_candidates / num_candidates
+                if num_candidates > 20 and alignment_4_ratio > 0.95:
+                    identified_alignment = 4
+                if num_candidates > 20 and alignment_16_ratio > 0.95:
+                    identified_alignment = 16
         return identified_alignment
 
     def locateCandidates(self):
@@ -434,52 +416,52 @@ class FunctionCandidateManager(object):
 
     def locateReferenceCandidates(self):
         # check for potential call instructions and check if their destinations have a common function prologue
-        for call_match in re.finditer(b"\xE8", self.disassembly.binary):
-            if not self._passesCodeFilter(self.disassembly.base_addr + call_match.start()):
+        for call_match in re.finditer(b"\xE8", self.disassembly.binary_info.binary):
+            if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + call_match.start()):
                 continue
-            if len(self.disassembly.binary) - call_match.start() > 5:
-                packed_call = self.disassembly.binary[call_match.start() + 1:call_match.start() + 5]
+            if len(self.disassembly.binary_info.binary) - call_match.start() > 5:
+                packed_call = self.disassembly.getRawBytes(call_match.start() + 1, 4)
                 rel_call_offset = struct.unpack("i", packed_call)[0]
                 # ignore zero offset calls, as they will likely not lead to functions but are rather used for positioning in shellcode etc
                 if rel_call_offset == 0:
                     continue
-                call_destination = (self.disassembly.base_addr + rel_call_offset + call_match.start() + 5) & self.getBitMask()
+                call_destination = (self.disassembly.binary_info.base_addr + rel_call_offset + call_match.start() + 5) & self.getBitMask()
                 if self.disassembly.isAddrWithinMemoryImage(call_destination):
-                    self.addReferenceCandidate(call_destination, self.disassembly.base_addr + call_match.start())
+                    self.addReferenceCandidate(call_destination, self.disassembly.binary_info.base_addr + call_match.start())
                     self.setInitialCandidate(call_destination)
         # also check for "jmp dword ptr <offset>", as they sometimes point to local functions (i.e. non-API)
         if self.bitness == 32:
-            for match in re.finditer(b"\xFF\x25", self.disassembly.binary):
+            for match in re.finditer(b"\xFF\x25", self.disassembly.binary_info.binary):
                 function_addr = self.resolvePointerReference(match.start())
                 if not self._passesCodeFilter(function_addr):
                     continue
                 if self.disassembly.isAddrWithinMemoryImage(function_addr):
-                    self.addReferenceCandidate(function_addr, self.disassembly.base_addr + match.start())
+                    self.addReferenceCandidate(function_addr, self.disassembly.binary_info.base_addr + match.start())
                     self.setInitialCandidate(function_addr)
             # also check for "call dword ptr <offset>", as they sometimes point to local functions (i.e. non-API)
-            for match in re.finditer(b"\xFF\x15", self.disassembly.binary):
+            for match in re.finditer(b"\xFF\x15", self.disassembly.binary_info.binary):
                 function_addr = self.resolvePointerReference(match.start())
                 if not self._passesCodeFilter(function_addr):
                     continue
                 if self.disassembly.isAddrWithinMemoryImage(function_addr):
-                    self.addReferenceCandidate(function_addr, self.disassembly.base_addr + match.start())
+                    self.addReferenceCandidate(function_addr, self.disassembly.binary_info.base_addr + match.start())
                     self.setInitialCandidate(function_addr)
 
     def locatePrologueCandidates(self):
         # next check for the default function prologue regardless of references
         for re_prologue in DEFAULT_PROLOGUES:
-            for prologue_match in re.finditer(re_prologue, self.disassembly.binary):
-                if not self._passesCodeFilter(self.disassembly.base_addr + prologue_match.start()):
+            for prologue_match in re.finditer(re_prologue, self.disassembly.binary_info.binary):
+                if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + prologue_match.start()):
                     continue
-                self.addPrologueCandidate((self.disassembly.base_addr + prologue_match.start()) & self.getBitMask())
-                self.setInitialCandidate((self.disassembly.base_addr + prologue_match.start()) & self.getBitMask())
+                self.addPrologueCandidate((self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask())
+                self.setInitialCandidate((self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask())
 
     def locateLangSpecCandidates(self):
         # if the sample is highly likely delphi, extract t-string-objects and use their function-addresses as high-confidence function starts
         delphi_candidates = set([])
-        if self.lang_analyzer.checkDelphi(self.disassembly.binary):
+        if self.lang_analyzer.checkDelphi(self.disassembly):
             LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from TObjects")
-            t_objects = self.lang_analyzer.getDelphiObjects(self.disassembly.binary, self.disassembly.base_addr)
+            t_objects = self.lang_analyzer.getDelphiObjects()
             for t_string in t_objects:
                 delphi_candidates.update(set(t_objects[t_string]))
             LOGGER.debug("delphi candidates based on TObject analysis: %d", len(delphi_candidates))
@@ -488,19 +470,19 @@ class FunctionCandidateManager(object):
 
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates
-        for block in re.finditer(b"(?P<block>(\xFF\x25[\S\s]{4}){2,})", self.disassembly.binary):
+        for block in re.finditer(b"(?P<block>(\xFF\x25[\S\s]{4}){2,})", self.disassembly.binary_info.binary):
             for match in re.finditer(b"\xFF\x25(?P<function>[\S\s]{4})", block.group("block")):
-                stub_addr = self.disassembly.base_addr + block.start() + match.start()
+                stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
                 self.addPrologueCandidate(stub_addr & self.getBitMask())
                 self.setInitialCandidate(stub_addr & self.getBitMask())
                 self.candidates[stub_addr].setIsStub(True)
         # structure for plt entries is similar but interleaved with additional code not considered functions
-        for block in re.finditer(b"(?P<block>(\xFF\x25[\S\s]{4}\x68[\S\s]{4}\xE9[\S\s]{4}){2,})", self.disassembly.binary):
-            block_addr = self.disassembly.base_addr + block.start()
+        for block in re.finditer(b"(?P<block>(\xFF\x25[\S\s]{4}\x68[\S\s]{4}\xE9[\S\s]{4}){2,})", self.disassembly.binary_info.binary):
+            block_addr = self.disassembly.binary_info.base_addr + block.start()
             for match in re.finditer(b"\xFF\x25(?P<function>[\S\s]{4})", block.group("block")):
-                stub_addr = self.disassembly.base_addr + block.start() + match.start()
+                stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
                 self.addPrologueCandidate(stub_addr & self.getBitMask())

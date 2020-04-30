@@ -170,8 +170,7 @@ class IntelInstructionEscaper:
         elif mnemonic == "nop":
             return "N"
         else:
-            LOGGER.info("********************************************** Unhandled mnemonic: %s", mnemonic)
-            # raise ValueError("Unhandled mnemonic: %s", mnemonic)
+            LOGGER.error("********************************************** Unhandled mnemonic: %s", mnemonic)
             return "U"
         return mnemonic
 

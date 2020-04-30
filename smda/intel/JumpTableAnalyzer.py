@@ -36,9 +36,9 @@ class JumpTableAnalyzer(object):
 
     def _findJumpTables(self):
         jumptables = set([])
-        for match_offset in re.finditer(b"(\x48|\x4c)\x8d.{5}(.\x63|\x77|.\x89..\x63)", self.disassembly.binary):
-            rel_table_offset = struct.unpack("I", self.disassembly.binary[match_offset.start() + 3:match_offset.start() + 7])[0]
-            ins_offset = self.disassembly.base_addr + match_offset.start()
+        for match_offset in re.finditer(b"(\x48|\x4c)\x8d.{5}(.\x63|\x77|.\x89..\x63)", self.disassembly.binary_info.binary):
+            rel_table_offset = struct.unpack("I", self.disassembly.getRawBytes(match_offset.start() + 3, 4))[0]
+            ins_offset = self.disassembly.binary_info.base_addr + match_offset.start()
             table_offset = ins_offset + rel_table_offset + 7
             if self.disassembly.isAddrWithinMemoryImage(table_offset):
                 jumptables.add(table_offset)
@@ -104,9 +104,8 @@ class JumpTableAnalyzer(object):
         jump_targets = set([])
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
-                rebased = off_jumptable - self.disassembly.base_addr
                 try:
-                    entry = struct.unpack("I", self.disassembly.binary[rebased + index * 4:rebased + index * 4 + 4])[0]
+                    entry = struct.unpack("I", self.disassembly.getBytes(off_jumptable + index * 4, 4))[0]
                     jump_targets.add(entry)
                 except:
                     continue
@@ -118,9 +117,9 @@ class JumpTableAnalyzer(object):
         jump_base = alternativeBase if alternativeBase else off_jumptable
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
-                rebased = off_jumptable + bonusOffset - self.disassembly.base_addr
+                rebased = off_jumptable + bonusOffset - self.disassembly.binary_info.base_addr
                 try:
-                    entry = struct.unpack("I", self.disassembly.binary[rebased + index * 4:rebased + index * 4 + 4])[0]
+                    entry = struct.unpack("I", self.disassembly.getRawBytes(rebased + index * 4, 4))[0]
                     # check if we are hitting a known jump table
                     if index and (off_jumptable + index * 4) in self.table_offsets:
                         # print("  Hit limit for jump table: 0x%x" % (off_jumptable + index * 4))
@@ -140,14 +139,14 @@ class JumpTableAnalyzer(object):
     def _resolveExplicitTable(self, jump_instruction, state, jumptable_address, jumptableSize=0):
         jumptable_size = jumptableSize if jumptableSize else 0xFF
         jumptable_addresses = []
-        entry_size = 4 if self.disassembler.bitness == 32 else 8
+        bitness = self.disassembly.binary_info.bitness
+        entry_size = 4 if bitness == 32 else 8
         if self.disassembly.isAddrWithinMemoryImage(jumptable_address):
             for i in range(jumptable_size):
-                rebased = jumptable_address - self.disassembly.base_addr
-                if self.disassembler.bitness == 32:
-                    table_entry = struct.unpack("I", self.disassembly.binary[rebased + i * entry_size:rebased + i * entry_size + entry_size])[0]
-                elif self.disassembler.bitness == 64:
-                    table_entry = struct.unpack("Q", self.disassembly.binary[rebased + i * entry_size:rebased + i * entry_size + entry_size])[0]
+                if bitness == 32:
+                    table_entry = struct.unpack("I", self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size))[0]
+                elif bitness == 64:
+                    table_entry = struct.unpack("Q", self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size))[0]
                 if not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
                 state.addDataRef(jump_instruction.address, jumptable_address + i * entry_size, size=entry_size)

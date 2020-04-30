@@ -38,22 +38,21 @@ class PdbSymbolProvider(AbstractLabelProvider):
         if oep_rva:
             self._func_symbols[self._base_addr + oep_rva] = "original_entry_point"
 
-    def update(self, file_path, binary, base_addr):
-        self._base_addr = base_addr
-        if not file_path:
+    def update(self, binary_info):
+        self._base_addr = binary_info.base_addr
+        if not binary_info.file_path:
             return
         data = ""
-        with open(file_path, "rb") as fin:
-            data = fin.read()
+        with open(binary_info.file_path, "rb") as fin:
+            data = fin.read(16)
         self._parseOep(data)
         if not data[:15] == b"Microsoft C/C++" or pdbparse is None:
             return
         try:
-            pdb = pdbparse.parse(file_path)
+            pdb = pdbparse.parse(binary_info.file_path)
             self._parseSymbols(pdb)
         except Exception as exc:
             LOGGER.error("Failed parsing \"%s\" with exception type: %s" % (file_path, type(exc)))
-
 
     def _parseSymbols(self, pdb):
         try:

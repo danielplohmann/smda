@@ -12,17 +12,14 @@ class IdaExporter(object):
         self.ida_interface = IdaInterface()
         self.bitness = bitness if bitness else self.ida_interface.getBitness()
         self.capstone = None
-        self._file_path = ""
         self.disassembly = DisassemblyResult()
+        self.disassembly.smda_version = config.VERSION
         self._initCapstone()
 
     def _initCapstone(self):
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
         if self.bitness == 64:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
-
-    def setFilePath(self, file_path):
-        self._file_path = file_path
 
     def _convertIdaInsToSmda(self, offset, instruction_bytes):
         cache = [i for i in self.capstone.disasm(instruction_bytes, offset)]
@@ -39,13 +36,17 @@ class IdaExporter(object):
             smda_ins = (offset, len(instruction_bytes), "error", "error", bytearray(instruction_bytes))
         return smda_ins
 
-    def analyzeBuffer(self, binary=None, base_addr=None, bitness=None, cbAnalysisTimeout=None):
+    def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
         """ instead of performing a full analysis, simply collect all data from IDA and convert it into a report """
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
-        self.disassembly.base_addr = base_addr if base_addr else self.ida_interface.getBaseAddr()
-        self.disassembly.binary = binary if binary else self.ida_interface.getBinary()
-        self.disassembly.architecture = self.ida_interface.getArchitecture()
-        self.disassembly.bitness = bitness if bitness else self.bitness
+        self.disassembly.binary_info = binary_info
+        self.disassembly.binary_info.architecture = self.ida_interface.getArchitecture()
+        if not self.disassembly.binary_info.base_addr:
+            self.disassembly.binary_info.base_addr = self.ida_interface.getBaseAddr()
+        if not self.disassembly.binary_info.binary:
+            self.disassembly.binary_info.setBinary(self.ida_interface.getBinary())
+        if not self.disassembly.binary_info.bitness:
+            self.disassembly.binary_info.bitness = self.bitness
         self.disassembly.function_symbols = self.ida_interface.getFunctionSymbols()
         api_map = self.ida_interface.getApiMap()
         for function_offset in self.ida_interface.getFunctions():

@@ -9,6 +9,7 @@ import struct
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
 from smda.DisassemblyResult import DisassemblyResult
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
@@ -21,18 +22,18 @@ from .IndirectCallAnalyzer import IndirectCallAnalyzer
 from .JumpTableAnalyzer import JumpTableAnalyzer
 from .MnemonicTfIdf import MnemonicTfIdf
 from .IntelInstructionEscaper import IntelInstructionEscaper
+from .BitnessAnalyzer import BitnessAnalyzer
 
 LOGGER = logging.getLogger(__name__)
 
 
 class IntelDisassembler(object):
 
-    def __init__(self, config, bitness=None):
+    def __init__(self, config, forced_bitness=None):
         self.config = config
-        self.bitness = bitness
+        self._forced_bitness = forced_bitness
         self.capstone = None
-        self._file_path = ""
-        self._code_areas = []
+        self.binary_info = None
         self.label_providers = []
         self._addLabelProviders()
         self.fc_manager = None
@@ -40,41 +41,37 @@ class IntelDisassembler(object):
         self.indcall_analyzer = None
         self.jumptable_analyzer = None
         self.disassembly = DisassemblyResult()
+        self.disassembly.smda_version = config.VERSION
         self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
-        self._initCapstone()
-        self._initTfIdf()
 
     def _initCapstone(self):
-        self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
+        self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.disassembly.binary_info.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
 
     def _initTfIdf(self):
-        self._tfidf = MnemonicTfIdf(bitness=64) if self.bitness == 64 else MnemonicTfIdf(bitness=32)
+        self._tfidf = MnemonicTfIdf(bitness=64) if self.disassembly.binary_info.bitness == 64 else MnemonicTfIdf(bitness=32)
 
     def getBitMask(self):
-        if self.bitness == 64:
+        if self.disassembly.binary_info.bitness == 64:
             return 0xFFFFFFFFFFFFFFFF
         return 0xFFFFFFFF
-
-    def setFilePath(self, file_path):
-        self._file_path = file_path
-
-    def setCodeAreas(self, code_areas):
-        self._code_areas = code_areas
 
     def _addLabelProviders(self):
         self.label_providers.append(WinApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
 
-    def _updateLabelProviders(self, binary, base_addr):
+    def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
-            provider.update(self._file_path, binary, base_addr)
+            provider.update(binary_info)
 
-    def addPdbFile(self, pdb_path, base_addr):
+    def addPdbFile(self, binary_info, pdb_path):
         LOGGER.debug("adding PDB file: %s", pdb_path)
-        if pdb_path and base_addr:
+        if pdb_path and binary_info.base_addr:
+            pdb_info = BinaryInfo(b"")
+            pdb_info.file_path = pdb_path
+            pdb_info.base_addr = binary_info.base_addr
             for provider in self.label_providers:
-                provider.update(pdb_path, b"", base_addr)
+                provider.update(pdb_info)
 
     def resolveApi(self, address):
         for provider in self.label_providers:
@@ -98,12 +95,6 @@ class IntelDisassembler(object):
             symbol_offsets.update(list(function_symbols.keys()))
         return list(symbol_offsets)
 
-    def dereferenceDword(self, addr):
-        if self.disassembly.isAddrWithinMemoryImage(addr):
-            extracted_dword = self.disassembly.binary[addr - self.disassembly.base_addr:addr - self.disassembly.base_addr + 4]
-            return struct.unpack("I", extracted_dword)[0]
-        return None
-
     def getReferencedAddr(self, op_str):
         referenced_addr = re.search(r"0x[a-fA-F0-9]+", op_str)
         if referenced_addr:
@@ -115,26 +106,17 @@ class IntelDisassembler(object):
         current_offset = addr_switch_array + size * 4
         if self.disassembly.isAddrWithinMemoryImage(current_offset):
             LOGGER.debug("0x%08x analyzing potentially indirect switch table (size: 0x%08x).", current_offset, size)
-            current_byte = self.disassembly.binary[current_offset - self.disassembly.base_addr]
+            current_byte = self.disassembly.getByte(current_offset)
             if isinstance(current_byte, str):
                 current_byte = ord(current_byte)
             while current_byte < size and not current_offset in self.fc_manager.getFunctionStartCandidates():
                 indirect_switch_bytes.append(current_offset)
                 current_offset += 1
-                current_byte = self.disassembly.binary[current_offset - self.disassembly.base_addr]
+                current_byte = self.disassembly.getByte(current_offset)
                 if isinstance(current_byte, str):
                     current_byte = ord(current_byte)
             LOGGER.debug("0x%08x found %d bytes.", current_offset, len(indirect_switch_bytes))
         return indirect_switch_bytes
-
-    def _calculatePicHash(self, blocks):
-        escaped_binary_seqs = []
-        for offset, block in sorted(blocks.items()):
-            instructions = [SmdaInstruction(ins) for ins in block]
-            for instruction in instructions:
-                escaped_binary_seqs.append(instruction.getEscapedBinary(IntelInstructionEscaper, lower_addr=self.disassembly.base_addr, upper_addr=self.disassembly.base_addr + len(self.disassembly.binary)))
-        as_bytes = bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-        return int(hashlib.sha256(as_bytes).hexdigest()[:16], 16)
 
     def _analyzeCallInstruction(self, i, state):
         state.setLeaf(False)
@@ -148,7 +130,7 @@ class IntelDisassembler(object):
             # case = "DWORD-PTR-REG"
             if i.op_str.strip().startswith("dword ptr [0x"):
                 # case = "DWORD-PTR"
-                dereferenced = self.dereferenceDword(call_destination)
+                dereferenced = self.disassembly.dereferenceDword(call_destination)
                 if dereferenced is not None:
                     state.addCodeRef(i.address, dereferenced)
                     self._handleCallTarget(state, i.address, dereferenced)
@@ -221,7 +203,7 @@ class IntelDisassembler(object):
             # case = "DWORD-PTR"
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
             jump_destination = self.getReferencedAddr(i.op_str)
-            dereferenced = self.dereferenceDword(jump_destination)
+            dereferenced = self.disassembly.dereferenceDword(jump_destination)
             state.addCodeRef(i.address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i.address, jump_destination)
             if dereferenced and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
@@ -257,6 +239,11 @@ class IntelDisassembler(object):
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
 
+    def _getDisasmWindowBuffer(self, addr):
+        relative_start = addr - self.disassembly.binary_info.base_addr
+        relative_end = relative_start + 15
+        return self.disassembly.binary_info.binary[relative_start:relative_end]
+
     def analyzeFunction(self, start_addr, as_gap=False):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         self.tailcall_analyzer.initFunction()
@@ -268,11 +255,10 @@ class IntelDisassembler(object):
         while state.hasUnprocessedBlocks():
             LOGGER.debug("  current block queue: %s", ", ".join(["0x%x" % addr for addr in state.block_queue]))
             state.chooseNextBlock()
-            r_block_start = state.block_start - self.disassembly.base_addr
             LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
             # in capstone, disassembly is more expensive than calling the function, so we use maximum x86/64 instruction size (14 bytes) as lookeahead.
             disasm_window = 15
-            cache = [i for i in self.capstone.disasm(self.disassembly.binary[r_block_start:r_block_start + disasm_window], state.block_start)]
+            cache = [i for i in self.capstone.disasm(self._getDisasmWindowBuffer(state.block_start), state.block_start)]
             cache_pos = 0
             previous_instruction = None
             while True:
@@ -311,7 +297,7 @@ class IntelDisassembler(object):
                         self._analyzeEndInstruction(state)
                         LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i.address)
                     elif previous_instruction and i.address != start_addr and previous_instruction.mnemonic == "call":
-                        instruction_sequence = [ins for ins in self.capstone.disasm(self.disassembly.binary[i.address - self.disassembly.base_addr:i.address - self.disassembly.base_addr + 15], i.address)]
+                        instruction_sequence = [ins for ins in self.capstone.disasm(self._getDisasmWindowBuffer(i.address), i.address)]
                         if self.fc_manager.isAlignmentSequence(instruction_sequence) or self.fc_manager.isFunctionCandidate(i.address):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
                             LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here." % (start_addr, i.address))
@@ -339,8 +325,7 @@ class IntelDisassembler(object):
                         break
                 else:
                     #if the inner loop did not break, we need to refill the cache in order to finish the block-analysis
-                    r_block_cache = r_block_start + cache_pos
-                    cache = [i for i in self.capstone.disasm(self.disassembly.binary[r_block_cache:r_block_cache + disasm_window], state.block_start + cache_pos)]
+                    cache = [i for i in self.capstone.disasm(self._getDisasmWindowBuffer(state.block_start + cache_pos), state.block_start + cache_pos)]
                     if not cache:
                         break
                     continue
@@ -366,30 +351,34 @@ class IntelDisassembler(object):
         self.fc_manager.updateCandidates(state)
         return state
 
-    def analyzeBuffer(self, binary, base_addr, bitness, cbAnalysisTimeout):
-        LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", len(binary), base_addr)
-        self.bitness = bitness
-        self._updateLabelProviders(binary, base_addr)
+    def analyzeBuffer(self, binary_info, cbAnalysisTimeout):
+        LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
+        self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
-        self.disassembly.architecture = "intel"
+        self.disassembly.smda_version = self.config.VERSION
+        self.disassembly.binary_info = binary_info
+        self.disassembly.binary_info.architecture = "intel"
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
-        self.disassembly.binary = binary
-        self.disassembly.base_addr = base_addr
+        if self.disassembly.binary_info.bitness not in [32, 64]:
+            bitness_analyzer = BitnessAnalyzer()
+            self.disassembly.binary_info.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
+            LOGGER.info("Automatically Recognized Bitness as: %d", self.disassembly.binary_info.bitness)
+        else:
+            LOGGER.debug("Using defined Bitness as: %d", self.disassembly.binary_info.bitness)
+        if self._forced_bitness:
+            self.disassembly.binary_info.bitness = self._forced_bitness
+            LOGGER.info("Forced Bitness override to: %d", self.disassembly.binary_info.bitness)
+    
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = IndirectCallAnalyzer(self)
         self.jumptable_analyzer = JumpTableAnalyzer(self)
+
         self.fc_manager = FunctionCandidateManager(self.config)
         if self.config.USE_SYMBOLS_AS_CANDIDATES:
             self.fc_manager.symbol_addresses = self.getSymbolCandidates()
-        self.fc_manager.init(self.disassembly, self.bitness, codeAreas=self._code_areas)
-
-        if not self.bitness:
-            self.bitness = self.fc_manager.bitness
-            LOGGER.info("Automatically Recognized Bitness as: %d", self.bitness)
-        else:
-            LOGGER.debug("Using forced Bitness as: %d", self.bitness)
-        self.disassembly.bitness = self.bitness
+        self.fc_manager.init(self.disassembly)
         self._initCapstone()
+        self._initTfIdf()
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
             if cbAnalysisTimeout():
@@ -431,9 +420,7 @@ class IntelDisassembler(object):
                 function_tfidf = self._tfidf.getTfIdfFromBlocks(function_blocks)
                 candidate.setTfIdf(function_tfidf)
                 candidate.getConfidence()
-                self.disassembly.pic_hashes[addr] = self._calculatePicHash(function_blocks)
             self.disassembly.candidates[addr] = candidate
-            self.disassembly.code_area = self._code_areas
         self.disassembly.analysis_end_ts = datetime.datetime.utcnow()
         if cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True

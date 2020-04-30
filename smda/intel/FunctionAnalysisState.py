@@ -131,8 +131,7 @@ class FunctionAnalysisState(object):
             #    print("0x%08x: %s %s" % (instruction[0], instruction[2], instruction[3]))
         if as_gap and not self.is_sanely_ending:
             if len(self.instructions) == 1 and self.instructions[0][2] == "jmp":
-                ins_offset = self.instructions[0][0] - self.disassembly.base_addr
-                byte = self.disassembly.binary[ins_offset]
+                byte = self.disassembly.getByte(self.instructions[0][0])
                 if isinstance(byte, int):
                     byte = chr(byte)
                 if byte == "\xeb":
