@@ -59,4 +59,6 @@ class WinApiResolver(AbstractLabelProvider):
 
     def getApi(self, absolute_addr):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
-        return self._api_map[self._os_name].get(absolute_addr, None)
+        if self._os_name and self._os_name in self._api_map:
+            return self._api_map[self._os_name].get(absolute_addr, None)
+        return None

@@ -7,6 +7,7 @@ CALL_INS = ["call", "lcall"]
 RET_INS = ["ret", "retn", "retf", "iret"]
 END_INS = ["ret", "retn", "retf", "iret", "int3", "hlt"]
 REGS_32BIT = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
+REGS_64BIT = ["rax", "rbx", "rcx", "rdx", "rsp", "rbp", "rsi", "rdi", "rip", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
 DOUBLE_ZERO = bytearray(b"\x00\x00")
 
 DEFAULT_PROLOGUES = [

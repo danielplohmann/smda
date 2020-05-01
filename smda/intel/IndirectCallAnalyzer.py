@@ -55,6 +55,15 @@ class IndirectCallAnalyzer(object):
                         registers[match3.group("reg")] = dword
                         LOGGER.debug("**moved value 0x%08x to register %s", dword, match3.group("reg"))
                         if match3.group("reg") == register_name: abs_value_found = True
+                #mov <reg>, qword ptr [reg + <addr>]
+                match4 =  re.match(r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$", ins[3])
+                if match4:
+                    rip = ins[0] + ins[1]
+                    dword = self.getDword(rip + int(match4.group("addr"), 16))
+                    if dword:
+                        registers[match4.group("reg")] = rip + dword
+                        LOGGER.debug("**moved value 0x%08x + 0x%08x == 0x%08x to register %s", rip, dword, rip + dword, match4.group("reg"))
+                        if match4.group("reg") == register_name: abs_value_found = True
             elif ins[2] == "lea":
                 #lea <reg>, dword ptr [<addr>]
                 match1 =  re.match(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$", ins[3])

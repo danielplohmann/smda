@@ -126,6 +126,14 @@ class DisassemblyResult(object):
             return struct.unpack("I", extracted_dword)[0]
         return None
 
+    def dereferenceQword(self, addr):
+        if self.isAddrWithinMemoryImage(addr):
+            rel_start_addr = addr - self.binary_info.base_addr
+            rel_end_addr = rel_start_addr + 8
+            extracted_qword = self.binary_info.binary[rel_start_addr:rel_end_addr]
+            return struct.unpack("Q", extracted_qword)[0]
+        return None
+
     def addCodeRefs(self, addr_from, addr_to):
         refs_from = self.code_refs_from.get(addr_from, set([]))
         refs_from.update([addr_to])

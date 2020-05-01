@@ -48,6 +48,8 @@ class FunctionCandidateManager(object):
         self._buildQueue()
 
     def _passesCodeFilter(self, addr):
+        if addr is None:
+            return False
         if self._code_areas:
             for area in self._code_areas:
                 if area[0] <= addr < area[1]:

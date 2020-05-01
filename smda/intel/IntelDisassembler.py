@@ -15,7 +15,7 @@ from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from smda.common.SmdaInstruction import SmdaInstruction
-from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, DOUBLE_ZERO
+from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
 from .FunctionAnalysisState import FunctionAnalysisState
 from .IndirectCallAnalyzer import IndirectCallAnalyzer
@@ -137,7 +137,7 @@ class IntelDisassembler(object):
         elif i.op_str.strip().startswith("0x"):
             # case = "DIRECT"
             self._handleCallTarget(state, i.address, call_destination)
-        elif i.op_str.lower() in REGS_32BIT:
+        elif i.op_str.lower() in REGS_32BIT or i.op_str.lower() in REGS_64BIT:
             # case = "REG"
             # this is resolved by backtracking at the end of function analysis.
             state.call_register_ins.append(i.address)
@@ -204,6 +204,16 @@ class IntelDisassembler(object):
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
             jump_destination = self.getReferencedAddr(i.op_str)
             dereferenced = self.disassembly.dereferenceDword(jump_destination)
+            state.addCodeRef(i.address, jump_destination, by_jump=True)
+            self.tailcall_analyzer.addJump(i.address, jump_destination)
+            if dereferenced and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
+                self._updateApiTarget(i.address, dereferenced)
+        elif i.op_str.strip().startswith("qword ptr [rip"):
+            # case = "QWORD-PTR, RIP-relative"
+            # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
+            rip = i.address + i.size
+            jump_destination = rip + self.getReferencedAddr(i.op_str)
+            dereferenced = self.disassembly.dereferenceQword(jump_destination)
             state.addCodeRef(i.address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i.address, jump_destination)
             if dereferenced and not self.disassembly.isAddrWithinMemoryImage(dereferenced):

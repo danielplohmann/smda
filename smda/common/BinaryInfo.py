@@ -5,7 +5,7 @@ class BinaryInfo(object):
 
     architecture = ""
     base_addr = 0
-    binary = ""
+    binary = b""
     binary_size = 0
     bitness = None
     code_areas = []
