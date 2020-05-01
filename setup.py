@@ -2,9 +2,6 @@
 
 from setuptools import setup, find_packages
 
-with open('LICENSE') as f:
-    LICENSE = f.read()
-
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
@@ -18,7 +15,7 @@ setup(
     author='Daniel Plohmann',
     author_email='daniel.plohmann@mailbox.org',
     url='https://github.com/danielplohmann/smda',
-    license=LICENSE,
+    license="BSD 2-Clause",
     packages=find_packages(exclude=('tests', 'docs')),
     data_files = [
         ('', ['LICENSE']),
