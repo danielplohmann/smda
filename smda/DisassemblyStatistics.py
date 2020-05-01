@@ -9,8 +9,8 @@ class DisassemblyStatistics(object):
     num_instructions = None
     num_api_calls = None
     num_function_calls = None
-    num_disassembly_failed_functions = None
-    num_disassembly_failed_instructions = None
+    num_failed_functions = None
+    num_failed_instructions = None
 
     def __init__(self, disassembly_result=None):
         if disassembly_result is not None:
@@ -21,8 +21,8 @@ class DisassemblyStatistics(object):
             self.num_instructions = self._countInstructions(disassembly_result)
             self.num_api_calls = self._countApiCalls(disassembly_result)
             self.num_function_calls = self._countFunctionCalls(disassembly_result)
-            self.num_disassembly_failed_functions = len(disassembly_result.failed_analysis_addr)
-            self.num_disassembly_failed_instructions = len(disassembly_result.errors)
+            self.num_failed_functions = len(disassembly_result.failed_analysis_addr)
+            self.num_failed_instructions = len(disassembly_result.errors)
 
     def _countBlocks(self, disassembly_result):
         num_blocks = 0
@@ -57,8 +57,8 @@ class DisassemblyStatistics(object):
         statistics.num_instructions = statistics_dict["num_instructions"]
         statistics.num_api_calls = statistics_dict["num_api_calls"]
         statistics.num_function_calls = statistics_dict["num_function_calls"]
-        statistics.num_disassembly_failed_functions = statistics_dict["num_disassembly_failed_functions"]
-        statistics.num_disassembly_failed_instructions = statistics_dict["num_disassembly_failed_instructions"]
+        statistics.num_failed_functions = statistics_dict["num_failed_functions"]
+        statistics.num_failed_instructions = statistics_dict["num_failed_instructions"]
         return statistics
 
     def toDict(self):
@@ -70,6 +70,6 @@ class DisassemblyStatistics(object):
             "num_instructions": self.num_instructions,
             "num_api_calls": self.num_api_calls,
             "num_function_calls": self.num_function_calls,
-            "num_disassembly_failed_functions": self.num_disassembly_failed_functions,
-            "num_disassembly_failed_instructions": self.num_disassembly_failed_instructions
+            "num_failed_functions": self.num_failed_functions,
+            "num_failed_instructions": self.num_failed_instructions
         }

@@ -17,7 +17,7 @@ class AbstractLabelProvider:
         raise NotImplementedError
 
     @abstractmethod
-    def getApi(self, address):
+    def getApi(self, absolute_addr):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
         raise NotImplementedError
 

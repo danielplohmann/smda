@@ -33,5 +33,4 @@ class SmdaConfig(object):
 
     def __init__(self, log_level=logging.INFO):
         if len(logging._handlerList) == 0:
-            self.LOG_LEVEL = log_level
-            logging.basicConfig(level=self.LOG_LEVEL, format=self.LOG_FORMAT)
+            logging.basicConfig(level=log_level, format=self.LOG_FORMAT)

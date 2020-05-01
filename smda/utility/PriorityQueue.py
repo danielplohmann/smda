@@ -17,7 +17,7 @@ class PriorityQueue(object):
     def next(self):
         if not self.heap:
             raise StopIteration
-        elif len(self.heap) == 1:
+        if len(self.heap) == 1:
             return self.heap.pop()
         last_item = self.heap.pop()
         result = self.heap[0]

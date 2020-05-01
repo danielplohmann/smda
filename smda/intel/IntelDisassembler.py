@@ -1,10 +1,8 @@
 #!/usr/bin/python
 
 import datetime
-import hashlib
 import logging
 import re
-import struct
 
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
@@ -14,14 +12,12 @@ from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
-from smda.common.SmdaInstruction import SmdaInstruction
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
 from .FunctionAnalysisState import FunctionAnalysisState
 from .IndirectCallAnalyzer import IndirectCallAnalyzer
 from .JumpTableAnalyzer import JumpTableAnalyzer
 from .MnemonicTfIdf import MnemonicTfIdf
-from .IntelInstructionEscaper import IntelInstructionEscaper
 from .BitnessAnalyzer import BitnessAnalyzer
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +29,7 @@ class IntelDisassembler(object):
         self.config = config
         self._forced_bitness = forced_bitness
         self.capstone = None
+        self._tfidf = None
         self.binary_info = None
         self.label_providers = []
         self._addLabelProviders()
@@ -75,22 +72,27 @@ class IntelDisassembler(object):
 
     def resolveApi(self, address):
         for provider in self.label_providers:
-            if not provider.isApiProvider(): continue
+            if not provider.isApiProvider():
+                continue
             result = provider.getApi(address)
-            if result: return result
+            if result:
+                return result
         return ("", "")
 
     def resolveSymbol(self, address):
         for provider in self.label_providers:
-            if not provider.isSymbolProvider(): continue
+            if not provider.isSymbolProvider():
+                continue
             result = provider.getSymbol(address)
-            if result: return result
+            if result:
+                return result
         return ""
 
     def getSymbolCandidates(self):
         symbol_offsets = set([])
         for provider in self.label_providers:
-            if not provider.isSymbolProvider(): continue
+            if not provider.isSymbolProvider():
+                continue
             function_symbols = provider.getFunctionSymbols()
             symbol_offsets.update(list(function_symbols.keys()))
         return list(symbol_offsets)
@@ -267,7 +269,6 @@ class IntelDisassembler(object):
             state.chooseNextBlock()
             LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
             # in capstone, disassembly is more expensive than calling the function, so we use maximum x86/64 instruction size (14 bytes) as lookeahead.
-            disasm_window = 15
             cache = [i for i in self.capstone.disasm(self._getDisasmWindowBuffer(state.block_start), state.block_start)]
             cache_pos = 0
             previous_instruction = None
@@ -310,13 +311,13 @@ class IntelDisassembler(object):
                         instruction_sequence = [ins for ins in self.capstone.disasm(self._getDisasmWindowBuffer(i.address), i.address)]
                         if self.fc_manager.isAlignmentSequence(instruction_sequence) or self.fc_manager.isFunctionCandidate(i.address):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
-                            LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here." % (start_addr, i.address))
+                            LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i.address)
                             state.setBlockEndingInstruction(True)
                             state.endBlock()
                             state.setSanelyEnding(True)
                             if self.fc_manager.isAlignmentSequence(instruction_sequence):
                                 next_aligned_address = previous_instruction.address + (16 - previous_instruction.address % 16)
-                                logging.debug("  Adding: 0x%x as candidate." % (next_aligned_address))
+                                logging.debug("  Adding: 0x%x as candidate.", next_aligned_address)
                                 self.fc_manager.addCandidate(next_aligned_address, is_gap=True)
                             break
                     previous_instruction = i
@@ -361,7 +362,7 @@ class IntelDisassembler(object):
         self.fc_manager.updateCandidates(state)
         return state
 
-    def analyzeBuffer(self, binary_info, cbAnalysisTimeout):
+    def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
         LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
         self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
@@ -378,7 +379,7 @@ class IntelDisassembler(object):
         if self._forced_bitness:
             self.disassembly.binary_info.bitness = self._forced_bitness
             LOGGER.info("Forced Bitness override to: %d", self.disassembly.binary_info.bitness)
-    
+
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = IndirectCallAnalyzer(self)
         self.jumptable_analyzer = JumpTableAnalyzer(self)
@@ -391,21 +392,20 @@ class IntelDisassembler(object):
         self._initTfIdf()
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
-            if cbAnalysisTimeout():
+            if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
             state = self.analyzeFunction(candidate.addr)
         LOGGER.debug("Finished heuristical analysis, functions: %d", len(self.disassembly.functions))
         # second pass, analyze remaining gaps for additional candidates in an iterative way
         gap_candidate = self.fc_manager.nextGapCandidate()
         while gap_candidate is not None:
-            if cbAnalysisTimeout():
+            if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
             LOGGER.debug("based on gap, performing function analysis of 0x%08x", gap_candidate)
             state = self.analyzeFunction(gap_candidate, as_gap=True)
             function_blocks = state.getBlocks()
             if function_blocks:
                 LOGGER.debug("+ got some blocks here -> 0x%08x", gap_candidate)
-            next_gap_pointer = None
             if gap_candidate in self.disassembly.functions:
                 fn_min = self.disassembly.function_borders[gap_candidate][0]
                 fn_max = self.disassembly.function_borders[gap_candidate][1]
@@ -413,7 +413,7 @@ class IntelDisassembler(object):
                 # start looking directly after our new function
             else:
                 self.fc_manager.updateAnalysisAborted(gap_candidate, "Gap candidate did not fulfil function criteria.")
-            next_gap = self.fc_manager.getNextGap(state, dontSkip=True)
+            next_gap = self.fc_manager.getNextGap(dont_skip=True)
             gap_candidate = self.fc_manager.nextGapCandidate(next_gap)
         LOGGER.debug("Finished gap analysis, functions: %d", len(self.disassembly.functions))
         # third pass, fix potential tailcall functions that were identified during analysis

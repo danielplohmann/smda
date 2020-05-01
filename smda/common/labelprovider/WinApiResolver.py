@@ -2,10 +2,10 @@
 
 import os
 import json
+import logging
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
-import logging
 LOGGER = logging.getLogger(__name__)
 
 
@@ -20,7 +20,7 @@ class WinApiResolver(AbstractLabelProvider):
         for os_name, db_filepath in self._config.API_COLLECTION_FILES.items():
             self._loadDbFile(os_name, db_filepath)
             self._os_name = os_name
-            
+
     def update(self, binary_info):
         return
 

@@ -1,17 +1,16 @@
 #!/usr/bin/python
 
-import json
 import logging
-import os
+from .AbstractLabelProvider import AbstractLabelProvider
+
 LOGGER = logging.getLogger(__name__)
 
 try:
     import lief
 except:
     lief = None
-    LOGGER.warn("3rd party library LIEF not installed - won't be able to extract symbols for ELF files where available.")
+    LOGGER.warning("3rd party library LIEF not installed - won't be able to extract symbols for ELF files where available.")
 
-from .AbstractLabelProvider import AbstractLabelProvider
 
 
 class ElfSymbolProvider(AbstractLabelProvider):
@@ -37,7 +36,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
         data = ""
         with open(binary_info.file_path, "rb") as fin:
             data = fin.read(16)
-        if not data[:4] == b"\x7FELF" or lief is None:
+        if data[:4] != b"\x7FELF" or lief is None:
             return
         lief_binary = lief.parse(binary_info.file_path)
         self._parseOep(lief_binary)

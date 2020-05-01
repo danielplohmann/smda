@@ -1,8 +1,9 @@
 import datetime
+import json
 import os
 
-from .SmdaFunction import SmdaFunction
 from smda.DisassemblyStatistics import DisassemblyStatistics
+from .SmdaFunction import SmdaFunction
 
 
 class SmdaReport(object):
@@ -24,7 +25,7 @@ class SmdaReport(object):
     sha256 = None
     smda_version = None
     statistics = None
-    # status can be "ok", "timeout", "error" 
+    # status can be "ok", "timeout", "error"
     status = None
     timestamp = None
     version = None
@@ -65,12 +66,15 @@ class SmdaReport(object):
                 self.binweight += smda_function.binweight
         return function_results
 
+    def getFunction(self, function_addr):
+        return self.xcfg[function_addr] if function_addr in self.xcfg else None
+
     def getFunctions(self):
         for _, smda_function in sorted(self.xcfg.items()):
             yield smda_function
 
     @classmethod
-    def fromFile(file_path):
+    def fromFile(cls, file_path):
         smda_json = {}
         if os.path.isfile(file_path):
             with open(file_path, "r") as fjson:

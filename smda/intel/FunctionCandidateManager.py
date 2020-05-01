@@ -16,11 +16,12 @@ class FunctionCandidateManager(object):
 
     def __init__(self, config):
         self.config = config
-        self.lang_analyzer = LanguageAnalyzer()
+        self.lang_analyzer = None
         self.disassembly = None
         self.bitness = None
         self._code_areas = []
         self.candidates = {}
+        self.candidate_queue = []
         self.cached_candidates = None
         self._candidate_offsets = []
         self.candidate_index = 0
@@ -38,7 +39,8 @@ class FunctionCandidateManager(object):
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
-        self.disassembly.language = self.lang_analyzer.identify(self.disassembly)
+        self.lang_analyzer = LanguageAnalyzer(disassembly)
+        self.disassembly.language = self.lang_analyzer.identify()
         self.bitness = disassembly.binary_info.bitness
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
         if self.bitness == 64:
@@ -55,8 +57,7 @@ class FunctionCandidateManager(object):
                 if area[0] <= addr < area[1]:
                     return True
             return False
-        else:
-            return True
+        return True
 
     def getBitMask(self):
         if self.bitness == 64:
@@ -73,6 +74,7 @@ class FunctionCandidateManager(object):
     def getFunctionCandidate(self, addr):
         if addr in self.candidates:
             return self.candidates[addr]
+        return None
 
     def getAbortedCandidates(self):
         aborted = []
@@ -161,52 +163,20 @@ class FunctionCandidateManager(object):
             LOGGER.debug("initGapSearch() 0x%08x - 0x%08x == %d", gap[0], gap[1], gap[2])
         return
 
-    def getNextGap(self, function_state, dontSkip=False):
+    def getNextGap(self, dont_skip=False):
         next_gap = self.getBitMask()
         for gap in self.function_gaps:
             if gap[0] > self.gap_pointer:
                 next_gap = gap[0]
                 break
-        LOGGER.debug("getNextGap(%s) for 0x%08x based on gap_map: 0x%08x", dontSkip, self.gap_pointer, next_gap)
+        LOGGER.debug("getNextGap(%s) for 0x%08x based on gap_map: 0x%08x", dont_skip, self.gap_pointer, next_gap)
         # we potentially just disassembled a function and want to continue directly behind it in case we would otherwise miss more
-        if dontSkip:
+        if dont_skip:
             if self.gap_pointer in self.disassembly.code_map:
                 function = self.disassembly.ins2fn[self.gap_pointer]
                 next_gap = min(next_gap, self.disassembly.function_borders[function][1])
-                LOGGER.debug("getNextGap(%s) without skip => after checking versus code map: 0x%08x", dontSkip, next_gap)
-        LOGGER.debug("getNextGap(%s) final gap_ptr: 0x%08x", dontSkip, next_gap)
-        return next_gap
-        if False:
-            if False:
-                first_gap = None
-                upper_function_border = None
-                if function_state:
-                    instructions = sorted(function_state.instructions)
-                    if instructions:
-                        upper_function_border = instructions[0][0] + instructions[0][1]
-                    for index in range(len(instructions)):
-                        current_ins = instructions[index]
-                        if first_gap is None:
-                            if index < len(instructions) - 1 and current_ins[0] + current_ins[1] < instructions[index + 1][0]:
-                                first_gap = current_ins[0] + current_ins[1]
-                        upper_function_border = max(upper_function_border, current_ins[0] + current_ins[1])
-                # in rare cases, the last function is scattered over the place, and could cause a big jump, avoid that by looking for a closer gap
-                if upper_function_border:
-                    if first_gap and upper_function_border > next_gap:
-                        next_gap = min(next_gap, first_gap)
-                        # prev_ins = self.gap_pointer
-                        # map_gap = self.getBitMask()
-                        # code_map =  self.disassembly.code_map.keys()
-                        # for ins in code_map[code_map.index(self.gap_pointer):]:
-                        #     if ins - prev_ins > 1:
-                        #         map_gap = prev_ins + 1
-                        #         break
-                        #     prev_ins = ins
-                        # next_gap = min(next_gap, map_gap)
-                    else:
-                        next_gap = min(next_gap, upper_function_border)
-                LOGGER.debug("getNextGap(%s) without skip => after checking versus code map: 0x%08x", dontSkip, next_gap)
-        LOGGER.debug("getNextGap(%s) final gap_ptr: 0x%08x", dontSkip, next_gap)
+                LOGGER.debug("getNextGap(%s) without skip => after checking versus code map: 0x%08x", dont_skip, next_gap)
+        LOGGER.debug("getNextGap(%s) final gap_ptr: 0x%08x", dont_skip, next_gap)
         return next_gap
 
     def isEffectiveNop(self, byte_sequence):
@@ -218,7 +188,6 @@ class FunctionCandidateManager(object):
         is_alignment_sequence = False
         if len(instruction_sequence) > 0:
             current_offset = instruction_sequence[0].address
-            byte_counter = 0
             for instruction in instruction_sequence:
                 if instruction.bytes in GAP_SEQUENCES[len(instruction.bytes)]:
                     current_offset += len(instruction.bytes)
@@ -279,7 +248,7 @@ class FunctionCandidateManager(object):
                 continue
             if self.gap_pointer in self.disassembly.code_map:
                 LOGGER.debug("nextGapCandidate() gap_ptr is already inside code map: 0x%08x", self.gap_pointer)
-                self.gap_pointer = self.getNextGap(None)
+                self.gap_pointer = self.getNextGap()
                 continue
             # we may have a candidate here
             LOGGER.debug("nextGapCandidate() using 0x%08x as candidate", self.gap_pointer)
@@ -287,10 +256,10 @@ class FunctionCandidateManager(object):
             has_common_prologue = True  # start_byte in FunctionCandidate(self.gap_pointer, start_byte, self.bitness).common_gap_starts[self.bitness]
             if self.previously_analyzed_gap == self.gap_pointer:
                 LOGGER.debug("--- HRM, nextGapCandidate() gap_ptr at: 0x%08x was previously analyzed", self.gap_pointer)
-                self.gap_pointer = self.getNextGap(None, dontSkip=True)
+                self.gap_pointer = self.getNextGap(dont_skip=True)
             elif not has_common_prologue:
                 LOGGER.debug("--- HRM, nextGapCandidate() gap_ptr at: 0x%08x has no common prologue (0x%08x)", self.gap_pointer, ord(start_byte))
-                self.gap_pointer = self.getNextGap(None, dontSkip=True)
+                self.gap_pointer = self.getNextGap(dont_skip=True)
             else:
                 self.previously_analyzed_gap = self.gap_pointer
                 self.addGapCandidate(self.gap_pointer)
@@ -461,7 +430,7 @@ class FunctionCandidateManager(object):
     def locateLangSpecCandidates(self):
         # if the sample is highly likely delphi, extract t-string-objects and use their function-addresses as high-confidence function starts
         delphi_candidates = set([])
-        if self.lang_analyzer.checkDelphi(self.disassembly):
+        if self.lang_analyzer.checkDelphi():
             LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from TObjects")
             t_objects = self.lang_analyzer.getDelphiObjects()
             for t_string in t_objects:
@@ -482,7 +451,6 @@ class FunctionCandidateManager(object):
                 self.candidates[stub_addr].setIsStub(True)
         # structure for plt entries is similar but interleaved with additional code not considered functions
         for block in re.finditer(b"(?P<block>(\xFF\x25[\S\s]{4}\x68[\S\s]{4}\xE9[\S\s]{4}){2,})", self.disassembly.binary_info.binary):
-            block_addr = self.disassembly.binary_info.base_addr + block.start()
             for match in re.finditer(b"\xFF\x25(?P<function>[\S\s]{4})", block.group("block")):
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):

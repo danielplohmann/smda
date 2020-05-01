@@ -8,7 +8,8 @@ LOGGER = logging.getLogger(__name__)
 
 class LanguageAnalyzer(object):
 
-    def __init__(self):
+    def __init__(self, disassembly):
+        self.disassembly = disassembly
         self.strings = None
 
     def validPEHeader(self):
@@ -39,31 +40,36 @@ class LanguageAnalyzer(object):
     def getVisualBasicScore(self):
         #check for the typical import of msvbvm60.dll
         vb_score = 0.0
-        if "MSVBVM60.DLL" in self.getStrings(): vb_score = 0.5
+        if "MSVBVM60.DLL" in self.getStrings():
+            vb_score = 0.5
         return vb_score
 
     def getDotNetScore(self):
         dot_net_score = 0.0
         #check for the typical import of mscorelib.dll and mscoree.dll
-        if "mscorelib.dll" in self.getStrings() or "mscoree.dll" in self.getStrings(): dot_net_score = 0.35
+        if "mscorelib.dll" in self.getStrings() or "mscoree.dll" in self.getStrings():
+            dot_net_score = 0.35
         #check for a functioning PE-Header and typical meta-data
         if self.validPEHeader():
             match = re.search(b"text\x00\x00\x00(?P<dword>[\S\s]{4})(?P<start>[\S\s]{4})", self.disassembly.binary_info.binary)
             if match:
                 start_addr = struct.unpack("<I", match.group("start"))[0]
-                if start_addr == 0x2000: dot_net_score = max(dot_net_score, 0.8)
-                if self.disassembly.getRawBytes(start_addr, 4) == "\xDB\x4D\x00\x79": dot_net_score = max(dot_net_score, 0.9)
+                if start_addr == 0x2000:
+                    dot_net_score = max(dot_net_score, 0.8)
+                if self.disassembly.getRawBytes(start_addr, 4) == "\xDB\x4D\x00\x79":
+                    dot_net_score = max(dot_net_score, 0.9)
         return dot_net_score
 
-    def checkDelphi(self, disassembly):
-        self.disassembly = disassembly
+    def checkDelphi(self):
         return self.getDelphiScore() > 0.5
 
     def getDelphiScore(self):
         delphi_score = 0.0
         #Check if Delphi-Locales are present in strings
-        if "Borland\\locales" in self.getStrings(): delphi_score = max(delphi_score, 0.5)
-        if self._getPETimestamp() == 0x2a425e19: delphi_score = 0.5
+        if "Borland\\locales" in self.getStrings():
+            delphi_score = max(delphi_score, 0.5)
+        if self._getPETimestamp() == 0x2a425e19:
+            delphi_score = 0.5
         #Find "Delphi-Saved" Strings
         delphi_strings = [
             match.group("string")
@@ -71,7 +77,8 @@ class LanguageAnalyzer(object):
             for match in re.finditer(b"(?P<length>[\S\s]{4})(?P<string>[ -~]{6,128})\x00", self.disassembly.binary_info.binary)
             if len(match.group("string")) == struct.unpack("<I", match.group("length"))[0]
         ]
-        if len(delphi_strings) > 100: delphi_score = max(delphi_score, 0.8)
+        if len(delphi_strings) > 100:
+            delphi_score = max(delphi_score, 0.8)
         return delphi_score
 
     def getDelphiObjects(self):
@@ -109,14 +116,14 @@ class LanguageAnalyzer(object):
                             LOGGER.debug("outside range: 0x%08x", address)
                     break
                 #if the first address is invalid, break
-                elif num_addresses == 1 and not  self.disassembly.isAddrWithinMemoryImage(address): break
+                elif num_addresses == 1 and not  self.disassembly.isAddrWithinMemoryImage(address):
+                    break
                 addresses.append(address)
             if not found_string_ref:
                 LOGGER.debug("no object end marker found" + str(t_object_name) + "0x%08x" % (t_string_pos - base_addr) + "0x%08x" % (t_string_pos))
         return t_objects
 
-    def identify(self, disassembly):
-        self.disassembly = disassembly
+    def identify(self):
         result = {
             #programming language : probability
             "c/asm": 0.1,  # if no other language matches, c/asm will
@@ -125,12 +132,13 @@ class LanguageAnalyzer(object):
         }
         #DELPHI
         result["delphi"] = self.getDelphiScore()
-        if self.checkDelphi(disassembly):
+        if self.checkDelphi():
             t_objects = self.getDelphiObjects()
             functions = sum([len(t_objects[t_string]) for t_string in t_objects])
             # result["_delphi_objects"] = t_objects.keys()
             result["_count_delphi_objects"] = len(t_objects)
-            if len(t_objects) > 5 and functions > 10: result["delphi"] = max(result.get("delphi", 0), 0.9)
+            if len(t_objects) > 5 and functions > 10:
+                result["delphi"] = max(result.get("delphi", 0), 0.9)
         #.NET
         result[".net"] = self.getDotNetScore()
         #VISUALBASIC
@@ -143,13 +151,14 @@ class LanguageAnalyzer(object):
         patterns.append(b"\x8B\x4D[\S\s]\xE8[\S\s]{3}(\x00|\xFF)")
         # mov ecx, <reg>; call XYZ
         patterns.append(b"\x8B[\xC8-\xCF]\xE8[\S\s]{3}(\x00|\xFF)")
-        result["c++"] = min(1, 6.0 * sum([len(re.findall(pattern, disassembly.binary_info.binary)) for pattern in patterns]) / max(1, len(disassembly.functions)))
-        result["_count_thiscalls"] = sum([len(re.findall(pattern, disassembly.binary_info.binary)) for pattern in patterns])
+        result["c++"] = min(1, 6.0 * sum([len(re.findall(pattern, self.disassembly.binary_info.binary)) for pattern in patterns]) / max(1, len(self.disassembly.functions)))
+        result["_count_thiscalls"] = sum([len(re.findall(pattern, self.disassembly.binary_info.binary)) for pattern in patterns])
 
         #guess the programming language and
         #return dict with probabilities for the use of certain programming languages
         guess = None
         for lang in [key for key in result if not key.startswith("_")]:
-            if not (guess and result[guess] > result[lang]): guess = lang
+            if not (guess and result[guess] > result[lang]):
+                guess = lang
         result["_guess"] = guess
         return result

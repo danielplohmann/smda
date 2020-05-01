@@ -2,8 +2,8 @@ import datetime
 
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
-from .IdaInterface import IdaInterface
 from smda.DisassemblyResult import DisassemblyResult
+from .IdaInterface import IdaInterface
 
 class IdaExporter(object):
 
@@ -36,7 +36,7 @@ class IdaExporter(object):
             smda_ins = (offset, len(instruction_bytes), "error", "error", bytearray(instruction_bytes))
         return smda_ins
 
-    def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
+    def analyzeBuffer(self, binary_info, cb_analysis_timeout=None):
         """ instead of performing a full analysis, simply collect all data from IDA and convert it into a report """
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
         self.disassembly.binary_info = binary_info

@@ -37,13 +37,13 @@ class TailcallAnalyzer(object):
             min_addr = min(interval[0] for interval in function_intervals)
             max_addr = max(interval[1] for interval in function_intervals)
             for source, destination in jumps[bisect.bisect_left(jumps_dest, min_addr):bisect.bisect_right(jumps_dest, max_addr)]:
-                if ((
-                     # the jumps destination is different from the functions start address
-                     destination != function.start_addr and
-                     # the jumps destination is in one of the functions intervals
-                     any((destination >= first and destination <= last) for first, last in function_intervals) and
-                     # the jump originates from outside the function (outside all intervals)
-                     all((source < first or source > last) for first, last in function_intervals))):
+                if (
+                        # the jumps destination is different from the functions start address
+                        destination != function.start_addr and
+                        # the jumps destination is in one of the functions intervals
+                        any((first <= destination <= last) for first, last in function_intervals) and
+                        # the jump originates from outside the function (outside all intervals)
+                        all((source < first or source > last) for first, last in function_intervals)):
 
                     result.append({
                         "source_addr": source,
@@ -63,12 +63,14 @@ class TailcallAnalyzer(object):
                 intervals.append((first_instruction[0], last_instruction[0]))
                 first_instruction = instruction
             last_instruction = instruction
-        if last_instruction: intervals.append((first_instruction[0], last_instruction[0]))
+        if last_instruction:
+            intervals.append((first_instruction[0], last_instruction[0]))
         return intervals
 
     def __getFunctionByStartAddr(self, start_addr):
         for function in self.__functions:
-            if function.start_addr == start_addr: return function
+            if function.start_addr == start_addr:
+                return function
 
     def __printIntervals(self, intervals):
         # return
@@ -80,13 +82,14 @@ class TailcallAnalyzer(object):
     def resolveTailcalls(self, disassembler, verbose=False):
         newly_created_functions = set([])
         for tailcall in self.getTailcalls():
-            if verbose: print("Processing tailcall:\n{}".format(json.dumps(tailcall, indent=2, sort_keys=True)))
+            if verbose:
+                print("Processing tailcall:\n{}".format(json.dumps(tailcall, indent=2, sort_keys=True)))
             # remove the information from the function-analysis state of the disassembly
             function = self.__getFunctionByStartAddr(tailcall["destination_function"])
             if not function or function.is_tailcall_function:
                 disassembler.analyzeFunction(tailcall["destination_function"])
                 continue
-                
+
             self.__functions.remove(function)
             if function:
                 if verbose:
@@ -108,13 +111,15 @@ class TailcallAnalyzer(object):
                     pass
                     # print ("0x{:x} -> 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
             elif verbose:
-                print ("**** 0x{:x} IS NOW PART OF 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
+                print("**** 0x{:x} IS NOW PART OF 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
 
             if verbose:
                 function = self.__getFunctionByStartAddr(tailcall["destination_function"])
                 new_function = self.__getFunctionByStartAddr(tailcall["destination_addr"])
                 print("New function:")
-                if new_function: self.__printIntervals(self.__getFunctionIntervals(new_function))
+                if new_function:
+                    self.__printIntervals(self.__getFunctionIntervals(new_function))
                 print("Re-disassembled old function:")
-                if function: self.__printIntervals(self.__getFunctionIntervals(function))
+                if function:
+                    self.__printIntervals(self.__getFunctionIntervals(function))
         return sorted(list(newly_created_functions))

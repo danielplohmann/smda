@@ -1,9 +1,10 @@
 #!/usr/bin/python
 
-import json
 import logging
-import os
-import traceback
+
+from smda.utility.PeFileLoader import PeFileLoader
+from .AbstractLabelProvider import AbstractLabelProvider
+
 LOGGER = logging.getLogger(__name__)
 
 try:
@@ -11,10 +12,8 @@ try:
     from pdbparse.undname import undname
 except:
     pdbparse = None
-    LOGGER.warn("3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available.")
+    LOGGER.warning("3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available.")
 
-from .AbstractLabelProvider import AbstractLabelProvider
-from smda.utility.PeFileLoader import PeFileLoader
 
 class DummyOmap(object):
     def remap(self, addr):
@@ -46,19 +45,19 @@ class PdbSymbolProvider(AbstractLabelProvider):
         with open(binary_info.file_path, "rb") as fin:
             data = fin.read(16)
         self._parseOep(data)
-        if not data[:15] == b"Microsoft C/C++" or pdbparse is None:
+        if data[:15] != b"Microsoft C/C++" or pdbparse is None:
             return
         try:
             pdb = pdbparse.parse(binary_info.file_path)
             self._parseSymbols(pdb)
         except Exception as exc:
-            LOGGER.error("Failed parsing \"%s\" with exception type: %s" % (file_path, type(exc)))
+            LOGGER.error("Failed parsing \"%s\" with exception type: %s", binary_info.file_path, type(exc))
 
     def _parseSymbols(self, pdb):
         try:
             sects = pdb.STREAM_SECT_HDR_ORIG.sections
             omap = pdb.STREAM_OMAP_FROM_SRC
-        except AttributeError as e:
+        except AttributeError:
             sects = pdb.STREAM_SECT_HDR.sections
             omap = DummyOmap()
         gsyms = pdb.STREAM_GSYM

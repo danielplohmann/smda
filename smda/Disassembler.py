@@ -1,15 +1,12 @@
 import datetime
-import hashlib
-import os
 import traceback
 
-from .DisassemblyStatistics import DisassemblyStatistics
-from .intel.IntelDisassembler import IntelDisassembler
-from .ida.IdaExporter import IdaExporter
 from smda.utility.FileLoader import FileLoader
 from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
+from .intel.IntelDisassembler import IntelDisassembler
+from .ida.IdaExporter import IdaExporter
 
 class Disassembler(object):
 

@@ -73,7 +73,7 @@ class IntelInstructionEscaper:
         "fprem", "fprem1", "fptan", "frndint", "frstor", "fscale", "fsetpm", "fsin", "fsincos", "fsqrt",
         "fst", "fstp", "fstpnce", "fsub", "fsubp", "fsubr", "fsubrp", "ftst", "fucom", "fucomi",
         "fucomp", "fucompi", "fucompp", "fxam", "fxch", "fxrstor", "fxsave", "fxtract", "fyl2x", "fyl2xp1",
-  "fcomip", "fdisi8087_nop", "feni8087_nop", "ffreep", "fucomip",
+        "fcomip", "fdisi8087_nop", "feni8087_nop", "ffreep", "fucomip",
     ]
     _xmm_group = [
         "addpd", "addps", "addsd", "addss", "addsubpd", "andn", "andnpd", "andnps", "andpd", "andps",
@@ -110,7 +110,7 @@ class IntelInstructionEscaper:
         "vpunpckhqdq", "vpunpckhwd", "vpunpckldq", "vpxor", "vrcpss", "vroundsd", "vshufps", "vsqrtsd", "vstmxcsr", "vsubps",
         "vsubsd", "vucomisd", "vucomiss", "vunpcklpd", "vxorpd", "vxorps", "vzeroall", "vzeroupper", "xgetbv", "xorpd",
         "xorps",
-        "vsubss", "vpmuldq",   "vaddsubps", "vcvttsd2usi", "vcvttss2usi", "vmaxps", "vmovaps", "pfcmpge", "kmovb", "mpsadbw",
+        "vsubss", "vpmuldq", "vaddsubps", "vcvttsd2usi", "vcvttss2usi", "vmaxps", "vmovaps", "pfcmpge", "kmovb", "mpsadbw",
     ]
     _vmx_group = [
         'invrpt', 'invvpid', 'vmcall', 'vmclear', 'vmfunc', 'vmlaunch', 'vmptrld', 'vmptrst', 'vmread', 'vmresume', 'vmwrite', 'vmxoff', 'vmxon'
@@ -210,17 +210,17 @@ class IntelInstructionEscaper:
                 escaped_field = "PTR"
         if escape_constants:
             try:
-                op_as_int = int(op_field)
-                escaped_field = "CONST"
+                # op_as_int = int(op_field)
                 # if op_as_int in [0, 1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0xFF, 0xFFFFFFFF, -1]:
                 #     escaped_field += "_%d" % op_as_int
+                escaped_field = "CONST"
             except:
                 pass
             try:
-                op_as_int = int(op_field, 16)
-                escaped_field = "CONST"
+                # op_as_int = int(op_field, 16)
                 # if op_as_int in [0, 1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0xFF, 0xFFFFFFFF, -1]:
                 #     escaped_field += "_%d" % op_as_int
+                escaped_field = "CONST"
             except:
                 pass
             if ":" in op_field:
@@ -327,7 +327,7 @@ class IntelInstructionEscaper:
                 escaped_sequence = ins.bytes.replace(packed_hex, "????????", 1)
                 LOGGER.warning("IntelInstructionEscaper.escapeBinaryPtrRef: 2 occurrences for %s in %s (%s %s), escaping only the first one", packed_hex, ins.bytes, ins.mnemonic, ins.operands)
             elif num_occurrences > 2:
-                LOGGER.warn("IntelInstructionEscaper.escapeBinaryPtrRef: more than 2 occurrences for %s", packed_hex)
+                LOGGER.warning("IntelInstructionEscaper.escapeBinaryPtrRef: more than 2 occurrences for %s", packed_hex)
         return escaped_sequence
 
     @staticmethod
@@ -339,9 +339,9 @@ class IntelInstructionEscaper:
         elif num_occurrences == 2:
             escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
             escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
-            LOGGER.warning("IntelInstructionEscaper.escapeBinaryValue: 2 occurrences for %s in %s (%s %s), escaped both, if they were non-overlapping", packed_hex, ins.bytes, ins.mnemonic, ins.operands)
+            LOGGER.warning("IntelInstructionEscaper.escapeBinaryValue: 2 occurrences for %s in %s, escaped both, if they were non-overlapping", packed_hex, escaped_sequence)
         elif num_occurrences > 2:
-            LOGGER.warn("IntelInstructionEscaper.escapeBinaryValue: more than 2 occurrences for %s", packed_hex)
+            LOGGER.warning("IntelInstructionEscaper.escapeBinaryValue: more than 2 occurrences for %s", packed_hex)
         return escaped_sequence
 
     @staticmethod
@@ -349,10 +349,10 @@ class IntelInstructionEscaper:
         ins_bytes = ins.bytes
         cleaned = ""
         is_cleaning = True
-        for b in [ins_bytes[i:i+2] for i in range(0, len(ins_bytes), 2)]:
-            if is_cleaning and b in ["26", "2e", "36", "3e", "64", "65", "66", "67", "f2", "f3"]:
+        for prefix_byte in [ins_bytes[i:i+2] for i in range(0, len(ins_bytes), 2)]:
+            if is_cleaning and prefix_byte in ["26", "2e", "36", "3e", "64", "65", "66", "67", "f2", "f3"]:
                 continue
             else:
                 is_cleaning = False
-                cleaned += b
+                cleaned += prefix_byte
         return cleaned

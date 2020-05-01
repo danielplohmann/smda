@@ -4,12 +4,12 @@ from .BackendInterface import BackendInterface
 
 try:
     import idaapi
+    import idautils
 except:
     pass
 
 try:
     # we only need these when we are in IDA - IDA 7.4 and above
-    import idautils
     import ida_idaapi
     import ida_funcs
     import ida_gdl
@@ -21,7 +21,6 @@ except:
 
 try:
     # we only need these when we are in IDA - IDA 7.3 and below
-    import idautils
     import idc
 except:
     pass
@@ -39,7 +38,6 @@ class IdaInterface(object):
 
     def __getattr__(self, name):
         return getattr(self.instance, name)
-
 
 
 class Ida74Interface(BackendInterface):
@@ -241,4 +239,3 @@ class Ida73Interface(BackendInterface):
         else:
             self._api_map[addr] = name
         return True
-

@@ -6,7 +6,7 @@ from smda.common.BasicBlock import BasicBlock
 
 class DisassemblyResult(object):
 
-    def __init__(self, bitness=32):
+    def __init__(self):
         self.analysis_start_ts = datetime.datetime.utcnow()
         self.analysis_end_ts = self.analysis_start_ts
         self.analysis_timeout = False
@@ -43,6 +43,7 @@ class DisassemblyResult(object):
     def getByte(self, addr):
         if self.isAddrWithinMemoryImage(addr):
             return self.binary_info.binary[addr - self.binary_info.base_addr]
+        return None
 
     def getRawByte(self, offset):
         return self.binary_info.binary[offset]
@@ -51,13 +52,10 @@ class DisassemblyResult(object):
         if self.isAddrWithinMemoryImage(addr):
             rel_start_addr = addr - self.binary_info.base_addr
             return self.binary_info.binary[rel_start_addr:rel_start_addr + num_bytes]
+        return None
 
     def getRawBytes(self, offset, num_bytes):
         return self.binary_info.binary[offset:offset + num_bytes]
-
-    def setBinary(self, binary):
-        self.binary = binary
-        self.binary_size = len(binary)
 
     def setConfidenceThreshold(self, threshold):
         self._confidence_threshold = threshold
@@ -115,7 +113,7 @@ class DisassemblyResult(object):
 
     def isAddrWithinMemoryImage(self, destination):
         if destination is not None:
-            return destination >= self.binary_info.base_addr and destination < (self.binary_info.base_addr + self.binary_info.binary_size)
+            return self.binary_info.base_addr <= destination < (self.binary_info.base_addr + self.binary_info.binary_size)
         return False
 
     def dereferenceDword(self, addr):

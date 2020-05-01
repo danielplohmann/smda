@@ -1,7 +1,6 @@
 import struct
 import logging
 
-
 if len(logging._handlerList) == 0:
     logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
 LOG = logging.getLogger(__name__)
@@ -65,8 +64,15 @@ class PeFileLoader(object):
                 mapped_binary = bytearray([0] * max_virt_section_offset)
                 mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
             for section_info in section_infos:
-                mapped_binary[section_info["virt_offset"]:section_info["virt_offset"] + section_info["raw_size"]] = binary[section_info["raw_offset"]:section_info["raw_offset"] + section_info["raw_size"]]
-                LOG.debug("Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)", section_info["section_index"], section_info["raw_offset"], section_info["raw_size"], section_info["virt_offset"], section_info["virt_size"])
+                mapped_from = section_info["virt_offset"]
+                mapped_to = section_info["virt_offset"] + section_info["raw_size"]
+                mapped_binary[mapped_from:mapped_to] = binary[section_info["raw_offset"]:section_info["raw_offset"] + section_info["raw_size"]]
+                LOG.debug("Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)",
+                          section_info["section_index"],
+                          section_info["raw_offset"],
+                          section_info["raw_size"],
+                          section_info["virt_offset"],
+                          section_info["virt_size"])
             LOG.debug("Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes", len(binary), num_sections, len(mapped_binary))
         return bytes(mapped_binary)
 
@@ -126,6 +132,21 @@ class PeFileLoader(object):
         return code_areas
 
     @staticmethod
+    def mergeCodeAreas(code_areas):
+        merged_code_areas = sorted(code_areas)
+        result = []
+        index = 0
+        while index < len(merged_code_areas) - 1:
+            this_area = merged_code_areas[index]
+            next_area = merged_code_areas[index + 1]
+            if this_area[1] != next_area[0]:
+                result.append(this_area)
+                index += 1
+            else:
+                merged_code_areas = merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2:]
+        return merged_code_areas
+
+    @staticmethod
     def getCodeAreas(binary):
         pefile = lief.parse(bytearray(binary))
         code_areas = []
@@ -138,16 +159,4 @@ class PeFileLoader(object):
                     section_size += 0x1000 - (section_size % 0x1000)
                 section_end = section_start + section_size
                 code_areas.append([section_start, section_end])
-        # merge areas if possible
-        code_areas = sorted(code_areas)
-        result = []
-        index = 0
-        while index < len(code_areas) - 1:
-            this_area = code_areas[index]
-            next_area = code_areas[index + 1]
-            if this_area[1] != next_area[0]:
-                result.append(this_area)
-                index += 1
-            else:
-                code_areas = code_areas[:index] + [[this_area[0], next_area[1]]] + code_areas[index + 2:]
-        return code_areas
+        return PeFileLoader.mergeCodeAreas(code_areas)

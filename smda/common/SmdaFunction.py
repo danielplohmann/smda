@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-from collections import Counter
 import hashlib
 
-from .SmdaInstruction import SmdaInstruction
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 from smda.common.Tarjan import Tarjan
+from .SmdaInstruction import SmdaInstruction
 
 
 class SmdaFunction(object):
@@ -82,7 +81,7 @@ class SmdaFunction(object):
         if offset is None:
             offset = self.offset
         if offset not in self.blocks:
-            return [] 
+            return []
         return self.blocks[offset]
 
     def _calculateSccs(self):
@@ -92,7 +91,7 @@ class SmdaFunction(object):
 
     def _calculatePicHash(self, binary_info):
         escaped_binary_seqs = []
-        for offset, block in sorted(self.blocks.items()):
+        for _, block in sorted(self.blocks.items()):
             for instruction in block:
                 escaped_binary_seqs.append(instruction.getEscapedBinary(self._escaper, lower_addr=binary_info.base_addr, upper_addr=binary_info.base_addr + binary_info.binary_size))
         as_bytes = bytes([ord(c) for c in "".join(escaped_binary_seqs)])
@@ -119,12 +118,12 @@ class SmdaFunction(object):
         smda_function.inrefs = function_dict["inrefs"]
         smda_function.outrefs = {int(k): v for k, v in function_dict["outrefs"].items()}
         smda_function.binweight = function_dict["metadata"]["binweight"]
-        smda_function.characteristics =  function_dict["metadata"]["characteristics"]
-        smda_function.confidence =  function_dict["metadata"]["confidence"]
-        smda_function.function_name =  function_dict["metadata"]["function_name"]
-        smda_function.pic_hash =  function_dict["metadata"]["pic_hash"]
-        smda_function.strongly_connected_components =  function_dict["metadata"]["strongly_connected_components"]
-        smda_function.tfidf =  function_dict["metadata"]["tfidf"]
+        smda_function.characteristics = function_dict["metadata"]["characteristics"]
+        smda_function.confidence = function_dict["metadata"]["confidence"]
+        smda_function.function_name = function_dict["metadata"]["function_name"]
+        smda_function.pic_hash = function_dict["metadata"]["pic_hash"]
+        smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
+        smda_function.tfidf = function_dict["metadata"]["tfidf"]
         return smda_function
 
     def toDict(self):

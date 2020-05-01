@@ -25,7 +25,7 @@ A typical workflow using SMDA could like this:
 >>> disassembler = Disassembler()
 >>> report = disassembler.disassembleFile("/bin/cat")
 >>> print(report)
- 0.777s -> (architecture: intel.64bit, base_addr: 0x00000000): 86 functions
+ 0.777s -> (architecture: intel.64bit, base_addr: 0x00000000): 143 functions
 >>> for fn in report.getFunctions():
 ...     print(fn)
 ...     for ins in fn.getInstructions():

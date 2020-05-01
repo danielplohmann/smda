@@ -122,7 +122,6 @@ class FunctionAnalysisState(object):
             self.disassembly.recursive_functions.add(self.start_addr)
         if self.is_leaf_function:
             self.disassembly.leaf_functions.add(self.start_addr)
-        return
 
     def finalizeAnalysis(self, as_gap=False):
         if as_gap:

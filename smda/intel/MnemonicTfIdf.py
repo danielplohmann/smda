@@ -20,8 +20,7 @@ class MnemonicTfIdf(object):
 
     def getTfIdfFromBlocks(self, blocks):
         term_counts = Counter()
-        for addr, block in blocks.items():
-            instructions = []
+        for _, block in blocks.items():
             for ins in block:
                 term_counts[str(ins[2])] += 1
         return self.tfidf(term_counts)
@@ -31,7 +30,6 @@ class MnemonicTfIdf(object):
         score = 0
         sum_term_counts = sum(term_counts.values())
         max_count = max(term_counts.values())
-        num_terms = len(term_counts)
         for term, term_count in term_counts.items():
             score += self._calculateTf(sum_term_counts, term_count, max_count) * self.getFrequency(term)
         return score
@@ -40,21 +38,21 @@ class MnemonicTfIdf(object):
         # raw count
         return term_count
         # term frequency
-        return term_count / num_terms if num_terms else 0
+        # return term_count / num_terms if num_terms else 0
         # double normal 0.5
-        return 0.5 + 0.5 * (term_count / max_term_count) if max_term_count else 0.5
+        # return 0.5 + 0.5 * (term_count / max_term_count) if max_term_count else 0.5
         # log normal
-        return math.log(1 + term_count)
+        # return math.log(1 + term_count)
         # binary
-        return 1 if term_count else 0
+        # return 1 if term_count else 0
 
     def _calculateIdf(self, num_documents, value_count):
         # idf probabilistic
         return math.log(1.0 * (num_documents - value_count) / value_count)
         # smooth
-        return math.log(num_documents / (1 + value_count)) + 1
+        # return math.log(num_documents / (1 + value_count)) + 1
         # idf
-        return math.log(num_documents / (value_count))
+        # return math.log(num_documents / (value_count))
 
     def getFrequency(self, term):
         # if we don't have that word in our collection, use the least observed frequency

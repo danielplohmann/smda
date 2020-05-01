@@ -76,6 +76,21 @@ class ElfFileLoader(object):
         return 0
 
     @staticmethod
+    def mergeCodeAreas(code_areas):
+        merged_code_areas = sorted(code_areas)
+        result = []
+        index = 0
+        while index < len(merged_code_areas) - 1:
+            this_area = merged_code_areas[index]
+            next_area = merged_code_areas[index + 1]
+            if this_area[1] != next_area[0]:
+                result.append(this_area)
+                index += 1
+            else:
+                merged_code_areas = merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2:]
+        return merged_code_areas
+
+    @staticmethod
     def getCodeAreas(binary):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(bytearray(binary))
@@ -88,17 +103,5 @@ class ElfFileLoader(object):
                 if section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])
-        # merge areas if possible
-        code_areas = sorted(code_areas)
-        result = []
-        index = 0
-        while index < len(code_areas) - 1:
-            this_area = code_areas[index]
-            next_area = code_areas[index + 1]
-            if this_area[1] != next_area[0]:
-                result.append(this_area)
-                index += 1
-            else:
-                code_areas = code_areas[:index] + [[this_area[0], next_area[1]]] + code_areas[index + 2:]                
-        return code_areas
+                code_areas.append([section_start, section_end])              
+        return ElfFileLoader.mergeCodeAreas(code_areas)

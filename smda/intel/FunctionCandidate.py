@@ -1,7 +1,6 @@
 from binascii import hexlify
 
 from .definitions import COMMON_PROLOGUES
-from .IntelInstructionEscaper import IntelInstructionEscaper
 
 class FunctionCandidate(object):
 
@@ -40,12 +39,12 @@ class FunctionCandidate(object):
         if self._confidence is None:
             # based on evaluation over Andriesse, Bao, and Plohmann data sets
             weighted_confidence = 0.298 * (1 if self.hasCommonFunctionStart() else 0)
-            if self._tfidf_score is not None: 
+            if self._tfidf_score is not None:
                 weighted_confidence += (
                     0.321 * (1 if self._tfidf_score < 0 else 0) +
-                    0.124 * (1 if self._tfidf_score < -2 else 0) + 
-                    0.120 * (1 if self._tfidf_score < -4 else 0) + 
-                    0.101 * (1 if self._tfidf_score < -1 else 0) + 
+                    0.124 * (1 if self._tfidf_score < -2 else 0) +
+                    0.120 * (1 if self._tfidf_score < -4 else 0) +
+                    0.101 * (1 if self._tfidf_score < -1 else 0) +
                     0.025 * (1 if self._tfidf_score < -8 else 0)
                     )
             # above experiments show that multiple inbound call references are basically always indeed functions
@@ -143,8 +142,7 @@ class FunctionCandidate(object):
         other_score = other.getScore()
         if own_score == other_score:
             return self.addr > other.addr
-        else:
-            return own_score < other_score
+        return own_score < other_score
 
     def getCharacteristics(self):
         is_aligned = "a" if self.alignment else "-"
