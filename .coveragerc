@@ -8,9 +8,9 @@ include =
     *tests*
 omit =
     *lib*
-    capstone*
-    distutils
-    ctypes
+    capstone/*
+    *distutils/*
+    ctypes/*
     
 [report]
 # Regexes for lines to exclude from consideration

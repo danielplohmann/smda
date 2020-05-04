@@ -66,3 +66,4 @@ config.ini
 figures
 reports
 analyze_*.py
+coverage-html
