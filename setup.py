@@ -8,7 +8,7 @@ with open("README.md", "r") as fh:
 setup(
     name='smda',
     # note to self: always change this in config as well.
-    version='1.2.1',
+    version='1.2.2',
     description='A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.',
     long_description_content_type="text/markdown",
     long_description=long_description,
@@ -17,16 +17,16 @@ setup(
     url='https://github.com/danielplohmann/smda',
     license="BSD 2-Clause",
     packages=find_packages(exclude=('tests', 'docs')),
-    data_files = [
+    data_files=[
         ('', ['LICENSE']),
     ],
     classifiers=[
-            "Development Status :: 4 - Beta",
-            "License :: OSI Approved :: BSD License",
-            "Operating System :: OS Independent",
-            "Programming Language :: Python :: 2.7",
-            "Programming Language :: Python :: 3",
-            "Topic :: Security",
-            "Topic :: Software Development :: Disassemblers",
-        ],
+        "Development Status :: 4 - Beta",
+        "License :: OSI Approved :: BSD License",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
+        "Topic :: Security",
+        "Topic :: Software Development :: Disassemblers",
+    ],
 )

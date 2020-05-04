@@ -209,15 +209,16 @@ class IntelInstructionEscaper:
                     or op_field.startswith("[")):
                 escaped_field = "PTR"
         if escape_constants:
+            # potentially include specific constants as extension to CONST
             try:
-                # op_as_int = int(op_field)
+                op_as_int = int(op_field)
                 # if op_as_int in [0, 1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0xFF, 0xFFFFFFFF, -1]:
                 #     escaped_field += "_%d" % op_as_int
                 escaped_field = "CONST"
             except:
                 pass
             try:
-                # op_as_int = int(op_field, 16)
+                op_as_int = int(op_field, 16)
                 # if op_as_int in [0, 1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0xFF, 0xFFFFFFFF, -1]:
                 #     escaped_field += "_%d" % op_as_int
                 escaped_field = "CONST"
@@ -234,7 +235,7 @@ class IntelInstructionEscaper:
         opstring = ins.operands
         op_fields = opstring.split(",")
         esc_regs = True
-        esc_cons = True
+        esc_consts = True
         if offsets_only:
             if ins.mnemonic in [
                     "call", "lcall", "jmp", "ljmp",
@@ -243,10 +244,10 @@ class IntelInstructionEscaper:
                     "loop", "loopne", "loope"]:
                 return "OFFSET"
             esc_regs = False
-            esc_cons = False
+            esc_consts = False
         escaped_fields = []
         for op_field in op_fields:
-            escaped_fields.append(IntelInstructionEscaper.escapeField(op_field, escape_registers=esc_regs, escape_constants=esc_cons))
+            escaped_fields.append(IntelInstructionEscaper.escapeField(op_field, escape_registers=esc_regs, escape_constants=esc_consts))
         return ", ".join(escaped_fields)
 
     @staticmethod
