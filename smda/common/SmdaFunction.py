@@ -107,7 +107,7 @@ class SmdaFunction(object):
             self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
 
     @classmethod
-    def fromDict(cls, function_dict):
+    def fromDict(cls, function_dict, architecture=None):
         smda_function = cls(None)
         smda_function.offset = function_dict["offset"]
         smda_function.blocks = {}
@@ -124,6 +124,8 @@ class SmdaFunction(object):
         smda_function.pic_hash = function_dict["metadata"]["pic_hash"]
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
+        if architecture:
+            smda_function._escaper = IntelInstructionEscaper if architecture in ["intel"] else None
         return smda_function
 
     def toDict(self):
