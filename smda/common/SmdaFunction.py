@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import struct
 
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 from smda.common.Tarjan import Tarjan
@@ -71,6 +72,12 @@ class SmdaFunction(object):
     def getBlocks(self):
         for _, block in sorted(self.blocks.items()):
             yield block
+
+    def getPicHashAsLong(self):
+        return self.pic_hash
+
+    def getPicHashAsHex(self):
+        return struct.pack("l", self.pic_hash).hex()
 
     def getInstructions(self):
         for block in self.getBlocks():
