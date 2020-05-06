@@ -119,7 +119,7 @@ class SmdaFunction(object):
         smda_function.offset = function_dict["offset"]
         smda_function.blocks = {}
         for addr, block in function_dict["blocks"].items():
-            smda_function.blocks[addr] = [SmdaInstruction.fromDict(ins) for ins in block]
+            smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins) for ins in block]
         smda_function.apirefs = {int(k): v for k, v in function_dict["apirefs"].items()}
         smda_function.blockrefs = {int(k): v for k, v in function_dict["blockrefs"].items()}
         smda_function.inrefs = function_dict["inrefs"]
