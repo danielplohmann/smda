@@ -259,7 +259,7 @@ class IntelInstructionEscaper:
                 "loop", "loopne", "loope"]:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins)
             return escaped_sequence
-        if True and ins.mnemonic in [
+        if ins.mnemonic in [
                 "je", "jne", "js", "jns", "jp", "jnp", "jo", "jno", "jl", "jle", "jg",
                 "jge", "jb", "jbe", "ja", "jae", "jcxz", "jecxz", "jrcxz"]:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
@@ -270,7 +270,7 @@ class IntelInstructionEscaper:
             immediates = []
             for immediate_match in re.finditer(r"0x[0-9a-fA-F]{1,8}", ins.operands):
                 immediate = int(immediate_match.group()[2:], 16)
-                if lower_addr > 0x00100000 and lower_addr < immediate < upper_addr:
+                if lower_addr > 0x00100000 and lower_addr <= immediate < upper_addr:
                     immediates.append(immediate)
                     escaped_sequence = IntelInstructionEscaper.escapeBinaryValue(escaped_sequence, immediate)
         return escaped_sequence
