@@ -39,6 +39,9 @@ class IdaInterface(object):
     def __getattr__(self, name):
         return getattr(self.instance, name)
 
+    def getIdbDir(self):
+        return idautils.GetIdbDir()
+
 
 class Ida74Interface(BackendInterface):
 
@@ -128,6 +131,12 @@ class Ida74Interface(BackendInterface):
             self._import_module_name = ida_nalt.get_import_module_name(i)
             ida_nalt.enum_import_names(i, self._cbEnumImports)
         return self._api_map
+
+    def isExternalFunction(self, function_offset):
+        function_segment = ida_segment.getseg(function_offset)
+        function_segment_name = ida_segment.get_segm_name(function_segment)
+        is_extern = function_segment_name in ["extern", "UNDEF"]
+        return is_extern
 
     def _cbEnumImports(self, addr, name, ordinal):
         # potentially use: idc.Name(addr)
@@ -231,6 +240,10 @@ class Ida73Interface(BackendInterface):
             self._import_module_name = idaapi.get_import_module_name(i)
             idaapi.enum_import_names(i, self._cbEnumImports)
         return self._api_map
+
+    def isExternalFunction(self, function_offset):
+        # TODO look up older function names to support this for IDA 7.3- as well
+        return False
 
     def _cbEnumImports(self, addr, name, ordinal):
         # potentially use: idc.Name(addr)

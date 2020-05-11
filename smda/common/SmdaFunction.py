@@ -35,9 +35,9 @@ class SmdaFunction(object):
             self.outrefs = disassembly.getOutRefs(function_offset)
             # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
-            self.characteristics = disassembly.candidates[function_offset].getCharacteristics()
-            self.confidence = disassembly.candidates[function_offset].getConfidence()
-            self.tfidf = disassembly.candidates[function_offset].getTfIdf()
+            self.characteristics = disassembly.candidates[function_offset].getCharacteristics() if function_offset in disassembly.candidates else None
+            self.confidence = disassembly.candidates[function_offset].getConfidence() if function_offset in disassembly.candidates else None
+            self.tfidf = disassembly.candidates[function_offset].getTfIdf() if function_offset in disassembly.candidates else None
             self.pic_hash = self._calculatePicHash(disassembly.binary_info)
             self.strongly_connected_components = self._calculateSccs()
 

@@ -60,10 +60,11 @@ class SmdaReport(object):
     def _convertCfg(self, disassembly):
         function_results = {}
         for function_offset in disassembly.functions:
-            if disassembly.candidates[function_offset].getConfidence() >= self.confidence_threshold:
-                smda_function = SmdaFunction(disassembly, function_offset)
-                function_results[function_offset] = smda_function
-                self.binweight += smda_function.binweight
+            if self.confidence_threshold and function_offset in disassembly.candidates and disassembly.candidates[function_offset].getConfidence() < self.confidence_threshold:
+                continue
+            smda_function = SmdaFunction(disassembly, function_offset)
+            function_results[function_offset] = smda_function
+            self.binweight += smda_function.binweight
         return function_results
 
     def getFunction(self, function_addr):

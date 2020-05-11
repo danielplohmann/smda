@@ -1,5 +1,8 @@
 init:
 	pip install -r requirements.txt
+package:
+	rm -rf dist/*
+	python3 setup.py sdist
 pylint:
 	python3 -m pylint --rcfile=.pylintrc smda
 test:

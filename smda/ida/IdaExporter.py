@@ -50,6 +50,8 @@ class IdaExporter(object):
         self.disassembly.function_symbols = self.ida_interface.getFunctionSymbols()
         api_map = self.ida_interface.getApiMap()
         for function_offset in self.ida_interface.getFunctions():
+            if self.ida_interface.isExternalFunction(function_offset):
+                continue
             converted_function = []
             for block in self.ida_interface.getBlocks(function_offset):
                 converted_block = []
