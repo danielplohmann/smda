@@ -14,6 +14,7 @@ class SmdaReport(object):
     binweight = None
     bitness = None
     code_areas = None
+    component = None
     confidence_threshold = None
     disassembly_errors = None
     execution_time = None
@@ -39,6 +40,7 @@ class SmdaReport(object):
             self.binweight = 0
             self.bitness = disassembly.binary_info.bitness
             self.code_areas = disassembly.binary_info.code_areas
+            self.component = disassembly.binary_info.component
             self.confidence_threshold = disassembly.getConfidenceThreshold()
             self.disassembly_errors = disassembly.errors
             self.execution_time = disassembly.getAnalysisDuration()
@@ -97,6 +99,8 @@ class SmdaReport(object):
         if "metadata" in report_dict:
             if "binweight" in report_dict["metadata"]:
                 smda_report.binweight = report_dict["metadata"]["binweight"]
+            if "component" in report_dict["metadata"]:
+                smda_report.component = report_dict["metadata"]["component"]
             if "family" in report_dict["metadata"]:
                 smda_report.family = report_dict["metadata"]["family"]
             if "filename" in report_dict["metadata"]:
@@ -127,6 +131,7 @@ class SmdaReport(object):
             "identified_alignment": self.identified_alignment,
             "metadata" : {
                 "binweight": self.binweight,
+                "component": self.component,
                 "family": self.family,
                 "filename": self.filename,
                 "is_library": self.is_library,

@@ -9,6 +9,7 @@ class BinaryInfo(object):
     binary_size = 0
     bitness = None
     code_areas = []
+    component = ""
     family = ""
     file_path = ""
     is_library = False

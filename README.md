@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-05-12: v1.2.7 - Added additional default metadata field "component" to SmdaReport.
  * 2020-05-11: v1.2.6 - Export from IDA to SMDA data format is now supported (IDA 7.4).
  * 2020-05-09: v1.2.5 - Fixed off-by-one that affected wildcarding of instructions (THX to Viviane Zwanger).
  * 2020-05-04: v1.2.4 - Various minor fixes.
