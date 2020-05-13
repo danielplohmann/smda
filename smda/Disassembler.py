@@ -66,10 +66,10 @@ class Disassembler(object):
         self._start_time = datetime.datetime.utcnow()
         self._timeout = timeout
         self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
-        return SmdaReport(self.disassembly)
+        return SmdaReport(self.disassembly, config=self.config)
 
     def _createErrorReport(self, start, exception):
-        report = SmdaReport()
+        report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
         report.execution_time = self._getDurationInSeconds(start, datetime.datetime.utcnow())

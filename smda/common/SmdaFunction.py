@@ -24,7 +24,7 @@ class SmdaFunction(object):
     strongly_connected_components = None
     tfidf = None
 
-    def __init__(self, disassembly=None, function_offset=None):
+    def __init__(self, disassembly=None, function_offset=None, config=None):
         if disassembly is not None and function_offset is not None:
             self._escaper = IntelInstructionEscaper if disassembly.binary_info.architecture in ["intel"] else None
             self.offset = function_offset
@@ -39,7 +39,8 @@ class SmdaFunction(object):
             self.confidence = disassembly.candidates[function_offset].getConfidence() if function_offset in disassembly.candidates else None
             self.tfidf = disassembly.candidates[function_offset].getTfIdf() if function_offset in disassembly.candidates else None
             self.pic_hash = self._calculatePicHash(disassembly.binary_info)
-            self.strongly_connected_components = self._calculateSccs()
+            if config and config.CALCULATE_SCC:
+                self.strongly_connected_components = self._calculateSccs()
 
     @property
     def num_edges(self):

@@ -137,8 +137,8 @@ class FunctionCandidateManager(object):
     def updateFunctionGaps(self):
         gaps = []
         prev_ins = 0
-        min_code = min(self.disassembly.code_map)
-        max_code = max(self.disassembly.code_map)
+        min_code = min(self.disassembly.code_map) if self.disassembly.code_map else self.getBitMask()
+        max_code = max(self.disassembly.code_map) if self.disassembly.code_map else 0
         for code_area in self._code_areas:
             if code_area[0] < min_code < code_area[1] and min_code != code_area[0]:
                 gaps.append([code_area[0], min_code, min_code - code_area[0]])

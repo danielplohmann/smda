@@ -32,7 +32,7 @@ class SmdaReport(object):
     version = None
     xcfg = None
 
-    def __init__(self, disassembly=None):
+    def __init__(self, disassembly=None, config=None):
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.base_addr = disassembly.binary_info.base_addr
@@ -57,14 +57,14 @@ class SmdaReport(object):
                 self.message = "Analysis was stopped when running into the timeout."
             self.timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
             self.version = disassembly.binary_info.version
-            self.xcfg = self._convertCfg(disassembly)
+            self.xcfg = self._convertCfg(disassembly, config=config)
 
-    def _convertCfg(self, disassembly):
+    def _convertCfg(self, disassembly, config=None):
         function_results = {}
         for function_offset in disassembly.functions:
             if self.confidence_threshold and function_offset in disassembly.candidates and disassembly.candidates[function_offset].getConfidence() < self.confidence_threshold:
                 continue
-            smda_function = SmdaFunction(disassembly, function_offset)
+            smda_function = SmdaFunction(disassembly, function_offset, config=config)
             function_results[function_offset] = smda_function
             self.binweight += smda_function.binweight
         return function_results
