@@ -110,11 +110,14 @@ class Ida74Interface(BackendInterface):
         return function_symbols
 
     def getBaseAddr(self):
+        base_addr = 0
         segment_starts = [ea for ea in idautils.Segments()]
-        first_segment_start = segment_starts[0]
-        # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
-        first_segment_start = (first_segment_start / 0x10000) * 0x10000
-        return  int(first_segment_start)
+        if segment_starts:
+            first_segment_start = segment_starts[0]
+            # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
+            first_segment_start = (first_segment_start / 0x10000) * 0x10000
+            base_addr = int(first_segment_start)
+        return base_addr
 
     def getBinary(self):
         result = b""

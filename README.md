@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-05-14: v1.2.10 - Bug in IdaInterface fixed.
  * 2020-05-13: v1.2.9 - Bugfix in code gap identification in FunctionCandidateManager, SCC calculation is now optional.
  * 2020-05-12: v1.2.7 - Added additional default metadata field "component" to SmdaReport.
  * 2020-05-11: v1.2.6 - Export from IDA to SMDA data format is now supported (IDA 7.4).
