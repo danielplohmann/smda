@@ -44,7 +44,7 @@ class IdaExporter(object):
         if not self.disassembly.binary_info.base_addr:
             self.disassembly.binary_info.base_addr = self.ida_interface.getBaseAddr()
         if not self.disassembly.binary_info.binary:
-            self.disassembly.binary_info.setBinary(self.ida_interface.getBinary())
+            self.disassembly.binary_info.binary = self.ida_interface.getBinary()
         if not self.disassembly.binary_info.bitness:
             self.disassembly.binary_info.bitness = self.bitness
         self.disassembly.function_symbols = self.ida_interface.getFunctionSymbols()
