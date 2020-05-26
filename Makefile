@@ -3,6 +3,8 @@ init:
 package:
 	rm -rf dist/*
 	python3 setup.py sdist
+publish:
+	python3 -m twine upload dist/*
 pylint:
 	python3 -m pylint --rcfile=.pylintrc smda
 test:

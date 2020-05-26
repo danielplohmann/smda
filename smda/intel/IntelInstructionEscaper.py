@@ -264,7 +264,7 @@ class IntelInstructionEscaper:
                 "jge", "jb", "jbe", "ja", "jae", "jcxz", "jecxz", "jrcxz"]:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
             return escaped_sequence
-        if "ptr [0x" in ins.operands or "ptr [rip + 0x" in ins.operands:
+        if "ptr [0x" in ins.operands or "[rip + 0x" in ins.operands or "[rip - 0x" in ins.operands:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryPtrRef(ins)
         if lower_addr is not None and upper_addr is not None and ins.operands.startswith("0x") or ", 0x" in ins.operands:
             immediates = []
@@ -313,9 +313,11 @@ class IntelInstructionEscaper:
     @staticmethod
     def escapeBinaryPtrRef(ins):
         escaped_sequence = ins.bytes
-        addr_match = re.search(r"ptr \[(rip \+ )?(?P<dword_offset>0x[a-fA-F0-9]+)\]", ins.operands)
+        addr_match = re.search(r"\[(rip (\+|\-) )?(?P<dword_offset>0x[a-fA-F0-9]+)\]", ins.operands)
         if addr_match:
             offset = int(addr_match.group("dword_offset"), 16)
+            if "rip -" in ins.operands:
+                offset = 0x100000000 - offset
             #TODO we need to check if this is actually a 64bit absolute offset (e.g. used by movabs)
             try:
                 packed_hex = str(codecs.encode(struct.pack("I", offset), 'hex').decode('ascii'))
