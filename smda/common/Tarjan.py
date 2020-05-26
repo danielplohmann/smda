@@ -1,70 +1,83 @@
-
-
-class Tarjan(object):
-    """
+"""
     Tarjan's Algorithm (named for its discoverer, Robert Tarjan) is a graph theory algorithm
     for finding the strongly connected components of a graph.
     This can be used to find loops.
     Based on: http://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
+    - Refactored into a class to allow pooled computation by Daniel Plohmann
+    - Implementation by Bas Westerbaan:
+      https://github.com/bwesterb/py-tarjan
+"""
 
-    - Refactored to allow pooled computation by Daniel Plohmann
-    - Implementation by Dries Verdegem:
-      http://www.logarithmic.net/pfh-files/blog/01208083168/tarjan.py
-    - Taken from Dr. Paul Harrison Blog:
-      http://www.logarithmic.net/pfh/blog/01208083168
-    """
+class Tarjan(object):
+    """ g is the graph represented as a dictionary { <vertex> : <successors of vertex> } """
 
     def __init__(self, graph):
         self._graph = graph
-        self._index_counter = [0]
         self._stack = []
-        self._lowlinks = {}
+        self._stack_set = set([])
         self._index = {}
+        self._lowlink = {}
+        self._nonrecursive_stack = []
         self._result = []
 
-    def _calculateSccForNode(self, node):
-        # set the depth index for this node to the smallest unused index
-        self._index[node] = self._index_counter[0]
-        self._lowlinks[node] = self._index_counter[0]
-        self._index_counter[0] += 1
-        self._stack.append(node)
+    def _tarjan_head(self, v):
+        self._index[v] = len(self._index)
+        self._lowlink[v] = self._index[v]
+        self._stack.append(v)
+        self._stack_set.add(v)
+        it = iter(self._graph.get(v, ()))
+        self._nonrecursive_stack.append((it, False, v, None))
 
-        # Consider successors of `node`
-        try:
-            successors = self._graph[node]
-        except:
-            successors = []
-        for successor in successors:
-            if successor not in self._lowlinks:
-                # Successor has not yet been visited; recurse on it
-                self._calculateSccForNode(successor)
-                self._lowlinks[node] = min(self._lowlinks[node], self._lowlinks[successor])
-            elif successor in self._stack:
-                # the successor is in the stack and hence in the current strongly connected component (SCC)
-                self._lowlinks[node] = min(self._lowlinks[node], self._index[successor])
-
-        # If `node` is a root node, pop the stack and generate an SCC
-        if self._lowlinks[node] == self._index[node]:
-            connected_component = []
-
-            while True:
-                successor = self._stack.pop()
-                connected_component.append(successor)
-                if successor == node:
-                    break
-            component = tuple(connected_component)
-            # storing the result
-            self._result.append(component)
+    def _tarjan_body(self, it, v):
+        for w in it:
+            if w not in self._index:
+                self._nonrecursive_stack.append((it, True, v, w))
+                self._tarjan_head(w)
+                return
+            if w in self._stack_set:
+                self._lowlink[v] = min(self._lowlink[v], self._index[w])
+        if self._lowlink[v] == self._index[v]:
+            scc = []
+            w = None
+            while v != w:
+                w = self._stack.pop()
+                scc.append(w)
+                self._stack_set.remove(w)
+            self._result.append(scc)
 
     def calculateScc(self):
-        """
-        @param graph: a dictionary describing a directed graph, with keys as nodes and values as successors.
-        @type graph: (dict)
-        @return: (a list of tuples) describing the SCCs
-        """
-        for node in self._graph:
-            if node not in self._lowlinks:
-                self._calculateSccForNode(node)
+        main_iter = iter(self._graph)
+        while True:
+            try:
+                v = next(main_iter)
+            except StopIteration:
+                return self._result
+            if v not in self._index:
+                self._tarjan_head(v)
+            while self._nonrecursive_stack:
+                it, inside, v, w = self._nonrecursive_stack.pop()
+                if inside:
+                    self._lowlink[v] = min(self._lowlink[w], self._lowlink[v])
+                self._tarjan_body(it, v)
+
+    def closure(self):
+        """ Given a graph @g, returns the transitive closure of @g """
+        ret = {}
+        for scc in self.calculateScc():
+            ws = set()
+            ews = set()
+            for v in scc:
+                ws.update(self._graph[v])
+            for w in ws:
+                assert w in ret or w in scc
+                ews.add(w)
+                ews.update(ret.get(w, ()))
+            if len(scc) > 1:
+                ews.update(scc)
+            ews = tuple(ews)
+            for v in scc:
+                ret[v] = ews
+        return ret
 
     def getResult(self):
         return self._result
