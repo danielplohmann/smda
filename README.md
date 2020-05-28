@@ -57,7 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2020-05-26: v1.2.12 - Bug in IntelInstructionEscaper fixed (handling of negative RIP-relative offsets); SCC calculation changed to iterative algorithm (using @bwesterb's implementation) and activated by default again. 
+ * 2020-05-28: v1.2.13 - Bugfixes in IntelInstructionEscaper (handling of negative RIP-relative offsets) and SmdaReport (datetime handling); SCC calculation changed to iterative algorithm (using @bwesterb's implementation) and activated by default again. 
  * 2020-05-14: v1.2.10 - Bug in IdaInterface fixed.
  * 2020-05-13: v1.2.9 - Bugfix in code gap identification in FunctionCandidateManager, SCC calculation is now optional.
  * 2020-05-12: v1.2.7 - Added additional default metadata field "component" to SmdaReport.

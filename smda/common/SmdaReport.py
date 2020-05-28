@@ -69,6 +69,25 @@ class SmdaReport(object):
             self.binweight += smda_function.binweight
         return function_results
 
+    @property
+    def num_functions(self):
+        return len(self.xcfg)
+
+    @property
+    def num_blocks(self):
+        sum_blocks = 0
+        for function in self.getFunctions():
+            sum_blocks += function.num_blocks
+        return sum_blocks
+
+    @property
+    def num_instructions(self):
+        sum_instructions = 0
+        for function in self.getFunctions():
+            sum_instructions += function.num_instructions
+        return sum_instructions
+
+
     def getFunction(self, function_addr):
         return self.xcfg[function_addr] if function_addr in self.xcfg else None
 
@@ -142,7 +161,7 @@ class SmdaReport(object):
             "smda_version": self.smda_version,
             "statistics": self.statistics.toDict(),
             "status": self.status,
-            "timestamp": self.timestamp,
+            "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()}
         }
 
