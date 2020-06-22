@@ -151,12 +151,13 @@ class PeFileLoader(object):
         pefile = lief.parse(bytearray(binary))
         code_areas = []
         base_address = PeFileLoader.getBaseAddress(binary)
-        for section in pefile.sections:
-            if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
-                section_start = base_address + section.virtual_address
-                section_size = section.virtual_size
-                if section_size % 0x1000 != 0:
-                    section_size += 0x1000 - (section_size % 0x1000)
-                section_end = section_start + section_size
-                code_areas.append([section_start, section_end])
+        if pefile and pefile.sections:
+            for section in pefile.sections:
+                if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
+                    section_start = base_address + section.virtual_address
+                    section_size = section.virtual_size
+                    if section_size % 0x1000 != 0:
+                        section_size += 0x1000 - (section_size % 0x1000)
+                    section_end = section_start + section_size
+                    code_areas.append([section_start, section_end])
         return PeFileLoader.mergeCodeAreas(code_areas)
