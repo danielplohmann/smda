@@ -25,7 +25,7 @@ class IntelInstructionEscaper:
         "cdqe", "daa", "das", "dec", "div", "idiv", "imul", "inc", "lzcnt", "mul",
         "mulx", "neg", "not", "or", "popcnt", "rcl", "rcr", "rol", "ror", "sal",
         "salc", "sar", "sbb", "shl", "shld", "shr", "shrd", "sub", "tzcnt", "xadd",
-        "xor"
+        "xor", "shlx", "shrx", "sarx"
     ]
     _cfg_group = [
         "arpl", "bound", "call", "clc", "cld", "cli", "cmc", "cmova", "cmovae", "cmovb",
@@ -44,7 +44,7 @@ class IntelInstructionEscaper:
         "lodsw", "lsl", "lss", "maskmovq", "mov", "movabs", "movnti", "movntq", "movs", "movsb",
         "movsd", "movss", "movsw", "movsx", "movsxd", "movzx", "rdmsr", "sahf", "scas", "scasb",
         "scasd", "scasq", "scasw", "stos", "stosb", "stosd", "stosq", "stosw", "wrmsr", "xabort",
-        "xbegin", "xchg", "xlat", "xlatb", "movbe"
+        "xbegin", "xchg", "xlat", "xlatb", "movbe", "clflush"
     ]
     _stack_group = [
         "enter", "leave", "pop", "popad", "popal", "popf", "popfd", "popfq", "push", "pushad",
@@ -61,7 +61,7 @@ class IntelInstructionEscaper:
     _aes_group = [
         "aesdec", "aesdeclast", "aesenc", "aesenclast", "aesimc", "aeskeygenassist", "crc32", "rdrand", "rdseed", "sha1msg1",
         "sha1msg2", "sha1nexte", "sha1rnds4", "sha256msg1", "sha256msg2", "sha256rnds2", "vaesenc", "vaesenclast", "xcryptcbc", "xcryptcfb",
-        "xcryptebc", "xcryptecb", "xcryptofb", "xstorerng"
+        "xcryptebc", "xcryptecb", "xcryptofb", "xstorerng", "xsha1", "xsha256", "xcryptctr", "vaesdec", "vaesdeclast"
     ]
     _float_group = [
         "f2xm1", "fabs", "fadd", "faddp", "fbld", "fbstp", "fchs", "fcmovb", "fcmovbe", "fcmove",
@@ -89,12 +89,12 @@ class IntelInstructionEscaper:
         "paddusb", "paddusw", "paddw", "palignr", "pand", "pandn", "pavgb", "pavgw", "pblendw", "pclmulqdq",
         "pcmpeqb", "pcmpeqd", "pcmpeqq", "pcmpeqw", "pcmpestri", "pcmpgtb", "pcmpgtd", "pcmpgtw", "pcmpistri", "pextrb",
         "pextrd", "pextrw", "phaddd", "phsubsw", "pinsrb", "pinsrd", "pinsrq", "pinsrw", "pmaddubsw", "pmaddwd",
-        "pmaxsw", "pmaxub", "pminsw", "pminub", "pmovmskb", "pmovzxwd", "pmulhuw", "pmulhw", "pmulld", "pmullw",
+        "pmaxsw", "pmaxub", "pminsw", "pminub", "pmovmskb", "pmovsxdq", "pmovzxwd", "pmulhuw", "pmulhw", "pmulld", "pmullw",
         "pmuludq", "popaw", "por", "psadbw", "pshufb", "pshufd", "pshufhw", "pshuflw", "pshufw", "psignw",
         "pslld", "pslldq", "psllq", "psllw", "psrad", "psraw", "psrld", "psrldq", "psrlq", "psrlw",
         "psubb", "psubd", "psubq", "psubsb", "psubsw", "psubusb", "psubusw", "psubw", "punpckhbw", "punpckhdq",
         "punpckhqdq", "punpckhwd", "punpcklbw", "punpckldq", "punpcklqdq", "punpcklwd", "pushaw", "pxor", "rcpps", "rcpss",
-        "rorx", "roundsd", "rsqrtps", "shufpd", "shufps", "sqrtps", "sqrtsd", "sqrtss", "stmxcsr", "subpd",
+        "rorx", "roundsd", "rsqrtps", "shufpd", "shufps", "sqrtpd", "sqrtps", "sqrtsd", "sqrtss", "stmxcsr", "subpd",
         "subps", "subsd", "subss", "ucomisd", "ucomiss", "unpckhpd", "unpckhps", "unpcklpd", "unpcklps", "vaddpd",
         "vaddsd", "vaddss", "vandnpd", "vandpd", "vandps", "vbroadcasti128", "vcmplesd", "vcmpnltsd", "vcmppd", "vcomisd",
         "vcvtdq2pd", "vcvtpd2dq", "vcvtps2pd", "vcvtsd2ss", "vcvtsi2ss", "vcvtss2si", "vcvttpd2dq", "vcvttsd2si", "vdivsd", "verr",
@@ -111,6 +111,7 @@ class IntelInstructionEscaper:
         "vsubsd", "vucomisd", "vucomiss", "vunpcklpd", "vxorpd", "vxorps", "vzeroall", "vzeroupper", "xgetbv", "xorpd",
         "xorps",
         "vsubss", "vpmuldq", "vaddsubps", "vcvttsd2usi", "vcvttss2usi", "vmaxps", "vmovaps", "pfcmpge", "kmovb", "mpsadbw",
+        "vextracti128", "vpbroadcastd", "vpbroadcastq", "vpcmpeqd", "vpcmpeqq", "vpermq", "vpextrq", "vpinsrq", "vpmuludq", "vpunpcklqdq"
     ]
     _vmx_group = [
         'invrpt', 'invvpid', 'vmcall', 'vmclear', 'vmfunc', 'vmlaunch', 'vmptrld', 'vmptrst', 'vmread', 'vmresume', 'vmwrite', 'vmxoff', 'vmxon'

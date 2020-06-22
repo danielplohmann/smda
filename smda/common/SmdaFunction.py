@@ -4,6 +4,7 @@ import struct
 
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 from smda.common.Tarjan import Tarjan
+from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
 from .SmdaInstruction import SmdaInstruction
 
 
@@ -41,6 +42,7 @@ class SmdaFunction(object):
             self.pic_hash = self._calculatePicHash(disassembly.binary_info)
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
+            self.nesting_depth = self._calculateNestingDepth()
 
     @property
     def num_edges(self):
@@ -97,15 +99,21 @@ class SmdaFunction(object):
         tarjan.calculateScc()
         return tarjan.getResult()
 
+    def _calculateNestingDepth(self):
+        nesting_depth = 0
+        if self.blockrefs:
+            tree = build_dominator_tree(self.blockrefs, self.offset)
+            nesting_depth = get_nesting_depth(self.blockrefs, tree, self.offset)
+        return nesting_depth
+
     def _calculatePicHash(self, binary_info):
         escaped_binary_seqs = []
         for _, block in sorted(self.blocks.items()):
             for instruction in block:
                 escaped_binary_seqs.append(instruction.getEscapedBinary(self._escaper, lower_addr=binary_info.base_addr, upper_addr=binary_info.base_addr + binary_info.binary_size))
         as_bytes = bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-        return int(hashlib.sha256(as_bytes).hexdigest()[:16], 16)
-        # TODO verify consistency
-        # return int(hashlib.sha256("".join(escaped_binary_seqs).encode("utf-8")).hexdigest()[:16], 16)
+        return struct.unpack("Q", hashlib.sha256(as_bytes).digest()[:8])
+        # return int(hashlib.sha256(as_bytes).hexdigest()[:16], 16)
 
     def _parseBlocks(self, block_dict):
         self.blocks = {}
@@ -130,6 +138,7 @@ class SmdaFunction(object):
         smda_function.confidence = function_dict["metadata"]["confidence"]
         smda_function.function_name = function_dict["metadata"]["function_name"]
         smda_function.pic_hash = function_dict["metadata"]["pic_hash"]
+        smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
         if architecture:
@@ -153,6 +162,7 @@ class SmdaFunction(object):
                 "confidence": self.confidence,
                 "function_name": self.function_name,
                 "pic_hash": self.pic_hash,
+                "nesting_depth": self.nesting_depth,
                 "strongly_connected_components": self.strongly_connected_components,
                 "tfidf": self.tfidf
             }

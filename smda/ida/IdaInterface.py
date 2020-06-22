@@ -16,6 +16,7 @@ try:
     import ida_bytes
     import ida_nalt
     import ida_segment
+    import ida_name
 except:
     pass
 
@@ -105,6 +106,9 @@ class Ida74Interface(BackendInterface):
         function_offsets = self.getFunctions()
         for function_offset in function_offsets:
             function_name = ida_funcs.get_func_name(function_offset)
+            # apply demangling if required
+            if "@" in function_name:
+                function_name = ida_name.demangle_name(function_name, 0)
             if not re.match("sub_[0-9a-fA-F]+", function_name):
                 function_symbols[function_offset] = function_name
         return function_symbols
@@ -213,6 +217,9 @@ class Ida73Interface(BackendInterface):
         function_offsets = self.getFunctions()
         for function_offset in function_offsets:
             function_name = idc.GetFunctionName(function_offset)
+            # apply demangling if required
+            if "@" in function_name:
+                function_name = idc.demangle_name(function_name, 0)
             if not re.match("sub_[0-9a-fA-F]+", function_name):
                 function_symbols[function_offset] = function_name
         return function_symbols
