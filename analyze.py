@@ -44,17 +44,16 @@ if __name__ == "__main__":
         if os.path.isfile(ARGS.input_path):
             # optionally create and set up a config, e.g. when using ApiScout profiles for WinAPI import usage discovery
             config = SmdaConfig()
-            config.API_COLLECTION_FILES = {
-                "win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])
-            }
-            DISASSEMBLER = Disassembler(config)
             print("now analyzing {}".format(ARGS.input_path))
             INPUT_FILENAME = os.path.basename(ARGS.input_path)
             if ARGS.parse_header:
+                DISASSEMBLER = Disassembler(config)
                 SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
             else:
                 BUFFER = readFileContent(ARGS.input_path)
                 BASE_ADDR = parseBaseAddrFromArgs(ARGS)
+                config.API_COLLECTION_FILES = {"win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])}
+                DISASSEMBLER = Disassembler(config)
                 SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR)
                 SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
             print(SMDA_REPORT)

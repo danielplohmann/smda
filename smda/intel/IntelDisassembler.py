@@ -70,11 +70,11 @@ class IntelDisassembler(object):
             for provider in self.label_providers:
                 provider.update(pdb_info)
 
-    def resolveApi(self, address):
+    def resolveApi(self, to_address, api_address):
         for provider in self.label_providers:
             if not provider.isApiProvider():
                 continue
-            result = provider.getApi(address)
+            result = provider.getApi(to_address, api_address)
             if result:
                 return result
         return ("", "")
@@ -136,9 +136,11 @@ class IntelDisassembler(object):
                 if dereferenced is not None:
                     state.addCodeRef(i.address, dereferenced)
                     self._handleCallTarget(state, i.address, dereferenced)
+                    self._handleApiTarget(i.address, call_destination, dereferenced)
         elif i.op_str.strip().startswith("0x"):
             # case = "DIRECT"
             self._handleCallTarget(state, i.address, call_destination)
+            self._handleApiTarget(i.address, call_destination, call_destination)
         elif i.op_str.lower() in REGS_32BIT or i.op_str.lower() in REGS_64BIT:
             # case = "REG"
             # this is resolved by backtracking at the end of function analysis.
@@ -147,18 +149,16 @@ class IntelDisassembler(object):
     def _handleCallTarget(self, state, from_addr, to_addr):
         if to_addr and self.disassembly.isAddrWithinMemoryImage(to_addr):
             state.addCodeRef(from_addr, to_addr)
-        if to_addr and not self.disassembly.isAddrWithinMemoryImage(to_addr):
-            self._updateApiTarget(from_addr, to_addr)
         if state.start_addr == to_addr:
             state.setRecursion(True)
 
-    def _updateApiTarget(self, from_addr, to_addr):
-        # identify API calls on the fly
-        dll, api = self.resolveApi(to_addr)
-        if dll and api:
-            self._updateApiInformation(from_addr, to_addr, dll, api)
-        else:
-            if not self.disassembly.isAddrWithinMemoryImage(to_addr):
+    def _handleApiTarget(self, from_addr, to_addr, dereferenced):
+        if to_addr and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
+            # identify API calls on the fly
+            dll, api = self.resolveApi(to_addr, dereferenced)
+            if dll and api:
+                self._updateApiInformation(from_addr, dereferenced, dll, api)
+            else:
                 logging.debug("potentially uncovered DLL address: 0x%08x", to_addr)
 
     def _updateApiInformation(self, from_addr, to_addr, dll, api):
@@ -208,8 +208,8 @@ class IntelDisassembler(object):
             dereferenced = self.disassembly.dereferenceDword(jump_destination)
             state.addCodeRef(i.address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i.address, jump_destination)
-            if dereferenced and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
-                self._updateApiTarget(i.address, dereferenced)
+            if dereferenced:
+                self._handleApiTarget(i.address, jump_destination, dereferenced)
         elif i.op_str.strip().startswith("qword ptr [rip"):
             # case = "QWORD-PTR, RIP-relative"
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
@@ -218,8 +218,8 @@ class IntelDisassembler(object):
             dereferenced = self.disassembly.dereferenceQword(jump_destination)
             state.addCodeRef(i.address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i.address, jump_destination)
-            if dereferenced and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
-                self._updateApiTarget(i.address, dereferenced)
+            if dereferenced:
+                self._handleApiTarget(i.address, jump_destination, dereferenced)
         elif i.op_str.strip().startswith("0x"):
             jump_destination = self.getReferencedAddr(i.op_str)
             self.tailcall_analyzer.addJump(i.address, jump_destination)

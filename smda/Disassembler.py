@@ -37,6 +37,7 @@ class Disassembler(object):
         loader = FileLoader(file_path, map_file=True)
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
+        binary_info.raw_data = loader.getRawData()
         binary_info.file_path = file_path
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
@@ -56,6 +57,7 @@ class Disassembler(object):
             binary_info = BinaryInfo(file_content)
             binary_info.base_addr = base_addr
             binary_info.bitness = bitness
+            binary_info.is_buffer = True
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")

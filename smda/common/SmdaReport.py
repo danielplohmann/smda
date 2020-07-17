@@ -22,6 +22,7 @@ class SmdaReport(object):
     filename = None
     identified_alignment = None
     is_library = None
+    is_buffer = None
     message = None
     sha256 = None
     smda_version = None
@@ -48,6 +49,7 @@ class SmdaReport(object):
             self.filename = os.path.basename(disassembly.binary_info.file_path)
             self.identified_alignment = disassembly.identified_alignment
             self.is_library = disassembly.binary_info.is_library
+            self.is_buffer = disassembly.binary_info.is_buffer
             self.message = "Analysis finished regularly."
             self.sha256 = disassembly.binary_info.sha256
             self.smda_version = disassembly.smda_version
@@ -126,6 +128,8 @@ class SmdaReport(object):
                 smda_report.filename = report_dict["metadata"]["filename"]
             if "is_library" in report_dict["metadata"]:
                 smda_report.is_library = report_dict["metadata"]["is_library"]
+            if "is_buffer" in report_dict["metadata"]:
+                smda_report.is_buffer = report_dict["metadata"]["is_buffer"]
             if "version" in report_dict["metadata"]:
                 smda_report.version = report_dict["metadata"]["version"]
         smda_report.message = report_dict["message"]
@@ -154,6 +158,7 @@ class SmdaReport(object):
                 "family": self.family,
                 "filename": self.filename,
                 "is_library": self.is_library,
+                "is_buffer": self.is_buffer,
                 "version": self.version,
             },
             "message": self.message,

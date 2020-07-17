@@ -4,6 +4,8 @@ import os
 import json
 import logging
 
+import lief
+
 from .AbstractLabelProvider import AbstractLabelProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -15,14 +17,24 @@ class WinApiResolver(AbstractLabelProvider):
     def __init__(self, config):
         self._config = config
         self._has_64bit = False
-        self._api_map = {}
+        self._api_map = {
+            "lief": {}
+        }
         self._os_name = None
+        self._is_buffer = False
         for os_name, db_filepath in self._config.API_COLLECTION_FILES.items():
             self._loadDbFile(os_name, db_filepath)
             self._os_name = os_name
 
     def update(self, binary_info):
-        return
+        self._is_buffer = binary_info.is_buffer
+        if not self._is_buffer:
+            #setup import table info from LIEF
+            lief_binary = lief.parse(bytearray(binary_info.raw_data))
+            for imported_library in lief_binary.imports:
+                for func in imported_library.entries:
+                    if func.name:
+                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (imported_library.name.lower(), func.name)
 
     def setOsName(self, os_name):
         self._os_name = os_name
@@ -57,8 +69,13 @@ class WinApiResolver(AbstractLabelProvider):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
         return True
 
-    def getApi(self, absolute_addr):
+    def getApi(self, to_addr, absolute_addr):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
-        if self._os_name and self._os_name in self._api_map:
-            return self._api_map[self._os_name].get(absolute_addr, None)
+        # if we work on a dump, use ApiScout method:
+        if self._is_buffer:
+            if self._os_name and self._os_name in self._api_map:
+                return self._api_map[self._os_name].get(absolute_addr, None)
+        # otherwise take import table info from LIEF
+        else:
+            return self._api_map["lief"].get(to_addr, None)
         return None

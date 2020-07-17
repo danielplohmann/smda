@@ -9,6 +9,7 @@ class FileLoader(object):
         self._file_path = file_path
         self._map_file = map_file
         self._data = b""
+        self._raw_data = b""
         self._base_addr = 0
         self._bitness = 0
         self._code_areas = []
@@ -23,20 +24,23 @@ class FileLoader(object):
         return binary
 
     def _loadFile(self):
-        data = self._loadRawFileContent()
+        self._raw_data = self._loadRawFileContent()
         if self._map_file:
             for loader in self.file_loaders:
-                if loader.isCompatible(data):
-                    self._data = loader.mapBinary(data)
-                    self._base_addr = loader.getBaseAddress(data)
-                    self._bitness = loader.getBitness(data)
-                    self._code_areas = loader.getCodeAreas(data)
+                if loader.isCompatible(self._raw_data):
+                    self._data = loader.mapBinary(self._raw_data)
+                    self._base_addr = loader.getBaseAddress(self._raw_data)
+                    self._bitness = loader.getBitness(self._raw_data)
+                    self._code_areas = loader.getCodeAreas(self._raw_data)
                     break
         else:
-            self._data = data
+            self._data = self._raw_data
 
     def getData(self):
         return self._data
+
+    def getRawData(self):
+        return self._raw_data
 
     def getBaseAddress(self):
         return self._base_addr
