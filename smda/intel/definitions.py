@@ -13,7 +13,8 @@ DOUBLE_ZERO = bytearray(b"\x00\x00")
 DEFAULT_PROLOGUES = [
     b"\x8B\xFF\x55\x8B\xEC",
     b"\x89\xFF\x55\x8B\xEC",
-    b"\x55\x8B\xEC"
+    b"\x55\x8B\xEC",
+    b"\x55\x89\xE5"
 ]
 
 # these cover 99% of confirmed function starts in the reference data set
