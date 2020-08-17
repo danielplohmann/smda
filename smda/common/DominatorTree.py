@@ -110,17 +110,14 @@ def build_dominator_tree(G, r):
     if not r in expanded_graph:
         print("r not in G:", r, G)
         return None
-    try:
-        domtree = DominatorTree(expanded_graph, r)
-        domtree.compute()
-        inverted = {}
-        for key, value in domtree.dom.items():
-            if value not in inverted:
-                inverted[value] = []
-            inverted[value].append(key)
-        return inverted
-    except:
-        return None
+    domtree = DominatorTree(expanded_graph, r)
+    domtree.compute()
+    inverted = {}
+    for key, value in domtree.dom.items():
+        if value not in inverted:
+            inverted[value] = []
+        inverted[value].append(key)
+    return inverted
 
 def get_nesting_depth(graph, domtree, root):
     expanded_graph = fix_graph(graph)
