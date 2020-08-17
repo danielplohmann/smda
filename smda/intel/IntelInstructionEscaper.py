@@ -304,6 +304,14 @@ class IntelInstructionEscaper:
                     clean_bytes.startswith("ffaa")):
                     # FF9*: call dword ptr [<reg> + <offset>] - seem all relative in our test data
                 return ins.bytes[:-8] + "????????"
+        if clean_bytes.startswith("48"):
+            if clean_bytes.startswith("48ff61") and len(clean_bytes) == 8:
+                # jmp qword/fword ptr [<register> + <offset>]
+                # these are definitely found as interprocedurals but might also be intraprocedurals?
+                return ins.bytes[:-2] + "??"
+            if clean_bytes.startswith("48ff25"):
+                # jmp qword ptr [rip + <offset>]
+                return ins.bytes[:-8] + "????????"
         if (clean_bytes.startswith("ea") or
                 clean_bytes.startswith("9a")):
                 # 9A*: lcall dword ptr [<seg> + <offset>]

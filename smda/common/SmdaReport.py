@@ -4,6 +4,7 @@ import os
 
 from smda.DisassemblyStatistics import DisassemblyStatistics
 from .SmdaFunction import SmdaFunction
+from .BinaryInfo import BinaryInfo
 
 
 class SmdaReport(object):
@@ -128,17 +129,20 @@ class SmdaReport(object):
                 smda_report.filename = report_dict["metadata"]["filename"]
             if "is_library" in report_dict["metadata"]:
                 smda_report.is_library = report_dict["metadata"]["is_library"]
-            if "is_buffer" in report_dict["metadata"]:
-                smda_report.is_buffer = report_dict["metadata"]["is_buffer"]
             if "version" in report_dict["metadata"]:
                 smda_report.version = report_dict["metadata"]["version"]
+            smda_report.is_buffer = report_dict["metadata"]["is_buffer"] if "is_buffer" in report_dict["metadata"] else False
         smda_report.message = report_dict["message"]
         smda_report.sha256 = report_dict["sha256"]
         smda_report.smda_version = report_dict["smda_version"]
         smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
         smda_report.status = report_dict["status"]
         smda_report.timestamp = datetime.datetime.strptime(report_dict["timestamp"], "%Y-%m-%dT%H-%M-%S")
-        smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict) for function_addr, function_dict in report_dict["xcfg"].items()}
+        binary_info = BinaryInfo(b"")
+        binary_info.architecture = smda_report.architecture
+        binary_info.base_addr = smda_report.base_addr
+        binary_info.binary_size = smda_report.binary_size
+        smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version) for function_addr, function_dict in report_dict["xcfg"].items()}
         return smda_report
 
     def toDict(self):
