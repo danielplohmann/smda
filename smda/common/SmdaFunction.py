@@ -103,7 +103,8 @@ class SmdaFunction(object):
         nesting_depth = 0
         if self.blockrefs:
             tree = build_dominator_tree(self.blockrefs, self.offset)
-            nesting_depth = get_nesting_depth(self.blockrefs, tree, self.offset)
+            if tree:
+                nesting_depth = get_nesting_depth(self.blockrefs, tree, self.offset)
         return nesting_depth
 
     def _calculatePicHash(self, binary_info):

@@ -109,15 +109,18 @@ def build_dominator_tree(G, r):
     expanded_graph = fix_graph(G)
     if not r in expanded_graph:
         print("r not in G:", r, G)
-    domtree = DominatorTree(expanded_graph, r)
-    domtree.compute()
-    inverted = {}
-    for key, value in domtree.dom.items():
-        if value not in inverted:
-            inverted[value] = []
-        inverted[value].append(key)
-    return inverted
-
+        return None
+    try:
+        domtree = DominatorTree(expanded_graph, r)
+        domtree.compute()
+        inverted = {}
+        for key, value in domtree.dom.items():
+            if value not in inverted:
+                inverted[value] = []
+            inverted[value].append(key)
+        return inverted
+    except:
+        return None
 
 def get_nesting_depth(graph, domtree, root):
     expanded_graph = fix_graph(graph)
@@ -125,7 +128,7 @@ def get_nesting_depth(graph, domtree, root):
     # print("significant_nodes", significant_nodes)
     def maximum_costs(cn):
         # print("  maximum_costs cn", cn)
-        if cn not in domtree or not domtree[cn]: 
+        if cn not in domtree or not domtree[cn]:
             # print("    %d not in domtree or not domtree[%d]" % (cn, cn), 1 if cn in significant_nodes else 0)
             return (1 if cn in significant_nodes else 0)
         val = max(maximum_costs(n) for n in domtree[cn]) + (1 if cn in significant_nodes else 0)
