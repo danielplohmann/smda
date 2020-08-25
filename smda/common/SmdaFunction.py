@@ -116,8 +116,7 @@ class SmdaFunction(object):
             for instruction in block:
                 escaped_binary_seqs.append(instruction.getEscapedBinary(self._escaper, lower_addr=binary_info.base_addr, upper_addr=binary_info.base_addr + binary_info.binary_size))
         as_bytes = bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-        return struct.unpack("Q", hashlib.sha256(as_bytes).digest()[:8])
-        # return int(hashlib.sha256(as_bytes).hexdigest()[:16], 16)
+        return struct.unpack("Q", hashlib.sha256(as_bytes).digest()[:8])[0]
 
     def _parseBlocks(self, block_dict):
         self.blocks = {}

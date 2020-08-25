@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-08-25: v1.3.6 - PicHash no longer stored as list.
  * 2020-08-17: v1.3.5 - Bugfix for import parsing (ELF files).
  * 2020-08-17: v1.3.4 - Recalculate PIC hash and nesting depth for  older (v1.2.x) reports on import for compatibility.
  * 2020-08-17: v1.3.3 - Added binary variation of `push ebp;mov ebp, esp` to list of default prologues and added exception handling for DominatorTrees (THX: @fxb).
