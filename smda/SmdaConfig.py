@@ -5,7 +5,7 @@ import logging
 class SmdaConfig(object):
 
     # note to self: always change this in setup.py as well!
-    VERSION = "1.3.6"
+    VERSION = "1.3.7"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", ".."])))
 
@@ -32,7 +32,3 @@ class SmdaConfig(object):
     CALCULATE_SCC = True
     # confidence score to use for filtering functions before including them in the output
     CONFIDENCE_THRESHOLD = 0.0
-
-    def __init__(self, log_level=logging.INFO):
-        if len(logging._handlerList) == 0:
-            logging.basicConfig(level=log_level, format=self.LOG_FORMAT)

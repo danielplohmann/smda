@@ -37,6 +37,7 @@ if __name__ == "__main__":
     PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
     PARSER.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
 
+
     ARGS = PARSER.parse_args()
     if ARGS.input_path:
         SMDA_REPORT = None
@@ -44,6 +45,7 @@ if __name__ == "__main__":
         if os.path.isfile(ARGS.input_path):
             # optionally create and set up a config, e.g. when using ApiScout profiles for WinAPI import usage discovery
             config = SmdaConfig()
+            logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
             print("now analyzing {}".format(ARGS.input_path))
             INPUT_FILENAME = os.path.basename(ARGS.input_path)
             if ARGS.parse_header:
