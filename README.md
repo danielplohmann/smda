@@ -57,7 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2020-08-31: v1.3.8 - Adjusted Logging to avoid interference with other loggers configured outside of SMDA (THX: @BonusPlay).
+ * 2020-08-31: v1.3.9 - Adjusted Logging to avoid interference with other loggers configured outside of SMDA (THX: @BonusPlay).
  * 2020-08-25: v1.3.6 - PicHash no longer stored as list.
  * 2020-08-17: v1.3.5 - Bugfix for import parsing (ELF files).
  * 2020-08-17: v1.3.4 - Recalculate PIC hash and nesting depth for  older (v1.2.x) reports on import for compatibility.
