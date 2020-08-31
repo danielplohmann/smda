@@ -159,7 +159,7 @@ class IntelDisassembler(object):
             if dll and api:
                 self._updateApiInformation(from_addr, dereferenced, dll, api)
             else:
-                logging.debug("potentially uncovered DLL address: 0x%08x", to_addr)
+                LOGGER.debug("potentially uncovered DLL address: 0x%08x", to_addr)
 
     def _updateApiInformation(self, from_addr, to_addr, dll, api):
         api_entry = {"referencing_addr": [], "dll_name": dll, "api_name": api}
@@ -317,7 +317,7 @@ class IntelDisassembler(object):
                             state.setSanelyEnding(True)
                             if self.fc_manager.isAlignmentSequence(instruction_sequence):
                                 next_aligned_address = previous_instruction.address + (16 - previous_instruction.address % 16)
-                                logging.debug("  Adding: 0x%x as candidate.", next_aligned_address)
+                                LOGGER.debug("  Adding: 0x%x as candidate.", next_aligned_address)
                                 self.fc_manager.addCandidate(next_aligned_address, is_gap=True)
                             break
                     previous_instruction = i
