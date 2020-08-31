@@ -93,7 +93,7 @@ class PeFileLoader(object):
             elif PeFileLoader.getBitness(binary) == 64:
                 base_addr = struct.unpack("L", binary[pe_offset + 0x30:pe_offset + 0x38])[0]
         if base_addr:
-            LOG.info("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
+            LOG.debug("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
         return base_addr
 
     @staticmethod

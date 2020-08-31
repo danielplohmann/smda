@@ -64,7 +64,7 @@ class WinApiResolver(AbstractLabelProvider):
                 base_address = api_db["dlls"][dll_entry]["base_address"]
                 virtual_address = base_address + export["address"]
                 api_map[virtual_address] = (dll_name, api_name)
-        LOGGER.info("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
+        LOGGER.debug("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
         self._api_map[os_name] = api_map
 
     def isApiProvider(self):

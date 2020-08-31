@@ -373,12 +373,12 @@ class IntelDisassembler(object):
         if self.disassembly.binary_info.bitness not in [32, 64]:
             bitness_analyzer = BitnessAnalyzer()
             self.disassembly.binary_info.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
-            LOGGER.info("Automatically Recognized Bitness as: %d", self.disassembly.binary_info.bitness)
+            LOGGER.debug("Automatically Recognized Bitness as: %d", self.disassembly.binary_info.bitness)
         else:
             LOGGER.debug("Using defined Bitness as: %d", self.disassembly.binary_info.bitness)
         if self._forced_bitness:
             self.disassembly.binary_info.bitness = self._forced_bitness
-            LOGGER.info("Forced Bitness override to: %d", self.disassembly.binary_info.bitness)
+            LOGGER.debug("Forced Bitness override to: %d", self.disassembly.binary_info.bitness)
 
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = IndirectCallAnalyzer(self)
