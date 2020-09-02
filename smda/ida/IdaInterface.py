@@ -108,7 +108,9 @@ class Ida74Interface(BackendInterface):
             function_name = ida_funcs.get_func_name(function_offset)
             # apply demangling if required
             if "@" in function_name:
-                function_name = ida_name.demangle_name(function_name, 0)
+                demangled = ida_name.demangle_name(function_name, 0)
+                if demangled:
+                    function_name = demangled
             if not re.match("sub_[0-9a-fA-F]+", function_name):
                 function_symbols[function_offset] = function_name
         return function_symbols

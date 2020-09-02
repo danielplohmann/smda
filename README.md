@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-09-02: v1.3.10 - Fixed a bug where IDA Pro would crash when failing to demangle a function name while exporting a SMDA report.
  * 2020-08-31: v1.3.9 - Adjusted Logging to avoid interference with other loggers configured outside of SMDA (THX: @BonusPlay).
  * 2020-08-25: v1.3.6 - PicHash no longer stored as list.
  * 2020-08-17: v1.3.5 - Bugfix for import parsing (ELF files).
