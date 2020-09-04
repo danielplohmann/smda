@@ -73,3 +73,17 @@ class DisassemblyStatistics(object):
             "num_failed_functions": self.num_failed_functions,
             "num_failed_instructions": self.num_failed_instructions
         }
+
+    def __add__(self, other):
+        if not isinstance(other, DisassemblyStatistics):
+            raise ValueError("Needs another DisassemblyStatistics to perform addition of values")
+        self.num_functions += other.num_functions
+        self.num_recursive_functions += other.num_recursive_functions
+        self.num_leaf_functions += other.num_leaf_functions
+        self.num_basic_blocks += other.num_basic_blocks
+        self.num_instructions += other.num_instructions
+        self.num_api_calls += other.num_api_calls
+        self.num_function_calls += other.num_function_calls
+        self.num_failed_functions += other.num_failed_functions
+        self.num_failed_instructions += other.num_failed_instructions
+        return self
