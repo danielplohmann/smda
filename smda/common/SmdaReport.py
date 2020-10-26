@@ -67,7 +67,7 @@ class SmdaReport(object):
         for function_offset in disassembly.functions:
             if self.confidence_threshold and function_offset in disassembly.candidates and disassembly.candidates[function_offset].getConfidence() < self.confidence_threshold:
                 continue
-            smda_function = SmdaFunction(disassembly, function_offset, config=config)
+            smda_function = SmdaFunction(disassembly, function_offset, config=config, smda_report=self)
             function_results[function_offset] = smda_function
             self.binweight += smda_function.binweight
         return function_results
@@ -89,7 +89,6 @@ class SmdaReport(object):
         for function in self.getFunctions():
             sum_instructions += function.num_instructions
         return sum_instructions
-
 
     def getFunction(self, function_addr):
         return self.xcfg[function_addr] if function_addr in self.xcfg else None
@@ -142,7 +141,7 @@ class SmdaReport(object):
         binary_info.architecture = smda_report.architecture
         binary_info.base_addr = smda_report.base_addr
         binary_info.binary_size = smda_report.binary_size
-        smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version) for function_addr, function_dict in report_dict["xcfg"].items()}
+        smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version, smda_report=smda_report) for function_addr, function_dict in report_dict["xcfg"].items()}
         return smda_report
 
     def toDict(self):

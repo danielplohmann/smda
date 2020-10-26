@@ -1,11 +1,13 @@
 class SmdaInstruction:
 
+    smda_function = None
     offset = None
     bytes = None
     mnemonic = None
     operands = None
 
-    def __init__(self, ins_list=None):
+    def __init__(self, ins_list=None, smda_function=None):
+        self.smda_function = smda_function
         if ins_list is not None:
             self.offset = ins_list[0]
             self.bytes = ins_list[1]
@@ -33,8 +35,9 @@ class SmdaInstruction:
         return self.bytes
 
     @classmethod
-    def fromDict(cls, instruction_dict):
+    def fromDict(cls, instruction_dict, smda_function=None):
         smda_instruction = cls(None)
+        smda_instruction.smda_function = smda_function
         smda_instruction.offset = instruction_dict[0]
         smda_instruction.bytes = instruction_dict[1]
         smda_instruction.mnemonic = instruction_dict[2]
@@ -43,6 +46,9 @@ class SmdaInstruction:
 
     def toDict(self):
         return [self.offset, self.bytes, self.mnemonic, self.operands]
+
+    def __int__(self):
+        return self.offset
 
     def __str__(self):
         return "0x{:08x}: ({:>14s}) - {} {}".format(self.offset, self.bytes, self.mnemonic, self.operands)

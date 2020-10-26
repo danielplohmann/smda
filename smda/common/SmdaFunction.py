@@ -3,6 +3,7 @@ import hashlib
 import struct
 
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.Tarjan import Tarjan
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
 from .SmdaInstruction import SmdaInstruction
@@ -10,6 +11,7 @@ from .SmdaInstruction import SmdaInstruction
 
 class SmdaFunction(object):
 
+    smda_report = None
     offset = None
     blocks = None
     apirefs = None
@@ -25,7 +27,8 @@ class SmdaFunction(object):
     strongly_connected_components = None
     tfidf = None
 
-    def __init__(self, disassembly=None, function_offset=None, config=None):
+    def __init__(self, disassembly=None, function_offset=None, config=None, smda_report=None):
+        self.smda_report = smda_report
         if disassembly is not None and function_offset is not None:
             self._escaper = IntelInstructionEscaper if disassembly.binary_info.architecture in ["intel"] else None
             self.offset = function_offset
@@ -74,7 +77,7 @@ class SmdaFunction(object):
 
     def getBlocks(self):
         for _, block in sorted(self.blocks.items()):
-            yield block
+            yield SmdaBasicBlock(block, smda_function=self)
 
     def getPicHashAsLong(self):
         return self.pic_hash
@@ -121,13 +124,14 @@ class SmdaFunction(object):
     def _parseBlocks(self, block_dict):
         self.blocks = {}
         for offset, block in block_dict.items():
-            instructions = [SmdaInstruction(ins) for ins in block]
+            instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
             self.blocks[int(offset)] = instructions
             self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
 
     @classmethod
-    def fromDict(cls, function_dict, binary_info=None, version=None):
+    def fromDict(cls, function_dict, binary_info=None, version=None, smda_report=None):
         smda_function = cls(None)
+        smda_function.smda_report = smda_report
         smda_function.offset = function_dict["offset"]
         smda_function.blocks = {}
         for addr, block in function_dict["blocks"].items():
@@ -175,6 +179,9 @@ class SmdaFunction(object):
                 "tfidf": self.tfidf
             }
         }
+
+    def __int__(self):
+        return self.offset
 
     def __str__(self):
         return "0x{:08x}: (->{:>4d}, {:>4d}->) {:>3d} blocks, {:>4d} instructions.".format(self.offset, self.num_inrefs, self.num_outrefs, self.num_blocks, self.num_instructions)
