@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-10-27: v1.4.1 - 10-20% gain in processing speed by switching to `capstone.disasm_lite()`.
  * 2020-10-26: v1.4.0 - Adding SmdaBasicBlock. Some convenience code to ease intgration with capa. (GeekWeek edition!) 
  * 2020-09-07: v1.3.11 - Summarizable DisassemblyStatistics.
  * 2020-09-02: v1.3.10 - Fixed a bug where IDA Pro would crash when failing to demangle a function name while exporting a SMDA report.

@@ -23,6 +23,21 @@ from .BitnessAnalyzer import BitnessAnalyzer
 LOGGER = logging.getLogger(__name__)
 
 
+class SimpleIns(object):
+    address = None
+    size = None
+    mnemonic = None
+    op_str = None
+    bytes = None
+
+    def __init__(self, address, size, mnemonic, op_str, bytes):
+        self.address = address
+        self.size = size
+        self.mnemonic = mnemonic
+        self.op_str = op_str
+        self.bytes = bytes
+
+
 class IntelDisassembler(object):
 
     def __init__(self, config, forced_bitness=None):
@@ -121,30 +136,31 @@ class IntelDisassembler(object):
         return indirect_switch_bytes
 
     def _analyzeCallInstruction(self, i, state):
+        i_address, i_size, i_mnemonic, i_op_str = i
         state.setLeaf(False)
         # case = "FALLTHROUGH"
-        call_destination = self.getReferencedAddr(i.op_str)
-        if ":" in i.op_str.strip():
+        call_destination = self.getReferencedAddr(i_op_str)
+        if ":" in i_op_str:
             # case = "LONG-CALL"
             pass
-        if i.op_str.strip().startswith("dword ptr ["):
+        if i_op_str.startswith("dword ptr ["):
             # reg+offset is currently ignored as it is a minority of calls
             # case = "DWORD-PTR-REG"
-            if i.op_str.strip().startswith("dword ptr [0x"):
+            if i_op_str.startswith("dword ptr [0x"):
                 # case = "DWORD-PTR"
                 dereferenced = self.disassembly.dereferenceDword(call_destination)
                 if dereferenced is not None:
-                    state.addCodeRef(i.address, dereferenced)
-                    self._handleCallTarget(state, i.address, dereferenced)
-                    self._handleApiTarget(i.address, call_destination, dereferenced)
-        elif i.op_str.strip().startswith("0x"):
+                    state.addCodeRef(i_address, dereferenced)
+                    self._handleCallTarget(state, i_address, dereferenced)
+                    self._handleApiTarget(i_address, call_destination, dereferenced)
+        elif i_op_str.startswith("0x"):
             # case = "DIRECT"
-            self._handleCallTarget(state, i.address, call_destination)
-            self._handleApiTarget(i.address, call_destination, call_destination)
-        elif i.op_str.lower() in REGS_32BIT or i.op_str.lower() in REGS_64BIT:
+            self._handleCallTarget(state, i_address, call_destination)
+            self._handleApiTarget(i_address, call_destination, call_destination)
+        elif i_op_str.lower() in REGS_32BIT or i_op_str.lower() in REGS_64BIT:
             # case = "REG"
             # this is resolved by backtracking at the end of function analysis.
-            state.call_register_ins.append(i.address)
+            state.call_register_ins.append(i_address)
 
     def _handleCallTarget(self, state, from_addr, to_addr):
         if to_addr and self.disassembly.isAddrWithinMemoryImage(to_addr):
@@ -170,10 +186,11 @@ class IntelDisassembler(object):
         self.disassembly.apis[to_addr] = api_entry
 
     def _analyzeCondJmpInstruction(self, i, state):
-        state.addBlockToQueue(i.address + i.size)
-        jump_destination = self.getReferencedAddr(i.op_str)
+        i_address, i_size, i_mnemonic, i_op_str = i
+        state.addBlockToQueue(i_address + i_size)
+        jump_destination = self.getReferencedAddr(i_op_str)
         # case = "FALLTHROUGH"
-        self.tailcall_analyzer.addJump(i.address, jump_destination)
+        self.tailcall_analyzer.addJump(i_address, jump_destination)
         if jump_destination:
             if jump_destination in self.disassembly.functions:
                 # case = "TAILCALL!"
@@ -184,45 +201,47 @@ class IntelDisassembler(object):
                 pass
             else:
                 # case = "OFFSET-QUEUE"
-                state.addBlockToQueue(int(i.op_str, 16))
-            state.addCodeRef(i.address, int(i.op_str, 16), by_jump=True)
+                state.addBlockToQueue(int(i_op_str, 16))
+            state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
         state.setBlockEndingInstruction(True)
 
     def _analyzeLoopInstruction(self, i, state):
-        jump_destination = self.getReferencedAddr(i.op_str)
+        i_address, i_size, i_mnemonic, i_op_str = i
+        jump_destination = self.getReferencedAddr(i_op_str)
         if jump_destination:
-            state.addCodeRef(i.address, int(i.op_str, 16), by_jump=True)
+            state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
         # loops have two exits and should thus be handled as block ending instruction
-        state.addBlockToQueue(i.address + i.size)
+        state.addBlockToQueue(i_address + i_size)
         state.setBlockEndingInstruction(True)
 
     def _analyzeJmpInstruction(self, i, state):
+        i_address, i_size, i_mnemonic, i_op_str = i
         # case = "FALLTHROUGH"
-        if ":" in i.op_str.strip():
+        if ":" in i_op_str:
             # case = "LONG-JMP"
             pass
-        elif i.op_str.strip().startswith("dword ptr [0x"):
+        elif i_op_str.startswith("dword ptr [0x"):
             # case = "DWORD-PTR"
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
-            jump_destination = self.getReferencedAddr(i.op_str)
+            jump_destination = self.getReferencedAddr(i_op_str)
             dereferenced = self.disassembly.dereferenceDword(jump_destination)
-            state.addCodeRef(i.address, jump_destination, by_jump=True)
-            self.tailcall_analyzer.addJump(i.address, jump_destination)
+            state.addCodeRef(i_address, jump_destination, by_jump=True)
+            self.tailcall_analyzer.addJump(i_address, jump_destination)
             if dereferenced:
-                self._handleApiTarget(i.address, jump_destination, dereferenced)
-        elif i.op_str.strip().startswith("qword ptr [rip"):
+                self._handleApiTarget(i_address, jump_destination, dereferenced)
+        elif i_op_str.startswith("qword ptr [rip"):
             # case = "QWORD-PTR, RIP-relative"
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
-            rip = i.address + i.size
-            jump_destination = rip + self.getReferencedAddr(i.op_str)
+            rip = i_address + i_size
+            jump_destination = rip + self.getReferencedAddr(i_op_str)
             dereferenced = self.disassembly.dereferenceQword(jump_destination)
-            state.addCodeRef(i.address, jump_destination, by_jump=True)
-            self.tailcall_analyzer.addJump(i.address, jump_destination)
+            state.addCodeRef(i_address, jump_destination, by_jump=True)
+            self.tailcall_analyzer.addJump(i_address, jump_destination)
             if dereferenced:
-                self._handleApiTarget(i.address, jump_destination, dereferenced)
-        elif i.op_str.strip().startswith("0x"):
-            jump_destination = self.getReferencedAddr(i.op_str)
-            self.tailcall_analyzer.addJump(i.address, jump_destination)
+                self._handleApiTarget(i_address, jump_destination, dereferenced)
+        elif i_op_str.startswith("0x"):
+            jump_destination = self.getReferencedAddr(i_op_str)
+            self.tailcall_analyzer.addJump(i_address, jump_destination)
             if jump_destination in self.disassembly.functions:
                 # case = "TAILCALL!"
                 state.setSanelyEnding(True)
@@ -235,14 +254,14 @@ class IntelDisassembler(object):
                     pass
                 else:
                     # case = "OFFSET-QUEUE"
-                    state.addBlockToQueue(int(i.op_str, 16))
-            state.addCodeRef(i.address, int(i.op_str, 16), by_jump=True)
+                    state.addBlockToQueue(int(i_op_str, 16))
+            state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
         else:
             jumptable_targets = self.jumptable_analyzer.getJumpTargets(i, state)
             for target in jumptable_targets:
                 if self.disassembly.isAddrWithinMemoryImage(target):
                     state.addBlockToQueue(target)
-                    state.addCodeRef(i.address, target, by_jump=True)
+                    state.addCodeRef(i_address, target, by_jump=True)
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
 
@@ -269,63 +288,72 @@ class IntelDisassembler(object):
             state.chooseNextBlock()
             LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
             # in capstone, disassembly is more expensive than calling the function, so we use maximum x86/64 instruction size (14 bytes) as lookeahead.
-            cache = [i for i in self.capstone.disasm(self._getDisasmWindowBuffer(state.block_start), state.block_start)]
+            # disasm_lite() also provides up to 30% faster disassembly than disasm(), so we work with tuples instead of objects
+            cache = [i for i in self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start)]
             cache_pos = 0
-            previous_instruction = None
+            previous_address = None
+            previous_mnemonic = None
+            previous_op_str = None
             while True:
                 for i in cache:
-                    LOGGER.debug("  analyzeFunction() now processing instruction @0x%08x: %s", i.address, i.mnemonic + " " + i.op_str)
-                    cache_pos += i.size
+                    i_address, i_size, i_mnemonic, i_op_str = i
+                    i_op_str = i_op_str.strip()
+                    i_relative_address = i_address - self.disassembly.binary_info.base_addr
+                    i_bytes = self.disassembly.binary_info.binary[i_relative_address:i_relative_address + i_size]
+                    LOGGER.debug("  analyzeFunction() now processing instruction @0x%08x: %s", i_address, i_mnemonic + " " + i_op_str)
+                    cache_pos += i_size
                     state.setNextInstructionReachable(True)
                     # count appearences of "suspicious" byte patterns (like 00 00) that indicate non-function code
-                    if i.bytes == DOUBLE_ZERO:
+                    if i_bytes == DOUBLE_ZERO:
                         state.suspicious_ins_count += 1
-                        LOGGER.debug("    analyzeFunction() found suspicious function @0x%08x", i.address)
+                        LOGGER.debug("    analyzeFunction() found suspicious function @0x%08x", i_address)
                         if state.suspicious_ins_count > 1:
-                            self.fc_manager.updateAnalysisAborted(start_addr, "too many suspicious instructions @0x%08x" % i.address)
+                            self.fc_manager.updateAnalysisAborted(start_addr, "too many suspicious instructions @0x%08x" % i_address)
                             return state
-                    if i.mnemonic in CALL_INS:
+                    if i_mnemonic in CALL_INS:
                         self._analyzeCallInstruction(i, state)
-                    elif i.mnemonic in JMP_INS:
+                    elif i_mnemonic in JMP_INS:
                         self._analyzeJmpInstruction(i, state)
-                    elif i.mnemonic in LOOP_INS:
+                    elif i_mnemonic in LOOP_INS:
                         self._analyzeLoopInstruction(i, state)
-                    elif i.mnemonic in CJMP_INS:
+                    elif i_mnemonic in CJMP_INS:
                         self._analyzeCondJmpInstruction(i, state)
-                    elif i.mnemonic.startswith("j"):
-                        LOGGER.error("unsupported jump @0x%08x (0x%08x): %s %s", i.address, start_addr, i.mnemonic, i.op_str)
+                    elif i_mnemonic.startswith("j"):
+                        LOGGER.error("unsupported jump @0x%08x (0x%08x): %s %s", i_address, start_addr, i_mnemonic, i_op_str)
                         # we do not analyze any potential exception handler (tricks), so treat breakpoints as exit condition
-                    elif i.mnemonic in RET_INS:
+                    elif i_mnemonic in RET_INS:
                         self._analyzeEndInstruction(state)
-                        LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i.address)
-                        if previous_instruction and previous_instruction.mnemonic == "push":
-                            push_ret_destination = self.getReferencedAddr(previous_instruction.op_str)
+                        LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
+                        if previous_address and previous_mnemonic == "push":
+                            push_ret_destination = self.getReferencedAddr(previous_op_str)
                             if self.disassembly.isAddrWithinMemoryImage(push_ret_destination):
-                                LOGGER.debug("  analyzeFunction() found push-return jump obfuscation: @0x%08x", i.address)
+                                LOGGER.debug("  analyzeFunction() found push-return jump obfuscation: @0x%08x", i_address)
                                 state.addBlockToQueue(push_ret_destination)
-                                state.addCodeRef(i.address, push_ret_destination, by_jump=True)
-                    elif i.mnemonic in ["int3", "hlt"]:
+                                state.addCodeRef(i_address, push_ret_destination, by_jump=True)
+                    elif i_mnemonic in ["int3", "hlt"]:
                         self._analyzeEndInstruction(state)
-                        LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i.address)
-                    elif previous_instruction and i.address != start_addr and previous_instruction.mnemonic == "call":
-                        instruction_sequence = [ins for ins in self.capstone.disasm(self._getDisasmWindowBuffer(i.address), i.address)]
-                        if self.fc_manager.isAlignmentSequence(instruction_sequence) or self.fc_manager.isFunctionCandidate(i.address):
+                        LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
+                    elif previous_address and i_address != start_addr and previous_mnemonic == "call":
+                        instruction_sequence = [ins for ins in self.capstone.disasm(self._getDisasmWindowBuffer(i_address), i_address)]
+                        if self.fc_manager.isAlignmentSequence(instruction_sequence) or self.fc_manager.isFunctionCandidate(i_address):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
-                            LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i.address)
+                            LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i_address)
                             state.setBlockEndingInstruction(True)
                             state.endBlock()
                             state.setSanelyEnding(True)
                             if self.fc_manager.isAlignmentSequence(instruction_sequence):
-                                next_aligned_address = previous_instruction.address + (16 - previous_instruction.address % 16)
+                                next_aligned_address = previous_address + (16 - previous_address % 16)
                                 LOGGER.debug("  Adding: 0x%x as candidate.", next_aligned_address)
                                 self.fc_manager.addCandidate(next_aligned_address, is_gap=True)
                             break
-                    previous_instruction = i
-                    if not i.address in self.disassembly.code_map and not i.address in self.disassembly.data_map and not state.isProcessed(i.address):
-                        LOGGER.debug("  analyzeFunction() booked instruction @0x%08x: %s for processed state", i.address, i.mnemonic + " " + i.op_str)
-                        state.addInstruction(i)
-                    elif i.address in self.disassembly.code_map:
-                        LOGGER.debug("  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)", i.address, i.mnemonic + " " + i.op_str, self.disassembly.ins2fn[i.address])
+                    previous_address = i_address
+                    previous_mnemonic = i_mnemonic
+                    previous_op_str = i_op_str
+                    if not i_address in self.disassembly.code_map and not i_address in self.disassembly.data_map and not state.isProcessed(i_address):
+                        LOGGER.debug("  analyzeFunction() booked instruction @0x%08x: %s for processed state", i_address, i_mnemonic + " " + i_op_str)
+                        state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
+                    elif i_address in self.disassembly.code_map:
+                        LOGGER.debug("  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)", i_address, i_mnemonic + " " + i_op_str, self.disassembly.ins2fn[i_address])
                         state.setBlockEndingInstruction(True)
                         state.setCollision(True)
                     else:
@@ -336,7 +364,7 @@ class IntelDisassembler(object):
                         break
                 else:
                     #if the inner loop did not break, we need to refill the cache in order to finish the block-analysis
-                    cache = [i for i in self.capstone.disasm(self._getDisasmWindowBuffer(state.block_start + cache_pos), state.block_start + cache_pos)]
+                    cache = [i for i in self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start + cache_pos), state.block_start + cache_pos)]
                     if not cache:
                         break
                     continue
@@ -346,8 +374,8 @@ class IntelDisassembler(object):
                 if i is not None:
                     LOGGER.debug("No block submitted, last instruction: 0x%08x -> 0x%08x %s || %s",
                                  start_addr,
-                                 i.address,
-                                 i.mnemonic + " " + i.op_str,
+                                 i_address,
+                                 i_mnemonic + " " + i_op_str,
                                  self.fc_manager.getFunctionCandidate(start_addr))
                 else:
                     LOGGER.debug("No block submitted with no ins, last instruction: 0x%08x || %s",

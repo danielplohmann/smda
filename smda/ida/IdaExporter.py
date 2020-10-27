@@ -22,9 +22,10 @@ class IdaExporter(object):
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
 
     def _convertIdaInsToSmda(self, offset, instruction_bytes):
-        cache = [i for i in self.capstone.disasm(instruction_bytes, offset)]
+        cache = [i for i in self.capstone.disasm_lite(instruction_bytes, offset)]
         if cache:
-            smda_ins = (cache[0].address, cache[0].size, cache[0].mnemonic, cache[0].op_str, cache[0].bytes)
+            i_address, i_size, i_mnemonic, i_op_str = []
+            smda_ins = (i_address, i_size, i_mnemonic, i_op_str, instruction_bytes)
         else:
             # record error and emit placeholder instruction
             bytes_as_hex = "".join(["%02x" % c for c in bytearray(instruction_bytes)])

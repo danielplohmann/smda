@@ -55,8 +55,8 @@ class JumpTableAnalyzer(object):
                 break
         return jumptable_size
 
-    def _directHandler(self, jump_instruction, state, backtracked):
-        register = jump_instruction.op_str.strip().lower()
+    def _directHandler(self, jump_instruction_op_str, state, backtracked):
+        register = jump_instruction_op_str.lower()
         data_ref_instruction_addr = None
         off_jumptable = None
         for instr in backtracked[:0:-1]:
@@ -135,7 +135,7 @@ class JumpTableAnalyzer(object):
                     continue
         return sorted(list(jump_targets))
 
-    def _resolveExplicitTable(self, jump_instruction, state, jumptable_address, jumptable_size=None):
+    def _resolveExplicitTable(self, jump_instruction_address, state, jumptable_address, jumptable_size=None):
         jumptable_size = jumptable_size if jumptable_size is not None else 0xFF
         jumptable_addresses = []
         bitness = self.disassembly.binary_info.bitness
@@ -148,25 +148,26 @@ class JumpTableAnalyzer(object):
                     table_entry = struct.unpack("Q", self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size))[0]
                 if not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
-                state.addDataRef(jump_instruction.address, jumptable_address + i * entry_size, size=entry_size)
+                state.addDataRef(jump_instruction_address, jumptable_address + i * entry_size, size=entry_size)
                 jumptable_addresses.append(table_entry)
         return jumptable_addresses
 
     def getJumpTargets(self, jump_instruction, state):
+        jump_instruction_address, jump_instruction_size, jump_instruction_mnemonic, jump_instruction_op_str = jump_instruction
         table_offsets = []
         off_jumptable = None
-        backtracked = state.backtrackInstructions(jump_instruction.address, 50)
+        backtracked = state.backtrackInstructions(jump_instruction_address, 50)
         backtracked_sequence = "-".join([ins[2] for ins in backtracked[::-1]][:3])
         jumptable_size = self._findJumpTableSize(backtracked)
-        if False and jump_instruction:
-            print("0x%x %s %s -> %s" % (jump_instruction.address, jump_instruction.mnemonic, jump_instruction.op_str, backtracked_sequence))
-        if jump_instruction.op_str.strip().startswith("dword ptr [") or jump_instruction.op_str.strip().startswith("qword ptr ["):
-            off_jumptable = self.disassembler.getReferencedAddr(jump_instruction.op_str)
-            table_offsets = self._resolveExplicitTable(jump_instruction, state, off_jumptable, jumptable_size)
+        if False and jump_instruction_address:
+            print("0x%x %s %s -> %s" % (jump_instruction_address, jump_instruction_mnemonic, jump_instruction_op_str, backtracked_sequence))
+        if jump_instruction_op_str.startswith("dword ptr [") or jump_instruction_op_str.startswith("qword ptr ["):
+            off_jumptable = self.disassembler.getReferencedAddr(jump_instruction_op_str)
+            table_offsets = self._resolveExplicitTable(jump_instruction_address, state, off_jumptable, jumptable_size)
         else:
             # 32bit cases typically load into target register directly
             if backtracked_sequence.startswith("mov"):
-                off_jumptable = self._directHandler(jump_instruction, state, backtracked)
+                off_jumptable = self._directHandler(jump_instruction_op_str, state, backtracked)
                 table_offsets = self._extractDirectTableOffsets(jumptable_size, off_jumptable)
             elif backtracked_sequence.startswith("add-movsxd"):
                 jumptable_size = self._findJumpTableSize(backtracked)

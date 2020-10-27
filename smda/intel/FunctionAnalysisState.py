@@ -54,15 +54,15 @@ class FunctionAnalysisState(object):
             # self.blocks.append(self.current_block)
         self.current_block = []
 
-    def addInstruction(self, i):
-        ins = (i.address, i.size, i.mnemonic, i.op_str, i.bytes)
+    def addInstruction(self, i_address, i_size, i_mnemonic, i_op_str, i_bytes):
+        ins = (i_address, i_size, i_mnemonic, i_op_str, i_bytes)
         self.instructions.append(ins)
         self.instruction_start_bytes.add(ins[0])
         self.current_block.append(ins)
-        for byte in range(i.size):
-            self.processed_bytes.add(i.address + byte)
+        for byte in range(i_size):
+            self.processed_bytes.add(i_address + byte)
         if self.is_next_instruction_reachable:
-            self.addCodeRef(i.address, i.address + i.size, self.is_jmp)
+            self.addCodeRef(i_address, i_address + i_size, self.is_jmp)
         self.is_jmp = False
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):

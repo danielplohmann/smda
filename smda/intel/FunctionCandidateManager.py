@@ -224,13 +224,15 @@ class FunctionCandidateManager(object):
                 self.gap_pointer += 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
-            ins_buf = [i for i in self.capstone.disasm(self.disassembly.getRawBytes(gap_offset, 15), gap_offset)]
-            if ins_buf and ins_buf[0].mnemonic == "nop":
-                nop_instruction = ins_buf[0].mnemonic + " " + ins_buf[0].op_str
-                nop_length = len(ins_buf[0].bytes)
-                LOGGER.debug("nextGapCandidate() found nop instruction (%s) - gap_ptr += %d: 0x%08x", nop_instruction, nop_length, self.gap_pointer)
-                self.gap_pointer += nop_length
-                continue
+            ins_buf = [i for i in self.capstone.disasm_lite(self.disassembly.getRawBytes(gap_offset, 15), gap_offset)]
+            if ins_buf:
+                i_address, i_size, i_mnemonic, i_op_str = ins_buf[0]
+                if  i_mnemonic == "nop":
+                    nop_instruction = i_mnemonic + " " + i_op_str
+                    nop_length = i_size
+                    LOGGER.debug("nextGapCandidate() found nop instruction (%s) - gap_ptr += %d: 0x%08x", nop_instruction, nop_length, self.gap_pointer)
+                    self.gap_pointer += nop_length
+                    continue
             # try to find effective NOPs and skip them.
             found_multi_byte_nop = False
             for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
