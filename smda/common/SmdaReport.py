@@ -2,6 +2,8 @@ import datetime
 import json
 import os
 
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
+
 from smda.DisassemblyStatistics import DisassemblyStatistics
 from .SmdaFunction import SmdaFunction
 from .BinaryInfo import BinaryInfo
@@ -33,6 +35,9 @@ class SmdaReport(object):
     timestamp = None
     version = None
     xcfg = None
+
+    # in case we need to re-disassemble with more detail, we hold an initialized capstone instance as singleton
+    capstone = None
 
     def __init__(self, disassembly=None, config=None):
         if disassembly is not None:
@@ -96,6 +101,12 @@ class SmdaReport(object):
     def getFunctions(self):
         for _, smda_function in sorted(self.xcfg.items()):
             yield smda_function
+
+    def getCapstone(self):
+        if self.capstone is None:
+            self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
+            self.capstone.detail = True
+        return self.capstone
 
     @classmethod
     def fromFile(cls, file_path):

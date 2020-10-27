@@ -14,6 +14,12 @@ class SmdaInstruction:
             self.mnemonic = ins_list[2]
             self.operands = ins_list[3]
 
+    def getDetailed(self):
+        capstone = self.smda_function.smda_report.getCapstone()
+        with_details = [i for i in capstone.disasm(bytes.fromhex(self.bytes), self.offset)]
+        assert len(with_details) == 1
+        return with_details[0]
+
     def getMnemonicGroup(self, escaper):
         if escaper:
             return escaper.escapeMnemonic(self.mnemonic)
