@@ -1,3 +1,6 @@
+from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+from capstone.x86 import X86_OP_IMM, X86_OP_MEM
+
 class SmdaInstruction:
 
     smda_function = None
@@ -14,6 +17,22 @@ class SmdaInstruction:
             self.bytes = ins_list[1]
             self.mnemonic = ins_list[2]
             self.operands = ins_list[3]
+
+    def getDataRefs(self):
+        if self.getMnemonicGroup(IntelInstructionEscaper) != "C":
+            detailed = self.getDetailed()
+            if len(detailed.operands) > 0:
+                for i in detailed.operands:
+                    value = None
+                    if i.type == X86_OP_IMM:
+                        value = i.imm
+                    if i.type == X86_OP_MEM:
+                        value = i.mem.disp
+                        if detailed.reg_name(i.mem.base) == "rip":
+                            # add RIP value
+                            value += detailed.address + detailed.size
+                    if value is not None and self.smda_function.smda_report.isAddrWithinMemoryImage(value):
+                        yield value
 
     def getDetailed(self):
         if self.detailed is None:
