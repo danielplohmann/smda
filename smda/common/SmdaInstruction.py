@@ -5,6 +5,7 @@ class SmdaInstruction:
     bytes = None
     mnemonic = None
     operands = None
+    detailed = None
 
     def __init__(self, ins_list=None, smda_function=None):
         self.smda_function = smda_function
@@ -15,10 +16,12 @@ class SmdaInstruction:
             self.operands = ins_list[3]
 
     def getDetailed(self):
-        capstone = self.smda_function.smda_report.getCapstone()
-        with_details = [i for i in capstone.disasm(bytes.fromhex(self.bytes), self.offset)]
-        assert len(with_details) == 1
-        return with_details[0]
+        if self.detailed is None:
+            capstone = self.smda_function.smda_report.getCapstone()
+            with_details = [i for i in capstone.disasm(bytes.fromhex(self.bytes), self.offset)]
+            assert len(with_details) == 1
+            self.detailed = with_details[0]
+        return self.detailed
 
     def getMnemonicGroup(self, escaper):
         if escaper:

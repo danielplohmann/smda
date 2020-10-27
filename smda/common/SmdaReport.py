@@ -108,6 +108,9 @@ class SmdaReport(object):
             self.capstone.detail = True
         return self.capstone
 
+    def isAddrWithinMemoryImage(self, offset):
+        return self.base_addr <= offset < self.base_addr + self.binary_size
+
     @classmethod
     def fromFile(cls, file_path):
         smda_json = {}
