@@ -46,6 +46,8 @@ class Disassembler(object):
         try:
             self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
+            if self.config.STORE_BUFFER:
+                smda_report.buffer = file_content
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
             smda_report = self._createErrorReport(start, exc)
@@ -59,6 +61,8 @@ class Disassembler(object):
             binary_info.bitness = bitness
             binary_info.is_buffer = True
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
+            if self.config.STORE_BUFFER:
+                smda_report.buffer = file_content
         except Exception as exc:
             print("-> an error occured (", str(exc), ").")
             smda_report = self._createErrorReport(start, exc)

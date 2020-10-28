@@ -1,6 +1,11 @@
 import datetime
 import json
 import os
+import zipfile
+try:
+    from StringIO import StringIO ## for Python 2
+except ImportError:
+    from io import StringIO ## for Python 3
 
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
@@ -16,6 +21,7 @@ class SmdaReport(object):
     binary_size = None
     binweight = None
     bitness = None
+    buffer = None
     code_areas = None
     component = None
     confidence_threshold = None
@@ -39,13 +45,14 @@ class SmdaReport(object):
     # in case we need to re-disassemble with more detail, we hold an initialized capstone instance as singleton
     capstone = None
 
-    def __init__(self, disassembly=None, config=None):
+    def __init__(self, disassembly=None, config=None, buffer=None):
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.base_addr = disassembly.binary_info.base_addr
             self.binary_size = disassembly.binary_info.binary_size
             self.binweight = 0
             self.bitness = disassembly.binary_info.bitness
+            self.buffer = buffer
             self.code_areas = disassembly.binary_info.code_areas
             self.component = disassembly.binary_info.component
             self.confidence_threshold = disassembly.getConfidenceThreshold()
@@ -95,6 +102,9 @@ class SmdaReport(object):
             sum_instructions += function.num_instructions
         return sum_instructions
 
+    def getBuffer(self):
+        return self.buffer
+
     def getFunction(self, function_addr):
         return self.xcfg[function_addr] if function_addr in self.xcfg else None
 
@@ -110,6 +120,20 @@ class SmdaReport(object):
 
     def isAddrWithinMemoryImage(self, offset):
         return self.base_addr <= offset < self.base_addr + self.binary_size
+
+    def _packBuffer(self, buffer):
+        # TODO
+        # create zip
+        # XOR with some key
+        # base64
+        return b""
+
+    def _unpackBuffer(self, buffer):
+        # TODO
+        # de-base64
+        # XOR with some key
+        # read from zip
+        return b""
 
     @classmethod
     def fromFile(cls, file_path):
