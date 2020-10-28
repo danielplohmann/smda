@@ -7,6 +7,7 @@ import logging
 import lief
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ class WinApiResolver(AbstractLabelProvider):
                 for func in imported_library.entries:
                     if func.name:
                         self._api_map["lief"][func.iat_address + binary_info.base_addr] = (imported_library.name.lower(), func.name)
+                    elif func.is_ordinal:
+                        resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
+                        ordinal_name = resolved_ordinal if resolved_ordinal else "#%s" % func.ordinal
+                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (imported_library.name.lower(), ordinal_name)
 
     def setOsName(self, os_name):
         self._os_name = os_name
