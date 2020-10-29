@@ -36,6 +36,7 @@ class FunctionAnalysisState(object):
         self.is_tailcall_function = False
         self.is_leaf_function = True
         self.is_recursive = False
+        self.is_thunk_call = False
         self.label = ""
 
     def chooseNextBlock(self):
@@ -122,6 +123,8 @@ class FunctionAnalysisState(object):
             self.disassembly.recursive_functions.add(self.start_addr)
         if self.is_leaf_function:
             self.disassembly.leaf_functions.add(self.start_addr)
+        if self.is_thunk_call:
+            self.disassembly.thunk_functions.add(self.start_addr)
 
     def finalizeAnalysis(self, as_gap=False):
         if as_gap:
@@ -231,6 +234,9 @@ class FunctionAnalysisState(object):
 
     def setRecursion(self, is_recursive):
         self.is_recursive = is_recursive
+
+    def setThunkCall(self, is_thunk_call):
+        self.is_thunk_call = is_thunk_call
 
     def setLeaf(self, is_leaf):
         self.is_leaf_function = is_leaf

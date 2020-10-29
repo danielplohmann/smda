@@ -21,6 +21,7 @@ class DisassemblyResult(object):
         self.functions = {}
         self.recursive_functions = set([])
         self.leaf_functions = set([])
+        self.thunk_functions = set([])
         self.failed_analysis_addr = []
         self.function_borders = {}
         # stored as key: int(i.address) = (i.size, i.mnemonic, i.op_str)

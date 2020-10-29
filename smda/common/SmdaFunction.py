@@ -75,6 +75,9 @@ class SmdaFunction(object):
     def num_returns(self):
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
 
+    def isThunkCall(self):
+        return "u" in self.characteristics
+
     def getBlocks(self):
         for _, block in sorted(self.blocks.items()):
             yield SmdaBasicBlock(block, smda_function=self)
@@ -87,7 +90,7 @@ class SmdaFunction(object):
 
     def getInstructions(self):
         for block in self.getBlocks():
-            for ins in block:
+            for ins in block.getInstructions():
                 yield ins
 
     def getInstructionsForBlock(self, offset):
