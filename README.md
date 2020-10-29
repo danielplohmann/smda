@@ -57,7 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2020-10-29: v1.4.9 - Resolves 64bit API calls of style `call qword ptr [rip + offset]`.
+ * 2020-10-29: v1.4.10 - Resolves 64bit API calls of style `call qword ptr [rip + offset]` and more register-based API calls in general (THX: @jcrussell).
  * 2020-10-29: v1.4.8 - Bugfixes. Verbose mode added (THX: @jcrussell).
  * 2020-10-28: v1.4.6 - WinApiResolver now tries to resolve import by ordinal to their name if it is known - can be extended in the database of OrdinalHelper.
  * 2020-10-28: v1.4.5 - Store the (mapped) buffer that was used to do disassembly along inside a SmdaReport - goal: enable to read strings/bytes at offsets at a later time.

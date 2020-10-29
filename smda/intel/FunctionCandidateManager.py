@@ -463,3 +463,9 @@ class FunctionCandidateManager(object):
                 # define data bytes inbetween
                 for offset in range(10):
                     self.disassembly.data_map.add(stub_addr + 6 + offset)
+
+    def locateExceptionHandlerCandidates(self):
+        # 64bit only - if we have a .pdata section describing exception handlers, we extract entries of guaranteed function starts from it.
+        # TODO 2020-10-29 continue here and extract function start candidates
+        if self.disassembly.binary_info.bitness == 64:
+            return
