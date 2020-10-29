@@ -153,6 +153,13 @@ class IntelDisassembler(object):
                     state.addCodeRef(i_address, dereferenced)
                     self._handleCallTarget(state, i_address, dereferenced)
                     self._handleApiTarget(i_address, call_destination, dereferenced)
+        elif i_op_str.startswith("qword ptr [rip"):
+            rip = i_address + i_size
+            call_destination = rip + self.getReferencedAddr(i_op_str)
+            dereferenced = self.disassembly.dereferenceQword(call_destination)
+            state.addCodeRef(i_address, call_destination)
+            if dereferenced:
+                self._handleApiTarget(i_address, call_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
             self._handleCallTarget(state, i_address, call_destination)
@@ -174,6 +181,7 @@ class IntelDisassembler(object):
             dll, api = self.resolveApi(to_addr, dereferenced)
             if dll and api:
                 self._updateApiInformation(from_addr, dereferenced, dll, api)
+                return (dll, api)
             else:
                 LOGGER.debug("potentially uncovered DLL address: 0x%08x", to_addr)
 
