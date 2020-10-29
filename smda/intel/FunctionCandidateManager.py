@@ -335,6 +335,13 @@ class FunctionCandidateManager(object):
         self.candidates[addr].setIsSymbol(True)
         self.candidates[addr].setInitialCandidate(True)
 
+    def addExceptionCandidate(self, addr):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        self.candidates[addr].setIsExceptionHandler(True)
+        self.candidates[addr].setInitialCandidate(True)
+
     def resolvePointerReference(self, offset):
         if self.bitness == 32:
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
@@ -374,6 +381,7 @@ class FunctionCandidateManager(object):
         self.locatePrologueCandidates()
         self.locateLangSpecCandidates()
         self.locateStubChainCandidates()
+        self.locateExceptionHandlerCandidates()
         self.identified_alignment = self._identifyAlignment()
 
     def _buildQueue(self):
@@ -468,4 +476,13 @@ class FunctionCandidateManager(object):
         # 64bit only - if we have a .pdata section describing exception handlers, we extract entries of guaranteed function starts from it.
         # TODO 2020-10-29 continue here and extract function start candidates
         if self.disassembly.binary_info.bitness == 64:
-            return
+            for section_info in self.disassembly.binary_info.getSections():
+                section_name, section_va_start, section_va_end = section_info
+                if section_name == ".pdata":
+                    rva_start = section_va_start - self.disassembly.binary_info.base_addr
+                    rva_end = section_va_end - self.disassembly.binary_info.base_addr
+                    for offset in range(rva_start, rva_end + 1, 12):
+                        rva_function_candidate = struct.unpack("I", self.disassembly.binary_info.binary[offset:offset + 4])[0]
+                        self.addExceptionCandidate(self.disassembly.binary_info.base_addr + rva_function_candidate)
+                        if not rva_function_candidate:
+                            break

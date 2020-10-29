@@ -28,6 +28,7 @@ class FunctionCandidate(object):
         self.function_start_score = None
         self.is_stub = False
         self.is_initial_candidate = False
+        self.is_exception_handler = False
 
     def setTfIdf(self, tfidf_score):
         self._tfidf_score = tfidf_score
@@ -102,6 +103,10 @@ class FunctionCandidate(object):
         self.is_symbol = is_symbol
         self._score = None
 
+    def setIsExceptionHandler(self, is_exception_handler):
+        self.is_exception_handler = is_exception_handler
+        self._score = None
+
     def setIsStub(self, is_stub):
         self.is_stub = is_stub
         self._score = None
@@ -120,6 +125,7 @@ class FunctionCandidate(object):
     def calculateScore(self):
         score = 0
         score += 10000 if self.is_symbol else 0
+        score += 5000 if self.is_exception_handler else 0
         score += 1000 if self.is_stub else 0
         score += 100 if self.lang_spec is not None else 0
         score += self.getFunctionStartScore()
