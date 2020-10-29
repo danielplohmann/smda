@@ -52,12 +52,21 @@ class IndirectCallAnalyzer(object):
                 #mov <reg>, dword ptr [<addr>]
                 match3 = re.match(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$", ins[3])
                 if match3:
-                    dword = self.getDword(int(match3.group("addr"), 16))
-                    if dword:
-                        registers[match3.group("reg")] = dword
-                        LOGGER.debug("**moved value 0x%08x to register %s", dword, match3.group("reg"))
-                        if match3.group("reg") == register_name:
-                            abs_value_found = True
+                    # HACK: test to see if the address points to a import and
+                    # use that instead of the actual memory value
+                    addr = int(match3.group("addr"), 16)
+                    dll, api = self.disassembler.resolveApi(addr, addr)
+                    if dll and api:
+                        registers[match3.group("reg")] = addr
+                        LOGGER.debug("**moved value 0x%08x to register %s", addr, match3.group("reg"))
+                        abs_value_found = True
+                    else:
+                        dword = self.getDword(addr)
+                        if dword:
+                            registers[match3.group("reg")] = dword
+                            LOGGER.debug("**moved value 0x%08x to register %s", dword, match3.group("reg"))
+                            if match3.group("reg") == register_name:
+                                abs_value_found = True
                 #mov <reg>, qword ptr [reg + <addr>]
                 match4 = re.match(r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$", ins[3])
                 if match4:
