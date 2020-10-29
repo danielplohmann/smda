@@ -1,14 +1,25 @@
 # -*- coding: utf-8 -*-
-
+import sys
 from setuptools import setup, find_packages
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+
+requirements = ["capstone"]
+
+if sys.version_info >= (3, 0):
+    # py3
+    requirements.append("lief")
+else:
+    # py2 - newer LIEF is Python3 only
+    requirements.append("lief==0.9.0")
+
+
 setup(
     name='smda',
     # note to self: always change this in config as well.
-    version='1.4.6',
+    version='1.4.7',
     description='A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.',
     long_description_content_type="text/markdown",
     long_description=long_description,
@@ -17,10 +28,7 @@ setup(
     url='https://github.com/danielplohmann/smda',
     license="BSD 2-Clause",
     packages=find_packages(exclude=('tests', 'docs')),
-    install_requires=[
-        'capstone',
-        'lief'
-    ],
+    install_requires=requirements,
     data_files=[
         ('', ['LICENSE']),
     ],

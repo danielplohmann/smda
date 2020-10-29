@@ -1,5 +1,6 @@
 import datetime
 import struct
+import sys
 
 from smda.common.BasicBlock import BasicBlock
 
@@ -91,12 +92,21 @@ class DisassemblyResult(object):
             bblocks.append(bblock)
         return bblocks
 
+    def _transformInstruction(self, ins_tuple):
+        ins_addr, _, ins_mnem, ins_ops, ins_raw_bytes = ins_tuple
+        # python3  and python2 do handling differently...
+        if sys.version_info >= (3, 0):
+            ins_hexbytes = "".join(["%02x" % c for c in ins_tuple[4]])
+        else:
+            ins_hexbytes = ins_raw_bytes.encode("hex")
+        return [ins_addr, ins_hexbytes, str(ins_mnem), str(ins_ops)]
+
     def getBlocksAsDict(self, function_addr):
         blocks = {}
         for block in self.functions[function_addr]:
             instructions = []
             for ins in block:
-                instructions.append([ins[0], "".join(["%02x" % c for c in ins[4]]), str(ins[2]), str(ins[3])])
+                instructions.append(self._transformInstruction(ins))
             blocks[instructions[0][0]] = instructions
         return blocks
 
