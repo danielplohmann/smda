@@ -58,8 +58,9 @@ class IndirectCallAnalyzer(object):
                     dll, api = self.disassembler.resolveApi(addr, addr)
                     if dll and api:
                         registers[match3.group("reg")] = addr
-                        LOGGER.debug("**moved value 0x%08x to register %s", addr, match3.group("reg"))
-                        abs_value_found = True
+                        LOGGER.debug("**moved API ref (%s:%s) @0x%08x to register %s", dll, api, addr, match3.group("reg"))
+                        if match3.group("reg") == register_name:
+                            abs_value_found = True
                     else:
                         dword = self.getDword(addr)
                         if dword:
@@ -97,8 +98,8 @@ class IndirectCallAnalyzer(object):
             if abs_value_found:
                 candidate = registers[register_name] if register_name in registers else None
                 self.state.setLeaf(False)
-                LOGGER.debug("candidate: 0x%x - %s, register: %s", candidate, ins[3], register_name)
                 if candidate:
+                    LOGGER.debug("candidate: 0x%x - %s, register: %s", candidate, ins[3], register_name)
                     dll, api = self.disassembler.resolveApi(candidate, candidate)
                     if dll and api:
                         LOGGER.debug("successfully resolved: %s %s", dll, api)
@@ -113,6 +114,9 @@ class IndirectCallAnalyzer(object):
                         self.disassembler.fc_manager.addCandidate(candidate, reference_source=self.current_calling_addr)
                     else:
                         LOGGER.debug("candidate not resolved")
+                else:
+                    LOGGER.debug("no candidate to resolved")
+
                 return True
         #process previous blocks
         if depth >= 0:
