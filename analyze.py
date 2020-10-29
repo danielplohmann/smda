@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import sys
 
 from smda.SmdaConfig import SmdaConfig
 from smda.Disassembler import Disassembler
@@ -35,32 +36,39 @@ if __name__ == "__main__":
     PARSER.add_argument('-d', '--pdb_path', type=str, default='', help='If available, use a PDB file to enhance disassembly (function offsets and names).')
     PARSER.add_argument('-b', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
     PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
+    PARSER.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable debug logging.')
     PARSER.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
 
 
     ARGS = PARSER.parse_args()
-    if ARGS.input_path:
-        SMDA_REPORT = None
-        INPUT_FILENAME = ""
-        if os.path.isfile(ARGS.input_path):
-            # optionally create and set up a config, e.g. when using ApiScout profiles for WinAPI import usage discovery
-            config = SmdaConfig()
-            logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
-            print("now analyzing {}".format(ARGS.input_path))
-            INPUT_FILENAME = os.path.basename(ARGS.input_path)
-            if ARGS.parse_header:
-                DISASSEMBLER = Disassembler(config)
-                SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
-            else:
-                BUFFER = readFileContent(ARGS.input_path)
-                BASE_ADDR = parseBaseAddrFromArgs(ARGS)
-                config.API_COLLECTION_FILES = {"win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])}
-                DISASSEMBLER = Disassembler(config)
-                SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR)
-                SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
-            print(SMDA_REPORT)
-        if SMDA_REPORT and os.path.isdir(ARGS.output_path):
-            with open(ARGS.output_path + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
-                json.dump(SMDA_REPORT.toDict(), fout, indent=1, sort_keys=True)
-    else:
+
+
+    if not ARGS.input_path:
         PARSER.print_help()
+        sys.exit(1)
+
+    # optionally create and set up a config, e.g. when using ApiScout profiles for WinAPI import usage discovery
+    config = SmdaConfig()
+    if ARGS.verbose:
+        config.LOG_LEVEL = logging.DEBUG
+    logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
+
+    SMDA_REPORT = None
+    INPUT_FILENAME = ""
+    if os.path.isfile(ARGS.input_path):
+        print("now analyzing {}".format(ARGS.input_path))
+        INPUT_FILENAME = os.path.basename(ARGS.input_path)
+        if ARGS.parse_header:
+            DISASSEMBLER = Disassembler(config)
+            SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
+        else:
+            BUFFER = readFileContent(ARGS.input_path)
+            BASE_ADDR = parseBaseAddrFromArgs(ARGS)
+            config.API_COLLECTION_FILES = {"win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])}
+            DISASSEMBLER = Disassembler(config)
+            SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR)
+            SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
+        print(SMDA_REPORT)
+    if SMDA_REPORT and os.path.isdir(ARGS.output_path):
+        with open(ARGS.output_path + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
+            json.dump(SMDA_REPORT.toDict(), fout, indent=1, sort_keys=True)
