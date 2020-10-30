@@ -29,6 +29,7 @@ class BinaryInfo(object):
 
     def getSections(self):
         pefile = lief.parse(bytearray(self.binary))
+        # TODO 20201030 might want to add ELF sections as well
         if not isinstance(pefile, lief.PE.Binary):
             return
         if pefile and pefile.sections:
