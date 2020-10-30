@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-10-30: v1.4.12 - Bugfix in IndirectCallHandler (THX: @jcrussell).
  * 2020-10-29: v1.4.11 - Populate exception handlers specified in PE64 `.pdata` section as FEPs.
  * 2020-10-29: v1.4.10 - Resolves 64bit API calls of style `call qword ptr [rip + offset]` and more register-based API calls in general (THX: @jcrussell).
  * 2020-10-29: v1.4.8 - Bugfixes. Verbose mode added (THX: @jcrussell).
