@@ -57,7 +57,8 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2020-10-30: v1.5.0 - PE section table now contained in SmdaReport and added `SmdaReport.getSection(offset)`.
+ * 2020-10-30: v1.5.2 - One bugfix, also removed one print and reduced logging priority for the message in case the PDB parser module is missing.
+ * 2020-10-30: v1.5.1 - PE section table now contained in SmdaReport and added `SmdaReport.getSection(offset)`.
  * 2020-10-30: v1.4.12 - Bugfix in IndirectCallHandler (THX: @jcrussell).
  * 2020-10-29: v1.4.11 - Populate exception handlers specified in PE64 `.pdata` section as FEPs.
  * 2020-10-29: v1.4.10 - Resolves 64bit API calls of style `call qword ptr [rip + offset]` and more register-based API calls in general (THX: @jcrussell).
@@ -105,6 +106,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 Thanks to Steffen Enders for his extensive contributions to this project.
 Thanks to Paul Hordiienko for adding symbol parsing support (ELF PDB).
+Thanks to Jonathan Crussell for helping me to beef up SMDA enough to make it a disassembler backend in capa!
 The project uses the implementation of Tarjan's Algorithm by Bas Westerbaan and the implementation of Lengauer-Tarjan's Algorithm for the DominatorTree by Armin Rigo.
 
 Pull requests welcome! :)

@@ -10,6 +10,10 @@
 #
 #   http://portal.acm.org/ft_gateway.cfm?id=357071
 
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
 class DominatorTree(object):
 
     def __init__(self, G, r):
@@ -108,7 +112,8 @@ def fix_graph(graph):
 def build_dominator_tree(G, r):
     expanded_graph = fix_graph(G)
     if not r in expanded_graph:
-        print("r not in G:", r, G)
+        # print("r not in G:", r, G)
+        LOGGER.debug("r not in G: %s %s", r, G)
         return None
     domtree = DominatorTree(expanded_graph, r)
     domtree.compute()

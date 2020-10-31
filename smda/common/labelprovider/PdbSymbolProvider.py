@@ -12,7 +12,7 @@ try:
     from pdbparse.undname import undname
 except:
     pdbparse = None
-    LOGGER.warning("3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available.")
+    LOGGER.debug("3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available.")
 
 
 class DummyOmap(object):

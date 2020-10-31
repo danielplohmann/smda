@@ -76,7 +76,7 @@ class SmdaFunction(object):
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
 
     def isThunkCall(self):
-        return "u" in self.characteristics
+        return "u" in self.characteristics if self.characteristics else False
 
     def getBlocks(self):
         for _, block in sorted(self.blocks.items()):
