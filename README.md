@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-11-05: v1.5.3 - Adjusted API thunk identification.
  * 2020-10-30: v1.5.2 - One bugfix, also removed one print and reduced logging priority for the message in case the PDB parser module is missing.
  * 2020-10-30: v1.5.1 - PE section table now contained in SmdaReport and added `SmdaReport.getSection(offset)`.
  * 2020-10-30: v1.4.12 - Bugfix in IndirectCallHandler (THX: @jcrussell).

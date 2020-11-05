@@ -75,8 +75,15 @@ class SmdaFunction(object):
     def num_returns(self):
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
 
-    def isThunkCall(self):
-        return "u" in self.characteristics if self.characteristics else False
+    def isApiThunk(self):
+        if self.num_instructions != 1:
+            return False
+        first_ins = self.blocks[self.offset][0]
+        if first_ins.mnemonic not in ["jmp", "call"]:
+            return False
+        if len(self.apirefs) == 0:
+            return False
+        return True
 
     def getBlocks(self):
         for _, block in sorted(self.blocks.items()):
