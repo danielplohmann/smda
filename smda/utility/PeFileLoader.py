@@ -1,14 +1,11 @@
 import struct
 import logging
 
+import lief
+
 LOG = logging.getLogger(__name__)
 
-LIEF_AVAILABLE = False
-try:
-    import lief
-    LIEF_AVAILABLE = True
-except:
-    LOG.warning("LIEF not available, will not be able to parse data from PE files.")
+
 
 class PeFileLoader(object):
 
@@ -16,8 +13,6 @@ class PeFileLoader(object):
 
     @staticmethod
     def isCompatible(data):
-        if not LIEF_AVAILABLE:
-            return False
         return data[:2] == b"MZ"
 
     @staticmethod
@@ -91,7 +86,7 @@ class PeFileLoader(object):
             if PeFileLoader.getBitness(binary) == 32:
                 base_addr = struct.unpack("I", binary[pe_offset + 0x34:pe_offset + 0x38])[0]
             elif PeFileLoader.getBitness(binary) == 64:
-                base_addr = struct.unpack("L", binary[pe_offset + 0x30:pe_offset + 0x38])[0]
+                base_addr = struct.unpack("Q", binary[pe_offset + 0x30:pe_offset + 0x38])[0]
         if base_addr:
             LOG.debug("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
         return base_addr
@@ -121,13 +116,20 @@ class PeFileLoader(object):
         return False
 
     @staticmethod
-    def __getCodeAreas(binary):
-        # TODO limit to executable sections
+    def getCodeAreas(binary):
+        pefile = lief.parse(bytearray(binary))
         code_areas = []
-        mapped_binary = PeFileLoader.mapBinary(binary)
-        base_addr = PeFileLoader.getBaseAddress(binary)
-        code_areas.append([base_addr, base_addr + len(mapped_binary)])
-        return code_areas
+        base_address = PeFileLoader.getBaseAddress(binary)
+        if pefile and pefile.sections:
+            for section in pefile.sections:
+                if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
+                    section_start = base_address + section.virtual_address
+                    section_size = section.virtual_size
+                    if section_size % 0x1000 != 0:
+                        section_size += 0x1000 - (section_size % 0x1000)
+                    section_end = section_start + section_size
+                    code_areas.append([section_start, section_end])
+        return PeFileLoader.mergeCodeAreas(code_areas)
 
     @staticmethod
     def mergeCodeAreas(code_areas):
@@ -143,19 +145,3 @@ class PeFileLoader(object):
             else:
                 merged_code_areas = merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2:]
         return merged_code_areas
-
-    @staticmethod
-    def getCodeAreas(binary):
-        pefile = lief.parse(bytearray(binary))
-        code_areas = []
-        base_address = PeFileLoader.getBaseAddress(binary)
-        if pefile and pefile.sections:
-            for section in pefile.sections:
-                if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
-                    section_start = base_address + section.virtual_address
-                    section_size = section.virtual_size
-                    if section_size % 0x1000 != 0:
-                        section_size += 0x1000 - (section_size % 0x1000)
-                    section_end = section_start + section_size
-                    code_areas.append([section_start, section_end])
-        return PeFileLoader.mergeCodeAreas(code_areas)
