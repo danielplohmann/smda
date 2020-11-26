@@ -41,25 +41,43 @@ class ElfFileLoader(object):
         # Attention: for Python 2.x use the cStringIO package for StringIO
         elffile = lief.parse(bytearray(binary))
         base_addr = ElfFileLoader.getBaseAddress(binary)
+        mapped_binary = b""
         LOGGER.debug("Assuming base address 0x%x for inference of reference counts (based on ELF header)", base_addr)
 
         # find begin of the first and end of the last section
-        max_virt_section_offset = 0
-        min_raw_section_offset = 0xFFFFFFFFFFFFFFFF
-        for section in elffile.sections:
-            # print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
-            if section.virtual_address:
-                max_virt_section_offset = max(max_virt_section_offset, section.size + section.virtual_address)
-                min_raw_section_offset = min(min_raw_section_offset, section.virtual_address)
+        if elffile.sections:
+            max_virt_section_offset = 0
+            min_raw_section_offset = 0xFFFFFFFFFFFFFFFF
+            for section in elffile.sections:
+                # print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
+                if section.virtual_address:
+                    max_virt_section_offset = max(max_virt_section_offset, section.size + section.virtual_address)
+                    min_raw_section_offset = min(min_raw_section_offset, section.virtual_address)
 
-        # copy binary to mapped_binary
-        if max_virt_section_offset:
-            mapped_binary = bytearray([0] * (max_virt_section_offset - base_addr))
-            mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
-        for section in elffile.sections:
-            if section.virtual_address:
-                rva = section.virtual_address - base_addr
-                mapped_binary[rva:rva + section.size] = section.content
+            # copy binary to mapped_binary
+            if max_virt_section_offset:
+                mapped_binary = bytearray([0] * (max_virt_section_offset - base_addr))
+                mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
+            for section in elffile.sections:
+                if section.virtual_address:
+                    rva = section.virtual_address - base_addr
+                    mapped_binary[rva:rva + section.size] = section.content
+        elif elffile.segments:
+            max_virt_segment_offset = 0
+            min_raw_segment_offset = 0xFFFFFFFFFFFFFFFF
+            for segment in elffile.segments:
+                if segment.virtual_address:
+                    max_virt_segment_offset = max(max_virt_segment_offset, segment.physical_size + segment.virtual_address)
+                    min_raw_segment_offset = min(min_raw_segment_offset, segment.virtual_address)
+
+            # copy binary to mapped_binary
+            if max_virt_segment_offset:
+                mapped_binary = bytearray([0] * (max_virt_segment_offset - base_addr))
+                mapped_binary[0:min_raw_segment_offset] = binary[0:min_raw_segment_offset]
+            for segment in elffile.segments:
+                if segment.virtual_address:
+                    rva = segment.virtual_address - base_addr
+                    mapped_binary[rva:rva + segment.physical_size] = segment.content
 
         return bytes(mapped_binary)
 

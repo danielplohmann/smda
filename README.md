@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-11-10: v1.5.6 - Now considering segments for content when ELF file has no sections (THX: @jcrussell).
  * 2020-11-10: v1.5.5 - Unmarshalling setting default value for older reports.
  * 2020-11-06: v1.5.4 - Minor fix on PE header parsing.
  * 2020-11-05: v1.5.3 - Adjusted API thunk identification.
