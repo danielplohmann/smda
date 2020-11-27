@@ -23,8 +23,8 @@ class FileLoader(object):
                 binary = inf.read()
         return binary
 
-    def _loadFile(self):
-        self._raw_data = self._loadRawFileContent()
+    def _loadFile(self, buffer=None):
+        self._raw_data = buffer if buffer is not None else self._loadRawFileContent()
         if self._map_file:
             for loader in self.file_loaders:
                 if loader.isCompatible(self._raw_data):

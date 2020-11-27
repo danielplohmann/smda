@@ -159,7 +159,7 @@ class SmdaReport(object):
         smda_report.binary_size = report_dict["binary_size"]
         smda_report.bitness = report_dict["bitness"]
         smda_report.code_areas = report_dict["code_areas"]
-        smda_report.code_sections = [(binascii.unhexlify(section[0]), section[1], section[2]) for section in report_dict["code_sections"]] if "code_sections" in report_dict else []
+        smda_report.code_sections = [("", section[0], section[1]) for section in report_dict["code_sections"]] if "code_sections" in report_dict else []
         smda_report.confidence_threshold = report_dict["confidence_threshold"]
         smda_report.disassembly_errors = report_dict["disassembly_errors"]
         smda_report.execution_time = report_dict["execution_time"]
@@ -198,7 +198,7 @@ class SmdaReport(object):
             "binary_size": self.binary_size,
             "bitness": self.bitness,
             "code_areas": self.code_areas,
-            "code_sections": [(binascii.hexlify(section[0]), section[1], section[2]) for section in self.code_sections],
+            "code_sections": [(section[1], section[2]) for section in self.code_sections],
             "confidence_threshold": self.confidence_threshold,
             "disassembly_errors": self.disassembly_errors,
             "execution_time": self.execution_time,
