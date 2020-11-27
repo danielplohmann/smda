@@ -39,4 +39,4 @@ class BinaryInfo(object):
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
                 section_end = section_start + section_size
-                yield section.name, section_start, section_end
+                yield section.name.encode(), section_start, section_end
