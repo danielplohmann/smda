@@ -57,7 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2020-11-27: v1.5.8 - Bugfix - encode section names as bytes.
+ * 2020-12-01: v1.5.9 - Bugfix for section names. again. :) 
  * 2020-11-25: v1.5.6 - Now considering segments for content when ELF file has no sections (THX: @jcrussell).
  * 2020-11-10: v1.5.5 - Unmarshalling setting default value for older reports.
  * 2020-11-06: v1.5.4 - Minor fix on PE header parsing.
