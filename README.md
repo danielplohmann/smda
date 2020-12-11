@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2020-12-11: v1.5.10 - Pinned LIEF to 0.10.1. :) 
  * 2020-12-01: v1.5.9 - Bugfix for section names. again. :) 
  * 2020-11-25: v1.5.6 - Now considering segments for content when ELF file has no sections (THX: @jcrussell).
  * 2020-11-10: v1.5.5 - Unmarshalling setting default value for older reports.
