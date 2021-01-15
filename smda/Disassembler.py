@@ -2,6 +2,7 @@ import datetime
 import traceback
 
 from smda.utility.FileLoader import FileLoader
+from smda.utility.MemoryFileLoader import MemoryFileLoader
 from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
@@ -45,6 +46,25 @@ class Disassembler(object):
         start = datetime.datetime.utcnow()
         try:
             self.disassembler.addPdbFile(binary_info, pdb_path)
+            smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
+            if self.config.STORE_BUFFER:
+                smda_report.buffer = file_content
+        except Exception as exc:
+            print("-> an error occured (", str(exc), ").")
+            smda_report = self._createErrorReport(start, exc)
+        return smda_report
+
+    def disassembleUnmappedBuffer(self, file_content):
+        loader = MemoryFileLoader(file_content, map_file=True)
+        file_content = loader.getData()
+        binary_info = BinaryInfo(file_content)
+        binary_info.raw_data = loader.getRawData()
+        binary_info.file_path = ""
+        binary_info.base_addr = loader.getBaseAddress()
+        binary_info.bitness = loader.getBitness()
+        binary_info.code_areas = loader.getCodeAreas()
+        start = datetime.datetime.utcnow()
+        try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content

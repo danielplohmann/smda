@@ -52,6 +52,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
         cls.cutwail_disassembly = disasm._disassemble(binary_info)
+        cls.cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(decrypted_cutwail)
 
     def testAsproxDisassemblyCoverage(self):
         assert len([fn for fn in self.asprox_disassembly.getFunctions()]) == 105
@@ -79,6 +80,8 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert report_as_dict["base_addr"] == 0x4000000
         assert report_as_dict["statistics"]["num_instructions"] == 1611
         assert report_as_dict["sha256"] == "a348a0ddfab135d152b684d561a3215ab6c472570facd3d75aa2c7ee845a8e2b"
+        # compare our manual file loading with unmapped buffer
+        assert self.cutwail_disassembly.num_instructions == self.cutwail_unmapped_disassembly.num_instructions
         reimported_report = SmdaReport.fromDict(report_as_dict)
 
 if __name__ == '__main__':

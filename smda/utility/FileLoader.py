@@ -5,16 +5,20 @@ from smda.utility.ElfFileLoader import ElfFileLoader
 
 class FileLoader(object):
 
-    def __init__(self, file_path, map_file=False):
+    _file_path = None
+    _map_file = False
+    _data = b""
+    _raw_data = b""
+    _base_addr = 0
+    _bitness = 0
+    _code_areas = []
+    file_loaders = [PeFileLoader, ElfFileLoader]
+
+    def __init__(self, file_path, load_file=True, map_file=False):
         self._file_path = file_path
         self._map_file = map_file
-        self._data = b""
-        self._raw_data = b""
-        self._base_addr = 0
-        self._bitness = 0
-        self._code_areas = []
-        self.file_loaders = [PeFileLoader, ElfFileLoader]
-        self._loadFile()
+        if load_file:
+            self._loadFile()
 
     def _loadRawFileContent(self):
         binary = ""
