@@ -159,8 +159,8 @@ class JumpTableAnalyzer(object):
         backtracked = state.backtrackInstructions(jump_instruction_address, 50)
         backtracked_sequence = "-".join([ins[2] for ins in backtracked[::-1]][:3])
         jumptable_size = self._findJumpTableSize(backtracked)
-        if False and jump_instruction_address:
-            print("0x%x %s %s -> %s" % (jump_instruction_address, jump_instruction_mnemonic, jump_instruction_op_str, backtracked_sequence))
+        # if False and jump_instruction_address:
+        #     print("0x%x %s %s -> %s" % (jump_instruction_address, jump_instruction_mnemonic, jump_instruction_op_str, backtracked_sequence))
         if jump_instruction_op_str.startswith("dword ptr [") or jump_instruction_op_str.startswith("qword ptr ["):
             off_jumptable = self.disassembler.getReferencedAddr(jump_instruction_op_str)
             table_offsets = self._resolveExplicitTable(jump_instruction_address, state, off_jumptable, jumptable_size)
@@ -189,8 +189,8 @@ class JumpTableAnalyzer(object):
                 off_jumptable = self._x64Handler(state, backtracked)
                 bonus = self._getx64BonusOffset(backtracked)
                 table_offsets = self._extractRelativeTableOffsets(jumptable_size, off_jumptable, bonus_offset=bonus)
-        if False and off_jumptable and table_offsets:
-            print("  Found jump table: 0x%x -> %d" % (off_jumptable, len(table_offsets)))
-            for offset in sorted(list(set(table_offsets))):
-                print("    0x%x" % offset)
+        # if False and off_jumptable and table_offsets:
+        #     print("  Found jump table: 0x%x -> %d" % (off_jumptable, len(table_offsets)))
+        #     for offset in sorted(list(set(table_offsets))):
+        #         print("    0x%x" % offset)
         return table_offsets

@@ -24,7 +24,7 @@ class IdaExporter(object):
     def _convertIdaInsToSmda(self, offset, instruction_bytes):
         cache = [i for i in self.capstone.disasm_lite(instruction_bytes, offset)]
         if cache:
-            i_address, i_size, i_mnemonic, i_op_str = []
+            i_address, i_size, i_mnemonic, i_op_str = cache[0]
             smda_ins = (i_address, i_size, i_mnemonic, i_op_str, instruction_bytes)
         else:
             # record error and emit placeholder instruction

@@ -215,7 +215,9 @@ class FunctionCandidateManager(object):
             try:
                 byte = self.disassembly.getRawByte(gap_offset)
             except:
-                print("0x%08x" % self.disassembly.binary_info.base_addr, "0x%08x" % self.disassembly.binary_info.binary_size, "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
+                pass
+                LOGGER.warn("could not fetch raw byte for gap pointer.")
+                # print("0x%08x" % self.disassembly.binary_info.base_addr, "0x%08x" % self.disassembly.binary_info.binary_size, "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             # try to find padding symbols and skip them
             if isinstance(byte, int):
                 byte = struct.pack("B", byte)

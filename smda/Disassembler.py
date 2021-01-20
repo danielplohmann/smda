@@ -1,5 +1,6 @@
 import datetime
 import traceback
+import logging
 
 from smda.utility.FileLoader import FileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
@@ -8,6 +9,8 @@ from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
 from .intel.IntelDisassembler import IntelDisassembler
 from .ida.IdaExporter import IdaExporter
+
+LOGGER = logging.getLogger(__name__)
 
 class Disassembler(object):
 
@@ -50,7 +53,8 @@ class Disassembler(object):
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
-            print("-> an error occured (", str(exc), ").")
+            LOGGER.error("An error occurred while disassembling file.")
+            # print("-> an error occured (", str(exc), ").")
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
@@ -69,7 +73,8 @@ class Disassembler(object):
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
-            print("-> an error occured (", str(exc), ").")
+            LOGGER.error("An error occurred while disassembling unmapped buffer.")
+            # print("-> an error occured (", str(exc), ").")
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
@@ -84,7 +89,8 @@ class Disassembler(object):
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
-            print("-> an error occured (", str(exc), ").")
+            LOGGER.error("An error occurred while disassembling buffer.")
+            # print("-> an error occured (", str(exc), ").")
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
