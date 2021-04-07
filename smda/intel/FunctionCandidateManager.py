@@ -484,7 +484,10 @@ class FunctionCandidateManager(object):
                     rva_start = section_va_start - self.disassembly.binary_info.base_addr
                     rva_end = section_va_end - self.disassembly.binary_info.base_addr
                     for offset in range(rva_start, rva_end + 1, 12):
-                        rva_function_candidate = struct.unpack("I", self.disassembly.binary_info.binary[offset:offset + 4])[0]
-                        self.addExceptionCandidate(self.disassembly.binary_info.base_addr + rva_function_candidate)
+                        packed_dword = self.disassembly.binary_info.binary[offset:offset + 4]
+                        rva_function_candidate = None
+                        if len(packed_dword) == 4:
+                            rva_function_candidate = struct.unpack("I", packed_dword)[0]
+                            self.addExceptionCandidate(self.disassembly.binary_info.base_addr + rva_function_candidate)
                         if not rva_function_candidate:
                             break

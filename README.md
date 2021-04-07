@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2021-04-07: v1.5.14 - Bugfix when processing Exception handler addresses as function entry point candidates (THX: capa team).
  * 2021-01-20: v1.5.13 - Now using LIEF 0.11 and moved some print output to logging.
  * 2021-01-15: v1.5.11 - Disassembler now offers `disassembleUnmappedBuffer(buffer)` to load and process unmapped files directly from memory.
  * 2020-12-11: v1.5.10 - Pinned LIEF to 0.10.1. 
