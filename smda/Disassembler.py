@@ -108,5 +108,5 @@ class Disassembler(object):
         report.smda_version = self.config.VERSION
         report.status = "error"
         report.execution_time = self._getDurationInSeconds(start, datetime.datetime.utcnow())
-        report.message = traceback.format_exc(exception)
+        report.message = traceback.format_exc()
         return report
