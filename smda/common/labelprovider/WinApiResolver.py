@@ -5,6 +5,7 @@ import json
 import logging
 
 import lief
+lief.logging.disable()
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from smda.common.labelprovider.OrdinalHelper import OrdinalHelper

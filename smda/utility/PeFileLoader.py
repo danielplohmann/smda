@@ -2,6 +2,7 @@ import struct
 import logging
 
 import lief
+lief.logging.disable()
 
 LOG = logging.getLogger(__name__)
 

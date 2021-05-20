@@ -7,6 +7,7 @@ LOGGER = logging.getLogger(__name__)
 LIEF_AVAILABLE = False
 try:
     import lief
+    lief.logging.disable()
     LIEF_AVAILABLE = True
 except:
     LOGGER.warning("LIEF not available, will not be able to parse data from ELF files.")

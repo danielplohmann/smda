@@ -7,6 +7,7 @@ LOGGER = logging.getLogger(__name__)
 
 try:
     import lief
+    lief.logging.disable()
 except:
     lief = None
     LOGGER.warning("3rd party library LIEF not installed - won't be able to extract symbols for ELF files where available.")

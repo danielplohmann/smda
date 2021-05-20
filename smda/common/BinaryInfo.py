@@ -1,6 +1,7 @@
 import hashlib
 
 import lief
+lief.logging.disable()
 
 
 class BinaryInfo(object):
