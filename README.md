@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2021-04-20: v1.5.16 - Bugfix for formatting exceptions in report output (THX: @BonusPlay)
  * 2021-05-18: v1.5.15 - Changed SHA256 in SmdaReports for unmapped files (was hash of memory-mapped image, not it's the input file's hash).
  * 2021-04-07: v1.5.14 - Bugfix when processing Exception handler addresses as function entry point candidates (THX: capa team).
  * 2021-01-20: v1.5.13 - Now using LIEF 0.11 and moved some print output to logging.
