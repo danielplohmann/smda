@@ -29,7 +29,7 @@ class BinaryInfo(object):
         self.sha256 = hashlib.sha256(binary).hexdigest()
 
     def getSections(self):
-        pefile = lief.parse(bytearray(self.binary))
+        pefile = lief.parse(bytearray(self.raw_data))
         # TODO 20201030 might want to add ELF sections as well
         if not isinstance(pefile, lief.PE.Binary):
             return
