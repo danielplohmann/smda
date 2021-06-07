@@ -333,7 +333,7 @@ class IntelInstructionEscaper:
             try:
                 packed_hex = str(codecs.encode(struct.pack("I", offset), 'hex').decode('ascii'))
             except:
-                packed_hex = str(codecs.encode(struct.pack("L", offset), 'hex').decode('ascii'))
+                packed_hex = str(codecs.encode(struct.pack("Q", offset), 'hex').decode('ascii'))
             num_occurrences = occurrences(ins.bytes, packed_hex)
             if num_occurrences == 1:
                 escaped_sequence = ins.bytes.replace(packed_hex, "????????")

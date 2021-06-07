@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2021-06-07: v1.5.18 - Bugfix for struct.pack 8byte conversion using L instead Q (works on Linux, not on Windows).
  * 2021-05-21: v1.5.17 - Bugfix for MemoryError when having LIEF try to process section data.
  * 2021-05-20: v1.5.16 - Bugfix for formatting exceptions in report output (THX: @BonusPlay)
  * 2021-05-18: v1.5.15 - Changed SHA256 in SmdaReports for unmapped files (was hash of memory-mapped image, not it's the input file's hash).
