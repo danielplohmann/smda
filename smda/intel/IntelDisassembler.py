@@ -91,9 +91,10 @@ class IntelDisassembler(object):
         for provider in self.label_providers:
             if not provider.isApiProvider():
                 continue
-            result = provider.getApi(to_address, api_address)
-            if result:
-                return result
+            dll, api = provider.getApi(to_address, api_address)
+            if dll or api:
+                return (dll, api)
+
         return ("", "")
 
     def resolveSymbol(self, address):
