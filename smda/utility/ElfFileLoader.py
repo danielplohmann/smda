@@ -1,6 +1,4 @@
 import logging
-import io
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -11,6 +9,14 @@ try:
     LIEF_AVAILABLE = True
 except:
     LOGGER.warning("LIEF not available, will not be able to parse data from ELF files.")
+
+
+def align(v, alignment):
+    remainder = v % alignment
+    if remainder == 0:
+        return v
+    else:
+        return v + remainder
 
 
 class ElfFileLoader(object):
@@ -38,48 +44,92 @@ class ElfFileLoader(object):
 
     @staticmethod
     def mapBinary(binary):
+        """
+        map the ELF file sections and segments into a contiguous bytearray
+        as if into virtual memory with the given base address.
+        """
         # ELFFile needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
         elffile = lief.parse(bytearray(binary))
         base_addr = ElfFileLoader.getBaseAddress(binary)
-        mapped_binary = b""
-        LOGGER.debug("Assuming base address 0x%x for inference of reference counts (based on ELF header)", base_addr)
 
-        # find begin of the first and end of the last section
-        if elffile.sections:
-            max_virt_section_offset = 0
-            min_raw_section_offset = 0xFFFFFFFFFFFFFFFF
-            for section in elffile.sections:
-                # print("{:20s} 0x{:08x} - 0x{:08x} / 0x{:08x}".format(section.name, section.header.sh_addr, section.header.sh_offset, section.header.sh_size))
-                if section.virtual_address:
-                    max_virt_section_offset = max(max_virt_section_offset, section.size + section.virtual_address)
-                    min_raw_section_offset = min(min_raw_section_offset, section.virtual_address)
+        LOGGER.debug("ELF: base address: 0x%x", base_addr)
 
-            # copy binary to mapped_binary
-            if max_virt_section_offset:
-                mapped_binary = bytearray([0] * (max_virt_section_offset - base_addr))
-                mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
-            for section in elffile.sections:
-                if section.virtual_address:
-                    rva = section.virtual_address - base_addr
-                    mapped_binary[rva:rva + section.size] = section.content
-        elif elffile.segments:
-            max_virt_segment_offset = 0
-            min_raw_segment_offset = 0xFFFFFFFFFFFFFFFF
-            for segment in elffile.segments:
-                if segment.virtual_address:
-                    max_virt_segment_offset = max(max_virt_segment_offset, segment.physical_size + segment.virtual_address)
-                    min_raw_segment_offset = min(min_raw_segment_offset, segment.virtual_address)
+        # a segment may contain 0 or more sections.
+        # ref: https://stackoverflow.com/a/14382477/87207
+        #
+        # i'm not sure if a section may be found outside of a segment.
+        # therefore, lets load segments first, and then load sections over them.
+        # we expect the section data to overwrite the segment data; however,
+        # it should be exactly the same data.
 
-            # copy binary to mapped_binary
-            if max_virt_segment_offset:
-                mapped_binary = bytearray([0] * (max_virt_segment_offset - base_addr))
-                mapped_binary[0:min_raw_segment_offset] = binary[0:min_raw_segment_offset]
-            for segment in elffile.segments:
-                if segment.virtual_address:
-                    rva = segment.virtual_address - base_addr
-                    mapped_binary[rva:rva + segment.physical_size] = segment.content
+        # find min and max virtual addresses.
+        max_virtual_address = 0
+        min_virtual_address = 0xFFFFFFFFFFFFFFFF
+        min_raw_offset = 0xFFFFFFFFFFFFFFFF
 
+        # find begin of the first section/segment and end of the last section/segment.
+        for section in sorted(elffile.sections, key=lambda section: section.size, reverse=True):
+            if not section.virtual_address:
+                continue
+
+            max_virtual_address = max(max_virtual_address, section.size + section.virtual_address)
+            min_virtual_address = min(min_virtual_address, section.virtual_address)
+            min_raw_offset = min(min_raw_offset, section.file_offset)
+
+        for segment in elffile.segments:
+            if not segment.virtual_address:
+                continue
+            max_virtual_address = max(max_virtual_address, segment.virtual_size + segment.virtual_address)
+            min_virtual_address = min(min_virtual_address, segment.virtual_address)
+            min_raw_offset = min(min_raw_offset, segment.file_offset)
+
+        if not max_virtual_address:
+            LOGGER.debug("ELF: no section or segment data")
+            return bytes()
+
+        # create mapped region.
+        # offset 0x0 corresponds to the ELF base address
+        virtual_size = max_virtual_address - base_addr
+        LOGGER.debug("ELF: max virtual section offset: 0x%x", max_virtual_address)
+        LOGGER.debug("ELF: mapped size: 0x%x", virtual_size)
+        LOGGER.debug("ELF: min raw offset: 0x%x", min_raw_offset)
+        mapped_binary = bytearray(align(virtual_size, 0x1000))
+
+        # map segments.
+        # segments may contains 0 or more sections,
+        # so we do segments first.
+        #
+        # load sections from largest to smallest,
+        # because some segments may overlap.
+        #
+        # technically, we should only have to load PT_LOAD segments,
+        # but we do all of them here.
+        for segment in sorted(elffile.segments, key=lambda segment: segment.physical_size, reverse=True):
+            if not segment.virtual_address:
+                continue
+            rva = segment.virtual_address - base_addr
+            LOGGER.debug("ELF: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)", segment.physical_size, rva, rva + segment.physical_size, segment.virtual_address)
+            assert len(segment.content) == segment.physical_size
+            mapped_binary[rva:rva + segment.physical_size] = segment.content
+
+        # map sections.
+        # may overwrite some segment data, but we expect the content to be identical.
+        for section in sorted(elffile.sections, key=lambda section: section.size, reverse=True):
+            if not section.virtual_address:
+                continue
+            rva = section.virtual_address - base_addr
+            LOGGER.debug("ELF: mapping section of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)", section.size, rva, rva + section.size, section.virtual_address)
+            assert len(section.content) == section.size
+            mapped_binary[rva:rva + section.size] = section.content
+
+        # map header.
+        # we consider the headers to be any data found before the first section/segment
+        if min_raw_offset != 0:
+            LOGGER.debug("ELF: mapping 0x%x bytes of header at 0x0 (0x%x)", min_raw_offset, base_addr)
+            mapped_binary[0:min_raw_offset] = binary[0:min_raw_offset]
+
+        LOGGER.debug("ELF: final mapped size: 0x%x", len(mapped_binary))
         return bytes(mapped_binary)
 
     @staticmethod
