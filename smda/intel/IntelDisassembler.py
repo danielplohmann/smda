@@ -179,7 +179,7 @@ class IntelDisassembler(object):
             state.setRecursion(True)
 
     def _handleApiTarget(self, from_addr, to_addr, dereferenced):
-        if to_addr and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
+        if to_addr:
             # identify API calls on the fly
             dll, api = self.resolveApi(to_addr, dereferenced)
             if dll or api:
