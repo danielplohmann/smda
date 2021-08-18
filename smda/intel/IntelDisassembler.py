@@ -161,7 +161,7 @@ class IntelDisassembler(object):
             call_destination = rip + self.getReferencedAddr(i_op_str)
             dereferenced = self.disassembly.dereferenceQword(call_destination)
             state.addCodeRef(i_address, call_destination)
-            if dereferenced:
+            if dereferenced is not None:
                 self._handleApiTarget(i_address, call_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
@@ -238,7 +238,7 @@ class IntelDisassembler(object):
             dereferenced = self.disassembly.dereferenceDword(jump_destination)
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i_address, jump_destination)
-            if dereferenced:
+            if dereferenced is not None:
                 self._handleApiTarget(i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("qword ptr [rip"):
             # case = "QWORD-PTR, RIP-relative"
@@ -248,7 +248,7 @@ class IntelDisassembler(object):
             dereferenced = self.disassembly.dereferenceQword(jump_destination)
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i_address, jump_destination)
-            if dereferenced:
+            if dereferenced is not None:
                 self._handleApiTarget(i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             jump_destination = self.getReferencedAddr(i_op_str)
