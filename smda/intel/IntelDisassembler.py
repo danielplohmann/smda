@@ -10,6 +10,7 @@ from smda.DisassemblyResult import DisassemblyResult
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
@@ -69,6 +70,7 @@ class IntelDisassembler(object):
 
     def _addLabelProviders(self):
         self.label_providers.append(WinApiResolver(self.config))
+        self.label_providers.append(ElfApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
 
