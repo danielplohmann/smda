@@ -182,7 +182,7 @@ class IntelDisassembler(object):
         if to_addr and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
             # identify API calls on the fly
             dll, api = self.resolveApi(to_addr, dereferenced)
-            if dll and api:
+            if dll or api:
                 self._updateApiInformation(from_addr, dereferenced, dll, api)
                 return (dll, api)
             else:
