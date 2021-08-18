@@ -54,10 +54,10 @@ class ElfApiResolver(AbstractLabelProvider):
 
     def getApi(self, to_addr, absolute_addr):
         """
-        If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None.
+        If the LabelProvider has any information about a used API for the given address, return (dll, api), else return (None, None).
 
         May return None for the `dll` if it cannot be determined.
         When it can be determined for ELF files, the `dll` field should be interpreted as the API version rather than shared library name.
         For example: "GLIBC_2.2.5".
         """
-        return self._api_map["lief"].get(to_addr, None)
+        return self._api_map["lief"].get(to_addr, (None, None))

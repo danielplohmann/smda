@@ -78,12 +78,13 @@ class WinApiResolver(AbstractLabelProvider):
         return True
 
     def getApi(self, to_addr, absolute_addr):
-        """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
+        """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return (None, None)"""
         # if we work on a dump, use ApiScout method:
         if self._is_buffer:
             if self._os_name and self._os_name in self._api_map:
-                return self._api_map[self._os_name].get(absolute_addr, None)
+                return self._api_map[self._os_name].get(absolute_addr, (None, None))
+            else:
+                return (None, None)
         # otherwise take import table info from LIEF
         else:
-            return self._api_map["lief"].get(to_addr, None)
-        return None
+            return self._api_map["lief"].get(to_addr, (None, None))
