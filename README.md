@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2021-08-19: v1.6.0 - Bugfix for truncation during ELF segment/section loading. API usage in ELF files is now resolved as well! (THX: @williballenthin)
  * 2021-06-07: v1.5.18 - Bugfix for struct.pack 8byte conversion using L instead Q (works on Linux, not on Windows).
  * 2021-05-21: v1.5.17 - Bugfix for MemoryError when having LIEF try to process section data.
  * 2021-05-20: v1.5.16 - Bugfix for formatting exceptions in report output (THX: @BonusPlay)
@@ -117,9 +118,10 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Credits
 
-Thanks to Steffen Enders for his extensive contributions to this project.
-Thanks to Paul Hordiienko for adding symbol parsing support (ELF PDB).
+Thanks to Steffen Enders for his extensive contributions to this project!
+Thanks to Paul Hordiienko for adding symbol parsing support (ELF+PDB)!
 Thanks to Jonathan Crussell for helping me to beef up SMDA enough to make it a disassembler backend in capa!
+Thanks to Willi Ballenthin for improving handling of ELF files, including properly handling API usage!
 The project uses the implementation of Tarjan's Algorithm by Bas Westerbaan and the implementation of Lengauer-Tarjan's Algorithm for the DominatorTree by Armin Rigo.
 
 Pull requests welcome! :)

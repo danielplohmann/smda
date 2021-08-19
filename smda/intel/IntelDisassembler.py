@@ -185,7 +185,7 @@ class IntelDisassembler(object):
             if dll or api:
                 self._updateApiInformation(from_addr, dereferenced, dll, api)
                 return (dll, api)
-            else:
+            elif not self.disassembly.isAddrWithinMemoryImage(to_addr):
                 LOGGER.debug("potentially uncovered DLL address: 0x%08x", to_addr)
 
     def _updateApiInformation(self, from_addr, to_addr, dll, api):

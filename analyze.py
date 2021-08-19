@@ -14,7 +14,7 @@ def parseBaseAddrFromArgs(args):
         logging.info("using provided base address: 0x%08x %d", parsed_base_addr, parsed_base_addr)
         return parsed_base_addr
     # try to infer base addr from filename:
-    baddr_match = re.search(re.compile("0x(?P<base_addr>[0-9a-fA-F]{8,16})$"), args.input_path)
+    baddr_match = re.search(re.compile("_0x(?P<base_addr>[0-9a-fA-F]{8,16})"), args.input_path)
     if baddr_match:
         parsed_base_addr = int(baddr_match.group("base_addr"), 16)
         logging.info("Parsed base address from file name: 0x%08x %d", parsed_base_addr, parsed_base_addr)
