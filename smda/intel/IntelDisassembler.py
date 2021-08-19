@@ -10,6 +10,7 @@ from smda.DisassemblyResult import DisassemblyResult
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
@@ -69,6 +70,7 @@ class IntelDisassembler(object):
 
     def _addLabelProviders(self):
         self.label_providers.append(WinApiResolver(self.config))
+        self.label_providers.append(ElfApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
 
@@ -89,9 +91,10 @@ class IntelDisassembler(object):
         for provider in self.label_providers:
             if not provider.isApiProvider():
                 continue
-            result = provider.getApi(to_address, api_address)
-            if result:
-                return result
+            dll, api = provider.getApi(to_address, api_address)
+            if dll or api:
+                return (dll, api)
+
         return ("", "")
 
     def resolveSymbol(self, address):
@@ -158,7 +161,7 @@ class IntelDisassembler(object):
             call_destination = rip + self.getReferencedAddr(i_op_str)
             dereferenced = self.disassembly.dereferenceQword(call_destination)
             state.addCodeRef(i_address, call_destination)
-            if dereferenced:
+            if dereferenced is not None:
                 self._handleApiTarget(i_address, call_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
@@ -176,10 +179,10 @@ class IntelDisassembler(object):
             state.setRecursion(True)
 
     def _handleApiTarget(self, from_addr, to_addr, dereferenced):
-        if to_addr and not self.disassembly.isAddrWithinMemoryImage(dereferenced):
+        if to_addr:
             # identify API calls on the fly
             dll, api = self.resolveApi(to_addr, dereferenced)
-            if dll and api:
+            if dll or api:
                 self._updateApiInformation(from_addr, dereferenced, dll, api)
                 return (dll, api)
             else:
@@ -235,7 +238,7 @@ class IntelDisassembler(object):
             dereferenced = self.disassembly.dereferenceDword(jump_destination)
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i_address, jump_destination)
-            if dereferenced:
+            if dereferenced is not None:
                 self._handleApiTarget(i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("qword ptr [rip"):
             # case = "QWORD-PTR, RIP-relative"
@@ -245,7 +248,7 @@ class IntelDisassembler(object):
             dereferenced = self.disassembly.dereferenceQword(jump_destination)
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             self.tailcall_analyzer.addJump(i_address, jump_destination)
-            if dereferenced:
+            if dereferenced is not None:
                 self._handleApiTarget(i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             jump_destination = self.getReferencedAddr(i_op_str)

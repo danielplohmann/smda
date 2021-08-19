@@ -56,7 +56,7 @@ class IndirectCallAnalyzer(object):
                     # use that instead of the actual memory value
                     addr = int(match3.group("addr"), 16)
                     dll, api = self.disassembler.resolveApi(addr, addr)
-                    if dll and api:
+                    if dll or api:
                         registers[match3.group("reg")] = addr
                         LOGGER.debug("**moved API ref (%s:%s) @0x%08x to register %s", dll, api, addr, match3.group("reg"))
                         if match3.group("reg") == register_name:
@@ -101,7 +101,7 @@ class IndirectCallAnalyzer(object):
                 if candidate:
                     LOGGER.debug("candidate: 0x%x - %s, register: %s", candidate, ins[3], register_name)
                     dll, api = self.disassembler.resolveApi(candidate, candidate)
-                    if dll and api:
+                    if dll or api:
                         LOGGER.debug("successfully resolved: %s %s", dll, api)
                         api_entry = {"referencing_addr": [], "dll_name": dll, "api_name": api}
                         if candidate in self.disassembly.apis:
