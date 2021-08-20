@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2021-08-20: v1.6.1 - Bugfix for alignment calculation of binary mappings. (THX: @williballenthin)
  * 2021-08-19: v1.6.0 - Bugfix for truncation during ELF segment/section loading. API usage in ELF files is now resolved as well! (THX: @williballenthin)
  * 2021-06-07: v1.5.18 - Bugfix for struct.pack 8byte conversion using L instead Q (works on Linux, not on Windows).
  * 2021-05-21: v1.5.17 - Bugfix for MemoryError when having LIEF try to process section data.
