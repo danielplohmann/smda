@@ -21,12 +21,32 @@ class BinaryInfo(object):
     is_buffer = False
     sha256 = ""
     version = ""
+    exported_functions = None
+    oep = None
 
     def __init__(self, binary):
         self.binary = binary
         self.raw_data = binary
         self.binary_size = len(binary)
         self.sha256 = hashlib.sha256(binary).hexdigest()
+
+    def getOep(self):
+        if self.oep is None:
+            lief_result = lief.parse(bytearray(self.raw_data))
+            if isinstance(lief_result, lief.PE.Binary):
+                self.oep = lief_result.optional_header.addressof_entrypoint
+            elif isinstance(lief_result, lief.ELF.Binary):
+                self.oep = lief_result.header.entrypoint
+        return self.oep
+
+    def getExportedFunctions(self):
+        if self.exported_functions is None:
+            lief_result = lief.parse(bytearray(self.raw_data))
+            if isinstance(lief_result, lief.PE.Binary) or isinstance(lief_result, lief.ELF.Binary):
+                self.exported_functions = {}
+                for function in lief_result.exported_functions:
+                    self.exported_functions[function.address] = function.name
+        return self.exported_functions
 
     def getSections(self):
         pefile = lief.parse(bytearray(self.raw_data))

@@ -406,7 +406,7 @@ class IntelDisassembler(object):
         self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
-        self.disassembly.binary_info = binary_info
+        self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "intel"
         self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
         if self.disassembly.binary_info.bitness not in [32, 64]:

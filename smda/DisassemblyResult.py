@@ -13,6 +13,7 @@ class DisassemblyResult(object):
         self.analysis_timeout = False
         self.binary_info = None
         self.identified_alignment = 0
+        self.oep = None
         self.code_map = {}
         self.data_map = set([])
         # key: offset, value: {"type": <str>, "instruction_bytes": <hexstr>}
@@ -22,6 +23,7 @@ class DisassemblyResult(object):
         self.recursive_functions = set([])
         self.leaf_functions = set([])
         self.thunk_functions = set([])
+        self.exported_functions = set([])
         self.failed_analysis_addr = []
         self.function_borders = {}
         # stored as key: int(i.address) = (i.size, i.mnemonic, i.op_str)
@@ -41,6 +43,13 @@ class DisassemblyResult(object):
         self._confidence_threshold = 0.0
         self.code_areas = []
         self.smda_version = ""
+
+    def setBinaryInfo(self, binary_info):
+        self.binary_info = binary_info
+        exported = binary_info.getExportedFunctions()
+        if exported is not None:
+            self.exported_functions = set([key + binary_info.base_addr for key in exported.keys()])
+        self.oep = binary_info.getOep()
 
     def getByte(self, addr):
         if self.isAddrWithinMemoryImage(addr):

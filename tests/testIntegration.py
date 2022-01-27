@@ -57,6 +57,25 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
     def testAsproxDisassemblyCoverage(self):
         assert len([fn for fn in self.asprox_disassembly.getFunctions()]) == 105
 
+    def testOep(self):
+        # PE header from buffers are not parsed, so we don't get header infos
+        assert self.asprox_disassembly.oep == None
+        # PE headers are parsed for regularly processed files (PE+ELF)
+        assert self.cutwail_unmapped_disassembly.oep == 0x1730
+
+    def testCodeXrefCreation(self):
+        example_function = self.asprox_disassembly.getFunction(0x008d8292)
+        # should be initialized on demand only
+        assert example_function.code_inrefs == None
+        # example function has inrefs and outrefs
+        inrefs = [code_inref for code_inref in example_function.getCodeInrefs()]
+        assert len(inrefs) == 1
+        for xref in example_function.getCodeInrefs():
+            print(xref.from_function, xref.from_instruction, xref.to_function, xref.to_instruction)
+        raise
+        outrefs = [code_outref for code_outref in example_function.getCodeOutrefs()]
+        assert len(outrefs) == 10
+
     def testAsproxApiCoverage(self):
         num_api_ref_srcs = 0
         api_ref_dsts = set()

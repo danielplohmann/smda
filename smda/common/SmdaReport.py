@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import zipfile
+
 try:
     from StringIO import StringIO ## for Python 2
 except ImportError:
@@ -10,9 +11,10 @@ except ImportError:
 
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
-from smda.DisassemblyStatistics import DisassemblyStatistics
-from .SmdaFunction import SmdaFunction
 from .BinaryInfo import BinaryInfo
+from .SmdaFunction import SmdaFunction
+from smda.common.CodeXref import CodeXref
+from smda.DisassemblyStatistics import DisassemblyStatistics
 
 
 class SmdaReport(object):
@@ -35,6 +37,7 @@ class SmdaReport(object):
     is_library = None
     is_buffer = None
     message = None
+    oep = None
     sha256 = None
     smda_version = None
     statistics = None
@@ -44,6 +47,8 @@ class SmdaReport(object):
     version = None
     xcfg = None
 
+    # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
+    _has_codexrefs = False
     # in case we need to re-disassemble with more detail, we hold an initialized capstone instance as singleton
     capstone = None
 
@@ -67,6 +72,7 @@ class SmdaReport(object):
             self.is_library = disassembly.binary_info.is_library
             self.is_buffer = disassembly.binary_info.is_buffer
             self.message = "Analysis finished regularly."
+            self.oep = disassembly.binary_info.getOep()
             self.sha256 = disassembly.binary_info.sha256
             self.smda_version = disassembly.smda_version
             self.statistics = DisassemblyStatistics(disassembly)
@@ -115,6 +121,11 @@ class SmdaReport(object):
         for _, smda_function in sorted(self.xcfg.items()):
             yield smda_function
 
+    def getExportedFunctions(self):
+        for _, smda_function in sorted(self.xcfg.items()):
+            if smda_function.isExported():
+                yield smda_function
+
     def getCapstone(self):
         if self.capstone is None:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
@@ -128,6 +139,29 @@ class SmdaReport(object):
 
     def isAddrWithinMemoryImage(self, offset):
         return self.base_addr <= offset < self.base_addr + self.binary_size
+
+    def initCodeXrefs(self):
+        if not self._has_codexrefs:
+            # create ins2fn map, and offset to SmdaInstruction map
+            ins2fn = {}
+            offset2ins = {}
+            tmp_functions = []
+            for function in self.getFunctions():
+                tmp_functions.append(function.offset)
+                for instruction in function.getInstructions():
+                    ins2fn[instruction.offset] = function
+                    offset2ins[instruction.offset] = instruction
+            # for all functions, populate code references
+            for function in self.getFunctions():
+                function.code_inrefs = []
+                for inref in function.inrefs:
+                    function.code_inrefs.append(CodeXref(offset2ins[inref], offset2ins[function.offset]))
+                function.code_outrefs = []
+                for outref_src, outref_dsts in function.outrefs.items():
+                    for target in outref_dsts:
+                        if target in offset2ins:
+                            function.code_outrefs.append(CodeXref(offset2ins[outref_src], offset2ins[target]))
+            self._has_codexrefs = True
 
     def _packBuffer(self, buffer):
         # TODO
@@ -179,6 +213,7 @@ class SmdaReport(object):
                 smda_report.version = report_dict["metadata"]["version"]
             smda_report.is_buffer = report_dict["metadata"]["is_buffer"] if "is_buffer" in report_dict["metadata"] else False
         smda_report.message = report_dict["message"]
+        smda_report.oep = report_dict["oep"] if "oep" in report_dict else None
         smda_report.sha256 = report_dict["sha256"]
         smda_report.smda_version = report_dict["smda_version"]
         smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
@@ -188,6 +223,7 @@ class SmdaReport(object):
         binary_info.architecture = smda_report.architecture
         binary_info.base_addr = smda_report.base_addr
         binary_info.binary_size = smda_report.binary_size
+        binary_info.oep = smda_report.oep
         smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version, smda_report=smda_report) for function_addr, function_dict in report_dict["xcfg"].items()}
         return smda_report
 
@@ -213,6 +249,7 @@ class SmdaReport(object):
                 "version": self.version,
             },
             "message": self.message,
+            "oep": self.oep,
             "sha256": self.sha256,
             "smda_version": self.smda_version,
             "statistics": self.statistics.toDict(),

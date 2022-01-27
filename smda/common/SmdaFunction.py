@@ -2,10 +2,11 @@
 import hashlib
 import struct
 
-from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
-from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.Tarjan import Tarjan
+from smda.common.CodeXref import CodeXref
+from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
+from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 from .SmdaInstruction import SmdaInstruction
 
 
@@ -18,6 +19,9 @@ class SmdaFunction(object):
     blockrefs = None
     inrefs = None
     outrefs = None
+    code_inrefs = None
+    code_outrefs = None
+    is_exported = None
     # metadata
     binweight = 0
     characteristics = ""
@@ -37,6 +41,7 @@ class SmdaFunction(object):
             self.blockrefs = disassembly.getBlockRefs(function_offset)
             self.inrefs = disassembly.getInRefs(function_offset)
             self.outrefs = disassembly.getOutRefs(function_offset)
+            self.is_exported = self.offset in disassembly.exported_functions
             # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             self.characteristics = disassembly.candidates[function_offset].getCharacteristics() if function_offset in disassembly.candidates else None
@@ -85,6 +90,9 @@ class SmdaFunction(object):
             return False
         return True
 
+    def isExported(self):
+        return self.is_exported
+
     def getBlocks(self):
         for _, block in sorted(self.blocks.items()):
             yield SmdaBasicBlock(block, smda_function=self)
@@ -106,6 +114,18 @@ class SmdaFunction(object):
         if offset not in self.blocks:
             return []
         return self.blocks[offset]
+
+    def getCodeInrefs(self):
+        self.smda_report.initCodeXrefs()
+        # potentially lazy initialize CodeXrefs externally via SmdaReport
+        for inref in self.code_inrefs:
+            yield inref
+
+    def getCodeOutrefs(self):
+        self.smda_report.initCodeXrefs()
+        # potentially lazy initialize CodeXrefs externally via SmdaReport
+        for outref in self.code_outrefs:
+            yield outref
 
     def _calculateSccs(self):
         tarjan = Tarjan(self.blockrefs)
@@ -150,6 +170,8 @@ class SmdaFunction(object):
         smda_function.blockrefs = {int(k): v for k, v in function_dict["blockrefs"].items()}
         smda_function.inrefs = function_dict["inrefs"]
         smda_function.outrefs = {int(k): v for k, v in function_dict["outrefs"].items()}
+        # provide some legacy support by assuming functions are not exported for SMDA reports < 1.7.0
+        smda_function.is_exported = function_dict["is_exported"] if "is_exported" in function_dict else False
         smda_function.binweight = function_dict["metadata"]["binweight"]
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]
@@ -178,6 +200,7 @@ class SmdaFunction(object):
             "blockrefs": self.blockrefs,
             "inrefs": self.inrefs,
             "outrefs": self.outrefs,
+            "is_exported": self.is_exported,
             "metadata": {
                 "binweight": self.binweight,
                 "characteristics": self.characteristics,

@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-01-27: v1.7.0 - SmdaReports now contains a field `oep`; SmdaFunctions now indicate `is_exported` and can provide CodeXrefs via `getCodeInrefs()` and `getCodeOutrefs()`. (THX for the ideas: @mr-tz)
  * 2021-08-20: v1.6.1 - Bugfix for alignment calculation of binary mappings. (THX: @williballenthin)
  * 2021-08-19: v1.6.0 - Bugfix for truncation during ELF segment/section loading. API usage in ELF files is now resolved as well! (THX: @williballenthin)
  * 2021-06-07: v1.5.18 - Bugfix for struct.pack 8byte conversion using L instead Q (works on Linux, not on Windows).

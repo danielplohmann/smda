@@ -34,14 +34,14 @@ if __name__ == "__main__":
     PARSER = argparse.ArgumentParser(description='Demo: Use SMDA to disassemble a given file (loaded memory view), optionally map it first and/or write the output to a file.')
     PARSER.add_argument('-p', '--parse_header', action='store_true', default=False, help='Parse header/symbols and perform mapping of the file as normalization.')
     PARSER.add_argument('-d', '--pdb_path', type=str, default='', help='If available, use a PDB file to enhance disassembly (function offsets and names).')
-    PARSER.add_argument('-b', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
+    PARSER.add_argument('-a', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
+    PARSER.add_argument('-b', '--bitness', type=int, default=0, help='Optionally force bitness to [32, 64] when processing dumps.')
     PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
     PARSER.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable debug logging.')
     PARSER.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
 
 
     ARGS = PARSER.parse_args()
-
 
     if not ARGS.input_path:
         PARSER.print_help()
@@ -55,6 +55,7 @@ if __name__ == "__main__":
 
     SMDA_REPORT = None
     INPUT_FILENAME = ""
+    BITNESS = ARGS.bitness if (ARGS.bitness in [32, 64]) else None
     if os.path.isfile(ARGS.input_path):
         print("now analyzing {}".format(ARGS.input_path))
         INPUT_FILENAME = os.path.basename(ARGS.input_path)
@@ -66,7 +67,7 @@ if __name__ == "__main__":
             BASE_ADDR = parseBaseAddrFromArgs(ARGS)
             config.API_COLLECTION_FILES = {"win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])}
             DISASSEMBLER = Disassembler(config)
-            SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR)
+            SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR, BITNESS)
             SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
         print(SMDA_REPORT)
     if SMDA_REPORT and os.path.isdir(ARGS.output_path):
