@@ -473,6 +473,35 @@ class FunctionCandidateManager(object):
                 # define data bytes inbetween
                 for offset in range(10):
                     self.disassembly.data_map.add(stub_addr + 6 + offset)
+        # structure for plt.sec (Intel Control Flow Enforcement Technology) entries
+        """
+        those look e.g. like this (64bit):
+        .plt.sec:000000000000CF70                                           ; =============== S U B R O U T I N E =======================================
+        .plt.sec:000000000000CF70
+        .plt.sec:000000000000CF70                                           ; Attributes: thunk
+        .plt.sec:000000000000CF70
+        .plt.sec:000000000000CF70                                           ; time_t time(time_t *timer)
+        .plt.sec:000000000000CF70                                           _time           proc near               ; CODE XREF: main+BE↓p
+        .plt.sec:000000000000CF70                                                                                   ; li_rand_init+37↓p ...
+        .plt.sec:000000000000CF70 F3 0F 1E FA                                               endbr64
+        .plt.sec:000000000000CF74 F2 FF 25 0D 2E 05 00                                      bnd jmp cs:time_ptr
+        .plt.sec:000000000000CF74                                           _time           endp
+        .plt.sec:000000000000CF74
+        .plt.sec:000000000000CF74                                           ; ---------------------------------------------------------------------------
+        .plt.sec:000000000000CF7B 0F 1F 44 00 00                                            align 20h
+        """
+        for block in re.finditer(b"(?P<block>(\xF3\x0F\x1E\xFA\xF2\xFF\x25[\S\s]{4}\x0F\x1F\x44\x00\x00){2,})", self.disassembly.binary_info.binary):
+            for match in re.finditer(b"\xF3\x0F\x1E\xFA\xF2\xFF\x25(?P<function>[\S\s]{4})", block.group("block")):
+                stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
+                if not self._passesCodeFilter(stub_addr):
+                    continue
+                self.addPrologueCandidate(stub_addr & self.getBitMask())
+                self.setInitialCandidate(stub_addr & self.getBitMask())
+                self.candidates[stub_addr].setIsStub(True)
+                # define data bytes inbetween
+                for offset in range(5):
+                    self.disassembly.data_map.add(stub_addr + 7 + offset)
+
 
     def locateExceptionHandlerCandidates(self):
         # 64bit only - if we have a .pdata section describing exception handlers, we extract entries of guaranteed function starts from it.
