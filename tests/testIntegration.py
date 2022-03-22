@@ -72,7 +72,6 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert len(inrefs) == 1
         for xref in example_function.getCodeInrefs():
             print(xref.from_function, xref.from_instruction, xref.to_function, xref.to_instruction)
-        raise
         outrefs = [code_outref for code_outref in example_function.getCodeOutrefs()]
         assert len(outrefs) == 10
 
