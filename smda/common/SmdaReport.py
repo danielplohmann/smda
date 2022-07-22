@@ -234,7 +234,7 @@ class SmdaReport(object):
             "binary_size": self.binary_size,
             "bitness": self.bitness,
             "code_areas": self.code_areas,
-            "code_sections": [("", section[1], section[2]) for section in self.code_sections],
+            "code_sections": [("", section[1], section[2]) for section in self.code_sections if len(section) > 2],
             "confidence_threshold": self.confidence_threshold,
             "disassembly_errors": self.disassembly_errors,
             "execution_time": self.execution_time,
