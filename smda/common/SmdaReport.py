@@ -62,6 +62,8 @@ class SmdaReport(object):
             self.buffer = buffer
             self.code_areas = disassembly.binary_info.code_areas
             self.code_sections = [section for section in disassembly.binary_info.getSections()]
+            if self.code_sections is None:
+                self.code_sections = []
             self.component = disassembly.binary_info.component
             self.confidence_threshold = disassembly.getConfidenceThreshold()
             self.disassembly_errors = disassembly.errors
@@ -234,7 +236,7 @@ class SmdaReport(object):
             "binary_size": self.binary_size,
             "bitness": self.bitness,
             "code_areas": self.code_areas,
-            "code_sections": [("", section[1], section[2]) for section in self.code_sections if len(section) > 2],
+            "code_sections": [("", section[1], section[2]) for section in self.code_sections],
             "confidence_threshold": self.confidence_threshold,
             "disassembly_errors": self.disassembly_errors,
             "execution_time": self.execution_time,
