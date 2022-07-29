@@ -28,6 +28,7 @@ class FunctionCandidateManager(object):
         self._all_call_refs = {}
         self.symbol_addresses = []
         self.identified_alignment = 0
+        self.go_objects = None
         # gap filling
         self.function_gaps = None
         self.max_function_addr = 0
@@ -450,6 +451,12 @@ class FunctionCandidateManager(object):
             LOGGER.debug("delphi candidates based on TObject analysis: %d", len(delphi_candidates))
             for obj in delphi_candidates:
                 self.addLanguageSpecCandidate(obj, "delphi")
+        if self.lang_analyzer.checkGo():
+            LOGGER.debug("Programming language recognized as Go, adding function start addresses from PCLNTAB")
+            self.go_objects = self.lang_analyzer.getGoObjects()
+            for add in self.go_objects:
+                self.addLanguageSpecCandidate(add, 'go')
+
 
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates
