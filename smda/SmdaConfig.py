@@ -5,7 +5,7 @@ import logging
 class SmdaConfig(object):
 
     # note to self: always change this in setup.py as well!
-    VERSION = "1.7.4"
+    VERSION = "1.8.0"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", ".."])))
 

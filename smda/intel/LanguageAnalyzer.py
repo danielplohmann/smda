@@ -1,7 +1,13 @@
 #!/usr/bin/python
+from io import BytesIO
 import re
 import struct
 import logging
+import lief
+import sys
+from collections import OrderedDict
+
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -10,6 +16,7 @@ class LanguageAnalyzer(object):
 
     def __init__(self, disassembly):
         self.disassembly = disassembly
+        self.go_resolver = GoSymbolProvider(None)
         self.strings = None
 
     def validPEHeader(self):
@@ -81,6 +88,17 @@ class LanguageAnalyzer(object):
             delphi_score = max(delphi_score, 0.8)
         return delphi_score
 
+    def getGoScore(self):
+        go_score = 0.0
+        strings = self.getStrings()
+        if any(b"Go build ID" in s for s in strings):
+            go_score = max(go_score, 0.6)
+
+        return go_score
+
+    def checkGo(self):
+        return self.getGoScore() > 0.5
+
     def getDelphiObjects(self):
         binary = self.disassembly.binary_info.binary
         base_addr = self.disassembly.binary_info.base_addr
@@ -123,6 +141,10 @@ class LanguageAnalyzer(object):
                 LOGGER.debug("no object end marker found" + str(t_object_name) + "0x%08x" % (t_string_pos - base_addr) + "0x%08x" % (t_string_pos))
         return t_objects
 
+    def getGoObjects(self):
+        self.go_resolver.update(self.disassembly.binary_info)
+        return self.go_resolver.getFunctionSymbols()
+
     def identify(self):
         result = {
             #programming language : probability
@@ -143,6 +165,8 @@ class LanguageAnalyzer(object):
         result[".net"] = self.getDotNetScore()
         #VISUALBASIC
         result["visualbasic"] = self.getVisualBasicScore()
+        #GO
+        result["go"] = self.getGoScore()
         #C++
         #check if there is a high number of the following patterns
         #in relation to the number off all functions (->the size of the sample)

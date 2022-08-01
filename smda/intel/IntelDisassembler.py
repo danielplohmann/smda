@@ -12,6 +12,7 @@ from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -73,6 +74,7 @@ class IntelDisassembler(object):
         self.label_providers.append(ElfApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
+        self.label_providers.append(GoSymbolProvider(self.config))
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
@@ -346,7 +348,7 @@ class IntelDisassembler(object):
                         LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
                     elif previous_address and i_address != start_addr and previous_mnemonic == "call":
                         instruction_sequence = [ins for ins in self.capstone.disasm(self._getDisasmWindowBuffer(i_address), i_address)]
-                        if (not self.disassembly.language == "go" and self.fc_manager.isAlignmentSequence(instruction_sequence)) or self.fc_manager.isFunctionCandidate(i_address):
+                        if (not self.disassembly.language['_guess'] == "go" and self.fc_manager.isAlignmentSequence(instruction_sequence)) or self.fc_manager.isFunctionCandidate(i_address):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
                             # however, Go tends to insert alignment NOPs after calls, too, but in this case, they are no tailcall indicator
                             LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i_address)
