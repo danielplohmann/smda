@@ -50,7 +50,8 @@ class SmdaFunction(object):
             self.pic_hash = self._calculatePicHash(disassembly.binary_info)
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
-            self.nesting_depth = self._calculateNestingDepth()
+            if config and config.CALCULATE_NESTING:
+                self.nesting_depth = self._calculateNestingDepth()
 
     @property
     def num_edges(self):

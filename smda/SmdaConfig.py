@@ -5,7 +5,7 @@ import logging
 class SmdaConfig(object):
 
     # note to self: always change this in setup.py as well!
-    VERSION = "1.8.0"
+    VERSION = "1.8.1"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", ".."])))
 
@@ -32,5 +32,6 @@ class SmdaConfig(object):
     RESOLVE_TAILCALLS = False
     # optional metadata generation options
     CALCULATE_SCC = True
+    CALCULATE_NESTING = True
     # confidence score to use for filtering functions before including them in the output
     CONFIDENCE_THRESHOLD = 0.0

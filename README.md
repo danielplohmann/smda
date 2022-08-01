@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-08-01: v1.8.1 - Added support for parsing 32bit Go binaries as well.
  * 2022-08-01: v1.8.0 - Added support for parsing Go function information (THX to @danielenders1!).
  * 2022-07-22: v1.7.4 - Bugfix for marshalling of reports.
  * 2022-07-08: v1.7.2 - Excluded overly aggressive tailcall recognition heuristics when processing Golang binaries.
