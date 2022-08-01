@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-08-01: v1.8.0 - Added support for parsing Go function information (THX to @danielenders1!).
  * 2022-07-22: v1.7.4 - Bugfix for marshalling of reports.
  * 2022-07-08: v1.7.2 - Excluded overly aggressive tailcall recognition heuristics when processing Golang binaries.
  * 2022-01-27: v1.7.0 - SmdaReports now contains a field `oep`; SmdaFunctions now indicate `is_exported` and can provide CodeXrefs via `getCodeInrefs()` and `getCodeOutrefs()`. (THX for the ideas: @mr-tz)
@@ -127,6 +128,7 @@ Thanks to Steffen Enders for his extensive contributions to this project!
 Thanks to Paul Hordiienko for adding symbol parsing support (ELF+PDB)!
 Thanks to Jonathan Crussell for helping me to beef up SMDA enough to make it a disassembler backend in capa!
 Thanks to Willi Ballenthin for improving handling of ELF files, including properly handling API usage!
+Thanks to Daniel Enders for his contributions to the parsing of the Golang function registry and label information!
 The project uses the implementation of Tarjan's Algorithm by Bas Westerbaan and the implementation of Lengauer-Tarjan's Algorithm for the DominatorTree by Armin Rigo.
 
 Pull requests welcome! :)

@@ -74,6 +74,7 @@ class IntelDisassembler(object):
         self.label_providers.append(ElfApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
+        self.label_providers.append(GoSymbolProvider(self.config))
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
@@ -429,12 +430,9 @@ class IntelDisassembler(object):
         if self.config.USE_SYMBOLS_AS_CANDIDATES:
             self.fc_manager.symbol_addresses = self.getSymbolCandidates()
         self.fc_manager.init(self.disassembly)
-        self.label_providers.append(GoSymbolProvider(self.config))
-        self.label_providers[-1].set_symbols(self.fc_manager.go_objects)
         self._initCapstone()
         self._initTfIdf()
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
-        print(self.fc_manager.getFunctionCandidate(4769024))
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
             if cbAnalysisTimeout and cbAnalysisTimeout():
                 break

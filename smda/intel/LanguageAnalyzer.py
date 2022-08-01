@@ -7,6 +7,8 @@ import lief
 import sys
 from collections import OrderedDict
 
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -14,6 +16,7 @@ class LanguageAnalyzer(object):
 
     def __init__(self, disassembly):
         self.disassembly = disassembly
+        self.go_resolver = GoSymbolProvider(None)
         self.strings = None
 
     def validPEHeader(self):
@@ -138,141 +141,9 @@ class LanguageAnalyzer(object):
                 LOGGER.debug("no object end marker found" + str(t_object_name) + "0x%08x" % (t_string_pos - base_addr) + "0x%08x" % (t_string_pos))
         return t_objects
 
-    def parse_pclntab(self, pclntab_offset):
-        binary = [self.disassembly.binary_info.binary]
-        try:
-            elf = lief.ELF.parse(sys.argv[1])
-            pclntab_offset = elf.get_section(".gopclntab").offset
-            elf = True
-        except:
-            try:
-                pelief = lief.PE.parse(sys.argv[1])
-                rdata_offet = pelief.get_section(".rdata").offset
-                pclntab_offset = rdata_offet + pelief.get_symbol("runtime.pclntab").value
-                elf = False
-            except ValueError:
-                find_pclntab = True
-        with open(sys.argv[1], 'rb') as fh:
-            fh.seek(pclntab_offset)
-            bytes_read = hex(int.from_bytes(fh.read(4), byteorder="little"))[2:]
-            if bytes_read == 'fffffff0':
-                    version = '1.18'
-            if bytes_read == 'fffffffa':
-                    version = '1.16'
-            if bytes_read == 'fffffffb':
-                    version = '1.12'
-            if version == '1.18':
-                fh.seek(pclntab_offset+8)
-                number_of_functions = int.from_bytes(fh.read(4), byteorder="little")
-                fh.seek(pclntab_offset+24)
-                start_text = hex(int.from_bytes(fh.read(4), byteorder="little"))[2:]
-                fh.seek(pclntab_offset+32)
-                function_name_offset = hex(int.from_bytes(fh.read(4), byteorder="little")+pclntab_offset)
-                fh.read(12)
-                file_name_offset = hex(int.from_bytes(fh.read(4), byteorder="little")+pclntab_offset)
-                fh.read(12)
-                weird_table_offset = hex(int.from_bytes(fh.read(4), byteorder="little")+pclntab_offset)
-            elif version == '1.16':
-                fh.seek(pclntab_offset+8)
-                number_of_functions = int.from_bytes(fh.read(4), byteorder="little")
-                fh.seek(pclntab_offset+24)
-                function_name_offset = hex(int.from_bytes(fh.read(4), byteorder="little")+pclntab_offset)
-                fh.read(4)
-                file_name_offset = hex(int.from_bytes(fh.read(4), byteorder="little")+pclntab_offset)
-                fh.read(20)
-                weird_table_offset = hex(int.from_bytes(fh.read(4), byteorder="little")+pclntab_offset)
-                start_text = '0'
-            elif version == '1.12':
-                fh.seek(pclntab_offset+8)
-                number_of_functions = int.from_bytes(fh.read(4), byteorder="little") 
-                function_name_offset = hex(pclntab_offset)
-                weird_table_offset = hex(pclntab_offset + 16)
-                start_text = '0'
-
-            fh.seek(int(weird_table_offset, base=16))
-            offsets = OrderedDict()
-            name_offsets = []
-            func_info_offsets = []
-            for index in range(number_of_functions):       
-                bytes_read = fh.read(4)
-                offsets[index] = hex(int.from_bytes(bytes_read, byteorder="little"))[2:]
-                if version == '1.16':
-                    fh.read(12)
-                if version == '1.18':
-                    fh.read(4)
-                if version == '1.12':
-                    fh.read(4)
-                    func_info_offsets.append( hex(int.from_bytes(fh.read(4), byteorder="little"))[2:])
-                    fh.read(4)
-
-            offsets2 = offsets.copy()
-            if version != '1.12':
-                delete = False
-                for offset in offsets:
-                    if delete:
-                        offsets2.pop(offset)
-                    bytes_read =  hex(int.from_bytes(fh.read(4), byteorder="little"))[2:]
-                    try:
-                        while bytes_read != offsets[offset]:
-                            bytes_read = hex(int.from_bytes(fh.read(4), byteorder="little"))[2:]
-
-                            
-                    except ValueError:
-                        delete = True
-                        offsets2.pop(offset)
-                        continue
-                    if version == '1.16':
-                        fh.read(4) 
-                    name_offsets.append( hex(int.from_bytes(fh.read(4), byteorder="little"))[2:])
-            else:
-                for offset in func_info_offsets:
-                    fh.seek(pclntab_offset+ int(offset, base=16)+8)
-                    name_offsets.append( hex(int.from_bytes(fh.read(4), byteorder="little"))[2:])
-                    
-
-            functions = {}
-            for offset in offsets2:
-                real_offset = int(offsets[offset], base=16)+ int(start_text, base=16)
-                fh.seek(int(function_name_offset,base=16)+int(name_offsets[offset],base=16))
-                bytes_read = fh.read(1).hex()
-                name = ''
-                while int(bytes_read, base=16) != 0:
-                    name += bytes_read
-                    bytes_read = fh.read(1).hex()
-
-                functions[real_offset] = bytearray.fromhex(name).decode().replace('\u00b7', ':')
-            return functions
-
     def getGoObjects(self):
-        find_pclntab = False
-        binary = self.disassembly.binary_info.raw_data
-        try:
-            elf = lief.ELF.parse(bytearray(binary))
-            pclntab_offset = elf.get_section(".gopclntab").offset
-            elf = True
-        except:
-            try:
-                pelief = lief.PE.parse(bytearray(binary))
-                rdata_offet = pelief.get_section(".rdata").offset
-                pclntab_offset = rdata_offet + pelief.get_symbol("runtime.pclntab").value
-                elf = False
-            except ValueError:
-                find_pclntab = True
-        if find_pclntab:
-            with open(sys.argv[1], 'rb') as fh:
-                while 1:
-                    bytes_read = fh.read(4)
-                    while (hex(int.from_bytes(bytes_read, byteorder="little"))[2:] not in ['fffffff0','fffffffa','fffffffb']) or (int(fh.read(2).hex(), base=16) != 0):
-                        fh.seek(fh.tell()-2)
-                        bytes_read = fh.read(4).hex()
-                    pclntab_offset = fh.tell() - 6
-                    print(pclntab_offset)
-                    try:
-                        return self.parse_pclntab(pclntab_offset)
-                    except:
-                        continue
-        else:
-            return self.parse_pclntab(pclntab_offset)
+        self.go_resolver.update(self.disassembly.binary_info)
+        return self.go_resolver.getFunctionSymbols()
 
     def identify(self):
         result = {
