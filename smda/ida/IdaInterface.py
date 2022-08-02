@@ -147,6 +147,14 @@ class Ida74Interface(BackendInterface):
         is_extern = function_segment_name in ["extern", "UNDEF"]
         return is_extern
 
+    def makeFunction(self, instruction):
+        return ida_funcs.add_func(instruction)
+
+    def makeNameEx(self, address, name, warning_level=None):
+        if warning_level is None:
+            warning_level=idc.SN_NOWARN
+        return idc.set_name(address, name, warning_level)
+
     def _cbEnumImports(self, addr, name, ordinal):
         # potentially use: idc.Name(addr)
         if self._import_module_name:
@@ -256,6 +264,14 @@ class Ida73Interface(BackendInterface):
     def isExternalFunction(self, function_offset):
         # TODO look up older function names to support this for IDA 7.3- as well
         return False
+
+    def makeFunction(self, instruction):
+        return idc.add_func(instruction)
+
+    def makeNameEx(self, address, name, warning_level=None):
+        if warning_level is None:
+            warning_level=idc.SN_NOWARN
+        return idc.set_name(address, name, warning_level)
 
     def _cbEnumImports(self, addr, name, ordinal):
         # potentially use: idc.Name(addr)
