@@ -11,7 +11,7 @@ from smda.Disassembler import Disassembler
 def parseBaseAddrFromArgs(args):
     if args.base_addr:
         parsed_base_addr = int(args.base_addr, 16) if args.base_addr.startswith("0x") else int(args.base_addr)
-        logging.info("using provided base address: 0x%08x %d", parsed_base_addr, parsed_base_addr)
+        logging.info("using provided base address: 0x%08x", parsed_base_addr)
         return parsed_base_addr
     # try to infer base addr from filename:
     baddr_match = re.search(re.compile("_0x(?P<base_addr>[0-9a-fA-F]{8,16})"), args.input_path)
