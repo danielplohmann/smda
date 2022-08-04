@@ -163,7 +163,7 @@ class SmdaFunction(object):
         dot_graph = f'digraph "CFG for 0x{self.offset:x}" {{\n'
         dot_graph += f'  label="CFG for 0x{self.offset:x}";\n'
         for smda_block in self.getBlocks():
-            block_entry = f'  Node0x{smda_block.offset} [shape=record,label="'
+            block_entry = f'  Node0x{smda_block.offset:x} [shape=record,label="'
             instructions_as_strings = []
             for smda_ins in smda_block.getInstructions():
                 instructions_as_strings.append(f'{smda_ins.offset:x}: {smda_ins.mnemonic} {smda_ins.operands}')
@@ -171,7 +171,7 @@ class SmdaFunction(object):
             dot_graph += block_entry + '"];\n'
             if smda_block.offset in self.blockrefs:
                 for target_offset in self.blockrefs[smda_block.offset]:
-                    dot_graph += f'  Node0x{smda_block.offset} -> Node0x{target_offset};\n'
+                    dot_graph += f'  Node0x{smda_block.offset:x} -> Node0x{target_offset:x};\n'
         dot_graph += "}"
         return dot_graph
 

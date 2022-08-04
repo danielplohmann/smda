@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-08-04: v1.8.4 - Dot export now uses hex formatted addresses in node names.
  * 2022-08-03: v1.8.3 - Added support for producing a Dot export for SmdaFunction.
  * 2022-08-01: v1.8.1 - Added support for parsing 32bit Go binaries as well.
  * 2022-08-01: v1.8.0 - Added support for parsing Go function information (THX to @danielenders1!).
