@@ -141,6 +141,8 @@ class GoSymbolProvider(AbstractLabelProvider):
             for index, info_offset in func_info_offsets.items():
                 function_offset = offsets[index]
                 name_offset = struct.unpack(field_indicator, pclntab_buffer[info_offset+field_size:info_offset+2*field_size])[0]
+                # only take lower 32bit in case of 64bit binaries.
+                name_offset &= 0xFFFFFFFF
                 function_name = self._readUtf8(function_name_buffer[name_offset:])
                 functions[function_offset + start_text] = function_name
         else:
