@@ -1,7 +1,7 @@
 import os
 from smda.utility.PeFileLoader import PeFileLoader
 from smda.utility.ElfFileLoader import ElfFileLoader
-
+from smda.utility.MachoFileLoader import MachoFileLoader
 
 class FileLoader(object):
 
@@ -12,7 +12,7 @@ class FileLoader(object):
     _base_addr = 0
     _bitness = 0
     _code_areas = []
-    file_loaders = [PeFileLoader, ElfFileLoader]
+    file_loaders = [PeFileLoader, ElfFileLoader, MachoFileLoader]
 
     def __init__(self, file_path, load_file=True, map_file=False):
         self._file_path = file_path

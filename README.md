@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-08-12: v1.9.0 - Added support for parsing intel MachO files, including Go parsing.
  * 2022-08-10: v1.8.5 - Fixed Go 64bit lavel parsing for v1.12 binaries.
  * 2022-08-04: v1.8.4 - Dot export now uses hex formatted addresses in node names.
  * 2022-08-03: v1.8.3 - Added support for producing a Dot export for SmdaFunction.

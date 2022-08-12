@@ -21,21 +21,18 @@ class GoSymbolProvider(AbstractLabelProvider):
 
     def update(self, binary_info):
         binary = binary_info.binary
-        is_elf = False
         pclntab_offset = None
         try:
-            elf = lief.ELF.parse(bytearray(binary))
-            pclntab_offset = elf.get_section(".gopclntab").offset
-            is_elf = True
+            lief_binary = lief.parse(bytearray(binary))
+            if lief_binary.format == lief.EXE_FORMATS.ELF:
+                pclntab_offset = lief_binary.get_section(".gopclntab").offset
+            elif lief_binary.format == lief.EXE_FORMATS.MACHO:
+                pclntab_offset = lief_binary.get_section("__gopclntab").offset
+            elif lief_binary.format == lief.EXE_FORMATS.PE:
+                rdata_offset = lief_binary.get_section(".rdata").offset
+                pclntab_offset = rdata_offset + lief_binary.get_symbol("runtime.pclntab").value
         except:
             pass
-        if not is_elf:
-            try:
-                pe = lief.PE.parse(bytearray(binary))
-                rdata_offset = pe.get_section(".rdata").offset
-                pclntab_offset = rdata_offset + pe.get_symbol("runtime.pclntab").value
-            except:
-                pass
         if pclntab_offset is None:
             # scan for offset of structure
             pclntab_regex = re.compile(b".\xFF\xFF\xFF\x00\x00\x01(\x04|\x08)")
