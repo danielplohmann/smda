@@ -175,7 +175,7 @@ class MachoFileLoader(object):
             if section.flags & ins_flags:
                 section_start = section.virtual_address
                 section_size = section.size
-                if section_size % section.alignment != 0:
+                if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
                 code_areas.append([section_start, section_end])              
