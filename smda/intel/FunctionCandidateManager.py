@@ -441,15 +441,11 @@ class FunctionCandidateManager(object):
                 self.setInitialCandidate((self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask())
 
     def locateLangSpecCandidates(self):
-        # if the sample is highly likely delphi, extract t-string-objects and use their function-addresses as high-confidence function starts
-        delphi_candidates = set([])
         if self.lang_analyzer.checkDelphi():
-            LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from TObjects")
-            t_objects = self.lang_analyzer.getDelphiObjects()
-            for t_string in t_objects:
-                delphi_candidates.update(set(t_objects[t_string]))
-            LOGGER.debug("delphi candidates based on TObject analysis: %d", len(delphi_candidates))
-            for obj in delphi_candidates:
+            LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from VMTs")
+            delphi_objects = self.lang_analyzer.getDelphiObjects()
+            LOGGER.debug("delphi candidates based on VMT analysis: %d", len(delphi_objects))
+            for obj in delphi_objects:
                 self.addLanguageSpecCandidate(obj, "delphi")
         if self.lang_analyzer.checkGo():
             LOGGER.debug("Programming language recognized as Go, adding function start addresses from PCLNTAB")
