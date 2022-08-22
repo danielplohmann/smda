@@ -29,6 +29,8 @@ class FunctionCandidateManager(object):
         self.symbol_addresses = []
         self.identified_alignment = 0
         self.go_objects = None
+        self.delphi_kb_objects = None
+        self.language_candidates_only = False
         # gap filling
         self.function_gaps = None
         self.max_function_addr = 0
@@ -115,6 +117,8 @@ class FunctionCandidateManager(object):
     def getNextFunctionStartCandidate(self):
         for candidate in self.candidate_queue:
             if not (candidate.isFinished() or candidate.getScore() == 0):
+                if self.language_candidates_only and candidate.lang_spec is None:
+                    continue
                 if self.identified_alignment and candidate.alignment < self.identified_alignment:
                     continue
                 yield candidate
@@ -200,6 +204,8 @@ class FunctionCandidateManager(object):
         return is_alignment_sequence
 
     def nextGapCandidate(self, start_gap_pointer=None):
+        if self.language_candidates_only:
+            return None
         if self.gap_pointer is None:
             self.initGapSearch()
         if start_gap_pointer:
@@ -452,7 +458,19 @@ class FunctionCandidateManager(object):
             self.go_objects = self.lang_analyzer.getGoObjects()
             for add in self.go_objects:
                 self.addLanguageSpecCandidate(add, 'go')
-
+        if self.lang_analyzer.checkDelphiKb():
+            LOGGER.debug("File recognized as Delphi knowledge base, adding function start addresses via parser")
+            self.language_candidates_only = True
+            self.delphi_kb_objects = self.lang_analyzer.getDelphiKbObjects()
+            # apply relocations with imaginary base_addr at 0x400000 (provided by file loader)
+            relocations = self.lang_analyzer.delphi_kb_resolver.getRelocations()
+            image_base_as_bytes = struct.pack("I", self.disassembly.binary_info.base_addr)
+            for relocation_offset in relocations:
+                # don't relocate relative jumps/calls
+                if self.disassembly.binary_info.binary[relocation_offset - 1] not in [0xE8, 0xE9]:
+                    self.disassembly.binary_info.binary = self.disassembly.binary_info.binary[:relocation_offset] + image_base_as_bytes + self.disassembly.binary_info.binary[relocation_offset + 4:]
+            for add in self.delphi_kb_objects:
+                self.addLanguageSpecCandidate(add, 'delphi_kb')
 
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates

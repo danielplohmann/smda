@@ -5,6 +5,7 @@ import logging
 from io import BytesIO
 
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ class LanguageAnalyzer(object):
     def __init__(self, disassembly):
         self.disassembly = disassembly
         self.go_resolver = GoSymbolProvider(None)
+        self.delphi_kb_resolver = DelphiKbSymbolProvider(None)
         self.strings = None
 
     def validPEHeader(self):
@@ -189,6 +191,16 @@ class LanguageAnalyzer(object):
         self.go_resolver.update(self.disassembly.binary_info)
         return self.go_resolver.getFunctionSymbols()
 
+    def getDelphiKbScore(self):
+        return 1.0 if self.disassembly.binary_info.binary.startswith(b"IDR Knowledge Base File") else 0.0
+
+    def checkDelphiKb(self):
+        return self.getDelphiKbScore() == 1
+
+    def getDelphiKbObjects(self):
+        self.delphi_kb_resolver.update(self.disassembly.binary_info)
+        return self.delphi_kb_resolver.getFunctionSymbols()
+
     def identify(self):
         result = {
             #programming language : probability
@@ -205,6 +217,7 @@ class LanguageAnalyzer(object):
             result["_count_delphi_objects"] = len(t_objects)
             if len(t_objects) > 5 and functions > 10:
                 result["delphi"] = max(result.get("delphi", 0), 0.9)
+        result["delphi_kb_file"] = self.getDelphiKbScore()
         #.NET
         result[".net"] = self.getDotNetScore()
         #VISUALBASIC

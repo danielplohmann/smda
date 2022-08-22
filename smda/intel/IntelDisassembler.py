@@ -13,6 +13,7 @@ from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -75,6 +76,7 @@ class IntelDisassembler(object):
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
         self.label_providers.append(GoSymbolProvider(self.config))
+        self.label_providers.append(DelphiKbSymbolProvider(self.config))
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
