@@ -1,15 +1,42 @@
 #!/usr/bin/python
-from io import BytesIO
 import re
 import struct
 import logging
-import pefile
-import sys
-from collections import OrderedDict
+from io import BytesIO
 
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
+
+
+class hexdump:
+    def __init__(self, buf, off=0):
+        self.buf = buf
+        self.off = off
+
+    def __iter__(self):
+        last_bs, last_line = None, None
+        for i in range(0, len(self.buf), 16):
+            bs = bytearray(self.buf[i : i + 16])
+            line = "{:08x}  {:23}  {:23}  |{:16}|".format(
+                self.off + i,
+                " ".join(("{:02x}".format(x) for x in bs[:8])),
+                " ".join(("{:02x}".format(x) for x in bs[8:])),
+                "".join((chr(x) if 32 <= x < 127 else "." for x in bs)),
+            )
+            if bs == last_bs:
+                line = "*"
+            if bs != last_bs or line != last_line:
+                yield line
+            last_bs, last_line = bs, line
+        yield "{:08x}".format(self.off + len(self.buf))
+
+    def __str__(self):
+        return "\n".join(self)
+
+    def __repr__(self):
+        return "\n".join(self)
+
 
 
 class LanguageAnalyzer(object):
@@ -99,97 +126,94 @@ class LanguageAnalyzer(object):
     def checkGo(self):
         return self.getGoScore() > 0.5
 
-    def getDelphiObjects(self):
-        pe =  pefile.PE(data=bytearray(self.disassembly.binary_info.binary))
-        data = BytesIO(self.disassembly.binary_info.binary)
-        code_sections = []
-        for section in pe.sections:
-                if (
-                    section.Characteristics
-                    & pefile.SECTION_CHARACTERISTICS["IMAGE_SCN_CNT_CODE"]
-                ):
-                    size = section.SizeOfRawData
-                    base_va = pe.OPTIONAL_HEADER.ImageBase + section.VirtualAddress
-                    code_sections.append((base_va,size))
-        function_offsets = set()
+    def parseDelphiString(self, buffer):
+        parsed_string = ""
+        if len(buffer) > 0:
+            length = buffer[0]
+            try:
+                parsed_string = buffer[1:1 + length].decode()
+            except:
+                parsed_string = "<invalid>"
+        return parsed_string
 
+    def getDelphiObjects(self):
+        image_base = self.disassembly.binary_info.base_addr
+        data = BytesIO(self.disassembly.binary_info.binary)
+        function_offsets = set()
+        name_mapping = {}
         while data.read(4) != b'':
             data.seek(data.tell()-4)
             offset = data.tell()
             potential_vmt_self_ptr = int.from_bytes(data.read(4), byteorder="little")
-            temp_offset = data.tell()
-            if offset + pe.OPTIONAL_HEADER.ImageBase + int('4C', base=16) == potential_vmt_self_ptr:
-                if potential_vmt_self_ptr == 4638980:
-                    print("FOUND")
-                data.seek(temp_offset)
-                intfTable = int.from_bytes(data.read(4), byteorder="little")
-                autoTable = int.from_bytes(data.read(4), byteorder="little")
-                initTable = int.from_bytes(data.read(4), byteorder="little")
-                typeInfo = int.from_bytes(data.read(4), byteorder="little")
-                fieldtable = int.from_bytes(data.read(4), byteorder="little")
-                methodTable = int.from_bytes(data.read(4), byteorder="little")
-                dynamicTable = int.from_bytes(data.read(4), byteorder="little")
+            saved_scan_offset = data.tell()
+            # Delphi VMTs have pointers that indicate their start, spanning an "address frame" that can be searched for
+            if offset + image_base + int('4C', base=16) == potential_vmt_self_ptr:
+                data.seek(saved_scan_offset)
+                interface_table = int.from_bytes(data.read(4), byteorder="little")
+                auto_table = int.from_bytes(data.read(4), byteorder="little")
+                init_table = int.from_bytes(data.read(4), byteorder="little")
+                type_info = int.from_bytes(data.read(4), byteorder="little")
+                field_table = int.from_bytes(data.read(4), byteorder="little")
+                method_table = int.from_bytes(data.read(4), byteorder="little")
+                dynamic_table = int.from_bytes(data.read(4), byteorder="little")
                 class_name = int.from_bytes(data.read(4), byteorder="little")
                 instance_size = int.from_bytes(data.read(4), byteorder="little")
-                temp = data.tell()
-                if class_name > pe.OPTIONAL_HEADER.ImageBase:
-                    data.seek(class_name-pe.OPTIONAL_HEADER.ImageBase)
-                    length = int.from_bytes(data.read(1), byteorder="little")
-                    class_name_string = data.read(length).decode()
-                data.seek(temp)
+                class_name_saved_offset = data.tell()
+                # not used currently but a candidate for future provided meta data
+                class_name_string = self.parseDelphiString(self.disassembly.binary_info.binary[class_name - image_base:])
+                data.seek(class_name_saved_offset)
                 data.read(8)
+                # search for addresses within our known structures
                 first_address = int.from_bytes(data.read(4), byteorder="little")
-
-                if first_address >= base_va and first_address <= base_va+size:
-                    data.seek(data.tell()-4)
-                    for i in range(8):
+                if self.disassembly.binary_info.isInCodeAreas(first_address):
+                    data.seek(data.tell() - 4)
+                    for _ in range(8):
                         function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                    if dynamicTable > 0:
-                        data.seek(dynamicTable-pe.OPTIONAL_HEADER.ImageBase)
-                        len_table = int.from_bytes(data.read(2), byteorder="little")
-                        data.read(2*len_table)
-                        for i in range(len_table):
+                    if dynamic_table > 0:
+                        data.seek(dynamic_table - image_base)
+                        table_length = int.from_bytes(data.read(2), byteorder="little")
+                        data.read(2 * table_length)
+                        for _ in range(table_length):
                             function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                        data.seek(potential_vmt_self_ptr-pe.OPTIONAL_HEADER.ImageBase)
-                        while data.tell() < dynamicTable-pe.OPTIONAL_HEADER.ImageBase:
+                        data.seek(potential_vmt_self_ptr - image_base)
+                        while data.tell() < dynamic_table - image_base:
                             function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
                     else:
-                        data.seek(potential_vmt_self_ptr-pe.OPTIONAL_HEADER.ImageBase)
-                        count = 0
-                        while data.tell() < class_name-pe.OPTIONAL_HEADER.ImageBase:
-                            count+=1
+                        data.seek(potential_vmt_self_ptr - image_base)
+                        while data.tell() < class_name - image_base:
                             function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                    if methodTable > 0:
-                        data.seek(methodTable-pe.OPTIONAL_HEADER.ImageBase)
+                    if method_table > 0:
+                        # this should at least work for Delphi 6
+                        data.seek(method_table - image_base)
                         length = int.from_bytes(data.read(2), byteorder="little")
-                        for i in range(length):
+                        for _ in range(length):
                             length_entry = int.from_bytes(data.read(2), byteorder="little")
                             method_offset = int.from_bytes(data.read(4), byteorder="little")
+                            method_name = self.parseDelphiString(self.disassembly.binary_info.binary[data.tell():])
+                            name_mapping[method_offset] = method_name
                             function_offsets.add(method_offset)
-                            data.seek(data.tell()+length_entry-6)
-                        data.seek(temp_offset)
-                    if intfTable > 0:
-                        data.seek(intfTable-pe.OPTIONAL_HEADER.ImageBase)
+                            data.seek(data.tell() + length_entry - 6)
+                        data.seek(saved_scan_offset)
+                    if interface_table > 0:
+                        data.seek(interface_table - image_base)
                         data.read(20)
-                        start_intf = int.from_bytes(data.read(4), byteorder="little")
-                        data.seek(start_intf-pe.OPTIONAL_HEADER.ImageBase)
+                        start_interface = int.from_bytes(data.read(4), byteorder="little")
+                        data.seek(start_interface - image_base)
                         bytes_read = int.from_bytes(data.read(4), byteorder="little")
-                        while bytes_read >= base_va and bytes_read <= base_va+size:
+                        while self.disassembly.binary_info.isInCodeAreas(bytes_read):
                             function_offsets.add(bytes_read)
                             bytes_read = int.from_bytes(data.read(4), byteorder="little")
-                        data.seek(temp_offset)
-        
+                        data.seek(saved_scan_offset)
                 else:
-                    data.seek(temp_offset)
-            
+                    data.seek(saved_scan_offset)
             else:
-                data.seek(temp_offset)
-
+                data.seek(saved_scan_offset)
         functions = {}
         for offset in function_offsets:
-            if offset >= base_va and offset <= base_va+size:
-                functions[offset] = ''
-        return functions 
+            if self.disassembly.binary_info.isInCodeAreas(offset):
+                function_name = name_mapping[offset]if offset in name_mapping else ""
+                functions[offset] = function_name
+        return functions
 
     def getGoObjects(self):
         self.go_resolver.update(self.disassembly.binary_info)

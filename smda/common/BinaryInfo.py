@@ -61,3 +61,12 @@ class BinaryInfo(object):
                     section_size += 0x1000 - (section_size % 0x1000)
                 section_end = section_start + section_size
                 yield section.name, section_start, section_end
+
+    def isInCodeAreas(self, address):
+        is_inside = False
+        # if no code areas found, assume we don't have information about it and always return True
+        if len(self.code_areas) == 0:
+            is_inside = True
+        else:
+            is_inside = any([a[0] <= address < a[1] for a in self.code_areas])
+        return is_inside
