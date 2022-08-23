@@ -119,9 +119,12 @@ class ElfFileLoader(object):
             if not section.virtual_address:
                 continue
             rva = section.virtual_address - base_addr
-            LOGGER.debug("ELF: mapping section of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)", section.size, rva, rva + section.size, section.virtual_address)
-            assert len(section.content) == section.size
-            mapped_binary[rva:rva + section.size] = section.content
+            LOGGER.debug("ELF: mapping section of 0x%04x bytes (content: 0x%04x bytes) at 0x%08x-0x%08x (0x%08x)", section.size, len(section.content), rva, rva + section.size, section.virtual_address)
+            # potentially perform zero padding if we have less content than section size
+            content_to_be_mapped = bytearray(section.content)
+            if len(section.content) < section.size:
+                content_to_be_mapped += b"\x00" * (section.size - len(section.content))
+            mapped_binary[rva:rva + section.size] = content_to_be_mapped
 
         # map header.
         # we consider the headers to be any data found before the first section/segment
