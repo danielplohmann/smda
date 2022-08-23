@@ -5,6 +5,7 @@ import logging
 from io import BytesIO
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,8 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
 
     def update(self, binary_info):
         binary = binary_info.binary
-        self._func_symbols = self.parseKbBuffer(binary, binary_info.base_addr)
+        if DelphiKbFileLoader.isCompatible(binary):
+            self._func_symbols = self.parseKbBuffer(binary, binary_info.base_addr)
 
     def isSymbolProvider(self):
         return True
