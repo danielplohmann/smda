@@ -57,7 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2022-08-25: v1.9.5 - Fixed bug in delphi knowledge base handling.
+ * 2022-08-25: v1.9.6 - Fixed bug in delphi knowledge base handling and improved performance.
  * 2022-08-23: v1.9.4 - Fixed bug in section padding for ELF files.
  * 2022-08-22: v1.9.3 - Added parsing for Delphi knowledge base files (THX to @danielenders1!).
  * 2022-08-22: v1.9.2 - Improved structural parsing of Delphi binaries (THX to @danielenders1!).

@@ -456,13 +456,20 @@ class FunctionCandidateManager(object):
             LOGGER.debug("File recognized as Delphi knowledge base")
             self.language_candidates_only = True
             self.delphi_kb_objects = self.lang_analyzer.getDelphiKbObjects()
+            LOGGER.debug("Knowledge Base Objects parsed.")
             # apply relocations with imaginary base_addr at 0x400000 (provided by file loader)
             relocations = self.lang_analyzer.delphi_kb_resolver.getRelocations()
             image_base_as_bytes = struct.pack("I", self.disassembly.binary_info.base_addr)
+            LOGGER.debug("Iterating relocations.")
+            binary_as_array = bytearray(self.disassembly.binary_info.binary)
             for relocation_offset in relocations:
                 # don't relocate relative jumps/calls
                 if self.disassembly.binary_info.binary[relocation_offset - 1] not in [0xE8, 0xE9]:
-                    self.disassembly.binary_info.binary = self.disassembly.binary_info.binary[:relocation_offset] + image_base_as_bytes + self.disassembly.binary_info.binary[relocation_offset + 4:]
+                    binary_as_array[relocation_offset] = image_base_as_bytes[0]
+                    binary_as_array[relocation_offset + 1] = image_base_as_bytes[1]
+                    binary_as_array[relocation_offset + 2] = image_base_as_bytes[2]
+                    binary_as_array[relocation_offset + 3] = image_base_as_bytes[3]
+            self.disassembly.binary_info.binary = bytes(binary_as_array)
             LOGGER.debug("Adding function start addresses via parser: %d" % len(self.delphi_kb_objects))
             for add in self.delphi_kb_objects:
                 self.addLanguageSpecCandidate(add, 'delphi_kb')
