@@ -447,19 +447,13 @@ class FunctionCandidateManager(object):
                 self.setInitialCandidate((self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask())
 
     def locateLangSpecCandidates(self):
-        if self.lang_analyzer.checkDelphi():
-            LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from VMTs")
-            delphi_objects = self.lang_analyzer.getDelphiObjects()
-            LOGGER.debug("delphi candidates based on VMT analysis: %d", len(delphi_objects))
-            for obj in delphi_objects:
-                self.addLanguageSpecCandidate(obj, "delphi")
         if self.lang_analyzer.checkGo():
-            LOGGER.debug("Programming language recognized as Go, adding function start addresses from PCLNTAB")
             self.go_objects = self.lang_analyzer.getGoObjects()
+            LOGGER.debug("Programming language recognized as Go, adding function start addresses from PCLNTAB: %d" % len(self.go_objects))
             for add in self.go_objects:
                 self.addLanguageSpecCandidate(add, 'go')
         if self.lang_analyzer.checkDelphiKb():
-            LOGGER.debug("File recognized as Delphi knowledge base, adding function start addresses via parser")
+            LOGGER.debug("File recognized as Delphi knowledge base")
             self.language_candidates_only = True
             self.delphi_kb_objects = self.lang_analyzer.getDelphiKbObjects()
             # apply relocations with imaginary base_addr at 0x400000 (provided by file loader)
@@ -469,8 +463,15 @@ class FunctionCandidateManager(object):
                 # don't relocate relative jumps/calls
                 if self.disassembly.binary_info.binary[relocation_offset - 1] not in [0xE8, 0xE9]:
                     self.disassembly.binary_info.binary = self.disassembly.binary_info.binary[:relocation_offset] + image_base_as_bytes + self.disassembly.binary_info.binary[relocation_offset + 4:]
+            LOGGER.debug("Adding function start addresses via parser: %d" % len(self.delphi_kb_objects))
             for add in self.delphi_kb_objects:
                 self.addLanguageSpecCandidate(add, 'delphi_kb')
+        elif self.lang_analyzer.checkDelphi():
+            LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from VMTs")
+            delphi_objects = self.lang_analyzer.getDelphiObjects()
+            LOGGER.debug("delphi candidates based on VMT analysis: %d", len(delphi_objects))
+            for obj in delphi_objects:
+                self.addLanguageSpecCandidate(obj, "delphi")
 
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates
