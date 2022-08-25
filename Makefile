@@ -2,15 +2,15 @@ init:
 	pip install -r requirements.txt
 package:
 	rm -rf dist/*
-	python3 setup.py sdist
+	python setup.py sdist
 publish:
-	python3 -m twine upload dist/* -u __token__
+	python -m twine upload dist/* -u __token__
 pylint:
-	python3 -m pylint --rcfile=.pylintrc smda
+	python -m pylint --rcfile=.pylintrc smda
 test:
-	python3 -m nose
+	python -m nose
 test-coverage:
-	python3 -m nose --with-coverage --cover-erase --cover-html-dir=./coverage-html --cover-html --cover-package=smda
+	python -m nose --with-coverage --cover-erase --cover-html-dir=./coverage-html --cover-html --cover-package=smda
 clean:
 	find . | grep -E "(__pycache__|\.pyc|\.pyo$\)" | xargs rm -rf
 	rm -rf .coverage
