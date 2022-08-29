@@ -354,6 +354,9 @@ class IntelDisassembler(object):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
                             # however, Go tends to insert alignment NOPs after calls, too, but in this case, they are no tailcall indicator
                             LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i_address)
+                            # remove next instruction from references
+                            state.removeCodeRef(previous_address, i_address)
+                            # end block
                             state.setBlockEndingInstruction(True)
                             state.endBlock()
                             state.setSanelyEnding(True)

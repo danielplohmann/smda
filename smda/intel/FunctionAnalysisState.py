@@ -78,6 +78,17 @@ class FunctionAnalysisState(object):
             self.is_jmp = True
             self.jump_targets.update([addr_to])
 
+
+    def removeCodeRef(self, addr_from, addr_to):
+        if (addr_from, addr_to) in self.code_refs:
+            self.code_refs.remove((addr_from, addr_to))
+        if addr_from in self.code_refs_from and addr_to in self.code_refs_from[addr_from]:
+            self.code_refs_from[addr_from].remove(addr_to)
+        if addr_to in self.code_refs_to and addr_from in self.code_refs_to[addr_to]:
+            self.code_refs_to[addr_to].remove(addr_from)
+        if addr_to in self.jump_targets:
+            self.jump_targets.remove(addr_to)
+
     def addDataRef(self, addr_from, addr_to, size=1):
         self.data_refs.update([(addr_from, addr_to)])
         for i in range(size):

@@ -191,16 +191,21 @@ class FunctionCandidateManager(object):
 
     def isAlignmentSequence(self, instruction_sequence):
         is_alignment_sequence = False
+        instructions_analyzed = 0
         if len(instruction_sequence) > 0:
             current_offset = instruction_sequence[0].address
             for instruction in instruction_sequence:
                 if instruction.bytes in GAP_SEQUENCES[len(instruction.bytes)]:
+                    instructions_analyzed += 1
                     current_offset += len(instruction.bytes)
                     if current_offset % 16 == 0:
                         is_alignment_sequence = True
                         break
                 else:
                     break
+        if len(instruction_sequence) > instructions_analyzed:
+            if instruction_sequence[instructions_analyzed].mnemonic in ["leave", "ret", "retn"]:
+                is_alignment_sequence = False
         return is_alignment_sequence
 
     def nextGapCandidate(self, start_gap_pointer=None):
