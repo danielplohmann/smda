@@ -353,18 +353,22 @@ class IntelDisassembler(object):
                         if (not self.disassembly.language['_guess'] == "go" and self.fc_manager.isAlignmentSequence(instruction_sequence)) or self.fc_manager.isFunctionCandidate(i_address):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
                             # however, Go tends to insert alignment NOPs after calls, too, but in this case, they are no tailcall indicator
-                            LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i_address)
-                            # remove next instruction from references
-                            state.removeCodeRef(previous_address, i_address)
-                            # end block
-                            state.setBlockEndingInstruction(True)
-                            state.endBlock()
-                            state.setSanelyEnding(True)
-                            if self.fc_manager.isAlignmentSequence(instruction_sequence):
-                                next_aligned_address = previous_address + (16 - previous_address % 16)
-                                LOGGER.debug("  Adding: 0x%x as candidate.", next_aligned_address)
-                                self.fc_manager.addCandidate(next_aligned_address, is_gap=True)
-                            break
+                            # apparently calls are frequently padded with NOPs, so one last chance to continue disassembly is when we already have instructions for our function beyond this call.
+                            if not any([disassembled_addr > i_address for disassembled_addr in state.instruction_start_bytes]):
+                                LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i_address)
+                                # remove next instruction from references
+                                state.removeCodeRef(previous_address, i_address)
+                                # end block
+                                state.setBlockEndingInstruction(True)
+                                state.endBlock()
+                                state.setSanelyEnding(True)
+                                if self.fc_manager.isAlignmentSequence(instruction_sequence):
+                                    next_aligned_address = previous_address + (16 - previous_address % 16)
+                                    LOGGER.debug("  Adding: 0x%x as candidate.", next_aligned_address)
+                                    self.fc_manager.addCandidate(next_aligned_address, is_gap=True)
+                                break
+                            else:
+                                LOGGER.debug("    current function: 0x%x ---> alignment sequence seems to just pad a call -> 0x%08x, NOT cutting block here.", start_addr, i_address)
                     previous_address = i_address
                     previous_mnemonic = i_mnemonic
                     previous_op_str = i_op_str
