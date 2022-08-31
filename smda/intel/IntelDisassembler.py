@@ -378,7 +378,7 @@ class IntelDisassembler(object):
                     elif i_address in self.disassembly.code_map:
                         LOGGER.debug("  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)", i_address, i_mnemonic + " " + i_op_str, self.disassembly.ins2fn[i_address])
                         state.setBlockEndingInstruction(True)
-                        state.setCollision(True)
+                        state.addCollision(i_address)
                     else:
                         LOGGER.debug("  analyzeFunction() was already present in local function.")
                         state.setBlockEndingInstruction(True)

@@ -32,6 +32,7 @@ class FunctionAnalysisState(object):
         self.is_block_ending_instruction = False
         self.is_sanely_ending = False
         self.has_collision = False
+        self.colliding_addresses = set()
         # set a flag that this tailcall has already been resolved so it does not have to be reanalyzed several times
         self.is_tailcall_function = False
         self.is_leaf_function = True
@@ -203,6 +204,11 @@ class FunctionAnalysisState(object):
                     if not current[2] in CALL_INS and not i == len(self.instructions) - 1:
                         if any([r != self.instructions[i+1][0] for r in self.code_refs_from[current[0]]]):
                             break
+                    # if we can reach a colliding address from here, the block is broken and should end.
+                    reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
+                    is_next_addr = current[0] + current[1] in reachable_collisions
+                    if reachable_collisions and is_next_addr:
+                        break
                 if not i == len(self.instructions) - 1 and self.instructions[i+1][0] in self.code_refs_to:
                     if len(self.code_refs_to[self.instructions[i+1][0]]) > 1 or self.instructions[i+1][0] in potential_starts:
                         break
@@ -240,8 +246,9 @@ class FunctionAnalysisState(object):
     def setSanelyEnding(self, is_sanely_ending):
         self.is_sanely_ending = is_sanely_ending
 
-    def setCollision(self, is_colliding):
-        self.has_collision = is_colliding
+    def addCollision(self, colliding_address):
+        self.has_collision = True
+        self.colliding_addresses.add(colliding_address)
 
     def setRecursion(self, is_recursive):
         self.is_recursive = is_recursive
