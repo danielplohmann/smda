@@ -57,9 +57,9 @@ class SmdaInstruction:
             return escaper.escapeOperands(self, offsets_only=True)
         return self.bytes
 
-    def getEscapedBinary(self, escaper, lower_addr=None, upper_addr=None):
+    def getEscapedBinary(self, escaper, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
         if escaper:
-            return escaper.escapeBinary(self, lower_addr=lower_addr, upper_addr=upper_addr)
+            return escaper.escapeBinary(self, escape_intraprocedural_jumps=escape_intraprocedural_jumps, lower_addr=lower_addr, upper_addr=upper_addr)
         return self.bytes
 
     @classmethod

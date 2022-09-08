@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-09-08: v1.9.10- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.
  * 2022-08-31: v1.9.9 - Better handling of colliding code due to tailjumps.
  * 2022-08-30: v1.9.8 - Improved accuracy for references around tailcalls.
  * 2022-08-25: v1.9.6 - Fixed bug in delphi knowledge base handling and improved performance.
