@@ -260,7 +260,7 @@ class IntelInstructionEscaper:
         if ins.mnemonic in [
                 "call", "lcall", "jmp", "ljmp",
                 "loop", "loopne", "loope"]:
-            escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins)
+            escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
             return escaped_sequence
         if ins.mnemonic in [
                 "je", "jne", "js", "jns", "jp", "jnp", "jo", "jno", "jl", "jle", "jg",
