@@ -269,7 +269,7 @@ class IntelInstructionEscaper:
             return escaped_sequence
         if "ptr [0x" in ins.operands or "[rip + 0x" in ins.operands or "[rip - 0x" in ins.operands:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryPtrRef(ins)
-        if lower_addr is not None and upper_addr is not None and ins.operands.startswith("0x") or ", 0x" in ins.operands:
+        if lower_addr is not None and upper_addr is not None and (ins.operands.startswith("0x") or ", 0x" in ins.operands):
             immediates = []
             for immediate_match in re.finditer(r"0x[0-9a-fA-F]{1,8}", ins.operands):
                 immediate = int(immediate_match.group()[2:], 16)
