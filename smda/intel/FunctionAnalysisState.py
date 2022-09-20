@@ -79,7 +79,6 @@ class FunctionAnalysisState(object):
             self.is_jmp = True
             self.jump_targets.update([addr_to])
 
-
     def removeCodeRef(self, addr_from, addr_to):
         if (addr_from, addr_to) in self.code_refs:
             self.code_refs.remove((addr_from, addr_to))
@@ -125,12 +124,12 @@ class FunctionAnalysisState(object):
             for offset in range(ins[1]):
                 self.disassembly.code_map[ins[0] + offset] = ins[0]
                 self.disassembly.ins2fn[ins[0] + offset] = self.start_addr
+        self.disassembly.data_map.update(self.data_bytes)
+        self.disassembly.functions[self.start_addr] = self.getBlocks()
         for cref in self.code_refs:
             self.disassembly.addCodeRefs(cref[0], cref[1])
         for dref in self.data_refs:
             self.disassembly.addDataRefs(dref[0], dref[1])
-        self.disassembly.data_map.update(self.data_bytes)
-        self.disassembly.functions[self.start_addr] = self.getBlocks()
         if self.is_recursive:
             self.disassembly.recursive_functions.add(self.start_addr)
         if self.is_leaf_function:
@@ -206,8 +205,11 @@ class FunctionAnalysisState(object):
                             break
                     # if we can reach a colliding address from here, the block is broken and should end.
                     reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
-                    is_next_addr = current[0] + current[1] in reachable_collisions
+                    next_addr = current[0] + current[1]
+                    is_next_addr = next_addr in reachable_collisions
                     if reachable_collisions and is_next_addr:
+                        # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
+                        self.removeCodeRef(current[0], next_addr)
                         break
                 if not i == len(self.instructions) - 1 and self.instructions[i+1][0] in self.code_refs_to:
                     if len(self.code_refs_to[self.instructions[i+1][0]]) > 1 or self.instructions[i+1][0] in potential_starts:
