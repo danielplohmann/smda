@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2022-09-27: v1.9.14- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).
  * 2022-09-20: v1.9.13- Fixed a bug for listing unreachable basic block refs pointing outside of function boundaries (exception handling).
  * 2022-09-19: v1.9.12- Fixed a logic binding bug in IntelInstructionEscaper (THX to @1337-42!).
  * 2022-09-08: v1.9.11- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.

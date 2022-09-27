@@ -111,6 +111,7 @@ class LanguageAnalyzer(object):
     def getDelphiObjects(self):
         image_base = self.disassembly.binary_info.base_addr
         data = BytesIO(self.disassembly.binary_info.binary)
+        length_of_binary = len(self.disassembly.binary_info.binary)
         function_offsets = set()
         name_mapping = {}
         while data.read(4) != b'':
@@ -150,10 +151,14 @@ class LanguageAnalyzer(object):
                         data.seek(potential_vmt_self_ptr - image_base)
                         while data.tell() < dynamic_table - image_base:
                             function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
+                            if data.tell() >= length_of_binary:
+                                break
                     else:
                         data.seek(potential_vmt_self_ptr - image_base)
                         while data.tell() < class_name - image_base:
                             function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
+                            if data.tell() >= length_of_binary:
+                                break
                     if method_table > 0:
                         # this should at least work for Delphi 6
                         data.seek(method_table - image_base)
@@ -170,11 +175,14 @@ class LanguageAnalyzer(object):
                         data.seek(interface_table - image_base)
                         data.read(20)
                         start_interface = int.from_bytes(data.read(4), byteorder="little")
-                        data.seek(start_interface - image_base)
-                        bytes_read = int.from_bytes(data.read(4), byteorder="little")
-                        while self.disassembly.binary_info.isInCodeAreas(bytes_read):
-                            function_offsets.add(bytes_read)
+                        if start_interface >= image_base:
+                            data.seek(start_interface - image_base)
                             bytes_read = int.from_bytes(data.read(4), byteorder="little")
+                            while self.disassembly.binary_info.isInCodeAreas(bytes_read):
+                                function_offsets.add(bytes_read)
+                                bytes_read = int.from_bytes(data.read(4), byteorder="little")
+                                if data.tell() >= length_of_binary:
+                                    break
                         data.seek(saved_scan_offset)
                 else:
                     data.seek(saved_scan_offset)
@@ -212,6 +220,7 @@ class LanguageAnalyzer(object):
         result["delphi"] = self.getDelphiScore()
         if self.checkDelphi():
             t_objects = self.getDelphiObjects()
+            print("here")
             functions = sum([len(t_objects[t_string]) for t_string in t_objects])
             # result["_delphi_objects"] = t_objects.keys()
             result["_count_delphi_objects"] = len(t_objects)
