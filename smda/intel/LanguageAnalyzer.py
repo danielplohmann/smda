@@ -220,7 +220,6 @@ class LanguageAnalyzer(object):
         result["delphi"] = self.getDelphiScore()
         if self.checkDelphi():
             t_objects = self.getDelphiObjects()
-            print("here")
             functions = sum([len(t_objects[t_string]) for t_string in t_objects])
             # result["_delphi_objects"] = t_objects.keys()
             result["_count_delphi_objects"] = len(t_objects)
