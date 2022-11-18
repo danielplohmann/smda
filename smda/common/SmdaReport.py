@@ -157,7 +157,8 @@ class SmdaReport(object):
             for function in self.getFunctions():
                 function.code_inrefs = []
                 for inref in function.inrefs:
-                    function.code_inrefs.append(CodeXref(offset2ins[inref], offset2ins[function.offset]))
+                    if inref in offset2ins:
+                        function.code_inrefs.append(CodeXref(offset2ins[inref], offset2ins[function.offset]))
                 function.code_outrefs = []
                 for outref_src, outref_dsts in function.outrefs.items():
                     for target in outref_dsts:
