@@ -32,7 +32,7 @@ class WinApiResolver(AbstractLabelProvider):
         self._is_buffer = binary_info.is_buffer
         if not self._is_buffer:
             #setup import table info from LIEF
-            lief_binary = lief.parse(bytearray(binary_info.raw_data))
+            lief_binary = lief.parse(binary_info.raw_data)
             if not isinstance(lief_binary, lief.PE.Binary):
                 return
             for imported_library in lief_binary.imports:
