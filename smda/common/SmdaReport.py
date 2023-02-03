@@ -129,18 +129,18 @@ class SmdaReport(object):
             if smda_function.isExported():
                 yield smda_function
 
-    def FindFunctionByContainedAddress(self, inner_address):
-        block = self.FindBlockByContainedAddress(inner_address)
+    def findFunctionByContainedAddress(self, inner_address):
+        block = self.findBlockByContainedAddress(inner_address)
         if block is None:
             return None
         return block.smda_function
 
-    def FindBlockByContainedAddress(self, inner_address):
+    def findBlockByContainedAddress(self, inner_address):
         # init the block locator if it hasn't been used yet.
         if self.block_locator is None:
             self.block_locator = BlockLocator(self.getFunctions())
 
-        block = self.block_locator.FindBlockByContainedAddress(inner_address)
+        block = self.block_locator.findBlockByContainedAddress(inner_address)
         return block
 
     def getCapstone(self):

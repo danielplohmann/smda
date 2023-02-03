@@ -20,10 +20,10 @@ class BlockLocator():
         # 2 a dict of blocks by addresses
         self.blocks_dict = {b.offset:b for b in blocks}
     
-    def FindBlockByContainedAddress(self, inner_address):
+    def findBlockByContainedAddress(self, inner_address):
         # do a binary search to find the closest address to the left of inner_address
         block_num = bisect.bisect(self.sorted_blocks_addresses, inner_address)
-        block_start = self.sorted_blocks_addresses[block_num - 2] 
+        block_start = self.sorted_blocks_addresses[block_num - 1] 
 
         block = self.blocks_dict[block_start] 
 
