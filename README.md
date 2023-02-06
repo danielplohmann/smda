@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2023-02-06: v1.11.0- SmdaReport now has functionality to find a function/block by a given offset contained within in (THX to @cccs-ay!).
  * 2023-02-06: v1.10.0- Adjusted to LIEF 0.12.3 API for binary parsing (THX to @lainswork!).
  * 2022-11-18: v1.9.16- Fixed a bug where handling of inrefs in SmdaReport could lead to crashes (THX to @1337-42!).
  * 2022-09-27: v1.9.15- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).

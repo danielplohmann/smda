@@ -40,10 +40,10 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             if isinstance(byte, str):
                 byte = ord(byte)
             decrypted_cutwail.append(byte ^ (index % 256))
-        cls.cutwail_binary = decrypted_cutwail
+        cls.cutwail_binary = bytes(decrypted_cutwail)
         # run FileLoader and disassemble as file
         loader = FileLoader("/", map_file=True)
-        loader._loadFile(decrypted_cutwail)
+        loader._loadFile(cls.cutwail_binary)
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
@@ -51,8 +51,10 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
+        binary_info.oep = binary_info.getOep()
+        cls.cutwail_binary_info = binary_info
         cls.cutwail_disassembly = disasm._disassemble(binary_info)
-        cls.cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(decrypted_cutwail)
+        cls.cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cls.cutwail_binary)
 
     def testAsproxDisassemblyCoverage(self):
         assert len([fn for fn in self.asprox_disassembly.getFunctions()]) == 105
