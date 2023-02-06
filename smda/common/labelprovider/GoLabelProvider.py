@@ -23,7 +23,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         binary = binary_info.binary
         pclntab_offset = None
         try:
-            lief_binary = lief.parse(bytearray(binary))
+            lief_binary = lief.parse(binary)
             if lief_binary.format == lief.EXE_FORMATS.ELF:
                 pclntab_offset = lief_binary.get_section(".gopclntab").offset
             elif lief_binary.format == lief.EXE_FORMATS.MACHO:

@@ -30,7 +30,7 @@ class MachoFileLoader(object):
 
     @staticmethod
     def getBaseAddress(binary):
-        macho_file = lief.parse(bytearray(binary))
+        macho_file = lief.parse(binary)
         # Determine base address of binary
         #
         base_addr = 0
@@ -50,7 +50,7 @@ class MachoFileLoader(object):
         """
         # MachO needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
-        macho_file = lief.parse(bytearray(binary))
+        macho_file = lief.parse(binary)
         base_addr = MachoFileLoader.getBaseAddress(binary)
 
         LOGGER.debug("MachO: base address: 0x%x", base_addr)
@@ -137,7 +137,7 @@ class MachoFileLoader(object):
     @staticmethod
     def getBitness(binary):
         # TODO add machine types whenever we add more architectures
-        macho_file = lief.parse(bytearray(binary))
+        macho_file = lief.parse(binary)
         machine_type = macho_file.header.cpu_type
         if machine_type == lief.MachO.CPU_TYPES.x86_64:
             return 64
@@ -163,7 +163,7 @@ class MachoFileLoader(object):
     @staticmethod
     def getCodeAreas(binary):
         # TODO add machine types whenever we add more architectures
-        macho_file = lief.parse(bytearray(binary))
+        macho_file = lief.parse(binary)
         ins_flags = (
             lief.MachO.SECTION_FLAGS.PURE_INSTRUCTIONS.value +
             lief.MachO.SECTION_FLAGS.SELF_MODIFYING_CODE.value +

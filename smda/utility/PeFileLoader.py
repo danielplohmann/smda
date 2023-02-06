@@ -118,7 +118,7 @@ class PeFileLoader(object):
 
     @staticmethod
     def getCodeAreas(binary):
-        pefile = lief.parse(bytearray(binary))
+        pefile = lief.parse(binary)
         code_areas = []
         base_address = PeFileLoader.getBaseAddress(binary)
         if pefile and pefile.sections:

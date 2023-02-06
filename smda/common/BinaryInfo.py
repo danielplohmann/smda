@@ -32,7 +32,7 @@ class BinaryInfo(object):
 
     def getOep(self):
         if self.oep is None:
-            lief_result = lief.parse(bytearray(self.raw_data))
+            lief_result = lief.parse(self.raw_data)
             if isinstance(lief_result, lief.PE.Binary):
                 self.oep = lief_result.optional_header.addressof_entrypoint
             elif isinstance(lief_result, lief.ELF.Binary):
@@ -41,7 +41,7 @@ class BinaryInfo(object):
 
     def getExportedFunctions(self):
         if self.exported_functions is None:
-            lief_result = lief.parse(bytearray(self.raw_data))
+            lief_result = lief.parse(self.raw_data)
             if isinstance(lief_result, lief.PE.Binary) or isinstance(lief_result, lief.ELF.Binary):
                 self.exported_functions = {}
                 for function in lief_result.exported_functions:
@@ -49,7 +49,7 @@ class BinaryInfo(object):
         return self.exported_functions
 
     def getSections(self):
-        pefile = lief.parse(bytearray(self.raw_data))
+        pefile = lief.parse(self.raw_data)
         # TODO 20201030 might want to add ELF sections as well
         if not isinstance(pefile, lief.PE.Binary):
             return

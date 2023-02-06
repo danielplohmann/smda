@@ -30,7 +30,7 @@ class ElfFileLoader(object):
 
     @staticmethod
     def getBaseAddress(binary):
-        elffile = lief.parse(bytearray(binary))
+        elffile = lief.parse(binary)
         # Determine base address of binary
         #
         base_addr = 0
@@ -50,7 +50,7 @@ class ElfFileLoader(object):
         """
         # ELFFile needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
-        elffile = lief.parse(bytearray(binary))
+        elffile = lief.parse(binary)
         base_addr = ElfFileLoader.getBaseAddress(binary)
 
         LOGGER.debug("ELF: base address: 0x%x", base_addr)
@@ -138,7 +138,7 @@ class ElfFileLoader(object):
     @staticmethod
     def getBitness(binary):
         # TODO add machine types whenever we add more architectures
-        elffile = lief.parse(bytearray(binary))
+        elffile = lief.parse(binary)
         machine_type = elffile.header.machine_type
         if machine_type == lief.ELF.ARCH.x86_64:
             return 64
@@ -164,7 +164,7 @@ class ElfFileLoader(object):
     @staticmethod
     def getCodeAreas(binary):
         # TODO add machine types whenever we add more architectures
-        elffile = lief.parse(bytearray(binary))
+        elffile = lief.parse(binary)
         code_areas = []
         for section in elffile.sections:
             # SHF_EXECINSTR = 4
