@@ -3,7 +3,6 @@ import datetime
 import json
 import os
 import zipfile
-
 try:
     from StringIO import StringIO ## for Python 2
 except ImportError:
@@ -14,6 +13,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 from .BinaryInfo import BinaryInfo
 from .SmdaFunction import SmdaFunction
 from smda.common.CodeXref import CodeXref
+from smda.common.BlockLocator import BlockLocator
 from smda.DisassemblyStatistics import DisassemblyStatistics
 
 
@@ -24,6 +24,7 @@ class SmdaReport(object):
     binary_size = None
     binweight = None
     bitness = None
+    block_locator = None
     buffer = None
     code_areas = None
     code_sections = None
@@ -127,6 +128,20 @@ class SmdaReport(object):
         for _, smda_function in sorted(self.xcfg.items()):
             if smda_function.isExported():
                 yield smda_function
+
+    def findFunctionByContainedAddress(self, inner_address):
+        block = self.findBlockByContainedAddress(inner_address)
+        if block is None:
+            return None
+        return block.smda_function
+
+    def findBlockByContainedAddress(self, inner_address):
+        # init the block locator if it hasn't been used yet.
+        if self.block_locator is None:
+            self.block_locator = BlockLocator(self.getFunctions())
+
+        block = self.block_locator.findBlockByContainedAddress(inner_address)
+        return block
 
     def getCapstone(self):
         if self.capstone is None:
