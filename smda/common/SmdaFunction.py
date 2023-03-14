@@ -159,14 +159,22 @@ class SmdaFunction(object):
             self.blocks[int(offset)] = instructions
             self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
 
-    def toDotGraph(self):
+    def toDotGraph(self, with_api=False):
         dot_graph = f'digraph "CFG for 0x{self.offset:x}" {{\n'
         dot_graph += f'  label="CFG for 0x{self.offset:x}";\n'
         for smda_block in self.getBlocks():
             block_entry = f'  Node0x{smda_block.offset:x} [shape=record,label="'
             instructions_as_strings = []
             for smda_ins in smda_block.getInstructions():
-                instructions_as_strings.append(f'{smda_ins.offset:x}: {smda_ins.mnemonic} {smda_ins.operands}')
+                printable_api = ""
+                if with_api:
+                    apiref_str = self.apirefs.get(smda_ins.offset, "")
+                    if apiref_str:
+                        printable_api = f"[{apiref_str}]"
+                if printable_api:
+                    instructions_as_strings.append(f'{smda_ins.offset:x}: {smda_ins.mnemonic} {printable_api}')
+                else:
+                    instructions_as_strings.append(f'{smda_ins.offset:x}: {smda_ins.mnemonic} {smda_ins.operands}')
             block_entry += "\l".join(instructions_as_strings)
             dot_graph += block_entry + '"];\n'
             if smda_block.offset in self.blockrefs:
