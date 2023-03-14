@@ -40,6 +40,8 @@ class SmdaReport(object):
     message = None
     oep = None
     sha256 = None
+    sha1 = None
+    md5 = None
     smda_version = None
     statistics = None
     # status can be "ok", "timeout", "error"
@@ -77,6 +79,8 @@ class SmdaReport(object):
             self.message = "Analysis finished regularly."
             self.oep = disassembly.binary_info.getOep()
             self.sha256 = disassembly.binary_info.sha256
+            self.sha1 = disassembly.binary_info.sha1
+            self.md5 = disassembly.binary_info.md5
             self.smda_version = disassembly.smda_version
             self.statistics = DisassemblyStatistics(disassembly)
             self.status = disassembly.getAnalysisOutcome()
@@ -233,6 +237,8 @@ class SmdaReport(object):
         smda_report.message = report_dict["message"]
         smda_report.oep = report_dict["oep"] if "oep" in report_dict else None
         smda_report.sha256 = report_dict["sha256"]
+        smda_report.sha1 = report_dict["sha1"] if "sha1" in report_dict else None
+        smda_report.md5 = report_dict["md5"] if "md5" in report_dict else None
         smda_report.smda_version = report_dict["smda_version"]
         smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
         smda_report.status = report_dict["status"]
@@ -269,6 +275,8 @@ class SmdaReport(object):
             "message": self.message,
             "oep": self.oep,
             "sha256": self.sha256,
+            "sha1": self.sha1,
+            "md5": self.md5,
             "smda_version": self.smda_version,
             "statistics": self.statistics.toDict(),
             "status": self.status,

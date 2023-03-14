@@ -43,8 +43,10 @@ class Disassembler(object):
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
-        # we want the SHA256 of the unmapped file not how we mapped it to memory
+        # we want the SHA256/SHA1/MD5 of the unmapped file not how we mapped it to memory
         binary_info.sha256 = hashlib.sha256(binary_info.raw_data).hexdigest()
+        binary_info.sha1 = hashlib.sha1(binary_info.raw_data).hexdigest()
+        binary_info.md5 = hashlib.md5(binary_info.raw_data).hexdigest()
         binary_info.file_path = file_path
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
@@ -66,8 +68,10 @@ class Disassembler(object):
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
-        # we want the SHA256 of the unmapped file not how we mapped it to memory
+        # we want the SHA256/SHA1/MD5 of the unmapped file not how we mapped it to memory
         binary_info.sha256 = hashlib.sha256(binary_info.raw_data).hexdigest()
+        binary_info.sha1 = hashlib.sha1(binary_info.raw_data).hexdigest()
+        binary_info.md5 = hashlib.md5(binary_info.raw_data).hexdigest()
         binary_info.file_path = ""
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()

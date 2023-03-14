@@ -20,6 +20,8 @@ class BinaryInfo(object):
     is_library = False
     is_buffer = False
     sha256 = ""
+    sha1 = ""
+    md5 = ""
     version = ""
     exported_functions = None
     oep = None
@@ -29,6 +31,8 @@ class BinaryInfo(object):
         self.raw_data = binary
         self.binary_size = len(binary)
         self.sha256 = hashlib.sha256(binary).hexdigest()
+        self.sha1 = hashlib.sha1(binary).hexdigest()
+        self.md5 = hashlib.md5(binary).hexdigest()
 
     def getOep(self):
         if self.oep is None:
