@@ -57,7 +57,8 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2023-03-14: v1.11.2- SMDA report now also contains SHA1 and MD5..
+ * 2023-03-24: v1.12.0- SMDA now parses PE export directories for symbols, as well as MinGW DWARF information if available.
+ * 2023-03-14: v1.11.2- SMDA report now also contains SHA1 and MD5.
  * 2023-03-14: v1.11.1- rendering dotGraph can now include API references instead of plain calls.
  * 2023-02-06: v1.11.0- SmdaReport now has functionality to find a function/block by a given offset contained within in (THX to @cccs-ay!).
  * 2023-02-06: v1.10.0- Adjusted to LIEF 0.12.3 API for binary parsing (THX to @lainswork!).

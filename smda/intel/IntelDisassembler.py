@@ -10,6 +10,7 @@ from smda.DisassemblyResult import DisassemblyResult
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
@@ -74,6 +75,7 @@ class IntelDisassembler(object):
         self.label_providers.append(WinApiResolver(self.config))
         self.label_providers.append(ElfApiResolver(self.config))
         self.label_providers.append(ElfSymbolProvider(self.config))
+        self.label_providers.append(PeSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
         self.label_providers.append(GoSymbolProvider(self.config))
         self.label_providers.append(DelphiKbSymbolProvider(self.config))

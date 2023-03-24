@@ -24,7 +24,7 @@ class BackendInterface(object):
     def getInstructionBytes(self, offset):
         raise NotImplementedError
 
-    def getFunctionSymbols(self):
+    def getFunctionSymbols(self, demangle=False):
         raise NotImplementedError
 
     def getBaseAddr(self):

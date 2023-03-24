@@ -101,13 +101,13 @@ class Ida74Interface(BackendInterface):
     def getCodeOutRefs(self, offset):
         return [(offset, ref_to) for ref_to in idautils.CodeRefsFrom(offset, True)]
 
-    def getFunctionSymbols(self):
+    def getFunctionSymbols(self, demangle=False):
         function_symbols = {}
         function_offsets = self.getFunctions()
         for function_offset in function_offsets:
             function_name = ida_funcs.get_func_name(function_offset)
             # apply demangling if required
-            if "@" in function_name:
+            if demangle and "@" in function_name:
                 demangled = ida_name.demangle_name(function_name, 0)
                 if demangled:
                     function_name = demangled
@@ -222,13 +222,13 @@ class Ida73Interface(BackendInterface):
     def getCodeOutRefs(self, offset):
         return [(offset, ref_to) for ref_to in idautils.CodeRefsFrom(offset, True)]
 
-    def getFunctionSymbols(self):
+    def getFunctionSymbols(self, demangle=False):
         function_symbols = {}
         function_offsets = self.getFunctions()
         for function_offset in function_offsets:
             function_name = idc.GetFunctionName(function_offset)
             # apply demangling if required
-            if "@" in function_name:
+            if demangle and "@" in function_name:
                 function_name = idc.demangle_name(function_name, 0)
             if not re.match("sub_[0-9a-fA-F]+", function_name):
                 function_symbols[function_offset] = function_name
