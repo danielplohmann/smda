@@ -57,7 +57,10 @@ class Ida74Interface(BackendInterface):
     def getArchitecture(self):
         # https://reverseengineering.stackexchange.com/a/11398
         info = ida_idaapi.get_inf_structure()
-        procname = info.procName
+        if idaapi.IDA_SDK_VERSION >= 800:
+            procname = info.procname
+        else:
+            procname = info.procName
         if procname in self._processor_map:
             return self._processor_map[procname]
         else:
