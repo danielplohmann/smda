@@ -43,9 +43,12 @@ class GoSymbolProvider(AbstractLabelProvider):
                 pclntab_offset = hits[0]
         # if we found a valid offset, do the pclntab parsing
         if pclntab_offset:
-            result = self._parse_pclntab(pclntab_offset, binary)
-            if result:
-                self._func_symbols = result
+            try:
+                result = self._parse_pclntab(pclntab_offset, binary)
+                if result:
+                    self._func_symbols = result
+            except:
+                return
 
     def isSymbolProvider(self):
         return True

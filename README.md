@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2023-05-22: v1.12.2- Fixed one bug each in PE parser and Go parser.
  * 2023-05-08: v1.12.1- Get rid of deprecation warning in IDA 8.0+.
  * 2023-03-24: v1.12.0- SMDA now parses PE export directories for symbols, as well as MinGW DWARF information if available.
  * 2023-03-14: v1.11.2- SMDA report now also contains SHA1 and MD5.

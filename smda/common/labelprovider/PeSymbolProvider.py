@@ -40,9 +40,10 @@ class PeSymbolProvider(AbstractLabelProvider):
         if data[:2] != b"MZ" or lief is None:
             return
         lief_binary = lief.parse(binary_info.file_path)
-        self._parseOep(lief_binary)
-        self._parseExports(lief_binary)
-        self._parseSymbols(lief_binary)
+        if lief_binary is not None:
+            self._parseOep(lief_binary)
+            self._parseExports(lief_binary)
+            self._parseSymbols(lief_binary)
 
     def _parseExports(self, binary):
         for function in binary.exported_functions:
