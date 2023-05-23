@@ -47,7 +47,15 @@ class PeSymbolProvider(AbstractLabelProvider):
 
     def _parseExports(self, binary):
         for function in binary.exported_functions:
-            self._func_symbols[binary.imagebase + function.address] = function.name
+            function_name = ""
+            try:
+                # here may occur a LIEF exception that we want to skip ->
+                # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
+                function_name = function.name
+            except:
+                pass
+            if function_name and all(c in range(0x20, 0x7f) for c in function_name):
+                self._func_symbols[binary.imagebase + function.address] = function_name
 
     def _parseSymbols(self, lief_binary):
         # find VA of first code section
@@ -60,11 +68,18 @@ class PeSymbolProvider(AbstractLabelProvider):
             return
         for symbol in lief_binary.symbols:
             if symbol.complex_type.name == "FUNCTION":
-                function_name = symbol.name
-                # for some reason, we need to add the section_offset of .text here
-                function_offset = code_base_address + symbol.value
-                if function_offset not in self._func_symbols:
-                    self._func_symbols[function_offset] = function_name
+                function_name = ""
+                try:
+                    # here may occur a LIEF exception that we want to skip ->
+                    # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
+                    function_name = symbol.name
+                except:
+                    pass
+                if function_name and all(c in range(0x20, 0x7f) for c in function_name):
+                    # for some reason, we need to add the section_offset of .text here
+                    function_offset = code_base_address + symbol.value
+                    if function_offset not in self._func_symbols:
+                        self._func_symbols[function_offset] = function_name
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
