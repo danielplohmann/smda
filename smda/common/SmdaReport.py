@@ -205,6 +205,8 @@ class SmdaReport(object):
         if os.path.isfile(file_path):
             with open(file_path, "r") as fjson:
                 smda_json = json.load(fjson)
+        else:
+            raise FileNotFoundError
         return SmdaReport.fromDict(smda_json)
 
     @classmethod

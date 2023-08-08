@@ -204,12 +204,13 @@ class SmdaFunction(object):
         smda_function.pic_hash = function_dict["metadata"]["pic_hash"]
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
-        if binary_info.architecture:
+        if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         # modernize older reports on import
         if version and version.startswith("1.2"):
             smda_function.nesting_depth = smda_function._calculateNestingDepth()
-            smda_function.pic_hash = smda_function._calculatePicHash(binary_info)
+            if binary_info:
+                smda_function.pic_hash = smda_function._calculatePicHash(binary_info)
         else:
             smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
         return smda_function

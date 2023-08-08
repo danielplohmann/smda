@@ -1,3 +1,6 @@
+import struct
+import hashlib
+
 from smda.common.SmdaInstruction import SmdaInstruction
 
 
@@ -5,6 +8,7 @@ class SmdaBasicBlock:
 
     smda_function = None
     instructions = None
+    picblockhash = None
     offset = None
     length = None
 
@@ -15,10 +19,25 @@ class SmdaBasicBlock:
             self.instructions = instructions
             self.offset = instructions[0].offset
             self.length = len(instructions)
+            self.picblockhash = self.getPicBlockHash()
 
     def getInstructions(self):
         for instruction in self.instructions:
             yield instruction
+
+    def getPicBlockHash(self):
+        """ if we have a SmdaFunction as parent, we can try to generate the PicBlockHash ad-hoc """
+        # check all the prerequisites
+        if self.picblockhash is not None:
+            return self.picblockhash
+        if self.smda_function and self.smda_function.smda_report and self.smda_function._escaper and self.smda_function.smda_report.base_addr is not None and self.smda_function.smda_report.binary_size:
+            escaped_binary_seqs = []
+            for instruction in self.getInstructions():
+                escaped_binary_seqs.append(instruction.getEscapedBinary(self.smda_function._escaper, escape_intraprocedural_jumps=True, lower_addr=self.smda_function.smda_report.base_addr, upper_addr=self.smda_function.smda_report.base_addr + self.smda_function.smda_report.binary_size))
+            as_bytes = bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+            self.picblockhash = struct.unpack("Q", hashlib.sha256(as_bytes).digest()[:8])[0]
+            return self.picblockhash
+        return None
 
     @classmethod
     def fromDict(cls, block_dict, smda_function=None):
