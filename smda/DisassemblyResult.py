@@ -141,6 +141,8 @@ class DisassemblyResult(object):
             rel_start_addr = addr - self.binary_info.base_addr
             rel_end_addr = rel_start_addr + 4
             extracted_dword = self.binary_info.binary[rel_start_addr:rel_end_addr]
+            if len(extracted_dword) < 4:
+                return None
             return struct.unpack("I", extracted_dword)[0]
         return None
 
@@ -149,6 +151,8 @@ class DisassemblyResult(object):
             rel_start_addr = addr - self.binary_info.base_addr
             rel_end_addr = rel_start_addr + 8
             extracted_qword = self.binary_info.binary[rel_start_addr:rel_end_addr]
+            if len(extracted_qword) < 8:
+                return None
             return struct.unpack("Q", extracted_qword)[0]
         return None
 
