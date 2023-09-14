@@ -20,15 +20,19 @@ class BlockLocator():
         # 2 a dict of blocks by addresses
         self.blocks_dict = {b.offset:b for b in blocks}
     
-    def findBlockByContainedAddress(self, inner_address):
+  def findBlockByContainedAddress(self, inner_address):
         # do a binary search to find the closest address to the left of inner_address
-        block_num = bisect.bisect(self.sorted_blocks_addresses, inner_address)
-        block_start = self.sorted_blocks_addresses[block_num - 1] 
-
+        block_num = bisect.bisect(self.sorted_blocks_addresses, inner_address) - 1
+        
+        if block_num == -1:
+            # target address is smaller than the first block's start address. return none
+            return None
+        
+        block_start = self.sorted_blocks_addresses[block_num] 
         block = self.blocks_dict[block_start] 
 
         # make sure inner_address falls within the selected block  
-        if inner_address <= block.offset + block.length: 
+        if block.offset<= inner_address <= block.offset + block.length: 
             return block
 
         return None
