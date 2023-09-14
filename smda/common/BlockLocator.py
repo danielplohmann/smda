@@ -2,7 +2,6 @@ import itertools
 import bisect
 
 
-
 class BlockLocator():
     """ Class that finds a block by any address within.
         When instantiated, creates the required data structures. 
@@ -20,20 +19,24 @@ class BlockLocator():
         # 2 a dict of blocks by addresses
         self.blocks_dict = {b.offset:b for b in blocks}
     
-  def findBlockByContainedAddress(self, inner_address):
+    def _get_block_end(self, block):
+        last_ins = block.instructions[-1]
+        return last_ins.offset + len(last_ins.bytes) // 2 # bytes is actuall a hex string
+
+    def findBlockByContainedAddress(self, inner_address):
         # do a binary search to find the closest address to the left of inner_address
         block_num = bisect.bisect(self.sorted_blocks_addresses, inner_address) - 1
         
         if block_num == -1:
-            # target address is smaller than the first block's start address. return none
+            # target address is smaller than first block. return none
             return None
         
         block_start = self.sorted_blocks_addresses[block_num] 
         block = self.blocks_dict[block_start] 
-
+        block_end = self._get_block_end(block)
+        
         # make sure inner_address falls within the selected block  
-        if block.offset<= inner_address <= block.offset + block.length: 
+        if block.offset <= inner_address < block_end: 
             return block
 
         return None
-         
