@@ -104,5 +104,32 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert self.cutwail_disassembly.num_instructions == self.cutwail_unmapped_disassembly.num_instructions
         reimported_report = SmdaReport.fromDict(report_as_dict)
 
+    def testBlockLocator(self):
+        # test with a function start
+        found_function = self.asprox_disassembly.findFunctionByContainedAddress(0x008d8292)
+        found_block = self.asprox_disassembly.findBlockByContainedAddress(0x008d8292)
+        assert found_function.offset == 0x008d8292
+        assert found_block.offset == 0x008d8292
+        # test with an instruction in a block a bit deeper in the function
+        found_function = self.asprox_disassembly.findFunctionByContainedAddress(0x008d82a6)
+        found_block = self.asprox_disassembly.findBlockByContainedAddress(0x008d82a6)
+        assert found_function.offset == 0x008d8292
+        assert found_block.offset == 0x008d82a4
+        # test with an offset that is not start of an instruction
+        found_function = self.asprox_disassembly.findFunctionByContainedAddress(0x008d82a7)
+        found_block = self.asprox_disassembly.findBlockByContainedAddress(0x008d82a7)
+        assert found_function.offset == 0x008d8292
+        assert found_block.offset == 0x008d82a4
+        # test with offsets beyond image base and binary size
+        found_function = self.asprox_disassembly.findFunctionByContainedAddress(0x100)
+        found_block = self.asprox_disassembly.findBlockByContainedAddress(0x100)
+        assert found_function is None
+        assert found_block is None
+        found_function = self.asprox_disassembly.findFunctionByContainedAddress(0xFFFFFF00)
+        found_block = self.asprox_disassembly.findBlockByContainedAddress(0xFFFFFF00)
+        assert found_function is None
+        assert found_block is None
+
+
 if __name__ == '__main__':
     unittest.main()
