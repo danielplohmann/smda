@@ -142,7 +142,7 @@ class LanguageAnalyzer(object):
                     data.seek(data.tell() - 4)
                     for _ in range(8):
                         function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                    if dynamic_table > 0:
+                    if dynamic_table > 0 and (dynamic_table - image_base) > 0:
                         data.seek(dynamic_table - image_base)
                         table_length = int.from_bytes(data.read(2), byteorder="little")
                         data.read(2 * table_length)
@@ -159,7 +159,7 @@ class LanguageAnalyzer(object):
                             function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
                             if data.tell() >= length_of_binary:
                                 break
-                    if method_table > 0:
+                    if method_table > 0 and (method_table - image_base) > 0:
                         # this should at least work for Delphi 6
                         data.seek(method_table - image_base)
                         length = int.from_bytes(data.read(2), byteorder="little")
@@ -171,7 +171,7 @@ class LanguageAnalyzer(object):
                             function_offsets.add(method_offset)
                             data.seek(data.tell() + length_entry - 6)
                         data.seek(saved_scan_offset)
-                    if interface_table > 0:
+                    if interface_table > 0 and (interface_table - image_base) > 0:
                         data.seek(interface_table - image_base)
                         data.read(20)
                         start_interface = int.from_bytes(data.read(4), byteorder="little")

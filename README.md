@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2023-10-12: v1.12.7- Bugfix for parsing Delphi structs.
  * 2023-09-15: v1.12.6- Bugfix in BlockLocator (THX to @cccs-ay!).
  * 2023-08-28: v1.12.5- Bugfix for address dereferencing where buffer sizes were not properly checked (THX to @yankovs!).
  * 2023-08-08: v1.12.4- SmdaBasicBlock can now do getPicBlockHash().
