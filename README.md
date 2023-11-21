@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2023-11-21: v1.13.0- BREAKING adjustments to PicHashing (now wildcarding intraprocedural jumps in functions, additionally more immediates if within address space). Introduction of OpcodeHash (OpcHash), which wildcards all but prefixes and opcode bytes.
  * 2023-10-12: v1.12.7- Bugfix for parsing Delphi structs.
  * 2023-09-15: v1.12.6- Bugfix in BlockLocator (THX to @cccs-ay!).
  * 2023-08-28: v1.12.5- Bugfix for address dereferencing where buffer sizes were not properly checked (THX to @yankovs!).
@@ -68,17 +69,6 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * 2023-03-14: v1.11.1- rendering dotGraph can now include API references instead of plain calls.
  * 2023-02-06: v1.11.0- SmdaReport now has functionality to find a function/block by a given offset contained within in (THX to @cccs-ay!).
  * 2023-02-06: v1.10.0- Adjusted to LIEF 0.12.3 API for binary parsing (THX to @lainswork!).
- * 2022-11-18: v1.9.16- Fixed a bug where handling of inrefs in SmdaReport could lead to crashes (THX to @1337-42!).
- * 2022-09-27: v1.9.15- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).
- * 2022-09-20: v1.9.13- Fixed a bug for listing unreachable basic block refs pointing outside of function boundaries (exception handling).
- * 2022-09-19: v1.9.12- Fixed a logic binding bug in IntelInstructionEscaper (THX to @1337-42!).
- * 2022-09-08: v1.9.11- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.
- * 2022-08-31: v1.9.9 - Better handling of colliding code due to tailjumps.
- * 2022-08-30: v1.9.8 - Improved accuracy for references around tailcalls.
- * 2022-08-25: v1.9.6 - Fixed bug in delphi knowledge base handling and improved performance.
- * 2022-08-23: v1.9.4 - Fixed bug in section padding for ELF files.
- * 2022-08-22: v1.9.3 - Added parsing for Delphi knowledge base files (THX to @danielenders1!).
- * 2022-08-22: v1.9.2 - Improved structural parsing of Delphi binaries (THX to @danielenders1!).
  * 2022-08-12: v1.9.1 - Added support for parsing intel MachO files, including Go parsing.
  * 2022-08-01: v1.8.0 - Added support for parsing Go function information (THX to @danielenders1!).
  * 2022-01-27: v1.7.0 - SmdaReports now contains a field `oep`; SmdaFunctions now indicate `is_exported` and can provide CodeXrefs via `getCodeInrefs()` and `getCodeOutrefs()`. (THX for the ideas: @mr-tz)

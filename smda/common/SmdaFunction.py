@@ -28,6 +28,7 @@ class SmdaFunction(object):
     confidence = 0.0
     function_name = ""
     pic_hash = None
+    opc_hash = None
     strongly_connected_components = None
     tfidf = None
 
@@ -47,7 +48,8 @@ class SmdaFunction(object):
             self.characteristics = disassembly.candidates[function_offset].getCharacteristics() if function_offset in disassembly.candidates else None
             self.confidence = disassembly.candidates[function_offset].getConfidence() if function_offset in disassembly.candidates else None
             self.tfidf = disassembly.candidates[function_offset].getTfIdf() if function_offset in disassembly.candidates else None
-            self.pic_hash = self._calculatePicHash(disassembly.binary_info)
+            self.pic_hash = self.getPicHash(disassembly.binary_info)
+            self.opc_hash = self.getOpcHash()
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
             if config and config.CALCULATE_NESTING:
@@ -144,13 +146,25 @@ class SmdaFunction(object):
             pass
         return nesting_depth
 
-    def _calculatePicHash(self, binary_info):
+    def getPicHash(self, binary_info):
+        return struct.unpack("Q", hashlib.sha256(self.getPicHashSequence(binary_info)).digest()[:8])[0]
+
+    def getPicHashSequence(self, binary_info):
         escaped_binary_seqs = []
         for _, block in sorted(self.blocks.items()):
             for instruction in block:
-                escaped_binary_seqs.append(instruction.getEscapedBinary(self._escaper, lower_addr=binary_info.base_addr, upper_addr=binary_info.base_addr + binary_info.binary_size))
-        as_bytes = bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-        return struct.unpack("Q", hashlib.sha256(as_bytes).digest()[:8])[0]
+                escaped_binary_seqs.append(instruction.getEscapedBinary(self._escaper, escape_intraprocedural_jumps=True, lower_addr=binary_info.base_addr, upper_addr=binary_info.base_addr + binary_info.binary_size))
+        return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+    
+    def getOpcHash(self):
+        return struct.unpack("Q", hashlib.sha256(self.getOpcHashSequence()).digest()[:8])[0]
+
+    def getOpcHashSequence(self):
+        escaped_binary_seqs = []
+        for _, block in sorted(self.blocks.items()):
+            for instruction in block:
+                escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self._escaper))
+        return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
 
     def _parseBlocks(self, block_dict):
         self.blocks = {}
@@ -190,7 +204,7 @@ class SmdaFunction(object):
         smda_function.offset = function_dict["offset"]
         smda_function.blocks = {}
         for addr, block in function_dict["blocks"].items():
-            smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins) for ins in block]
+            smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins, smda_function) for ins in block]
         smda_function.apirefs = {int(k): v for k, v in function_dict["apirefs"].items()}
         smda_function.blockrefs = {int(k): v for k, v in function_dict["blockrefs"].items()}
         smda_function.inrefs = function_dict["inrefs"]
@@ -201,18 +215,23 @@ class SmdaFunction(object):
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]
         smda_function.function_name = function_dict["metadata"]["function_name"]
-        smda_function.pic_hash = function_dict["metadata"]["pic_hash"]
+        smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else 0
+        smda_function.opc_hash = function_dict["metadata"]["opc_hash"] if "opc_hash" in function_dict["metadata"] else 0
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         # modernize older reports on import
-        if version and version.startswith("1.2"):
-            smda_function.nesting_depth = smda_function._calculateNestingDepth()
-            if binary_info:
-                smda_function.pic_hash = smda_function._calculatePicHash(binary_info)
-        else:
-            smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
+        if version:
+            version = [int(v) for v in version.split(".")]
+            if version < [1, 3, 0]:
+                smda_function.nesting_depth = smda_function._calculateNestingDepth()
+                if binary_info:
+                    smda_function.pic_hash = smda_function.getPicHash(binary_info)
+            else:
+                smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
+            if version < [1, 13, 0]:
+                smda_function.opc_hash = smda_function.getOpcHash()
         return smda_function
 
     def toDict(self):
@@ -233,6 +252,7 @@ class SmdaFunction(object):
                 "confidence": self.confidence,
                 "function_name": self.function_name,
                 "pic_hash": self.pic_hash,
+                "opc_hash": self.opc_hash,
                 "nesting_depth": self.nesting_depth,
                 "strongly_connected_components": self.strongly_connected_components,
                 "tfidf": self.tfidf

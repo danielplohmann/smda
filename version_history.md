@@ -1,6 +1,16 @@
 # Full Version History
 
+ * 2022-11-18: v1.9.16- Fixed a bug where handling of inrefs in SmdaReport could lead to crashes (THX to @1337-42!).
+ * 2022-09-27: v1.9.15- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).
+ * 2022-09-20: v1.9.13- Fixed a bug for listing unreachable basic block refs pointing outside of function boundaries (exception handling).
+ * 2022-09-19: v1.9.12- Fixed a logic binding bug in IntelInstructionEscaper (THX to @1337-42!).
+ * 2022-09-08: v1.9.11- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.
+ * 2022-08-31: v1.9.9 - Better handling of colliding code due to tailjumps.
+ * 2022-08-30: v1.9.8 - Improved accuracy for references around tailcalls.
+ * 2022-08-25: v1.9.6 - Fixed bug in delphi knowledge base handling and improved performance.
  * 2022-08-23: v1.9.4 - Fixed bug in section padding for ELF files.
+ * 2022-08-22: v1.9.3 - Added parsing for Delphi knowledge base files (THX to @danielenders1!).
+ * 2022-08-22: v1.9.2 - Improved structural parsing of Delphi binaries (THX to @danielenders1!).
  * 2022-08-22: v1.9.3 - Added parsing for Delphi knowledge base files (THX to @danielenders1!).
  * 2022-08-22: v1.9.2 - Improved structural parsing of Delphi binaries (THX to @danielenders1!).
  * 2022-08-12: v1.9.1 - Added support for parsing intel MachO files, including Go parsing.

@@ -254,6 +254,36 @@ class IntelInstructionEscaper:
         return ", ".join(escaped_fields)
 
     @staticmethod
+    def escapeToOpcodeOnly(ins):
+        escaped_sequence = ""
+        ins_bytes = ins.bytes
+        cleaned = ""
+        is_cleaning = True
+        for target_byte in [ins_bytes[i:i+2] for i in range(0, len(ins_bytes), 2)]:
+            if is_cleaning and target_byte in ["26", "2e", "36", "3e", "64", "65", "66", "67", "f2", "f3"]:
+                escaped_sequence += target_byte
+            else:
+                is_cleaning = False
+                cleaned += target_byte
+        cap_ins = ins.getDetailed()
+        opcode_length = 0
+        if cap_ins.rex:
+            # we need to add one, because we are apparently in 64bit mode and have a REX prefix
+            opcode_length += 1
+        if (cap_ins.rex and cleaned[2:].startswith("00")) or cleaned.startswith("00"):
+            # this can only be ADD PTR, REG with exactly one opcode bytes 
+            opcode_length += 1
+        elif (cap_ins.rex and cleaned[2:].startswith("0f00")) or cleaned.startswith("0f00"):
+            # this can only be *LDT/*TR/VER* with exactly two opcode bytes 
+            opcode_length += 2
+        else:
+            for field in cap_ins.opcode:
+                if field != 0:
+                    opcode_length += 1
+        escaped_sequence += cleaned[:opcode_length*2] + "?" * (len(cleaned) - opcode_length*2)
+        return escaped_sequence
+
+    @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
         escaped_sequence = ins.bytes
         # remove segment, operand, address, repeat override prefixes
@@ -269,13 +299,13 @@ class IntelInstructionEscaper:
             return escaped_sequence
         if "ptr [0x" in ins.operands or "[rip + 0x" in ins.operands or "[rip - 0x" in ins.operands:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryPtrRef(ins)
-        if lower_addr is not None and upper_addr is not None and (ins.operands.startswith("0x") or ", 0x" in ins.operands):
+        if lower_addr is not None and upper_addr is not None and (ins.operands.startswith("0x") or ", 0x" in ins.operands or "+ 0x" in ins.operands or "- 0x" in ins.operands):
             immediates = []
             for immediate_match in re.finditer(r"0x[0-9a-fA-F]{1,8}", ins.operands):
                 immediate = int(immediate_match.group()[2:], 16)
                 if lower_addr > 0x00100000 and lower_addr <= immediate < upper_addr:
                     immediates.append(immediate)
-                    escaped_sequence = IntelInstructionEscaper.escapeBinaryValue(escaped_sequence, immediate)
+                    escaped_sequence = IntelInstructionEscaper.escapeBinaryValue(ins, escaped_sequence, immediate)
         return escaped_sequence
 
     @staticmethod
@@ -338,14 +368,14 @@ class IntelInstructionEscaper:
             if num_occurrences == 1:
                 escaped_sequence = ins.bytes.replace(packed_hex, "????????")
             elif num_occurrences == 2:
-                escaped_sequence = ins.bytes.replace(packed_hex, "????????", 1)
-                LOGGER.warning("IntelInstructionEscaper.escapeBinaryPtrRef: 2 occurrences for %s in %s (%s %s), escaping only the first one", packed_hex, ins.bytes, ins.mnemonic, ins.operands)
+                escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
+                LOGGER.warning("IntelInstructionEscaper.escapeBinaryPtrRef: 2 occurrences for %s in %s (%s %s), escaping only the second one", packed_hex, ins.bytes, ins.mnemonic, ins.operands)
             elif num_occurrences > 2:
                 LOGGER.warning("IntelInstructionEscaper.escapeBinaryPtrRef: more than 2 occurrences for %s", packed_hex)
         return escaped_sequence
 
     @staticmethod
-    def escapeBinaryValue(escaped_sequence, value):
+    def escapeBinaryValue(ins, escaped_sequence, value):
         packed_hex = str(codecs.encode(struct.pack("I", value), 'hex').decode('ascii'))
         num_occurrences = occurrences(escaped_sequence, packed_hex)
         if num_occurrences == 1:
@@ -353,7 +383,7 @@ class IntelInstructionEscaper:
         elif num_occurrences == 2:
             escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
             escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
-            LOGGER.warning("IntelInstructionEscaper.escapeBinaryValue: 2 occurrences for %s in %s, escaped both, if they were non-overlapping", packed_hex, escaped_sequence)
+            LOGGER.warning("IntelInstructionEscaper.escapeBinaryValue: 2 occurrences for %s in %s, trying to escape both, if they were non-overlapping", packed_hex, escaped_sequence)
         elif num_occurrences > 2:
             LOGGER.warning("IntelInstructionEscaper.escapeBinaryValue: more than 2 occurrences for %s", packed_hex)
         return escaped_sequence
