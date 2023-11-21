@@ -57,6 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
+ * 2023-11-21: v1.13.1- SmdaBasicBlock now has `getPredecessors()` and `getSuccessors()`.
  * 2023-11-21: v1.13.0- BREAKING adjustments to PicHashing (now wildcarding intraprocedural jumps in functions, additionally more immediates if within address space). Introduction of OpcodeHash (OpcHash), which wildcards all but prefixes and opcode bytes.
  * 2023-10-12: v1.12.7- Bugfix for parsing Delphi structs.
  * 2023-09-15: v1.12.6- Bugfix in BlockLocator (THX to @cccs-ay!).

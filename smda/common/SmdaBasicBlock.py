@@ -60,6 +60,21 @@ class SmdaBasicBlock:
             for instruction in self.getInstructions():
                 escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self.smda_function._escaper))
             return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+        
+    def getPredecessors(self):
+        predecessors = []
+        if self.smda_function is not None:
+            for frm, to in self.smda_function.blockrefs.items():
+                if self.offset in to:
+                    predecessors.append(frm)
+        return predecessors
+    
+    def getSuccessors(self):
+        successors = []
+        if self.smda_function is not None:
+            if self.offset in self.smda_function.blockrefs:
+                successors.extend(self.smda_function.blockrefs[self.offset])
+        return successors
 
     @classmethod
     def fromDict(cls, block_dict, smda_function=None):
