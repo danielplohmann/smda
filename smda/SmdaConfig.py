@@ -5,7 +5,7 @@ import logging
 class SmdaConfig(object):
 
     # note to self: always change this in setup.py as well!
-    VERSION = "1.13.1"
+    VERSION = "1.13.2"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", ".."])))
 
@@ -28,6 +28,8 @@ class SmdaConfig(object):
     USE_ALIGNMENT = True
     USE_SYMBOLS_AS_CANDIDATES = True
     RESOLVE_REGISTER_CALLS = True
+    # limit this to avoid blowing up analysis time for weird samples
+    MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
     HIGH_ACCURACY = True
     RESOLVE_TAILCALLS = False
     # optional metadata generation options

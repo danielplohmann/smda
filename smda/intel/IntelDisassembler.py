@@ -443,6 +443,7 @@ class IntelDisassembler(object):
         self.fc_manager.init(self.disassembly)
         self._initCapstone()
         self._initTfIdf()
+        LOGGER.debug("Starting heuristical analysis.")
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
             if cbAnalysisTimeout and cbAnalysisTimeout():

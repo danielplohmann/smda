@@ -79,8 +79,18 @@ class IndirectCallAnalyzer(object):
                         if match4.group("reg") == register_name:
                             abs_value_found = True
             elif ins[2] == "lea":
+                LOGGER.debug("*checking %s %s", ins[2], ins[3])
                 #lea <reg>, dword ptr [<addr>]
                 match1 = re.match(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$", ins[3])
+                if match1:
+                    dword = self.getDword(int(match1.group("addr"), 16))
+                    if dword:
+                        registers[match1.group("reg")] = dword
+                        LOGGER.debug("**moved value 0x%08x to register %s", dword, match1.group("reg"))
+                        if match1.group("reg") == register_name:
+                            abs_value_found = True
+                #lea <reg>, [<addr>]
+                match1 = re.match(r"(?P<reg>[a-z]{3}), \[(?P<addr>0x[0-9a-f]{,8})\]$", ins[3])
                 if match1:
                     dword = self.getDword(int(match1.group("addr"), 16))
                     if dword:
@@ -125,16 +135,30 @@ class IndirectCallAnalyzer(object):
                 if to == block[0][0] and
                 fr not in [ins[0] for block in processed for ins in block]
             ]
-            LOGGER.debug("start processing previous blocks")
+            LOGGER.debug("start processing previous blocks, searching in %d in_refs with remaining depth: %d", len(refs_in), depth - 1)
             if any(self.processBlock(analysis_state, b, registers.copy(), register_name, processed, depth - 1) for b in [self.searchBlock(analysis_state, i) for i in refs_in]):
                 return True
 
     def resolveRegisterCalls(self, analysis_state, block_depth=3):
         # after block reconstruction do simple data flow analysis to resolve open cases like "call <register>" as stored in self.call_register_ins
+        if analysis_state.call_register_ins:
+            LOGGER.debug("Trying to resolve %d register calls in function: 0x%x", len(analysis_state.call_register_ins), analysis_state.start_addr)
+        max_calls_per_block = 10
+        calls_per_block = {}
         for calling_addr in analysis_state.call_register_ins:
             LOGGER.debug("#" * 20)
             self.current_calling_addr = calling_addr
             self.state = analysis_state
             start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
+            # we only process at most 10 register-calls per block to avoid extreme cases 
+            # found one Go sample with 130k register calls.
+            if start_block[0] not in calls_per_block:
+                calls_per_block[start_block[0]] = 0
+            calls_per_block[start_block[0]] += 1
+            # if we have an old config, default to 50
+            max_calls = self.disassembler.config.MAX_INDIRECT_CALLS_PER_BASIC_BLOCK if hasattr(self.disassembler.config, 'MAX_INDIRECT_CALLS_PER_BASIC_BLOCK') else 50
+            if calls_per_block[start_block[0]] > max_calls:
+                break
+            LOGGER.debug("For this block, we can still analyze %d indirect calls.", max_calls_per_block - calls_per_block[start_block[0]])
             if start_block:
                 self.processBlock(analysis_state, start_block, dict(), start_block[-1][3], list(), block_depth)

@@ -36,6 +36,7 @@ class Disassembler(object):
         if not self._timeout:
             return False
         time_diff = datetime.datetime.utcnow() - self._start_time
+        LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
 
     def disassembleFile(self, file_path, pdb_path=""):
