@@ -29,8 +29,9 @@ class PriorityQueue(object):
         self.heap.append(element)
         heapq._siftdown_max(self.heap, 0, len(self.heap)-1)
 
-    def update(self):
-        heapq._heapify_max(self.heap)
+    def update(self, target_candidate=None):
+        if target_candidate is None:
+            heapq._heapify_max(self.heap)
 
     def __str__(self):
         return str(self.heap)

@@ -5,6 +5,7 @@ import logging
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
 from smda.utility.PriorityQueue import PriorityQueue
+from smda.utility.BracketQueue import BracketQueue
 from .definitions import DEFAULT_PROLOGUES, GAP_SEQUENCES
 from .LanguageAnalyzer import LanguageAnalyzer
 from .FunctionCandidate import FunctionCandidate
@@ -102,6 +103,8 @@ class FunctionCandidateManager(object):
             if conflicts:
                 for candidate_addr, conflict in conflicts.items():
                     self.candidates[candidate_addr].removeCallRefs(conflict)
+                    # depending on implementation, update candidates individually
+                    self.candidate_queue.update(self.candidates[candidate_addr])
                 self.candidate_queue.update()
 
     def addCandidate(self, addr, is_gap=False, reference_source=None):
@@ -403,7 +406,12 @@ class FunctionCandidateManager(object):
         # increase lookup speed with static list
         self._candidate_offsets = [c.addr for c in self.candidates.values()]
         self.cached_candidates = list(self.candidates.values())
-        self.candidate_queue = PriorityQueue(content=self.cached_candidates)
+        if self.config.CANDIDATE_QUEUE == "BracketQueue":
+            self.candidate_queue = BracketQueue(candidates=self.cached_candidates)
+            LOGGER.info("Using BracketQueue")
+        else:
+            self.candidate_queue = PriorityQueue(content=self.cached_candidates)
+            LOGGER.info("Using PriorityQueue")
 
     def locateSymbolCandidates(self):
         for symbol_addr in self.symbol_addresses:

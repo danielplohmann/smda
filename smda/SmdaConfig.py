@@ -5,7 +5,7 @@ import logging
 class SmdaConfig(object):
 
     # note to self: always change this in setup.py as well!
-    VERSION = "1.13.2"
+    VERSION = "1.13.3"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", ".."])))
 
@@ -24,6 +24,8 @@ class SmdaConfig(object):
     MAX_IMAGE_SIZE = 100 * 1024 * 1024
     # store raw binary buffer in SmdaReport to enable carving data from refs
     STORE_BUFFER = False
+    # the queue to use for candidate management
+    CANDIDATE_QUEUE = "PriorityQueue"  # choose from: ["BracketQueue", "PriorityQueue"]
     # improve disassembly by resolving references through data flows
     USE_ALIGNMENT = True
     USE_SYMBOLS_AS_CANDIDATES = True
