@@ -408,10 +408,10 @@ class FunctionCandidateManager(object):
         self.cached_candidates = list(self.candidates.values())
         if self.config.CANDIDATE_QUEUE == "BracketQueue":
             self.candidate_queue = BracketQueue(candidates=self.cached_candidates)
-            LOGGER.info("Using BracketQueue")
+            LOGGER.debug("Using BracketQueue")
         else:
             self.candidate_queue = PriorityQueue(content=self.cached_candidates)
-            LOGGER.info("Using PriorityQueue")
+            LOGGER.debug("Using PriorityQueue")
 
     def locateSymbolCandidates(self):
         for symbol_addr in self.symbol_addresses:

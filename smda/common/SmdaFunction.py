@@ -49,7 +49,6 @@ class SmdaFunction(object):
             self.confidence = disassembly.candidates[function_offset].getConfidence() if function_offset in disassembly.candidates else None
             self.tfidf = disassembly.candidates[function_offset].getTfIdf() if function_offset in disassembly.candidates else None
             self.pic_hash = self.getPicHash(disassembly.binary_info)
-            self.opc_hash = self.getOpcHash()
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
             if config and config.CALCULATE_NESTING:
@@ -82,6 +81,10 @@ class SmdaFunction(object):
     @property
     def num_returns(self):
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
+    
+    @property
+    def opc_hash(self):
+        return self.getOpcHash()
 
     def isApiThunk(self):
         if self.num_instructions != 1:
@@ -230,8 +233,6 @@ class SmdaFunction(object):
                     smda_function.pic_hash = smda_function.getPicHash(binary_info)
             else:
                 smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
-            if version < [1, 13, 0]:
-                smda_function.opc_hash = smda_function.getOpcHash()
         return smda_function
 
     def toDict(self):
@@ -252,7 +253,6 @@ class SmdaFunction(object):
                 "confidence": self.confidence,
                 "function_name": self.function_name,
                 "pic_hash": self.pic_hash,
-                "opc_hash": self.opc_hash,
                 "nesting_depth": self.nesting_depth,
                 "strongly_connected_components": self.strongly_connected_components,
                 "tfidf": self.tfidf
