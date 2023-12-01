@@ -112,6 +112,9 @@ class LanguageAnalyzer(object):
         image_base = self.disassembly.binary_info.base_addr
         data = BytesIO(self.disassembly.binary_info.binary)
         length_of_binary = len(self.disassembly.binary_info.binary)
+        if length_of_binary > 5*1024*1024:
+            LOGGER.info("Filesize exceeds 5 MB, skipping Delphi struct parsing.")
+            return {}
         function_offsets = set()
         name_mapping = {}
         while data.read(4) != b'':
