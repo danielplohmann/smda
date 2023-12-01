@@ -57,7 +57,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
 
 ## Version History
 
- * 2023-11-29: v1.13.5- Made OpcodeHash an attribute with on-demand calculation to save processing time.
+ * 2023-11-29: v1.13.6- Made OpcodeHash an attribute with on-demand calculation to save processing time.
  * 2023-11-29: v1.13.3- Implemented an alternative queue working with reference count based brackets in pursuit of accelerated processing.
  * 2023-11-28: v1.13.2- IndirectCallAnalyzer will now analyze at most a configurable amount of calls per basic block, default 50.
  * 2023-11-21: v1.13.1- SmdaBasicBlock now has `getPredecessors()` and `getSuccessors()`.

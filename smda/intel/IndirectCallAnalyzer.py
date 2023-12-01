@@ -150,6 +150,8 @@ class IndirectCallAnalyzer(object):
             self.current_calling_addr = calling_addr
             self.state = analysis_state
             start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
+            if not start_block:
+                return
             # we only process at most 10 register-calls per block to avoid extreme cases 
             # found one Go sample with 130k register calls.
             if start_block[0] not in calls_per_block:
