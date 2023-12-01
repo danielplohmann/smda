@@ -219,7 +219,6 @@ class SmdaFunction(object):
         smda_function.confidence = function_dict["metadata"]["confidence"]
         smda_function.function_name = function_dict["metadata"]["function_name"]
         smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else 0
-        smda_function.opc_hash = function_dict["metadata"]["opc_hash"] if "opc_hash" in function_dict["metadata"] else 0
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
         if binary_info and binary_info.architecture:
