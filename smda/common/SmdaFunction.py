@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import struct
+from typing import Iterator
 
 from smda.common.Tarjan import Tarjan
 from smda.common.CodeXref import CodeXref
@@ -99,7 +100,7 @@ class SmdaFunction(object):
     def isExported(self):
         return self.is_exported
 
-    def getBlocks(self):
+    def getBlocks(self) -> Iterator["SmdaBasicBlock"]:
         for _, block in sorted(self.blocks.items()):
             yield SmdaBasicBlock(block, smda_function=self)
 
@@ -114,7 +115,7 @@ class SmdaFunction(object):
             for ins in block.getInstructions():
                 yield ins
 
-    def getInstructionsForBlock(self, offset):
+    def getInstructionsForBlock(self, offset) -> Iterator["SmdaInstruction"]:
         if offset is None:
             offset = self.offset
         if offset not in self.blocks:
@@ -201,7 +202,7 @@ class SmdaFunction(object):
         return dot_graph
 
     @classmethod
-    def fromDict(cls, function_dict, binary_info=None, version=None, smda_report=None):
+    def fromDict(cls, function_dict, binary_info=None, version=None, smda_report=None) -> "SmdaFunction":
         smda_function = cls(None)
         smda_function.smda_report = smda_report
         smda_function.offset = function_dict["offset"]
@@ -234,7 +235,7 @@ class SmdaFunction(object):
                 smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
         return smda_function
 
-    def toDict(self):
+    def toDict(self) -> dict:
         blocks_as_dict = {}
         for addr, block in self.blocks.items():
             blocks_as_dict[addr] = [ins.toDict() for ins in block]

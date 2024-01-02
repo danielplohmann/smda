@@ -1,5 +1,9 @@
-from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+from typing import Optional
+
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
+
+from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+
 
 class SmdaInstruction:
 
@@ -68,7 +72,7 @@ class SmdaInstruction:
         return self.bytes
 
     @classmethod
-    def fromDict(cls, instruction_dict, smda_function=None):
+    def fromDict(cls, instruction_dict, smda_function=None) -> Optional["SmdaInstruction"]:
         smda_instruction = cls(None)
         smda_instruction.smda_function = smda_function
         smda_instruction.offset = instruction_dict[0]
@@ -77,7 +81,7 @@ class SmdaInstruction:
         smda_instruction.operands = instruction_dict[3]
         return smda_instruction
 
-    def toDict(self):
+    def toDict(self) -> dict:
         return [self.offset, self.bytes, self.mnemonic, self.operands]
 
     def __int__(self):

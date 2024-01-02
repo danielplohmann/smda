@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import zipfile
+from typing import Optional, Iterator
 try:
     from StringIO import StringIO ## for Python 2
 except ImportError:
@@ -12,6 +13,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
 
 from .BinaryInfo import BinaryInfo
 from .SmdaFunction import SmdaFunction
+from .SmdaBasicBlock import SmdaBasicBlock
 from smda.common.CodeXref import CodeXref
 from smda.common.BlockLocator import BlockLocator
 from smda.DisassemblyStatistics import DisassemblyStatistics
@@ -118,13 +120,13 @@ class SmdaReport(object):
             sum_instructions += function.num_instructions
         return sum_instructions
 
-    def getBuffer(self):
+    def getBuffer(self) -> bytes:
         return self.buffer
 
-    def getFunction(self, function_addr):
+    def getFunction(self, function_addr)  -> Optional["SmdaFunction"]:
         return self.xcfg[function_addr] if function_addr in self.xcfg else None
 
-    def getFunctions(self):
+    def getFunctions(self) -> Iterator["SmdaFunction"]:
         for _, smda_function in sorted(self.xcfg.items()):
             yield smda_function
 
@@ -133,13 +135,13 @@ class SmdaReport(object):
             if smda_function.isExported():
                 yield smda_function
 
-    def findFunctionByContainedAddress(self, inner_address):
+    def findFunctionByContainedAddress(self, inner_address) -> Optional["SmdaFunction"]:
         block = self.findBlockByContainedAddress(inner_address)
         if block is None:
             return None
         return block.smda_function
 
-    def findBlockByContainedAddress(self, inner_address):
+    def findBlockByContainedAddress(self, inner_address) -> Optional["SmdaBasicBlock"]:
         # init the block locator if it hasn't been used yet.
         if self.block_locator is None:
             self.block_locator = BlockLocator(self.getFunctions())
@@ -210,7 +212,7 @@ class SmdaReport(object):
         return SmdaReport.fromDict(smda_json)
 
     @classmethod
-    def fromDict(cls, report_dict):
+    def fromDict(cls, report_dict) -> Optional["SmdaReport"]:
         smda_report = cls(None)
         smda_report.architecture = report_dict["architecture"]
         smda_report.base_addr = report_dict["base_addr"]
@@ -253,7 +255,7 @@ class SmdaReport(object):
         smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version, smda_report=smda_report) for function_addr, function_dict in report_dict["xcfg"].items()}
         return smda_report
 
-    def toDict(self):
+    def toDict(self) -> dict:
         return {
             "architecture": self.architecture,
             "base_addr": self.base_addr,

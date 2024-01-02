@@ -1,5 +1,6 @@
 import struct
 import hashlib
+from typing import Iterator
 
 from smda.common.SmdaInstruction import SmdaInstruction
 
@@ -23,7 +24,7 @@ class SmdaBasicBlock:
             self.picblockhash = self.getPicBlockHash()
             self.opcblockhash = self.getOpcBlockHash()
 
-    def getInstructions(self):
+    def getInstructions(self) -> Iterator["SmdaInstruction"]:
         for instruction in self.instructions:
             yield instruction
 
@@ -77,13 +78,13 @@ class SmdaBasicBlock:
         return successors
 
     @classmethod
-    def fromDict(cls, block_dict, smda_function=None):
+    def fromDict(cls, block_dict, smda_function=None) -> "SmdaBasicBlock":
         smda_block = cls(None)
         smda_block.smda_function = smda_function
         smda_block.instructions = [SmdaInstruction.fromDict(d, smda_function=smda_function) for d in block_dict]
         return smda_block
 
-    def toDict(self):
+    def toDict(self) -> dict:
         return [smda_ins.toDict() for smda_ins in self.instructions]
 
     def __int__(self):
