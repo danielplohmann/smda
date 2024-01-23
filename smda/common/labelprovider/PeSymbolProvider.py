@@ -61,7 +61,7 @@ class PeSymbolProvider(AbstractLabelProvider):
         # find VA of first code section
         code_base_address = None
         for section in lief_binary.sections:
-            if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
+            if section.characteristics & 0x20000000:
                 code_base_address = lief_binary.imagebase + section.virtual_address
                 break
         if code_base_address is None:

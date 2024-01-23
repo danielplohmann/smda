@@ -123,7 +123,8 @@ class PeFileLoader(object):
         base_address = PeFileLoader.getBaseAddress(binary)
         if pefile and pefile.sections:
             for section in pefile.sections:
-                if section.characteristics & lief.PE.SECTION_CHARACTERISTICS.MEM_EXECUTE:
+                # MEM_EXECUTE
+                if section.characteristics & 0x20000000:
                     section_start = base_address + section.virtual_address
                     section_size = section.virtual_size
                     if section_size % 0x1000 != 0:
