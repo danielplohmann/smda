@@ -23,6 +23,8 @@ class DisassemblyTestSuite(unittest.TestCase):
         test_data = [
             {"ins": (0, "55", "push", "ebp"), "mnemonic_group": "S", "escaped_operands": "REG"},
             {"ins": (1, "8365fc00", "and", "dword ptr [ebp - 4], 0"), "mnemonic_group": "A", "escaped_operands": "PTR, CONST"},
+            {"ins": (2, "f30f1efa", "endbr64", ""), "mnemonic_group": "C", "escaped_operands": ""},
+            {"ins": (3, "c58e5ad3", "vcvtss2sd", "xmm2, xmm14, xmm3"), "mnemonic_group": "X", "escaped_operands": "XREG, XREG, XREG"},
         ]
         for data in test_data:
             smda_ins = SmdaInstruction(data["ins"])

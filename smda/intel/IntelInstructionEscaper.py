@@ -18,37 +18,57 @@ LOGGER = logging.getLogger(__name__)
 
 
 class IntelInstructionEscaper:
-    """ Escaper to abstract information from disassembled instructions. Based on capstone disassembly. """
+    """ Escaper to abstract information from disassembled instructions. Based on capstone disassembly. 
+    Should now cover full instruction name mapping:
+    https://github.com/capstone-engine/capstone/blob/31ea133e64cb6576524e61b734681260104d0a6f/arch/X86/X86MappingInsnName.inc#L168
+    """
 
     _aritlog_group = [
         "aaa", "aad", "aam", "aas", "adc", "adcx", "add", "adox", "and", "cdq",
         "cdqe", "daa", "das", "dec", "div", "idiv", "imul", "inc", "lzcnt", "mul",
         "mulx", "neg", "not", "or", "popcnt", "rcl", "rcr", "rol", "ror", "sal",
         "salc", "sar", "sbb", "shl", "shld", "shr", "shrd", "sub", "tzcnt", "xadd",
-        "xor", "shlx", "shrx", "sarx"
+        "xor", "shlx", "shrx", "sarx",
+        # bit manipulation
+        'bzhi', 'bextr', 'blcfill', 'blci', 'blcic', 'blcmsk', 'blcs', 'blsfill', 'blsi', 'blsic', 'blsmsk', 'blsr', 'tzmsk', 't1mskc',
     ]
     _cfg_group = [
         "arpl", "bound", "call", "clc", "cld", "cli", "cmc", "cmova", "cmovae", "cmovb",
         "cmovbe", "cmove", "cmovge", "cmovl", "cmovle", "cmovne", "cmovs", "cmp", "cmps", "cmpsb",
-        "cmpsd", "cmpsw", "iret", "iretd", "ja", "jae", "jb", "jbe", "jcxz", "je",
+        "cmpsd", "cmpsw", "iret", "iretd", 'iretq', "ja", "jae", "jb", "jbe", "jcxz", "je",
         "jecxz", "jg", "jge", "jl", "jle", "jmp", "jne", "jno", "jnp", "jns",
         "jo", "jp", "jrcxz", "js", "lcall", "ljmp", "loop", "loope", "loopne", "ret",
         "retf", "retfq", "retn", "seta", "setae", "setb", "setbe", "sete", "setg", "setge",
         "setl", "setle", "setne", "setno", "setnp", "setns", "seto", "setp", "sets", "stc",
-        "std", "sti", "test"
+        "std", "sti", "test",
+        # CET 
+        'endbr32', 'endbr64'
     ]
     _mem_group = [
         "bsf", "bsr", "bswap", "bt", "btc", "btr", "bts", "cbw", "cmovg", "cmovno",
-        "cmovnp", "cmovns", "cmovo", "cmovp", "cmpxchg", "cmpxchg8b", "cqo", "cwd", "cwde", "lahf",
+        "cmovnp", "cmovns", "cmovo", "cmovp", "cmpxchg", "cmpxchg8b", "cmpxchg16b", "cqo", "cwd", "cwde", "lahf",
         "lar", "lds", "lea", "les", "lfs", "lgs", "lods", "lodsb", "lodsd", "lodsq",
-        "lodsw", "lsl", "lss", "maskmovq", "mov", "movabs", "movnti", "movntq", "movs", "movsb",
-        "movsd", "movss", "movsw", "movsx", "movsxd", "movzx", "rdmsr", "sahf", "scas", "scasb",
+        "lodsw", "lsl", "lss", "maskmovq", 'maskmovdqu', "mov", "movabs", "movnti", "movntq", "movs", "movsb",
+        "movsd", "movsw", "movsx", "movsxd", "movzx", "rdmsr", "sahf", "scas", "scasb",
         "scasd", "scasq", "scasw", "stos", "stosb", "stosd", "stosq", "stosw", "wrmsr", "xabort",
-        "xbegin", "xchg", "xlat", "xlatb", "movbe", "clflush"
+        "xbegin", "xchg", "xlat", "xlatb", "movbe", "clflush",
+        # 
+        'movntdqa', 
+        # direct store
+        'movdir64b', 'movdiri',
+        # segment bases
+        'wrgsbase', 'wrfsbase', 'rdfsbase', 'rdgsbase', 'swapgs', 
+        # bounds
+        'bndcl', 'bndcn', 'bndcu', 'bndldx', 'bndmk', 'bndmov', 'bndstx'
+
     ]
     _stack_group = [
         "enter", "leave", "pop", "popad", "popal", "popf", "popfd", "popfq", "push", "pushad",
         "pushal", "pushf", "pushfd", "pushfq"
+    ]
+    # unused, for completeness
+    _prefix_group = [
+        'lock', 'rep', 'repne', 'rex64', 'data16', 
     ]
     _privileged_group = [
         "clts", "cpuid", "getsec", "hlt", "in", "ins", "insb", "insd", "insw", "int",
@@ -56,66 +76,190 @@ class IntelInstructionEscaper:
         "ltr", "mfence", "out", "outs", "outsb", "outsd", "outsw", "pause", "prefetchnta", "prefetcht0",
         "prefetcht1", "prefetcht2", "prefetchw", "rdpmc", "rdtsc", "rsm", "sfence", "sgdt", "sidt", "sldt",
         "smsw", "str", "syscall", "sysenter", "sysexit", "sysret", "ud", "ud2", "ud2b", "wait",
-        "wbinvd", "xsaveopt", "ud0",
+        "wbinvd", "ud0", "ud1",
+        'sysexitq', 'sysretq',
+        # memory protection and cache
+        'wrpkru', 'wbnoinvd', 'clac', 'stac',
+        # enclaves
+        'encls', 'enclu', 'enclv',
+        # shadow stack
+        'cldemote', 'clflushopt', 'clrssbsy', 'clwb', 'clzero', 'incsspq', 'rdsspq', 'saveprevssp', 'rstorssp', 'wrssq', 'wrussq', 'setssbsy',
+        # no idea where to fit these otherwise :)
+        'pconfig', 'invpcid', 'rdpid', 'rdpkru', 'rdtscp', 
+        'umonitor', 'uwait', 'umwait', 'mwait', 'mwaitx', 'monitor', 'monitorx', 'tpause', 
+        "xsaveopt", 'xacquire', 'xend', 'xrelease', 'xrstor', 'xrstor64', 'xrstors', 'xrstors64', 'xsave', 
+        'xsave64', 'xsavec', 'xsavec64', 'xsaveopt64', 'xsaves', 'xsaves64', 'xsetbv', 'xtest',
+        # AMD lightweight profiling
+        'llwpcb', 'lwpins', 'slwpcb', 'lwpval', 
+
     ]
-    _aes_group = [
-        "aesdec", "aesdeclast", "aesenc", "aesenclast", "aesimc", "aeskeygenassist", "crc32", "rdrand", "rdseed", "sha1msg1",
-        "sha1msg2", "sha1nexte", "sha1rnds4", "sha256msg1", "sha256msg2", "sha256rnds2", "vaesenc", "vaesenclast", "xcryptcbc", "xcryptcfb",
-        "xcryptebc", "xcryptecb", "xcryptofb", "xstorerng", "xsha1", "xsha256", "xcryptctr", "vaesdec", "vaesdeclast"
-    ]
+    _crypto_group = [
+        'aesdec', 'aesdeclast', 'aesenc', 'aesenc128kl', 'aesenc256kl', 'aesenclast', 'aesencwide128kl', 'aesencwide256kl', 'aesimc', 
+        'aeskeygenassist', 'ccs_encrypt', 'ccs_hash', 'encodekey128', 'encodekey256', 'loadiwkey', 'montmul', 'pclmulqdq', 'pclmullqlqdq', 
+        'pclmulhqlqdq', 'pclmullqqhdq', 'pclmulhqqhdq', "vpclmulqdq", 'rdrand', 'rdseed', 'sha1msg1', 'sha1msg2', 'sha1nexte', 'sha1rnds4', 'sha256msg1', 
+        'sha256msg2', 'sha256rnds2', 'xcryptcbc', 'xcryptcfb', 'xcryptctr', 'xcryptecb', 'xcryptofb', 'xsha1', 'xsha256', 'xstore',
+        'vaesdec', 'vaesdeclast', 'vaesenc', 'vaesenclast', 'vaesimc', 'vaeskeygenassist', "crc32",
+        'gf2p8affineinvqb', 'gf2p8affineqb', 'gf2p8mulb',
+        ]
+
     _float_group = [
         "f2xm1", "fabs", "fadd", "faddp", "fbld", "fbstp", "fchs", "fcmovb", "fcmovbe", "fcmove",
         "fcmovnb", "fcmovnbe", "fcmovne", "fcmovnu", "fcmovu", "fcom", "fcomi", "fcomp", "fcompi", "fcompp",
         "fcos", "fdecstp", "fdiv", "fdivp", "fdivr", "fdivrp", "ffree", "fiadd", "ficom", "ficomp",
         "fidiv", "fidivr", "fild", "fimul", "fincstp", "fist", "fistp", "fisttp", "fisub", "fisubr",
         "fld", "fld1", "fldcw", "fldenv", "fldl2e", "fldl2t", "fldlg2", "fldln2", "fldpi", "fldz",
-        "fmul", "fmulp", "fnclex", "fninit", "fnop", "fnsave", "fnstcw", "fnstenv", "fnstsw", "fpatan",
+        "fmul", "fmulp", "fnclex", "fninit", "fnsave", "fnstcw", "fnstenv", "fnstsw", "fpatan",
         "fprem", "fprem1", "fptan", "frndint", "frstor", "fscale", "fsetpm", "fsin", "fsincos", "fsqrt",
         "fst", "fstp", "fstpnce", "fsub", "fsubp", "fsubr", "fsubrp", "ftst", "fucom", "fucomi",
-        "fucomp", "fucompi", "fucompp", "fxam", "fxch", "fxrstor", "fxsave", "fxtract", "fyl2x", "fyl2xp1",
-        "fcomip", "fdisi8087_nop", "feni8087_nop", "ffreep", "fucomip",
+        "fucomp", "fucompi", "fucompp", "fxam", "fxch", "fyl2x", "fyl2xp1",
+        "fcomip", "ffreep", "fucomip", 'fcmovnp', 
+        "fxsave", 'fxsave64', "fxrstor", "fxtract", 'fxrstor64', 
     ]
+
+    _nop_group = [
+        "nop", "fnop", "fdisi8087_nop", "feni8087_nop", 
+    ]
+
     _xmm_group = [
-        "addpd", "addps", "addsd", "addss", "addsubpd", "andn", "andnpd", "andnps", "andpd", "andps",
-        "cmpeqps", "cmpeqsd", "cmplesd", "cmpltpd", "cmpltps", "cmpltsd", "cmpneqpd", "cmpneqsd", "cmpneqss", "cmpnlepd",
-        "cmpnlesd", "cmpnltsd", "cmpps", "cmpsq", "comisd", "comiss", "cvtdq2pd", "cvtdq2ps", "cvtpd2dq", "cvtpd2ps",
-        "cvtpi2ps", "cvtps2dq", "cvtps2pd", "cvtps2pi", "cvtsd2si", "cvtsd2ss", "cvtsi2sd", "cvtsi2ss", "cvtss2sd", "cvtss2si",
-        "cvttpd2dq", "cvttps2dq", "cvttps2pi", "cvttsd2si", "cvttss2si", "divpd", "divps", "divsd", "divss", "emms",
-        "femms", "haddpd", "lddqu", "ldmxcsr", "maxpd", "maxps", "maxsd", "maxss", "minpd", "minps",
-        "minsd", "minss", "movapd", "movaps", "movd", "movddup", "movdq2q", "movdqa", "movdqu", "movhlps",
-        "movhpd", "movhps", "movlhps", "movlpd", "movlps", "movmskpd", "movmskps", "movntdq", "movntps", "movq",
-        "movsldup", "movsq", "movupd", "movups", "mulpd", "mulps", "mulsd", "mulss", "orpd", "orps",
+        # masks
+        'kaddb', 'kaddd', 'kaddq', 'kaddw', 'kandb', 'kandd', 'kandnb', 'kandnd', 'kandnq', 'kandnw', 'kandq', 'kandw', 'kmovd', 
+        'kmovq', 'kmovw', 'knotb', 'knotd', 'knotq', 'knotw', 'korb', 'kord', 'korq', 'kortestb', 'kortestd', 'kortestq', 
+        'kortestw', 'korw', 'kshiftlb', 'kshiftld', 'kshiftlq', 'kshiftlw', 'kshiftrb', 'kshiftrd', 'kshiftrq', 'kshiftrw', 
+        'ktestb', 'ktestd', 'ktestq', 'ktestw', 'kunpckbw', 'kunpckdq', 'kunpckwd', 'kxnorb', 'kxnord', 'kxnorq', 'kxnorw', 
+        'kxorb', 'kxord', 'kxorq', 'kxorw',
+        # 
+        'vcmp',
+        # ps
+        "subps", "addps", "andnps", "andps", "cmpeqps", "cmpltps", "cvtpd2ps","cvtdq2ps", "cmpps", "cvtpi2ps", 
+        "maxps", "divps", "movaps", "minps", "movhlps","movhps", "movlhps", "movlps", "movmskps", "movntps", 
+        "movups", "mulps", "orps", "rsqrtps", "shufps", "rcpps", "sqrtps", "unpckhps", "unpcklps",
+        "vandps", "vmovlhps", "vmovups", "vmulps", "vorps", "vshufps", "vsubps", "vxorps", "xorps",
+        "vaddsubps", "vmaxps", "vmovaps", 'vaddps', 
+        'addsubps', 'blendps', 'blendvps', 'dpps', 'extractps', 'haddps', 'hsubps', 'insertps', 'roundps', 'vandnps', 'vblendmps', 'vblendps',
+        'vblendvps', 'vcmpps', 'vcompressps', 'vcvtdq2ps', 'vcvtpd2ps', 'vcvtph2ps', 'vcvtqq2ps', 'vcvtudq2ps', 'vcvtuqq2ps', 'vdivps', 'vdpps',
+        'vexp2ps', 'vexpandps', 'vextractps', 'vfixupimmps', 'vfpclassps', 'vfrczps', 'vgatherdps', 'vgatherpf0dps', 'vgatherpf0qps', 'vgatherpf1dps',
+        'vgatherpf1qps', 'vgatherqps', 'vgetexpps', 'vgetmantps', 'vhaddps', 'vhsubps', 'vinsertps', 'vmaskmovps', 'vminps', 'vmovhlps', 'vmovhps',
+        'vmovlps', 'vmovmskps', 'vmovntps', 'vpermi2ps', 'vpermil2ps', 'vpermilps', 'vpermps', 'vpermt2ps', 'vrangeps', 'vrcp14ps', 'vrcp28ps',
+        'vrcpps', 'vreduceps', 'vrndscaleps', 'vroundps', 'vrsqrt14ps', 'vrsqrt28ps', 'vrsqrtps', 'vscalefps', 'vscatterdps', 'vscatterpf0dps',
+        'vscatterpf0qps', 'vscatterpf1dps', 'vscatterpf1qps', 'vscatterqps', 'vsqrtps', 'vtestps', 'vunpckhps', 'vunpcklps', 
+        # pd
+        "addpd", "addsubpd", "andnpd", "andpd", "cmpltpd", "cmpneqpd", "cmpnlepd", "cvtdq2pd", "cvtps2pd",
+        "divpd", "haddpd", "maxpd", "minpd", "movapd", "movhpd", "movlpd", "movmskpd", "movupd", "mulpd", 
+        "orpd", "shufpd", "sqrtpd", "subpd", "unpckhpd", "unpcklpd",  "vaddpd", "vandnpd", "vandpd", 
+        "vcmppd", "vcvtdq2pd", "vcvtps2pd", "vfmadd132pd", "vfmsubpd", "vhaddpd", "vfmsubaddpd", 
+        "vminpd", "vmovapd", "vmulpd", "vorpd", "vunpcklpd", "vxorpd", "xorpd",  'vaddsubpd', 
+        'blendpd', 'blendvpd', 'cmppd', 'cvtpi2pd', 'dppd', 'hsubpd', 'incsspd', 'movntpd', 'pswapd', 'rdsspd', 'roundpd', 'vblendmpd', 
+        'vblendpd', 'vblendvpd', 'vcompresspd', 'vcvtqq2pd', 'vcvtudq2pd', 'vcvtuqq2pd', 'vdivpd', 'vdppd', 'vexp2pd', 'vexpandpd', 
+        'vfixupimmpd', 'vfpclasspd', 'vfrczpd', 'vgatherdpd', 'vgatherpf0dpd', 'vgatherpf0qpd', 'vgatherpf1dpd', 'vgatherpf1qpd', 
+        'vgatherqpd', 'vgetexppd', 'vgetmantpd', 'vhsubpd', 'vmaskmovpd', 'vmaxpd', 'vmovhpd', 'vmovlpd', 'vmovmskpd', 'vmovntpd', 
+        'vmovupd', 'vpcmpd', 'vpermi2pd', 'vpermil2pd', 'vpermilpd', 'vpermpd', 'vpermt2pd', 'vrangepd', 'vrcp14pd', 'vrcp28pd', 
+        'vreducepd', 'vrndscalepd', 'vroundpd', 'vrsqrt14pd', 'vrsqrt28pd', 'vscalefpd', 'vscatterdpd', 'vscatterpf0dpd', 'vscatterpf0qpd', 
+        'vscatterpf1dpd', 'vscatterpf1qpd', 'vscatterqpd', 'vshufpd', 'vsqrtpd', 'vsubpd', 'vtestpd', 'vunpckhpd',
+        # v4f
+        'v4fmaddps', 'v4fmaddss', 'v4fnmaddps', 'v4fnmaddss',
+        # FMA3
+        'vfmadd132ps', 'vfmadd132ss', 'vfmadd213pd', 'vfmadd213ps', 'vfmadd231pd', 'vfmadd231ps', 'vfmaddpd',
+        'vfmaddps', 'vfmaddsd', 'vfmaddss' ,'vfmaddsub132pd', 'vfmaddsub132ps', 'vfmaddsub213pd', 'vfmaddsub213ps',
+        'vfmaddsub231pd', 'vfmaddsub231ps', 'vfmaddsubpd', 'vfmaddsubps', 'vfmsub132pd', 'vfmsub132ps', 'vfmsub132ss',
+        'vfmsub213pd', 'vfmsub213ps', 'vfmsub231pd', 'vfmsub231ps', 'vfmsub231sd', 'vfmsub231ss', 'vfmsubadd132pd',
+        'vfmsubadd132ps', 'vfmsubadd213pd', 'vfmsubadd213ps', 'vfmsubadd231pd', 'vfmsubadd231ps', 'vfmsubaddps',
+        'vfmsubps', 'vfmsubsd', 'vfmsubss', 'vfnmadd132pd', 'vfnmadd132ps', 'vfnmadd132ss', 'vfnmadd213pd',
+        'vfnmadd213ps', 'vfnmadd213ss', 'vfnmadd231pd', 'vfnmadd231ps', 'vfnmadd231ss', 'vfnmaddpd', 'vfnmaddps',
+        'vfnmaddsd', 'vfnmaddss', 'vfnmsub132pd', 'vfnmsub132ps', 'vfnmsub132sd', 'vfnmsub132ss', 'vfnmsub213pd',
+        'vfnmsub213ps', 'vfnmsub213sd', 'vfnmsub213ss', 'vfnmsub231pd', 'vfnmsub231ps', 'vfnmsub231sd', 'vfnmsub231ss',
+        'vfnmsubpd', 'vfnmsubps', 'vfnmsubsd', 'vfnmsubss',
+        #
+        'valignd', 'valignq', 'vbroadcastf128', 'vbroadcastf32x2', 'vbroadcastf32x4', 'vbroadcastf32x8', 'vbroadcastf64x2', 
+        'vbroadcastf64x4', 'vbroadcasti32x2', 'vbroadcasti32x4', 'vbroadcasti32x8', 'vbroadcasti64x2', 'vbroadcasti64x4', 'vcvtpd2qq', 
+        'vcvtpd2udq', 'vcvtpd2uqq', 'vcvtps2dq', 'vcvtps2ph', 'vcvtps2qq', 'vcvtps2udq', 'vcvtps2uqq', 'vcvtsd2si', 'vcvtsd2usi', 'vcvtss2usi', 
+        'vcvttpd2qq', 'vcvttpd2udq', 'vcvttpd2uqq', 'vcvttps2dq', 'vcvttps2qq', 'vcvttps2udq', 'vcvttps2uqq', 'vcvttss2si', 'vdbpsadbw', 
+        'vextractf128', 'vextractf32x4', 'vextractf32x8', 'vextractf64x2', 'vextractf64x4', 'vextracti32x4', 'vextracti32x8', 'vextracti64x2', 
+        'vextracti64x4', 'vgf2p8affineinvqb', 'vgf2p8affineqb', 'vgf2p8mulb', 'vinsertf128', 'vinsertf32x4', 'vinsertf32x8', 'vinsertf64x2', 
+        'vinsertf64x4', 'vinserti32x4', 'vinserti32x8', 'vinserti64x2', 'vinserti64x4', 'vlddqu', 'vmaskmovdqu', 'vmovdqa32', 'vmovdqa64', 
+        'vmovdqu16', 'vmovdqu32', 'vmovdqu64', 'vmovdqu8', 'vmovntdqa', 'vmovshdup', 'vmovsldup', 'vmpsadbw', 'vp4dpwssds', 'vpabsb', 'vpabsq', 
+        'vpabsw', 'vpacksswb', 'vpackusdw', 'vpandd', 'vpandnd', 'vpandnq', 'vpandq', 'vpblendmb', 'vpblendmd', 'vpblendmq', 'vpblendmw', 
+        'vpblendvb', 'vpbroadcastmb2q', 'vpbroadcastmw2d', 'vpbroadcastw', 'vpcmov', 'vpcmp', 'vpcmpb', 'vpcmpestri', 'vpcmpestrm', 'vpcmpgtb', 
+        'vpcmpgtq', 'vpcmpgtw', 'vpcmpistri', 'vpcmpistrm', 'vpcmpq', 'vpcmpub', 'vpcmpud', 'vpcmpuq', 'vpcmpuw', 'vpcmpw', 'vpcom', 'vpcomb', 
+        'vpcomd', 'vpcompressb', 'vpcompressq', 'vpcompressw', 'vpcomq', 'vpcomub', 'vpcomud', 'vpcomuq', 'vpcomuw', 'vpcomw', 'vpconflictd', 
+        'vpconflictq', 'vpdpbusds', 'vpdpwssds', 'vpermb', 'vpermi2b', 'vpermi2d', 'vpermi2q', 'vpermi2w', 'vpermt2b', 'vpermt2d', 'vpermt2q', 
+        'vpermt2w', 'vpermw', 'vpexpandb', 'vpexpandd', 'vpexpandq', 'vpexpandw', 'vpextrb', 'vpextrd', 'vpextrw', 'vpgatherdd', 'vpgatherdq', 
+        'vpgatherqd', 'vpgatherqq', 'vphaddbd', 'vphaddbq', 'vphaddbw', 'vphaddd', 'vphadddq', 'vphaddsw', 'vphaddubd', 'vphaddubq', 'vphaddubw', 
+        'vphaddudq', 'vphadduwd', 'vphadduwq', 'vphaddw', 'vphaddwd', 'vphaddwq', 'vphminposuw', 'vphsubbw', 'vphsubd', 'vphsubdq', 'vphsubsw', 
+        'vphsubw', 'vphsubwd', 'vpinsrb', 'vpinsrw', 'vplzcntd', 'vplzcntq', 'vpmacsdd', 'vpmacsdqh', 'vpmacsdql', 'vpmacssdd', 'vpmacssdqh', 
+        'vpmacssdql', 'vpmacsswd', 'vpmacssww', 'vpmacswd', 'vpmacsww', 'vpmadcsswd', 'vpmadcswd', 'vpmadd52huq', 'vpmadd52luq', 'vpmaddubsw', 
+        'vpmaskmovd', 'vpmaskmovq', 'vpmaxsb', 'vpmaxsq', 'vpmaxud', 'vpmaxuq', 'vpmaxuw', 'vpminsb', 'vpminsq', 'vpminsw', 'vpminub', 'vpminud', 
+        'vpminuq', 'vpminuw', 'vpmovb2m', 'vpmovd2m', 'vpmovdb', 'vpmovdw', 'vpmovm2b', 'vpmovm2d', 'vpmovm2q', 'vpmovm2w', 'vpmovq2m', 'vpmovqb', 
+        'vpmovqd', 'vpmovqw', 'vpmovsdb', 'vpmovsdw', 'vpmovsqb', 'vpmovsqd', 'vpmovsqw', 'vpmovswb', 'vpmovsxbd', 'vpmovsxbq', 'vpmovsxbw', 
+        'vpmovsxdq', 'vpmovsxwd', 'vpmovsxwq', 'vpmovusdb', 'vpmovusdw', 'vpmovusqb', 'vpmovusqd', 'vpmovusqw', 'vpmovuswb', 'vpmovw2m', 'vpmovwb', 
+        'vpmovzxbd', 'vpmovzxbq', 'vpmovzxbw', 'vpmovzxdq', 'vpmovzxwd', 'vpmovzxwq', 'vpmulhrsw', 'vpmulhuw', 'vpmulhw', 'vpmulld', 'vpmullq', 
+        'vpmultishiftqb', 'vpopcntb', 'vpopcntd', 'vpopcntq', 'vpopcntw', 'vpord', 'vporq', 'vpperm', 'vprold', 'vprolq', 'vprolvd', 'vprolvq', 
+        'vprord', 'vprorq', 'vprorvd', 'vprorvq', 'vprotb', 'vprotw', 'vpscatterdd', 'vpscatterdq', 'vpscatterqd', 'vpscatterqq', 'vpshab', 
+        'vpshad', 'vpshaq', 'vpshaw', 'vpshlb', 'vpshld', 'vpshldd', 'vpshldq', 'vpshldvd', 'vpshldvq', 'vpshldvw', 'vpshldw', 'vpshlq', 
+        'vpshlw', 'vpshrdd', 'vpshrdq', 'vpshrdvd', 'vpshrdvq', 'vpshrdvw', 'vpshrdw', 'vpshufbitqmb', 'vpshufhw', 'vpshuflw', 'vpsignb', 
+        'vpsignd', 'vpsignw', 'vpsllvd', 'vpsllvq', 'vpsllvw', 'vpsllw', 'vpsraq', 'vpsravd', 'vpsravq', 'vpsravw', 'vpsrlvd', 'vpsrlvq', 
+        'vpsrlvw', 'vpsrlw', 'vpsubb', 'vpsubsb', 'vpsubsw', 'vpsubusw', 'vpternlogd', 'vpternlogq', 'vptestmb', 'vptestmd', 'vptestmq', 
+        'vptestmw', 'vptestnmb', 'vptestnmd', 'vptestnmq', 'vptestnmw', 'vpunpcklbw', 'vpunpcklwd', 'vpxord', 'vpxorq', 'vshuff32x4', 
+        'vshuff64x2', 'vshufi32x4', 'vshufi64x2',
+        # 
+        'movq2dq', 'movshdup', 
+        'extrq', 'insertq', 
+        'cvtpd2pi', 'cvttpd2pi', 
+        'pabsb', 'packusdw', 'pavgusb', 'pblendvb', 'pcmpestrm', 'pcmpgtq', 'pcmpistrm', 'pdep', 'pext', 'pextrq', 'pf2id', 'pf2iw', 
+        'pfacc', 'pfadd', 'pfcmpeq', 'pfcmpgt', 'pfmax', 'pfmin', 'pfmul', 'pfnacc', 'pfpnacc', 'pfrcp', 'pfrcpit1', 'pfrcpit2', 
+        'pfrsqit1', 'pfrsqrt', 'pfsub', 'pfsubr', 'phaddsw', 'phaddw', 'phminposuw', 'phsubd', 'phsubw', 'pi2fd', 'pi2fw', 'pmuldq', 
+        'pmulhrsw', 'pmulhrw', 'prefetch', 'prefetchwt1', 'psignb', 'psignd', 'ptest', 'ptwrite',
+        'pmaxsb', 'pmaxud', 'pmaxuw', 'pminsb', 'pminud', 'pminuw', 'pmovsxbd', 'pmovsxbq', 'pmovsxbw', 'pmovsxwd', 'pmovsxwq', 'pmovzxbd', 
+        'pmovzxbq', 'pmovzxbw', 'pmovzxdq', 'pmovzxwq',
+        'movntsd', 'pmaxsd', 'pminsd', 'vbroadcastsd', 'vcmpsd', 'vcvtsi2sd', 'vcvtss2sd', 'vcvtusi2sd', 'vfixupimmsd', 
+        'vfpclasssd', 'vfrczsd', 'vgetexpsd', 'vgetmantsd', 'vp4dpwssd', 'vpabsd', 'vpcompressd', 'vpdpbusd', 'vpdpwssd', 
+        'vpmaxsd', 'vpminsd', 'vrangesd', 'vrcp14sd', 'vrcp28sd', 'vreducesd', 'vrndscalesd', 'vrsqrt14sd', 'vrsqrt28sd', 'vscalefsd', 'wrssd', 'wrussd',
+        'movntss', 'roundss', 'rsqrtss', 'vbroadcastss', 'vcmpss', 'vcomiss', 'vcvtusi2ss', 'vdivss', 'vfixupimmss', 'vfpclassss', 
+        'vfrczss', 'vgetexpss', 'vgetmantss', 'vminss', 'vmulss', 'vrangess', 'vrcp14ss', 'vrcp28ss', 'vreducess', 'vrndscaless', 
+        'vroundss', 'vrsqrt14ss', 'vrsqrt28ss', 'vrsqrtss', 'vscalefss', 'vsqrtss',
+        "movss", 'cmpss',
+        "addsd", "addss",  "andn", 
+        "cmpeqsd", "cmplesd", "cmpltsd", "cmpneqsd", "cmpneqss", 
+        "cmpnlesd", "cmpnltsd", "cmpsq", "comisd", "comiss", "cvtpd2dq", 
+        "cvtps2dq",  "cvtps2pi", "cvtsd2si", "cvtsd2ss", "cvtsi2sd", "cvtsi2ss", "cvtss2sd", "cvtss2si",
+        "cvttpd2dq", "cvttps2dq", "cvttps2pi", "cvttsd2si", "cvttss2si", "divsd", "divss", "emms",
+        "femms", "lddqu", "ldmxcsr", "maxsd", "maxss", 
+        "minsd", "minss", "movd", "movddup", "movdq2q", "movdqa", "movdqu", 
+        "movntdq", "movq",
+        "movsldup", "movsq", "mulsd", "mulss", 
         "pabsd", "pabsw", "packssdw", "packsswb", "packuswb", "paddb", "paddd", "paddq", "paddsb", "paddsw",
-        "paddusb", "paddusw", "paddw", "palignr", "pand", "pandn", "pavgb", "pavgw", "pblendw", "pclmulqdq",
+        "paddusb", "paddusw", "paddw", "palignr", "pand", "pandn", "pavgb", "pavgw", "pblendw", 
         "pcmpeqb", "pcmpeqd", "pcmpeqq", "pcmpeqw", "pcmpestri", "pcmpgtb", "pcmpgtd", "pcmpgtw", "pcmpistri", "pextrb",
         "pextrd", "pextrw", "phaddd", "phsubsw", "pinsrb", "pinsrd", "pinsrq", "pinsrw", "pmaddubsw", "pmaddwd",
         "pmaxsw", "pmaxub", "pminsw", "pminub", "pmovmskb", "pmovsxdq", "pmovzxwd", "pmulhuw", "pmulhw", "pmulld", "pmullw",
         "pmuludq", "popaw", "por", "psadbw", "pshufb", "pshufd", "pshufhw", "pshuflw", "pshufw", "psignw",
         "pslld", "pslldq", "psllq", "psllw", "psrad", "psraw", "psrld", "psrldq", "psrlq", "psrlw",
         "psubb", "psubd", "psubq", "psubsb", "psubsw", "psubusb", "psubusw", "psubw", "punpckhbw", "punpckhdq",
-        "punpckhqdq", "punpckhwd", "punpcklbw", "punpckldq", "punpcklqdq", "punpcklwd", "pushaw", "pxor", "rcpps", "rcpss",
-        "rorx", "roundsd", "rsqrtps", "shufpd", "shufps", "sqrtpd", "sqrtps", "sqrtsd", "sqrtss", "stmxcsr", "subpd",
-        "subps", "subsd", "subss", "ucomisd", "ucomiss", "unpckhpd", "unpckhps", "unpcklpd", "unpcklps", "vaddpd",
-        "vaddsd", "vaddss", "vandnpd", "vandpd", "vandps", "vbroadcasti128", "vcmplesd", "vcmpnltsd", "vcmppd", "vcomisd",
-        "vcvtdq2pd", "vcvtpd2dq", "vcvtps2pd", "vcvtsd2ss", "vcvtsi2ss", "vcvtss2si", "vcvttpd2dq", "vcvttsd2si", "vdivsd", "verr",
-        "verw", "vfmadd132pd", "vfmadd132sd", "vfmadd213sd", "vfmadd213ss", "vfmadd231sd", "vfmadd231ss", "vfmsub132sd", "vfmsub213sd", "vfmsub213ss",
-        "vfmsubaddpd", "vfmsubpd", "vfnmadd132sd", "vfnmadd213sd", "vfnmadd231sd", "vhaddpd", "vinserti128", "vldmxcsr", "vmaxsd", "vmaxss",
-        "vminpd", "vminsd", "vmovapd", "vmovd", "vmovddup", "vmovdqa", "vmovdqu", "vmovlhps", "vmovntdq", "vmovq",
-        "vmovsd", "vmovss", "vmovups", "vmulpd", "vmulps", "vmulsd", "vorpd", "vorps", "vpackssdw", "vpackuswb",
+        "punpckhqdq", "punpckhwd", "punpcklbw", "punpckldq", "punpcklqdq", "punpcklwd", "pushaw", "pxor", "rcpss",
+        "rorx", "roundsd", "sqrtsd", "sqrtss", "stmxcsr", 
+            "subsd", "subss", "ucomisd", "ucomiss", 
+        "vaddsd", "vaddss", "vbroadcasti128", "vcmplesd", "vcmpnltsd", "vcomisd",
+        "vcvtpd2dq",  "vcvtsd2ss", "vcvtsi2ss", "vcvtss2si", "vcvttpd2dq", "vcvttsd2si", "vdivsd", "verr",
+        "verw",  "vfmadd132sd", "vfmadd213sd", "vfmadd213ss", "vfmadd231sd", "vfmadd231ss", "vfmsub132sd", "vfmsub213sd", "vfmsub213ss",
+        "vfnmadd132sd", "vfnmadd213sd", "vfnmadd231sd", "vinserti128", "vldmxcsr", "vmaxsd", "vmaxss",
+        "vminsd", "vmovd", "vmovddup", "vmovdqa", "vmovdqu", "vmovntdq", "vmovq",
+        "vmovsd", "vmovss", "vmulsd", "vpackssdw", "vpackuswb",
         "vpaddb", "vpaddd", "vpaddq", "vpaddsb", "vpaddsw", "vpaddusb", "vpaddusw", "vpaddw", "vpalignr", "vpand",
-        "vpandn", "vpavgb", "vpavgw", "vpblendd", "vpblendw", "vpbroadcastb", "vpclmulqdq", "vpcmpeqb", "vpcmpeqw", "vpcmpgtd",
+        "vpandn", "vpavgb", "vpavgw", "vpblendd", "vpblendw", "vpbroadcastb", "vpcmpeqb", "vpcmpeqw", "vpcmpgtd",
         "vperm2f128", "vperm2i128", "vpermd", "vpinsrd", "vpmaddwd", "vpmaxsw", "vpmaxub", "vpmovmskb", "vpmullw", "vpor",
         "vprotd", "vprotq", "vpsadbw", "vpshufb", "vpshufd", "vpslld", "vpslldq", "vpsllq", "vpsrad", "vpsraw",
         "vpsrld", "vpsrldq", "vpsrlq", "vpsubd", "vpsubq", "vpsubusb", "vpsubw", "vptest", "vpunpckhbw", "vpunpckhdq",
-        "vpunpckhqdq", "vpunpckhwd", "vpunpckldq", "vpxor", "vrcpss", "vroundsd", "vshufps", "vsqrtsd", "vstmxcsr", "vsubps",
-        "vsubsd", "vucomisd", "vucomiss", "vunpcklpd", "vxorpd", "vxorps", "vzeroall", "vzeroupper", "xgetbv", "xorpd",
-        "xorps",
-        "vsubss", "vpmuldq", "vaddsubps", "vcvttsd2usi", "vcvttss2usi", "vmaxps", "vmovaps", "pfcmpge", "kmovb", "mpsadbw",
+        "vpunpckhqdq", "vpunpckhwd", "vpunpckldq", "vpxor", "vrcpss", "vroundsd", "vsqrtsd", "vstmxcsr", 
+        "vsubsd", "vucomisd", "vucomiss", "vzeroall", "vzeroupper", "xgetbv", 
+        
+        "vsubss", "vpmuldq",  "vcvttsd2usi", "vcvttss2usi", "pfcmpge", "kmovb", "mpsadbw",
         "vextracti128", "vpbroadcastd", "vpbroadcastq", "vpcmpeqd", "vpcmpeqq", "vpermq", "vpextrq", "vpinsrq", "vpmuludq", "vpunpcklqdq"
     ]
-    _vmx_group = [
-        'invrpt', 'invvpid', 'vmcall', 'vmclear', 'vmfunc', 'vmlaunch', 'vmptrld', 'vmptrst', 'vmread', 'vmresume', 'vmwrite', 'vmxoff', 'vmxon'
+    _vm_group = [
+        'clgi', 'invept', 'invvpid', 'invlpga', 'psmash', 'pvalidate', 'rmpadjust', 'rmpquery', 'rmpupdate', 'seamcall', 'seamops', 'seamret', 
+        'skinit', 'stgi', 'tdcall', 'vmmcall', 'vmcall', 'vmclear', 'vmfunc', 'vmgexit', 'vmlaunch', 'vmload', 'vmread', 'vmresume', 'vmrun', 
+        'vmsave', 'vmptrld', 'vmptrst', 'vmwrite', 'vmxon', 'vmxoff'
     ]
+
     _registers = [
         "al", "bl", "cl", "dl",
         "ah", "bh", "ch", "dh",
@@ -160,15 +304,15 @@ class IntelInstructionEscaper:
             return "S"
         elif mnemonic in IntelInstructionEscaper._privileged_group:
             return "P"
-        elif mnemonic in IntelInstructionEscaper._aes_group:
+        elif mnemonic in IntelInstructionEscaper._crypto_group:
             return "Y"
         elif mnemonic in IntelInstructionEscaper._float_group:
             return "F"
         elif mnemonic in IntelInstructionEscaper._xmm_group:
             return "X"
-        elif mnemonic in IntelInstructionEscaper._vmx_group:
+        elif mnemonic in IntelInstructionEscaper._vm_group:
             return "V"
-        elif mnemonic == "nop":
+        elif mnemonic in IntelInstructionEscaper._nop_group:
             return "N"
         elif mnemonic == "error":
             return "U"
