@@ -56,9 +56,10 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
+ * 2024-01-23: v1.13.11 - Introduced indicator in SmdaConfig for compatibility of instruction escaping.
  * 2024-01-23: v1.13.10 - Parsing of PE files should work again with lief >=0.14.0.
  * 2024-01-23: v1.13.9  - Improved parsing robustness for section/segment tables in ELF files, also now padding with zeroes when finding less content than expected physical size in a segment (THX for reporting @schrodyn!).
- * 2024-01-23: v1.13.8  - Escaper now is capable of handling all known x86/x64 instructions in capstone (THX for reporting @schrodyn!).
+ * 2024-01-23: v1.13.8  - BREAKING adjustments to IntelInstructionEscaper.escapeMnemonic: Escaper now is capable of handling all known x86/x64 instructions in capstone (THX for reporting @schrodyn!).
  * 2023-12-01: v1.13.7  - Skip processing of Delphi structs for large files, workaround until this is properly reimplemented.
  * 2023-11-29: v1.13.6  - Made OpcodeHash an attribute with on-demand calculation to save processing time.
  * 2023-11-29: v1.13.3  - Implemented an alternative queue working with reference count based brackets in pursuit of accelerated processing.
