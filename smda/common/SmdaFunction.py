@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import hashlib
+import re
 import struct
+import hashlib
 from typing import Iterator
 
 from smda.common.Tarjan import Tarjan
@@ -225,7 +226,7 @@ class SmdaFunction(object):
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         # modernize older reports on import
-        if version:
+        if version and re.match("[0-9\.]+", version):
             version = [int(v) for v in version.split(".")]
             if version < [1, 3, 0]:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()

@@ -56,6 +56,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
+ * 2024-02-02: v1.13.12 - Versions might be non-numerical, addressed that in SmdaFunction.
  * 2024-01-23: v1.13.11 - Introduced indicator in SmdaConfig for compatibility of instruction escaping.
  * 2024-01-23: v1.13.10 - Parsing of PE files should work again with lief >=0.14.0.
  * 2024-01-23: v1.13.9  - Improved parsing robustness for section/segment tables in ELF files, also now padding with zeroes when finding less content than expected physical size in a segment (THX for reporting @schrodyn!).
