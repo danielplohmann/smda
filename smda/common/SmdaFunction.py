@@ -226,7 +226,8 @@ class SmdaFunction(object):
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         # modernize older reports on import
-        if version and re.match("[0-9\.]+", version):
+        if version and re.match("(v)?\d+(.\d+)*", version):
+            version = version.replace("v", "")
             version = [int(v) for v in version.split(".")]
             if version < [1, 3, 0]:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
@@ -234,6 +235,11 @@ class SmdaFunction(object):
                     smda_function.pic_hash = smda_function.getPicHash(binary_info)
             else:
                 smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
+        # if we don't have valid version information, always recalculate
+        else:
+            smda_function.nesting_depth = smda_function._calculateNestingDepth()
+            if binary_info:
+                smda_function.pic_hash = smda_function.getPicHash(binary_info)
         return smda_function
 
     def toDict(self) -> dict:
