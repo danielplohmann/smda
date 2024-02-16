@@ -226,7 +226,7 @@ class SmdaFunction(object):
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         # sanitize MCRIT plugin generated version strings
-        if version.startswith("MCRIT4IDA"):
+        if version and version.startswith("MCRIT4IDA"):
             version = version.rsplit(" ", 1)[-1]
         # modernize older reports on import
         if version and re.match("(v)?\d+(.\d+)*", version):
@@ -242,6 +242,10 @@ class SmdaFunction(object):
         else:
             smda_function.nesting_depth = smda_function._calculateNestingDepth()
             if smda_function._escaper:
+                smda_function.pic_hash = smda_function.getPicHash(binary_info)
+            # as last resort, assume we analyze Intel
+            else:
+                smda_function._escaper = IntelInstructionEscaper
                 smda_function.pic_hash = smda_function.getPicHash(binary_info)
         return smda_function
 
