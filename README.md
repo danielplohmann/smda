@@ -56,7 +56,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
- * 2024-02-15: v1.13.13 - Fixed issue where `nesting_depth` was not calculated in SmdaFunction when a version was not recognized (THX to @
+ * 2024-02-15: v1.13.14 - Fixed issues with version recognition in SmdaFunction which cause issues in MCRIT (THX to @
 malwarefrank!) 
  * 2024-02-02: v1.13.12 - Versions might be non-numerical, addressed that in SmdaFunction.
  * 2024-01-23: v1.13.11 - Introduced indicator in SmdaConfig for compatibility of instruction escaping.

@@ -220,25 +220,28 @@ class SmdaFunction(object):
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]
         smda_function.function_name = function_dict["metadata"]["function_name"]
-        smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else 0
+        smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else None
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
+        # sanitize MCRIT plugin generated version strings
+        if version.startswith("MCRIT4IDA"):
+            version = version.rsplit(" ", 1)[-1]
         # modernize older reports on import
         if version and re.match("(v)?\d+(.\d+)*", version):
             version = version.replace("v", "")
             version = [int(v) for v in version.split(".")]
             if version < [1, 3, 0]:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
-                if binary_info:
+                if smda_function._escaper:
                     smda_function.pic_hash = smda_function.getPicHash(binary_info)
             else:
                 smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
         # if we don't have valid version information, always recalculate
         else:
             smda_function.nesting_depth = smda_function._calculateNestingDepth()
-            if binary_info:
+            if smda_function._escaper:
                 smda_function.pic_hash = smda_function.getPicHash(binary_info)
         return smda_function
 
