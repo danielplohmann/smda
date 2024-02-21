@@ -5,8 +5,8 @@ import logging
 class SmdaConfig(object):
 
     # note to self: always change this in setup.py as well!
-    VERSION = "1.13.15"
-    ESCAPER_DOWNWARD_COMPATIBILITY = "1.13.8"
+    VERSION = "1.13.16"
+    ESCAPER_DOWNWARD_COMPATIBILITY = "1.13.16"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", ".."])))
 

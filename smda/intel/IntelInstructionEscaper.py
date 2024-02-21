@@ -24,13 +24,20 @@ class IntelInstructionEscaper:
     """
 
     _aritlog_group = [
-        "aaa", "aad", "aam", "aas", "adc", "adcx", "add", "adox", "and", "cdq",
+        "aaa", "aad", "aam", "aas", "adc", "adcx", "add", "addb", "addl", "addq", "addw", 
+        "adox", "and", "andnl", "andnq", "cdq",
         "cdqe", "daa", "das", "dec", "div", "idiv", "imul", "inc", "lzcnt", "mul",
-        "mulx", "neg", "not", "or", "popcnt", "rcl", "rcr", "rol", "ror", "sal",
+        "mulx", "mulxl", "mulxq", "neg", "not", "or", "popcnt", "rcl", "rcr", "rol", "ror", "sal",
         "salc", "sar", "sbb", "shl", "shld", "shr", "shrd", "sub", "tzcnt", "xadd",
         "xor", "shlx", "shrx", "sarx",
+        "rorxl", "rorxq", "sarxl", "sarxq", "shlxl", "shlxq", "shrxl", "shrxq", 
         # bit manipulation
-        'bzhi', 'bextr', 'blcfill', 'blci', 'blcic', 'blcmsk', 'blcs', 'blsfill', 'blsi', 'blsic', 'blsmsk', 'blsr', 'tzmsk', 't1mskc',
+        "bzhil", "bzhiq", 
+        'bzhi', 'bextr', 'blcfill', 'blci', 'blcic', 'blcmsk', 'blcs', 'blsfill', 'blsi', 'blsic', 
+        'blsmsk', 'blsr', 'tzmsk', 't1mskc',
+        "bextrl", "bextrq", "blcfilll", "blcfillq", "blcicl", "blcicq", "blcil", "blciq", "blcmskl", 
+        "blcmskq", "blcsl", "blcsq", "blsfilll", "blsfillq", "blsicl", "blsicq", "blsil", "blsiq", 
+        "blsmskl", "blsmskq", "blsrl", "blsrq", "t1mskcl", "t1mskcq", "tzmskl", "tzmskq", 
     ]
     _cfg_group = [
         "arpl", "bound", "call", "clc", "cld", "cli", "cmc", "cmova", "cmovae", "cmovb",
@@ -49,6 +56,7 @@ class IntelInstructionEscaper:
         "cmovnp", "cmovns", "cmovo", "cmovp", "cmpxchg", "cmpxchg8b", "cmpxchg16b", "cqo", "cwd", "cwde", "lahf",
         "lar", "lds", "lea", "les", "lfs", "lgs", "lods", "lodsb", "lodsd", "lodsq",
         "lodsw", "lsl", "lss", "maskmovq", 'maskmovdqu', "mov", "movabs", "movnti", "movntq", "movs", "movsb",
+        "movabsq", "movb", "movl", 
         "movsd", "movsw", "movsx", "movsxd", "movzx", "rdmsr", "sahf", "scas", "scasb",
         "scasd", "scasq", "scasw", "stos", "stosb", "stosd", "stosq", "stosw", "wrmsr", "xabort",
         "xbegin", "xchg", "xlat", "xlatb", "movbe", "clflush",
@@ -88,7 +96,7 @@ class IntelInstructionEscaper:
         'pconfig', 'invpcid', 'rdpid', 'rdpkru', 'rdtscp', 
         'umonitor', 'uwait', 'umwait', 'mwait', 'mwaitx', 'monitor', 'monitorx', 'tpause', 
         "xsaveopt", 'xacquire', 'xend', 'xrelease', 'xrstor', 'xrstor64', 'xrstors', 'xrstors64', 'xsave', 
-        'xsave64', 'xsavec', 'xsavec64', 'xsaveopt64', 'xsaves', 'xsaves64', 'xsetbv', 'xtest',
+        'xsave64', 'xsavec', 'xsavec64', 'xsaveopt64', 'xsaves', 'xsaves64', 'xsetbv', 'xtest', "pcommit",
         # AMD lightweight profiling
         'llwpcb', 'lwpins', 'slwpcb', 'lwpval', 
 
@@ -96,9 +104,11 @@ class IntelInstructionEscaper:
     _crypto_group = [
         'aesdec', 'aesdeclast', 'aesenc', 'aesenc128kl', 'aesenc256kl', 'aesenclast', 'aesencwide128kl', 'aesencwide256kl', 'aesimc', 
         'aeskeygenassist', 'ccs_encrypt', 'ccs_hash', 'encodekey128', 'encodekey256', 'loadiwkey', 'montmul', 'pclmulqdq', 'pclmullqlqdq', 
-        'pclmulhqlqdq', 'pclmullqqhdq', 'pclmulhqqhdq', "vpclmulqdq", 'rdrand', 'rdseed', 'sha1msg1', 'sha1msg2', 'sha1nexte', 'sha1rnds4', 'sha256msg1', 
+        'pclmulhqlqdq', 'pclmullqqhdq', 'pclmulhqqhdq', "vpclmulqdq", 
+        'rdrand', 'rdseed', "rdrandl", "rdrandq", "rdrandw", "rdseedl", "rdseedq", "rdseedw", 
+        'sha1msg1', 'sha1msg2', 'sha1nexte', 'sha1rnds4', 'sha256msg1', 
         'sha256msg2', 'sha256rnds2', 'xcryptcbc', 'xcryptcfb', 'xcryptctr', 'xcryptecb', 'xcryptofb', 'xsha1', 'xsha256', 'xstore',
-        'vaesdec', 'vaesdeclast', 'vaesenc', 'vaesenclast', 'vaesimc', 'vaeskeygenassist', "crc32",
+        'vaesdec', 'vaesdeclast', 'vaesenc', 'vaesenclast', 'vaesimc', 'vaeskeygenassist', "crc32", "crc32b", "crc32l", "crc32q", "crc32w",
         'gf2p8affineinvqb', 'gf2p8affineqb', 'gf2p8mulb',
         ]
 
@@ -108,6 +118,7 @@ class IntelInstructionEscaper:
         "fcos", "fdecstp", "fdiv", "fdivp", "fdivr", "fdivrp", "ffree", "fiadd", "ficom", "ficomp",
         "fidiv", "fidivr", "fild", "fimul", "fincstp", "fist", "fistp", "fisttp", "fisub", "fisubr",
         "fld", "fld1", "fldcw", "fldenv", "fldl2e", "fldl2t", "fldlg2", "fldln2", "fldpi", "fldz",
+        "filds", "flds", 
         "fmul", "fmulp", "fnclex", "fninit", "fnsave", "fnstcw", "fnstenv", "fnstsw", "fpatan",
         "fprem", "fprem1", "fptan", "frndint", "frstor", "fscale", "fsetpm", "fsin", "fsincos", "fsqrt",
         "fst", "fstp", "fstpnce", "fsub", "fsubp", "fsubr", "fsubrp", "ftst", "fucom", "fucomi",
@@ -204,6 +215,7 @@ class IntelInstructionEscaper:
         'movq2dq', 'movshdup', 
         'extrq', 'insertq', 
         'cvtpd2pi', 'cvttpd2pi', 
+        "pdepl", "pdepq", "pextl", "pextq", 
         'pabsb', 'packusdw', 'pavgusb', 'pblendvb', 'pcmpestrm', 'pcmpgtq', 'pcmpistrm', 'pdep', 'pext', 'pextrq', 'pf2id', 'pf2iw', 
         'pfacc', 'pfadd', 'pfcmpeq', 'pfcmpgt', 'pfmax', 'pfmin', 'pfmul', 'pfnacc', 'pfpnacc', 'pfrcp', 'pfrcpit1', 'pfrcpit2', 
         'pfrsqit1', 'pfrsqrt', 'pfsub', 'pfsubr', 'phaddsw', 'phaddw', 'phminposuw', 'phsubd', 'phsubw', 'pi2fd', 'pi2fw', 'pmuldq', 
@@ -252,7 +264,26 @@ class IntelInstructionEscaper:
         "vsubsd", "vucomisd", "vucomiss", "vzeroall", "vzeroupper", "xgetbv", 
         
         "vsubss", "vpmuldq",  "vcvttsd2usi", "vcvttss2usi", "pfcmpge", "kmovb", "mpsadbw",
-        "vextracti128", "vpbroadcastd", "vpbroadcastq", "vpcmpeqd", "vpcmpeqq", "vpermq", "vpextrq", "vpinsrq", "vpmuludq", "vpunpcklqdq"
+        "vextracti128", "vpbroadcastd", "vpbroadcastq", "vpcmpeqd", "vpcmpeqq", "vpermq", "vpextrq", "vpinsrq", "vpmuludq", "vpunpcklqdq",
+        # cmp equivalents
+        "cmpeqpd", "cmpeqss", "cmplepd", "cmpleps", "cmpless", "cmpltss", "cmpneqps", "cmpnleps", "cmpnless", "cmpnltpd", "cmpnltps", "cmpnltss", "cmpordpd", 
+        "cmpordps", "cmpordsd", "cmpordss", "cmpunordpd", "cmpunordps", "cmpunordsd", "cmpunordss",
+        # more emmitable instruction decodings
+        "vcmpeq_ospd", "vcmpeq_osps", "vcmpeq_ossd", "vcmpeq_osss", "vcmpeq_uqpd", "vcmpeq_uqps", "vcmpeq_uqsd", "vcmpeq_uqss", "vcmpeq_uspd", 
+        "vcmpeq_usps", "vcmpeq_ussd", "vcmpeq_usss", "vcmpeqpd", "vcmpeqps", "vcmpeqsd", "vcmpeqss", "vcmpfalse_ospd", "vcmpfalse_osps", 
+        "vcmpfalse_ossd", "vcmpfalse_osss", "vcmpfalsepd", "vcmpfalseps", "vcmpfalsesd", "vcmpfalsess", "vcmpge_oqpd", "vcmpge_oqps", "vcmpge_oqsd", 
+        "vcmpge_oqss", "vcmpgepd", "vcmpgeps", "vcmpgesd", "vcmpgess", "vcmpgt_oqpd", "vcmpgt_oqps", "vcmpgt_oqsd", "vcmpgt_oqss", "vcmpgtpd", 
+        "vcmpgtps", "vcmpgtsd", "vcmpgtss", "vcmple_oqpd", "vcmple_oqps", "vcmple_oqsd", "vcmple_oqss", "vcmplepd", "vcmpleps", "vcmpless", 
+        "vcmplt_oqpd", "vcmplt_oqps", "vcmplt_oqsd", "vcmplt_oqss", "vcmpltpd", "vcmpltps", "vcmpltsd", "vcmpltss", "vcmpneq_oqpd", "vcmpneq_oqps", 
+        "vcmpneq_oqsd", "vcmpneq_oqss", "vcmpneq_ospd", "vcmpneq_osps", "vcmpneq_ossd", "vcmpneq_osss", "vcmpneq_uspd", "vcmpneq_usps", 
+        "vcmpneq_ussd", "vcmpneq_usss", "vcmpneqpd", "vcmpneqps", "vcmpneqsd", "vcmpneqss", "vcmpnge_uqpd", "vcmpnge_uqps", "vcmpnge_uqsd", 
+        "vcmpnge_uqss", "vcmpngepd", "vcmpngeps", "vcmpngesd", "vcmpngess", "vcmpngt_uqpd", "vcmpngt_uqps", "vcmpngt_uqsd", "vcmpngt_uqss", 
+        "vcmpngtpd", "vcmpngtps", "vcmpngtsd", "vcmpngtss", "vcmpnle_uqpd", "vcmpnle_uqps", "vcmpnle_uqsd", "vcmpnle_uqss", "vcmpnlepd", 
+        "vcmpnleps", "vcmpnlesd", "vcmpnless", "vcmpnlt_uqpd", "vcmpnlt_uqps", "vcmpnlt_uqsd", "vcmpnlt_uqss", "vcmpnltpd", "vcmpnltps", 
+        "vcmpnltss", "vcmpord_spd", "vcmpord_sps", "vcmpord_ssd", "vcmpord_sss", "vcmpordpd", "vcmpordps", "vcmpordsd", "vcmpordss", 
+        "vcmptrue_uspd", "vcmptrue_usps", "vcmptrue_ussd", "vcmptrue_usss", "vcmptruepd", "vcmptrueps", "vcmptruesd", "vcmptruess", "vcmpunord_spd", 
+        "vcmpunord_sps", "vcmpunord_ssd", "vcmpunord_sss", "vcmpunordpd", "vcmpunordps", "vcmpunordsd", "vcmpunordss", "vcvtpd2dqx", 
+        "vcvtpd2dqy", "vcvtpd2psx", "vcvtpd2psy", "vcvtsi2sdl", "vcvtsi2sdq", "vcvtsi2ssl", "vcvtsi2ssq", "vcvttpd2dqx", "vcvttpd2dqy"
     ]
     _vm_group = [
         'clgi', 'invept', 'invvpid', 'invlpga', 'psmash', 'pvalidate', 'rmpadjust', 'rmpquery', 'rmpupdate', 'seamcall', 'seamops', 'seamret', 
