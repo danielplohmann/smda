@@ -37,6 +37,7 @@ if __name__ == "__main__":
     PARSER.add_argument('-a', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
     PARSER.add_argument('-b', '--bitness', type=int, default=0, help='Optionally force bitness to [32, 64] when processing dumps.')
     PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
+    PARSER.add_argument('-s', '--strings', action='store_true', default=False, help='Enable string extraction.')
     PARSER.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable debug logging.')
     PARSER.add_argument('input_path', type=str, default='', help='Path to file to analyze.')
 
@@ -51,6 +52,8 @@ if __name__ == "__main__":
     config = SmdaConfig()
     if ARGS.verbose:
         config.LOG_LEVEL = logging.DEBUG
+    if ARGS.strings:
+        config.WITH_STRINGS = True
     logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
 
     SMDA_REPORT = None

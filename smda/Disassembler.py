@@ -5,6 +5,7 @@ import logging
 
 from smda.utility.FileLoader import FileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
+from smda.utility.StringExtractor import extract_strings
 from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
@@ -12,6 +13,9 @@ from .intel.IntelDisassembler import IntelDisassembler
 from .ida.IdaExporter import IdaExporter
 
 LOGGER = logging.getLogger(__name__)
+
+
+
 
 class Disassembler(object):
 
@@ -38,6 +42,14 @@ class Disassembler(object):
         time_diff = datetime.datetime.utcnow() - self._start_time
         LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
+    
+    def _addStringsToReport(self, smda_report, buffer):
+        smda_report.buffer = buffer
+        for smda_function in smda_report.getFunctions():
+            function_strings = {}
+            for string, addr in extract_strings(smda_function):
+                function_strings[addr] = string
+            smda_function.stringrefs = function_strings
 
     def disassembleFile(self, file_path, pdb_path=""):
         loader = FileLoader(file_path, map_file=True)
@@ -56,6 +68,8 @@ class Disassembler(object):
         try:
             self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
+            if self.config.WITH_STRINGS:
+                self._addStringsToReport(smda_report, file_content)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
@@ -80,6 +94,8 @@ class Disassembler(object):
         start = datetime.datetime.utcnow()
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
+            if self.config.WITH_STRINGS:
+                self._addStringsToReport(smda_report, file_content)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
@@ -102,6 +118,8 @@ class Disassembler(object):
             binary_info.code_areas = code_areas
             binary_info.oep = oep
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
+            if self.config.WITH_STRINGS:
+                self._addStringsToReport(smda_report, file_content)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
