@@ -88,13 +88,19 @@ class Disassembler(object):
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
-    def disassembleBuffer(self, file_content, base_addr, bitness=None):
+    def disassembleBuffer(self, file_content, base_addr, bitness=None, code_areas=None, oep=None):
+        """
+        Disassemble a given buffer (file_content), with given base_addr.
+        Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
+        """
         start = datetime.datetime.utcnow()
         try:
             binary_info = BinaryInfo(file_content)
             binary_info.base_addr = base_addr
             binary_info.bitness = bitness
             binary_info.is_buffer = True
+            binary_info.code_areas = code_areas
+            binary_info.oep = oep
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
