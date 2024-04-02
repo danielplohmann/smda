@@ -56,6 +56,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
+ * 2024-04-02: v1.13.19 - Fixed bug in string parsing, added tests, strings now no longer are hex-encoded as they are always printable anyway.
  * 2024-03-12: v1.13.18 - Added functionality to extract and store all referenced strings along SmdaFunctions (has to be enabled via SmdaConfig).
  * 2024-03-12: v1.13.17 - Extended disassembleBuffer() to now take additional arguments `code_areas` and `oep`.
  * 2024-02-21: v1.13.16 - BREAKING IntelInstructionEscaper.escapeMnemonic: Escaper now handles another 200 instruction names found in other capstone source files (THX for reporting @malwarefrank!).

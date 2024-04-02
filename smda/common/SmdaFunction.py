@@ -224,9 +224,11 @@ class SmdaFunction(object):
         smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else None
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
-        smda_function.stringrefs = {addr: string.decode("utf-8") for addr, string in function_dict["stringrefs"].items()} if "stringrefs" in function_dict["stringrefs"] else {}
+        smda_function.stringrefs = {addr: string for addr, string in function_dict["stringrefs"].items()} if "stringrefs" in function_dict else {}
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
+        else:
+            smda_function._escaper = None
         # sanitize MCRIT plugin generated version strings
         if version and version.startswith("MCRIT4IDA"):
             version = version.rsplit(" ", 1)[-1]
@@ -246,7 +248,7 @@ class SmdaFunction(object):
             if smda_function._escaper:
                 smda_function.pic_hash = smda_function.getPicHash(binary_info)
             # as last resort, assume we analyze Intel
-            else:
+            elif binary_info:
                 smda_function._escaper = IntelInstructionEscaper
                 smda_function.pic_hash = smda_function.getPicHash(binary_info)
         return smda_function
@@ -259,7 +261,7 @@ class SmdaFunction(object):
             "offset": self.offset,
             "blocks": blocks_as_dict,
             "apirefs": self.apirefs,
-            "stringrefs": {addr: string.encode("utf-8").hex() for addr, string in self.stringrefs.items()} if self.stringrefs is not None else {},
+            "stringrefs": {addr: string for addr, string in self.stringrefs.items()} if self.stringrefs is not None else {},
             "blockrefs": self.blockrefs,
             "inrefs": self.inrefs,
             "outrefs": self.outrefs,

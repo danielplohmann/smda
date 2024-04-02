@@ -8,6 +8,7 @@ from smda.utility.FileLoader import FileLoader
 from smda.common.BinaryInfo import BinaryInfo
 from smda.Disassembler import Disassembler
 from smda.common.SmdaReport import SmdaReport
+from smda.common.SmdaFunction import SmdaFunction
 from .context import config
 
 LOG = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super(SmdaIntegrationTestSuite, cls).setUpClass()
+        config.WITH_STRINGS = True
         disasm = Disassembler(config)
         # load encrypted Asprox
         with open(os.path.join(config.PROJECT_ROOT, "tests", "asprox_0x008D0000_xored"), "rb") as f_binary:
@@ -76,6 +78,13 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             print(xref.from_function, xref.from_instruction, xref.to_function, xref.to_instruction)
         outrefs = [code_outref for code_outref in example_function.getCodeOutrefs()]
         assert len(outrefs) == 10
+
+    def testAsproxStringRefs(self):
+        function_with_strings = self.asprox_disassembly.getFunction(0x008d2850)
+        assert function_with_strings.stringrefs[9251000] == "Software"
+        marshalled = function_with_strings.toDict()
+        unmarshalled = SmdaFunction.fromDict(marshalled)
+        assert unmarshalled.stringrefs[9251000] == "Software"
 
     def testAsproxApiCoverage(self):
         num_api_ref_srcs = 0
