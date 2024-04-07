@@ -327,18 +327,20 @@ class IntelDisassembler(object):
                         if state.suspicious_ins_count > 1:
                             self.fc_manager.updateAnalysisAborted(start_addr, "too many suspicious instructions @0x%08x" % i_address)
                             return state
-                    if i_mnemonic in CALL_INS:
+                    # remove potential "bnd" prefix
+                    i_mnemonic_sanitized = i_mnemonic.split(" ")[-1]
+                    if i_mnemonic_sanitized in CALL_INS:
                         self._analyzeCallInstruction(i, state)
-                    elif i_mnemonic in JMP_INS:
+                    elif i_mnemonic_sanitized in JMP_INS:
                         self._analyzeJmpInstruction(i, state)
-                    elif i_mnemonic in LOOP_INS:
+                    elif i_mnemonic_sanitized in LOOP_INS:
                         self._analyzeLoopInstruction(i, state)
-                    elif i_mnemonic in CJMP_INS:
+                    elif i_mnemonic_sanitized in CJMP_INS:
                         self._analyzeCondJmpInstruction(i, state)
-                    elif i_mnemonic.startswith("j"):
+                    elif i_mnemonic_sanitized.startswith("j"):
                         LOGGER.error("unsupported jump @0x%08x (0x%08x): %s %s", i_address, start_addr, i_mnemonic, i_op_str)
                         # we do not analyze any potential exception handler (tricks), so treat breakpoints as exit condition
-                    elif i_mnemonic in RET_INS:
+                    elif i_mnemonic_sanitized in RET_INS:
                         self._analyzeEndInstruction(state)
                         LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
                         if previous_address and previous_mnemonic == "push":
@@ -347,7 +349,7 @@ class IntelDisassembler(object):
                                 LOGGER.debug("  analyzeFunction() found push-return jump obfuscation: @0x%08x", i_address)
                                 state.addBlockToQueue(push_ret_destination)
                                 state.addCodeRef(i_address, push_ret_destination, by_jump=True)
-                    elif i_mnemonic in ["int3", "hlt"]:
+                    elif i_mnemonic_sanitized in ["int3", "hlt"]:
                         self._analyzeEndInstruction(state)
                         LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
                     elif previous_address and i_address != start_addr and previous_mnemonic == "call":
