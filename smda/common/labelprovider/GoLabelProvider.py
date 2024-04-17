@@ -79,6 +79,8 @@ class GoSymbolProvider(AbstractLabelProvider):
             version = '1.16'
         elif marker == 0xfffffff0:
             version = '1.18'
+        elif marker == 0xfffffff1:
+            version = '1.20'
         else:
             raise ValueError(f"Could not recognize Golang version marker: 0x{marker}")
         
@@ -105,7 +107,7 @@ class GoSymbolProvider(AbstractLabelProvider):
             file_name_offset = pclntab_offset + parsed_pclntab_fields[3]
             weird_table_offset = pclntab_offset + parsed_pclntab_fields[6]
             start_text = 0
-        elif version == '1.18':
+        elif version == '1.18' or version == '1.20':
             parsed_pclntab_fields = struct.unpack(8*field_indicator, pclntab_buffer[8:8+8*field_size])
             number_of_functions = parsed_pclntab_fields[0]
             start_text = parsed_pclntab_fields[2]
@@ -130,7 +132,7 @@ class GoSymbolProvider(AbstractLabelProvider):
                 offsets[index] = struct.unpack(field_indicator, table_buffer[read_offset:read_offset+field_size])[0]
                 read_offset += 2 * field_size
             # here we have a more compact structure for both x86/x64, no need to skip
-            if version == '1.18':
+            if version == '1.18' or version == '1.20':
                 offsets[index] = struct.unpack("I", table_buffer[read_offset:read_offset+4])[0]
                 read_offset += 8
 
