@@ -67,7 +67,7 @@ class PeSymbolProvider(AbstractLabelProvider):
         if code_base_address is None:
             return
         for symbol in lief_binary.symbols:
-            if symbol.complex_type.name == "FUNCTION":
+            if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
                 function_name = ""
                 try:
                     # here may occur a LIEF exception that we want to skip ->

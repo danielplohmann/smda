@@ -19,7 +19,7 @@ else:
 setup(
     name='smda',
     # note to self: always change this in config as well.
-    version='1.13.21',
+    version='1.13.22',
     description='A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.',
     long_description_content_type="text/markdown",
     long_description=long_description,

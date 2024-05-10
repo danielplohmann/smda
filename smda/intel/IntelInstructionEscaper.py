@@ -456,6 +456,9 @@ class IntelInstructionEscaper:
                 if field != 0:
                     opcode_length += 1
         escaped_sequence += cleaned[:opcode_length*2] + "?" * (len(cleaned) - opcode_length*2)
+        # ensure length by readding prefix bytes
+        if len(escaped_sequence) < len(ins.bytes):
+            escaped_sequence = ins.bytes[:-1 * len(ins.bytes)] + escaped_sequence
         return escaped_sequence
 
     @staticmethod
