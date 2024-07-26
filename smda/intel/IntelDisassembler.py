@@ -442,6 +442,9 @@ class IntelDisassembler(object):
         self.fc_manager = FunctionCandidateManager(self.config)
         if self.config.USE_SYMBOLS_AS_CANDIDATES:
             self.fc_manager.symbol_addresses = self.getSymbolCandidates()
+        # once we are initialized, add OEP
+        if binary_info.oep is not None:
+            self.fc_manager.symbol_addresses.append(binary_info.base_addr + binary_info.oep)
         self.fc_manager.init(self.disassembly)
         self._initCapstone()
         self._initTfIdf()

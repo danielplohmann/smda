@@ -22,6 +22,14 @@ def parseBaseAddrFromArgs(args):
     logging.warning("No base address recognized, using 0.")
     return 0
 
+def parseOepFromArgs(args):
+    if args.oep is not None:
+        parsed_oep = int(args.oep, 16) if args.oep.startswith("0x") else int(args.oep)
+        logging.info("using provided OEP(RVA): 0x%08x", parsed_oep)
+        return parsed_oep
+    logging.warning("No OEP recognized, skipping.")
+    return None
+
 
 def readFileContent(file_path):
     file_content = b""
@@ -36,6 +44,7 @@ if __name__ == "__main__":
     PARSER.add_argument('-d', '--pdb_path', type=str, default='', help='If available, use a PDB file to enhance disassembly (function offsets and names).')
     PARSER.add_argument('-a', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
     PARSER.add_argument('-b', '--bitness', type=int, default=0, help='Optionally force bitness to [32, 64] when processing dumps.')
+    PARSER.add_argument('-i', '--oep', type=str, default='', help='Force OEP for buffers, defined as RVA.')
     PARSER.add_argument('-o', '--output_path', type=str, default='', help='Optionally write the output to a file (JSON format).')
     PARSER.add_argument('-s', '--strings', action='store_true', default=False, help='Enable string extraction.')
     PARSER.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable debug logging.')
@@ -68,9 +77,10 @@ if __name__ == "__main__":
         else:
             BUFFER = readFileContent(ARGS.input_path)
             BASE_ADDR = parseBaseAddrFromArgs(ARGS)
+            OEP = parseOepFromArgs(ARGS)
             config.API_COLLECTION_FILES = {"win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])}
             DISASSEMBLER = Disassembler(config)
-            SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR, BITNESS)
+            SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR, BITNESS, oep=OEP)
             SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
         print(SMDA_REPORT)
     if SMDA_REPORT and os.path.isdir(ARGS.output_path):
