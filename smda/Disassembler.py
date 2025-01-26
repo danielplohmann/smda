@@ -1,5 +1,7 @@
 import hashlib
 import datetime
+import json
+import os
 import traceback
 import logging
 
@@ -13,8 +15,6 @@ from .intel.IntelDisassembler import IntelDisassembler
 from .ida.IdaExporter import IdaExporter
 
 LOGGER = logging.getLogger(__name__)
-
-
 
 
 class Disassembler(object):
@@ -42,7 +42,7 @@ class Disassembler(object):
         time_diff = datetime.datetime.utcnow() - self._start_time
         LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
-    
+
     def _addStringsToReport(self, smda_report, buffer):
         smda_report.buffer = buffer
         for smda_function in smda_report.getFunctions():
@@ -141,3 +141,23 @@ class Disassembler(object):
         report.execution_time = self._getDurationInSeconds(start, datetime.datetime.utcnow())
         report.message = traceback.format_exc()
         return report
+
+    @staticmethod
+    def importReport(json_report_path):
+        if not os.path.exists(json_report_path):
+            print("File could not be found %s", json_report_path)
+            return None
+        try:
+            with open(json_report_path, "r") as fin:
+                data = json.load(fin)
+            report = SmdaReport().fromDict(data)
+            return report
+        except Exception as e:
+            print("Import failed on:  %s" % json_report_path)
+            return None
+
+    @staticmethod
+    def exportReport(report, output_filepath):
+        with open(output_filepath, "w") as fout:
+            json.dump(report.toDict(), fout, indent=1, sort_keys=True)
+            print("Output saved to: %s" % output_filepath)
