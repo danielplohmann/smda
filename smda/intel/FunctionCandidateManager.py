@@ -453,7 +453,7 @@ class FunctionCandidateManager(object):
     def locatePrologueCandidates(self):
         # next check for the default function prologue regardless of references
         for re_prologue in DEFAULT_PROLOGUES:
-            for prologue_match in re.finditer(re_prologue, self.disassembly.binary_info.binary):
+            for prologue_match in re.finditer(re.escape(re_prologue), self.disassembly.binary_info.binary):
                 if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + prologue_match.start()):
                     continue
                 self.addPrologueCandidate((self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask())
