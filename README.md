@@ -56,6 +56,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
+ * 2025-01-26: v1.13.24 - Added functionality to import and export SMDA reports as JSON. Fixed byte patterns matching special regex chars
  * 2024-07-26: v1.13.23 - Now using OEP as symbol function candidate when available (THX to @alexander-hanel for reporting!).
  * 2024-05-10: v1.13.22 - Handled odd case where disassembly with capstone and IDA would return different results (THX to @r0ny123 for reporting!).
  * 2024-04-17: v1.13.21 - Fixed handling of Go binaries for version 1.20+ (THX to @Manny684!).
