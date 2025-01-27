@@ -1,5 +1,7 @@
 import hashlib
 import datetime
+import json
+import os
 import traceback
 import logging
 
@@ -13,8 +15,6 @@ from .intel.IntelDisassembler import IntelDisassembler
 from .ida.IdaExporter import IdaExporter
 
 LOGGER = logging.getLogger(__name__)
-
-
 
 
 class Disassembler(object):
@@ -42,7 +42,7 @@ class Disassembler(object):
         time_diff = datetime.datetime.utcnow() - self._start_time
         LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
-    
+
     def _addStringsToReport(self, smda_report, buffer):
         smda_report.buffer = buffer
         for smda_function in smda_report.getFunctions():
