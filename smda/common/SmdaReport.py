@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import zipfile
+import logging
 from typing import Optional, Iterator
 try:
     from StringIO import StringIO ## for Python 2
@@ -17,6 +18,9 @@ from .SmdaBasicBlock import SmdaBasicBlock
 from smda.common.CodeXref import CodeXref
 from smda.common.BlockLocator import BlockLocator
 from smda.DisassemblyStatistics import DisassemblyStatistics
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SmdaReport(object):
@@ -287,6 +291,25 @@ class SmdaReport(object):
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()}
         }
+
+    @classmethod
+    def fromFile(cls, input_filepath) -> Optional["SmdaReport"]:
+        smda_report = cls(None)
+        if not os.path.exists(input_filepath):
+            LOGGER.error(f"File could not be found: {input_filepath}")
+        else:
+            try:
+                with open(input_filepath, "r") as fin:
+                    data = json.load(fin)
+                smda_report = SmdaReport().fromDict(data)
+            except Exception as e:
+                LOGGER.error(f"Import failed on: {input_filepath}")
+        return smda_report
+
+    def toFile(self, output_filepath) -> None:
+        with open(output_filepath, "w") as fout:
+            json.dump(self.toDict(), fout, indent=1, sort_keys=True)
+            LOGGER.info(f"SmdaReport saved to: {output_filepath}")
 
     def __str__(self):
         if self.status == "error":
