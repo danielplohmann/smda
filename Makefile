@@ -8,7 +8,7 @@ publish:
 pylint:
 	python -m pylint --rcfile=.pylintrc smda
 test:
-	python -m nose
+	pytest tests/test*
 test-coverage:
 	python -m nose --with-coverage --cover-erase --cover-html-dir=./coverage-html --cover-html --cover-package=smda
 clean:

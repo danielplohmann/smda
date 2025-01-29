@@ -10,7 +10,7 @@ requirements = ["capstone"]
 
 if sys.version_info >= (3, 0):
     # py3
-    requirements.append("lief==0.14.0")
+    requirements.append("lief>=0.16.0")
 else:
     # py2 - newer LIEF is Python3 only
     requirements.append("lief==0.9.0")
@@ -19,7 +19,7 @@ else:
 setup(
     name='smda',
     # note to self: always change this in config as well.
-    version='1.13.24',
+    version='1.14.0',
     description='A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.',
     long_description_content_type="text/markdown",
     long_description=long_description,

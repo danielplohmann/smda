@@ -39,7 +39,7 @@ class Disassembler(object):
     def _callbackAnalysisTimeout(self):
         if not self._timeout:
             return False
-        time_diff = datetime.datetime.utcnow() - self._start_time
+        time_diff = datetime.datetime.now(datetime.UTC) - self._start_time
         LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
 
@@ -64,7 +64,7 @@ class Disassembler(object):
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
-        start = datetime.datetime.utcnow()
+        start = datetime.datetime.now(datetime.UTC)
         try:
             self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
@@ -91,7 +91,7 @@ class Disassembler(object):
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
-        start = datetime.datetime.utcnow()
+        start = datetime.datetime.now(datetime.UTC)
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
@@ -109,7 +109,7 @@ class Disassembler(object):
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
         """
-        start = datetime.datetime.utcnow()
+        start = datetime.datetime.now(datetime.UTC)
         try:
             binary_info = BinaryInfo(file_content)
             binary_info.base_addr = base_addr
@@ -129,7 +129,7 @@ class Disassembler(object):
         return smda_report
 
     def _disassemble(self, binary_info, timeout=0):
-        self._start_time = datetime.datetime.utcnow()
+        self._start_time = datetime.datetime.now(datetime.UTC)
         self._timeout = timeout
         self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
         return SmdaReport(self.disassembly, config=self.config)
@@ -138,6 +138,6 @@ class Disassembler(object):
         report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
-        report.execution_time = self._getDurationInSeconds(start, datetime.datetime.utcnow())
+        report.execution_time = self._getDurationInSeconds(start, datetime.datetime.now(datetime.UTC))
         report.message = traceback.format_exc()
         return report

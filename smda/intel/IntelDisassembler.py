@@ -424,7 +424,7 @@ class IntelDisassembler(object):
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "intel"
-        self.disassembly.analysis_start_ts = datetime.datetime.utcnow()
+        self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.UTC)
         if self.disassembly.binary_info.bitness not in [32, 64]:
             bitness_analyzer = BitnessAnalyzer()
             self.disassembly.binary_info.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
@@ -490,7 +490,7 @@ class IntelDisassembler(object):
                 candidate.setTfIdf(function_tfidf)
                 candidate.getConfidence()
             self.disassembly.candidates[addr] = candidate
-        self.disassembly.analysis_end_ts = datetime.datetime.utcnow()
+        self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.UTC)
         if cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
         return self.disassembly

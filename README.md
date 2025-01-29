@@ -48,7 +48,7 @@ There is also a demo script:
 
 * analyze.py -- example usage: perform disassembly on a file or memory dump and optionally store results in JSON to a given output path.
 
-The code should be fully compatible with Python 2 and 3.
+The code should be fully compatible with Python 3.8+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
 To take full advantage of SMDA's capabilities, make sure to (optionally) install:
@@ -56,6 +56,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
+ * 2025-01-29: v1.14.0 - Bump to LIEF 0.16.0+ (THX to @huettenhain for the ping!). Migrated tests to `pytest`, UTC datetime handling fixes.
  * 2025-01-26: v1.13.24 - Added functionality to import and export SMDA reports as JSON. Fixed byte patterns matching special regex chars (THX to @alexander-hanel!).
  * 2024-07-26: v1.13.23 - Now using OEP as symbol function candidate when available (THX to @alexander-hanel for reporting!).
  * 2024-05-10: v1.13.22 - Handled odd case where disassembly with capstone and IDA would return different results (THX to @r0ny123 for reporting!).

@@ -92,7 +92,7 @@ class SmdaReport(object):
             self.status = disassembly.getAnalysisOutcome()
             if self.status == "timeout":
                 self.message = "Analysis was stopped when running into the timeout."
-            self.timestamp = datetime.datetime.utcnow()
+            self.timestamp = datetime.datetime.now(datetime.UTC)
             self.version = disassembly.binary_info.version
             self.xcfg = self._convertCfg(disassembly, config=config)
 
