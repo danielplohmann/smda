@@ -12,6 +12,7 @@ from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
 from .intel.IntelDisassembler import IntelDisassembler
+from .cil.CilDisassembler import CilDisassembler
 from .ida.IdaExporter import IdaExporter
 
 LOGGER = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ class Disassembler(object):
         self.disassembler = None
         if backend == "intel":
             self.disassembler = IntelDisassembler(self.config)
+        elif backend == "cil":
+            self.disassembler = CilDisassembler(self.config)
         elif backend == "IDA":
             self.disassembler = IdaExporter(self.config)
         self._start_time = None
