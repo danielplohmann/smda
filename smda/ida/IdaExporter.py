@@ -39,7 +39,7 @@ class IdaExporter(object):
 
     def analyzeBuffer(self, binary_info, cb_analysis_timeout=None):
         """ instead of performing a full analysis, simply collect all data from IDA and convert it into a report """
-        self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.UTC)
+        self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.binary_info = binary_info
         self.disassembly.binary_info.architecture = self.ida_interface.getArchitecture()
         if not self.disassembly.binary_info.base_addr:
@@ -75,5 +75,5 @@ class IdaExporter(object):
                 self.disassembly.recursive_functions.add(function_offset)
             if self.disassembly.isLeafFunction(function_offset):
                 self.disassembly.leaf_functions.add(function_offset)
-        self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.UTC)
+        self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         return self.disassembly

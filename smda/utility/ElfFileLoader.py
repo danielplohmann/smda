@@ -175,6 +175,12 @@ class ElfFileLoader(object):
         return bytes(mapped_binary)
 
     @staticmethod
+    def getArchitecture(binary):
+        architecture = "intel"
+        # TODO 20250205 determine ABI based on this: https://lief.re/doc/latest/formats/elf/python.html#header
+        return architecture
+
+    @staticmethod
     def getBitness(binary):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary)

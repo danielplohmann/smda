@@ -20,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 class Disassembler(object):
 
-    def __init__(self, config=None, backend="intel"):
+    def __init__(self, config=None, backend=None):
         if config is None:
             config = SmdaConfig()
         self.config = config
@@ -36,13 +36,21 @@ class Disassembler(object):
         # cache the last DisassemblyResult
         self.disassembly = None
 
+    def initDisassembler(self, architecture="intel"):
+        """ Initialize disassembler backend to given architecture, if not initialized yet, default: intel """
+        if self.disassembler is None:
+            if architecture == "intel":
+                self.disassembler = IntelDisassembler(self.config)
+            elif architecture == "cil":
+                self.disassembler = CilDisassembler(self.config)
+
     def _getDurationInSeconds(self, start_ts, end_ts):
         return (end_ts - start_ts).seconds + ((end_ts - start_ts).microseconds / 1000000.0)
 
     def _callbackAnalysisTimeout(self):
         if not self._timeout:
             return False
-        time_diff = datetime.datetime.now(datetime.UTC) - self._start_time
+        time_diff = datetime.datetime.now(datetime.timezone.utc) - self._start_time
         LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
 
@@ -66,8 +74,10 @@ class Disassembler(object):
         binary_info.file_path = file_path
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
+        binary_info.architecture = loader.getArchitecture()
         binary_info.code_areas = loader.getCodeAreas()
-        start = datetime.datetime.now(datetime.UTC)
+        self.initDisassembler(binary_info.architecture)
+        start = datetime.datetime.now(datetime.timezone.utc)
         try:
             self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
@@ -93,8 +103,10 @@ class Disassembler(object):
         binary_info.file_path = ""
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
+        binary_info.architecture = loader.getArchitecture()
         binary_info.code_areas = loader.getCodeAreas()
-        start = datetime.datetime.now(datetime.UTC)
+        self.initDisassembler(binary_info.architecture)
+        start = datetime.datetime.now(datetime.timezone.utc)
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
@@ -107,19 +119,21 @@ class Disassembler(object):
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
-    def disassembleBuffer(self, file_content, base_addr, bitness=None, code_areas=None, oep=None):
+    def disassembleBuffer(self, file_content, base_addr, bitness=None, code_areas=None, oep=None, architecture="intel"):
         """
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
         """
-        start = datetime.datetime.now(datetime.UTC)
+        binary_info = BinaryInfo(file_content)
+        binary_info.base_addr = base_addr
+        binary_info.bitness = bitness
+        binary_info.is_buffer = True
+        binary_info.code_areas = code_areas
+        binary_info.architecture = architecture
+        binary_info.oep = oep
+        self.initDisassembler(binary_info.architecture)
+        start = datetime.datetime.now(datetime.timezone.utc)
         try:
-            binary_info = BinaryInfo(file_content)
-            binary_info.base_addr = base_addr
-            binary_info.bitness = bitness
-            binary_info.is_buffer = True
-            binary_info.code_areas = code_areas
-            binary_info.oep = oep
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
                 self._addStringsToReport(smda_report, file_content)
@@ -132,7 +146,7 @@ class Disassembler(object):
         return smda_report
 
     def _disassemble(self, binary_info, timeout=0):
-        self._start_time = datetime.datetime.now(datetime.UTC)
+        self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
         self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
         return SmdaReport(self.disassembly, config=self.config)
@@ -141,6 +155,6 @@ class Disassembler(object):
         report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
-        report.execution_time = self._getDurationInSeconds(start, datetime.datetime.now(datetime.UTC))
+        report.execution_time = self._getDurationInSeconds(start, datetime.datetime.now(datetime.timezone.utc))
         report.message = traceback.format_exc()
         return report

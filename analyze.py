@@ -42,7 +42,7 @@ if __name__ == "__main__":
     PARSER = argparse.ArgumentParser(description='Demo: Use SMDA to disassemble a given file (loaded memory view), optionally map it first and/or write the output to a file.')
     PARSER.add_argument('-p', '--parse_header', action='store_true', default=False, help='Parse header/symbols and perform mapping of the file as normalization.')
     PARSER.add_argument('-d', '--pdb_path', type=str, default='', help='If available, use a PDB file to enhance disassembly (function offsets and names).')
-    PARSER.add_argument('-r', '--architecture', type=str, default='intel', help='Use the disassembler for the following architecture if available (default:intel, experimental:cil).')
+    PARSER.add_argument('-r', '--architecture', type=str, default='', help='Use the disassembler for the following architecture if available (default:auto, options: [intel, cil]).')
     PARSER.add_argument('-a', '--base_addr', type=str, default='', help='When analyzing a buffer, set base address to given value (int or 0x-hex format).')
     PARSER.add_argument('-b', '--bitness', type=int, default=0, help='Optionally force bitness to [32, 64] when processing dumps.')
     PARSER.add_argument('-i', '--oep', type=str, default='', help='Force OEP for buffers, defined as RVA.')

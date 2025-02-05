@@ -207,7 +207,7 @@ class CilDisassembler(object):
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "cil"
-        self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.UTC)
+        self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "cil"
 
         LOGGER.debug("Starting parser-based analysis.")
@@ -228,7 +228,7 @@ class CilDisassembler(object):
             self.analyzeFunction(pe, method_body.offset, method_body)
         LOGGER.debug("Finished parser-based analysis, functions: %d", len(self.disassembly.functions))
         # package up and finish
-        self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.UTC)
+        self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
         return self.disassembly
