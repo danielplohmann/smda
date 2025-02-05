@@ -72,6 +72,14 @@ def format_operand(pe, operand: Any) -> str:
     elif isinstance(operand, dnfile.mdtable.MemberRefRow):
         if isinstance(operand.Class.row, (dnfile.mdtable.TypeRefRow,)):
             return f"{str(operand.Class.row.TypeNamespace)}.{operand.Class.row.TypeName}::{operand.Name}"
+        else:
+            return f"{operand.Name}"
+    elif isinstance(operand, dnfile.mdtable.MethodSpecRow):
+        operand = operand.Method.row
+        if isinstance(operand, (dnfile.mdtable.TypeRefRow,)):
+            return f"{str(operand.TypeNamespace)}.{operand.TypeName}::{operand.Name}"
+        else:
+            return f"{operand.Name}"
     elif isinstance(operand, dnfile.mdtable.TypeRefRow):
         return f"{str(operand.TypeNamespace)}.{operand.TypeName}"
     elif isinstance(operand, (dnfile.mdtable.FieldRow, dnfile.mdtable.MethodDefRow)):
@@ -111,6 +119,7 @@ class CilDisassembler(object):
         self._tfidf = None
         self.binary_info = None
         self.label_providers = []
+        self.cil_label_provider = CilSymbolProvider(self.config)
         self._addLabelProviders()
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
@@ -119,7 +128,7 @@ class CilDisassembler(object):
         return
 
     def _addLabelProviders(self):
-        self.label_providers.append(CilSymbolProvider(self.config))
+        self.label_providers.append(self.cil_label_provider)
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
@@ -143,7 +152,6 @@ class CilDisassembler(object):
     def analyzeFunction(self, pe, start_addr, method_body):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         state = FunctionAnalysisState(start_addr, self.disassembly)
-        # TODO loop instructions, set all code refs on the way to enable block inference
         for insn in method_body.instructions:
             state.setNextInstructionReachable(True)
             print(
@@ -181,11 +189,20 @@ class CilDisassembler(object):
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
                 state.setNextInstructionReachable(False)
+            if i_mnemonic in ["ldstr"]:
+                # we possibly want to extract and collect these and put them in the stringref part of SmdaFunction
+                pass
             if i_mnemonic in ["call", "callvirt"]:
                 self._updateApiInformation(i_address, i_bytes, i_op_str)
                 # https://blog.objektkultur.de/about-tail-recursion-in-.net/
                 if state.prev_opcode.startswith("tail"):
                     state.setNextInstructionReachable(False)
+                if i_bytes.endswith(b"\x06"):
+                    operand = resolve_token(pe, insn.operand)
+                    if isinstance(operand, dnfile.mdtable.MethodDefRow):
+                        # override operand string with "address" of the method
+                        method_name = self.cil_label_provider.decodeSymbolName(operand.Name.value)
+                        i_op = f"0x{self.cil_label_provider.getAddress(method_name):x}"
             if i_mnemonic in ["throw"]:
                 state.setNextInstructionReachable(False)
             if i_mnemonic in ["switch"]:
