@@ -185,13 +185,13 @@ class CilDisassembler(object):
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
             if i_mnemonic in ["jmp"]:
-                raise Exception("Found unhandled CIL jmp instruction, report back its structure")
+                raise Exception("Found unhandled CIL jmp instruction, report back its structure and have Daniel fix it.")
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
                 state.setNextInstructionReachable(False)
             if i_mnemonic in ["ldstr"]:
                 # we possibly want to extract and collect these and put them in the stringref part of SmdaFunction
-                pass
+                self.disassembly.addStringRef(start_addr, i_address, i_op_str[1:-1])
             if i_mnemonic in ["call", "callvirt"]:
                 self._updateApiInformation(i_address, i_bytes, i_op_str)
                 # https://blog.objektkultur.de/about-tail-recursion-in-.net/

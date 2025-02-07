@@ -39,6 +39,8 @@ class DisassemblyResult(object):
         self.addr_to_api = {}
         # address:name
         self.function_symbols = {}
+        # address:string
+        self.stringrefs = {}
         self.candidates = {}
         self._confidence_threshold = 0.0
         self.code_areas = []
@@ -280,6 +282,17 @@ class DisassemblyResult(object):
                 if ins[0] in self.addr_to_api:
                     api_refs[ins[0]] = self.addr_to_api[ins[0]]
         return api_refs
+    
+    def addStringRef(self, func_addr, ref_addr, string):
+        if func_addr not in self.stringrefs:
+            self.stringrefs[func_addr] = {}
+        self.stringrefs[func_addr][ref_addr] = string
+
+    def getStringRefsForFunction(self, func_addr):
+        # addr with ref: str
+        if func_addr in self.stringrefs:
+            return self.stringrefs[func_addr]
+        return {}
 
     def __str__(self):
         return "-> {:5.2f}s | {:5d} Func (status: {})".format(self.getAnalysisDuration(), len(self.functions), self.getAnalysisOutcome())

@@ -8,6 +8,7 @@ from smda.common.SmdaReport import SmdaReport
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaInstruction import SmdaInstruction
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+from smda.cil.CilInstructionEscaper import CilInstructionEscaper
 
 from .context import config
 
@@ -31,7 +32,7 @@ class DisassemblyTestSuite(unittest.TestCase):
             self.assertEqual(smda_ins.getMnemonicGroup(IntelInstructionEscaper), data["mnemonic_group"])
             self.assertEqual(smda_ins.getEscapedOperands(IntelInstructionEscaper), data["escaped_operands"])
 
-    def testInstructionWildcarding(self):
+    def testIntelInstructionWildcarding(self):
         test_data = [
             # simple mov with IMM outside of address space
             {"ins": (0, "b803400080", "mov", "eax, 0x80004003"), "lower": 0x63300000, "upper": 0x63400000, "expected_bin": "b803400080", "bitness": 32, "expected_opc": "b8????????"},
@@ -61,6 +62,15 @@ class DisassemblyTestSuite(unittest.TestCase):
             smda_ins = SmdaInstruction(data["ins"], smda_function=smda_function)
             self.assertEqual(smda_ins.getEscapedBinary(IntelInstructionEscaper, lower_addr=data["lower"], upper_addr=data["upper"]), data["expected_bin"])
             self.assertEqual(smda_ins.getEscapedToOpcodeOnly(IntelInstructionEscaper), data["expected_opc"])
+
+    def testCilInstructionWildcarding(self):
+        test_data = [
+            # call MemberRef
+            {"ins": (0, "280a000006", "call", "SomeFunc"), "expected_bin": "28??????06", "expected_opc": "28????????"},
+        ]
+        for data in test_data:
+            self.assertEqual(CilInstructionEscaper.escapeToOpcodeOnly(data["ins"][1]), data["expected_opc"])
+            self.assertEqual(CilInstructionEscaper.escapeToOpcodeOnly(data["ins"][1]), data["expected_opc"])
 
 
 if __name__ == '__main__':
