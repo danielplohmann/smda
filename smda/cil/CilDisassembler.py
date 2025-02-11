@@ -154,18 +154,25 @@ class CilDisassembler(object):
         state = FunctionAnalysisState(start_addr, self.disassembly)
         for insn in method_body.instructions:
             state.setNextInstructionReachable(True)
-            print(
-                "{:04X}".format(insn.offset)
-                + "    "
-                + f"{' '.join('{:02x}'.format(b) for b in insn.get_bytes()) : <20}"
-                + f"{str(insn.opcode) : <15}"
-                + format_operand(pe, insn.operand)
-            )
             i_bytes = insn.get_bytes()
             i_address = insn.offset
             i_size = len(i_bytes)
             i_mnemonic = str(insn.opcode)
             i_op_str = format_operand(pe, insn.operand)
+            # debug output
+            if True:
+                from smda.cil.CilInstructionEscaper import CilInstructionEscaper
+                from smda.common.SmdaInstruction import SmdaInstruction
+                smda_ins = SmdaInstruction([i_address, i_bytes.hex(), i_mnemonic, i_op_str])
+                escaped = CilInstructionEscaper.escapeBinary(smda_ins)
+                print(
+                    f"{escaped:<20}"
+                    + "{:04X}".format(insn.offset)
+                    + "    "
+                    + f"{' '.join('{:02x}'.format(b) for b in insn.get_bytes()) : <20}"
+                    + f"{str(insn.opcode) : <15}"
+                    + format_operand(pe, insn.operand)
+                )
             # https://en.wikipedia.org/wiki/List_of_CIL_instructions
             if i_mnemonic in ["ret"]:
                 state.setNextInstructionReachable(False)
