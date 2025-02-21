@@ -40,6 +40,6 @@ class SmdaConfig(object):
     # optional metadata generation options
     CALCULATE_SCC = True
     CALCULATE_NESTING = True
-    CALCULATE_HASHING = False
+    CALCULATE_HASHING = True
     # confidence score to use for filtering functions before including them in the output
     CONFIDENCE_THRESHOLD = 0.0
