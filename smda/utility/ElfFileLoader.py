@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ElfFileLoader(object):
                 min_virtual_address = min(min_virtual_address, section.virtual_address)
                 min_raw_offset = min(min_raw_offset, section.file_offset)
         else:
-            LOGGER.warn(f"ELF: found possibly bogus section information, trying to parse segments.")
+            LOGGER.warn("ELF: found possibly bogus section information, trying to parse segments.")
         # parse segments regardless
         for segment in elffile.segments:
             if not segment.virtual_address:
@@ -110,7 +110,7 @@ class ElfFileLoader(object):
             min_raw_offset = min(min_raw_offset, segment.file_offset)
 
         if (max_virtual_address - base_addr) > sys.maxsize:
-            LOGGER.warn(f"ELF: found possibly bogus segment information, trying to parse segments.")
+            LOGGER.warn("ELF: found possibly bogus segment information, trying to parse segments.")
 
         if not max_virtual_address:
             LOGGER.debug("ELF: no section or segment data")
@@ -185,9 +185,9 @@ class ElfFileLoader(object):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary)
         machine_type = elffile.header.machine_type
-        if machine_type == lief.ELF.ARCH.x86_64:
+        if machine_type == lief.ELF.ARCH.X86_64:
             return 64
-        elif machine_type == lief.ELF.ARCH.i386:
+        elif machine_type == lief.ELF.ARCH.I386:
             return 32
         return 0
 
@@ -213,7 +213,7 @@ class ElfFileLoader(object):
         code_areas = []
         for section in elffile.sections:
             # SHF_EXECINSTR = 4
-            if section.flags & 0x4:
+            if section.flags & lief.ELF.Section.FLAGS.EXECINSTR.value:
                 section_start = section.virtual_address
                 section_size = section.size
                 if section_size % section.alignment != 0:
@@ -222,7 +222,7 @@ class ElfFileLoader(object):
                 code_areas.append([section_start, section_end])    
         for segment in sorted(elffile.segments, key=lambda segment: segment.physical_size, reverse=True):
             # SHF_EXECINSTR = 4
-            if segment.flags & 0x4:
+            if segment.flags.value & lief.ELF.Section.FLAGS.EXECINSTR.value:
                 segment_start = segment.virtual_address
                 segment_size = segment.virtual_size
                 if segment_size % segment.alignment != 0:

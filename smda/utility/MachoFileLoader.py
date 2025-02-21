@@ -139,10 +139,12 @@ class MachoFileLoader(object):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
         machine_type = macho_file.header.cpu_type
-        if machine_type == lief.MachO.CPU_TYPES.x86_64:
+        if machine_type == lief.MachO.Header.CPU_TYPE.X86_64:
             return 64
-        elif machine_type == lief.MachO.CPU_TYPES.x86:
+        elif machine_type == lief.MachO.Header.CPU_TYPES.X86:
             return 32
+        elif machine_type == Header.CPU_TYPE.ARM64:
+            raise NotImplementedError("SMDA does not support ARM yet.")
         return 0
 
     @staticmethod
@@ -165,14 +167,14 @@ class MachoFileLoader(object):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
         ins_flags = (
-            lief.MachO.SECTION_FLAGS.PURE_INSTRUCTIONS.value +
-            lief.MachO.SECTION_FLAGS.SELF_MODIFYING_CODE.value +
-            lief.MachO.SECTION_FLAGS.SOME_INSTRUCTIONS.value
+            lief.MachO.Section.FLAGS.PURE_INSTRUCTIONS.value +
+            lief.MachO.Section.FLAGS.SELF_MODIFYING_CODE.value +
+            lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS.value
         )
         code_areas = []
         for section in macho_file.sections:
             # SHF_EXECINSTR = 4
-            if section.flags & ins_flags:
+            if section.flags.value & ins_flags:
                 section_start = section.virtual_address
                 section_size = section.size
                 if section.alignment and section_size % section.alignment != 0:
