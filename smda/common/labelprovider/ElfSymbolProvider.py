@@ -43,7 +43,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
         self._parseOep(lief_binary)
         # TODO split resolution into API/dynamic part and local symbols
         self._parseExports(lief_binary)
-        self._parseSymbols(lief_binary.static_symbols)
+        self._parseSymbols(lief_binary.symtab_symbols)
         self._parseSymbols(lief_binary.dynamic_symbols)
         for reloc in lief_binary.relocations:
             if reloc.has_symbol:
