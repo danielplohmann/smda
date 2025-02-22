@@ -75,7 +75,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                     function_name = symbol.name
                 except:
                     pass
-                if function_name and all(c in range(0x20, 0x7f) for c in function_name):
+                if function_name and all(ord(c) in range(0x20, 0x7f) for c in function_name):
                     # for some reason, we need to add the section_offset of .text here
                     function_offset = code_base_address + symbol.value
                     if function_offset not in self._func_symbols:
