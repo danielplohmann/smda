@@ -8,7 +8,7 @@ from smda.common.BasicBlock import BasicBlock
 class DisassemblyResult(object):
 
     def __init__(self):
-        self.analysis_start_ts = datetime.datetime.now(datetime.UTC)
+        self.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.analysis_end_ts = self.analysis_start_ts
         self.analysis_timeout = False
         self.binary_info = None
