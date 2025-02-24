@@ -76,8 +76,8 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         bashlite_binary_info = binary_info
         bashlite_disassembly = disasm._disassemble(binary_info)
         bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
-        assert bashlite_unmapped_disassembly.num_functions == 172
-        # TODO test label extraction for ELF
+        assert bashlite_unmapped_disassembly.num_functions == 177
+        assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174
 
     def testMacOsParsingWithKomplex(self):
         disasm = Disassembler(config)
