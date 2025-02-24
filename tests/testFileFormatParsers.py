@@ -49,21 +49,22 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         cutwail_disassembly = disasm._disassemble(binary_info)
         cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cutwail_binary)
         assert cutwail_unmapped_disassembly.num_functions == 33
+        # TODO test label extraction for PE, add another binary for testing
 
-    def testElfParsingWithBase64(self):
+    def testElfParsingWithBashlite(self):
         disasm = Disassembler(config)
         # load encrypted benign /bin/cat
-        with open(os.path.join(config.PROJECT_ROOT, "tests", "cat_xored"), "rb") as f_binary:
+        with open(os.path.join(config.PROJECT_ROOT, "tests", "bashlite_xored"), "rb") as f_binary:
             binary = f_binary.read()
-        decrypted_cat = bytearray()
+        decrypted_bashlite = bytearray()
         for index, byte in enumerate(binary):
             if isinstance(byte, str):
                 byte = ord(byte)
-            decrypted_cat.append(byte ^ (index % 256))
-        cat_binary = bytes(decrypted_cat)
+            decrypted_bashlite.append(byte ^ (index % 256))
+        bashlite_binary = bytes(decrypted_bashlite)
         # run FileLoader and disassemble as file
         loader = FileLoader("/", map_file=True)
-        loader._loadFile(cat_binary)
+        loader._loadFile(bashlite_binary)
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
@@ -72,10 +73,11 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
-        cat_binary_info = binary_info
-        cat_disassembly = disasm._disassemble(binary_info)
-        cat_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cat_binary)
-        assert cat_unmapped_disassembly.num_functions == 150
+        bashlite_binary_info = binary_info
+        bashlite_disassembly = disasm._disassemble(binary_info)
+        bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
+        assert bashlite_unmapped_disassembly.num_functions == 172
+        # TODO test label extraction for ELF
 
     def testMacOsParsingWithKomplex(self):
         disasm = Disassembler(config)
