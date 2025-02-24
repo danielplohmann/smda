@@ -51,7 +51,8 @@ class SmdaFunction(object):
             self.characteristics = disassembly.candidates[function_offset].getCharacteristics() if function_offset in disassembly.candidates else None
             self.confidence = disassembly.candidates[function_offset].getConfidence() if function_offset in disassembly.candidates else None
             self.tfidf = disassembly.candidates[function_offset].getTfIdf() if function_offset in disassembly.candidates else None
-            self.pic_hash = self.getPicHash(disassembly.binary_info)
+            if config and config.CALCULATE_HASHING:
+                self.pic_hash = self.getPicHash(disassembly.binary_info)
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
             if config and config.CALCULATE_NESTING:
