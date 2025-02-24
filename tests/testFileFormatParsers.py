@@ -24,7 +24,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         super(SmdaIntegrationTestSuite, cls).setUpClass()
 
     def testPeParsingWithCutwail(self):
-        disasm = Disassembler(config)
+        disasm = Disassembler(config, backend="intel")
         # load encrypted malicious win.cutwail
         with open(os.path.join(config.PROJECT_ROOT, "tests", "cutwail_xored"), "rb") as f_binary:
             binary = f_binary.read()
@@ -49,21 +49,22 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         cutwail_disassembly = disasm._disassemble(binary_info)
         cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cutwail_binary)
         assert cutwail_unmapped_disassembly.num_functions == 33
+        # TODO test label extraction for PE, add another binary for testing
 
-    def testElfParsingWithBase64(self):
-        disasm = Disassembler(config)
+    def testElfParsingWithBashlite(self):
+        disasm = Disassembler(config, backend="intel")
         # load encrypted benign /bin/cat
-        with open(os.path.join(config.PROJECT_ROOT, "tests", "cat_xored"), "rb") as f_binary:
+        with open(os.path.join(config.PROJECT_ROOT, "tests", "bashlite_xored"), "rb") as f_binary:
             binary = f_binary.read()
-        decrypted_cat = bytearray()
+        decrypted_bashlite = bytearray()
         for index, byte in enumerate(binary):
             if isinstance(byte, str):
                 byte = ord(byte)
-            decrypted_cat.append(byte ^ (index % 256))
-        cat_binary = bytes(decrypted_cat)
+            decrypted_bashlite.append(byte ^ (index % 256))
+        bashlite_binary = bytes(decrypted_bashlite)
         # run FileLoader and disassemble as file
         loader = FileLoader("/", map_file=True)
-        loader._loadFile(cat_binary)
+        loader._loadFile(bashlite_binary)
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
@@ -72,13 +73,30 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
-        cat_binary_info = binary_info
-        cat_disassembly = disasm._disassemble(binary_info)
-        cat_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cat_binary)
-        assert cat_unmapped_disassembly.num_functions == 150
+        bashlite_binary_info = binary_info
+        bashlite_disassembly = disasm._disassemble(binary_info)
+        bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
+        assert bashlite_unmapped_disassembly.num_functions == 177
+        assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174
+
+    def testDotnetParsingWithNjRAT(self):
+        disasm = Disassembler(config, backend="cil")
+        # load encrypted malicious win.cutwail
+        with open(os.path.join(config.PROJECT_ROOT, "tests", "njrat_xored"), "rb") as f_binary:
+            binary = f_binary.read()
+        decrypted_njrat = bytearray()
+        for index, byte in enumerate(binary):
+            if isinstance(byte, str):
+                byte = ord(byte)
+            decrypted_njrat.append(byte ^ (index % 256))
+        njrat_binary = bytes(decrypted_njrat)
+        # run FileLoader and disassemble as file
+        njrat_unmapped_disassembly = disasm.disassembleUnmappedBuffer(njrat_binary)
+        assert njrat_unmapped_disassembly.num_functions == 64
+        assert len([f.function_name for f in njrat_unmapped_disassembly.getFunctions() if f.function_name]) == 64
 
     def testMacOsParsingWithKomplex(self):
-        disasm = Disassembler(config)
+        disasm = Disassembler(config, backend="intel")
         # load encrypted malicious osx.komplex
         with open(os.path.join(config.PROJECT_ROOT, "tests", "komplex_xored"), "rb") as f_binary:
             binary = f_binary.read()

@@ -135,15 +135,26 @@ class MachoFileLoader(object):
         return bytes(mapped_binary)
 
     @staticmethod
+    def getArchitecture(binary):
+        # TODO add machine types whenever we add more architectures
+        macho_file = lief.parse(binary)
+        machine_type = macho_file.header.cpu_type
+        if machine_type in [lief.MachO.Header.CPU_TYPE.X86_64, lief.MachO.Header.CPU_TYPE.X86]:
+            return "intel"
+        elif machine_type == lief.MachO.Header.CPU_TYPE.ARM64:
+            return "ARM64"
+        raise NotImplementedError("SMDA does not support this architecture yet.")
+
+    @staticmethod
     def getBitness(binary):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
         machine_type = macho_file.header.cpu_type
         if machine_type == lief.MachO.Header.CPU_TYPE.X86_64:
             return 64
-        elif machine_type == lief.MachO.Header.CPU_TYPES.X86:
+        elif machine_type == lief.MachO.Header.CPU_TYPE.X86:
             return 32
-        elif machine_type == Header.CPU_TYPE.ARM64:
+        elif machine_type == lief.MachO.Header.CPU_TYPE.ARM64:
             raise NotImplementedError("SMDA does not support ARM yet.")
         return 0
 
