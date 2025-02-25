@@ -7,8 +7,9 @@ END_INS = ["ret"]
 
 class FunctionAnalysisState(object):
 
-    def __init__(self, start_addr, disassembly):
+    def __init__(self, start_addr, code_start_addr, disassembly):
         self.start_addr = start_addr
+        self.code_start_addr = code_start_addr
         self.disassembly = disassembly
         self.block_queue = [start_addr]
         self.current_block = []
@@ -115,7 +116,7 @@ class FunctionAnalysisState(object):
             return self.blocks
         self.instructions.sort()
         ins = {i[0]:ind for ind, i in enumerate(self.instructions)}
-        potential_starts = set([self.start_addr])
+        potential_starts = set([self.code_start_addr])
         potential_starts.update(list(self.jump_targets))
         blocks = []
         for start in sorted(potential_starts):

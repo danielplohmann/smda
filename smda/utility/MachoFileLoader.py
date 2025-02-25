@@ -141,8 +141,8 @@ class MachoFileLoader(object):
         machine_type = macho_file.header.cpu_type
         if machine_type in [lief.MachO.Header.CPU_TYPE.X86_64, lief.MachO.Header.CPU_TYPE.X86]:
             return "intel"
-        elif machine_type == lief.MachO.Header.CPU_TYPE.ARM64:
-            return "ARM64"
+        elif machine_type == [lief.MachO.Header.CPU_TYPE.ARM64, lief.MachO.Header.CPU_TYPE.ARM]:
+            return "arm"
         raise NotImplementedError("SMDA does not support this architecture yet.")
 
     @staticmethod

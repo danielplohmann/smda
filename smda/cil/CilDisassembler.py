@@ -151,7 +151,7 @@ class CilDisassembler(object):
 
     def analyzeFunction(self, pe, start_addr, method_body):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
-        state = FunctionAnalysisState(start_addr, self.disassembly)
+        state = FunctionAnalysisState(start_addr, method_body.instructions[0].offset, self.disassembly)
         for insn in method_body.instructions:
             state.setNextInstructionReachable(True)
             i_bytes = insn.get_bytes()
@@ -159,8 +159,8 @@ class CilDisassembler(object):
             i_size = len(i_bytes)
             i_mnemonic = str(insn.opcode)
             i_op_str = format_operand(pe, insn.operand)
-            # debug output
-            if True:
+            # debug output for all instructions
+            if False:
                 from smda.cil.CilInstructionEscaper import CilInstructionEscaper
                 from smda.common.SmdaInstruction import SmdaInstruction
                 smda_ins = SmdaInstruction([i_address, i_bytes.hex(), i_mnemonic, i_op_str])
@@ -219,7 +219,6 @@ class CilDisassembler(object):
                     state.addCodeRef(i_address, target, by_jump=True)
             state.prev_opcode = i_mnemonic
             state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
-        ####
         state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis()
         return state
@@ -236,6 +235,7 @@ class CilDisassembler(object):
 
         LOGGER.debug("Starting parser-based analysis.")
         pe = dnfile.dnPE(data=binary_info.raw_data)
+        all_instruction_offsets = set([])
         for row in pe.net.mdtables.MethodDef:
             if not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
                 # skip methods that do not have a method body
@@ -249,8 +249,7 @@ class CilDisassembler(object):
                 continue
             if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
-            self.analyzeFunction(pe, method_body.offset, method_body)
-        LOGGER.debug("Finished parser-based analysis, functions: %d", len(self.disassembly.functions))
+            function_result_state = self.analyzeFunction(pe, method_body.offset, method_body)
         # package up and finish
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout():
