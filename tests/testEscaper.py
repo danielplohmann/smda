@@ -8,6 +8,7 @@ from smda.common.SmdaReport import SmdaReport
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaInstruction import SmdaInstruction
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+from smda.cil.CilInstructionEscaper import CilInstructionEscaper
 
 from .context import config
 
@@ -31,7 +32,7 @@ class DisassemblyTestSuite(unittest.TestCase):
             self.assertEqual(smda_ins.getMnemonicGroup(IntelInstructionEscaper), data["mnemonic_group"])
             self.assertEqual(smda_ins.getEscapedOperands(IntelInstructionEscaper), data["escaped_operands"])
 
-    def testInstructionWildcarding(self):
+    def testIntelInstructionWildcarding(self):
         test_data = [
             # simple mov with IMM outside of address space
             {"ins": (0, "b803400080", "mov", "eax, 0x80004003"), "lower": 0x63300000, "upper": 0x63400000, "expected_bin": "b803400080", "bitness": 32, "expected_opc": "b8????????"},
@@ -61,6 +62,24 @@ class DisassemblyTestSuite(unittest.TestCase):
             smda_ins = SmdaInstruction(data["ins"], smda_function=smda_function)
             self.assertEqual(smda_ins.getEscapedBinary(IntelInstructionEscaper, lower_addr=data["lower"], upper_addr=data["upper"]), data["expected_bin"])
             self.assertEqual(smda_ins.getEscapedToOpcodeOnly(IntelInstructionEscaper), data["expected_opc"])
+
+    def testCilInstructionWildcarding(self):
+        test_data = [
+            # call MemberRef
+            {"ins": (0, "280a000006", "call", "SomeFunc"), "expected_bin": "28??????06", "expected_bin_intraprocedural": "28??????06", "expected_opc": "28????????", "bitness": 32},
+            {"ins": (0, "6fbb00000a", "callvirt", "SomeFunc"), "expected_bin": "6f??????0a", "expected_bin_intraprocedural": "6f??????0a", "expected_opc": "6f????????", "bitness": 32},
+            {"ins": (0, "2d3a", "brtrue.s", "0x5994"), "expected_bin": "2d3a", "expected_bin_intraprocedural": "2d??", "expected_opc": "2d??", "bitness": 32},
+            {"ins": (0, "450300000002000000060000000a000000", "switch", "[(0D50), (0D54), (0D58)]"), "expected_bin": "450300000002000000060000000a000000", "expected_bin_intraprocedural": "45????????????????????????????????", "expected_opc": "45????????????????????????????????", "bitness": 32},
+            {"ins": (0, "20c48efb0e", "ldc.i4", "0xefb8ec4"), "expected_bin": "20c48efb0e", "expected_bin_intraprocedural": "20c48efb0e", "expected_opc": "20????????", "bitness": 32},
+        ]
+        for data in test_data:
+            smda_report = SmdaReport()
+            smda_report.bitness = data["bitness"]
+            smda_function = SmdaFunction(smda_report=smda_report)
+            smda_ins = SmdaInstruction(data["ins"], smda_function=smda_function)
+            self.assertEqual(CilInstructionEscaper.escapeToOpcodeOnly(smda_ins), data["expected_opc"])
+            self.assertEqual(CilInstructionEscaper.escapeBinary(smda_ins), data["expected_bin"])
+            self.assertEqual(CilInstructionEscaper.escapeBinary(smda_ins, escape_intraprocedural_jumps=True), data["expected_bin_intraprocedural"])
 
 
 if __name__ == '__main__':

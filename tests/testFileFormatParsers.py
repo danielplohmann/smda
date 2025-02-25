@@ -24,7 +24,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         super(SmdaIntegrationTestSuite, cls).setUpClass()
 
     def testPeParsingWithCutwail(self):
-        disasm = Disassembler(config)
+        disasm = Disassembler(config, backend="intel")
         # load encrypted malicious win.cutwail
         with open(os.path.join(config.PROJECT_ROOT, "tests", "cutwail_xored"), "rb") as f_binary:
             binary = f_binary.read()
@@ -52,7 +52,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         # TODO test label extraction for PE, add another binary for testing
 
     def testElfParsingWithBashlite(self):
-        disasm = Disassembler(config)
+        disasm = Disassembler(config, backend="intel")
         # load encrypted benign /bin/cat
         with open(os.path.join(config.PROJECT_ROOT, "tests", "bashlite_xored"), "rb") as f_binary:
             binary = f_binary.read()
@@ -79,8 +79,24 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert bashlite_unmapped_disassembly.num_functions == 177
         assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174
 
+    def testDotnetParsingWithNjRAT(self):
+        disasm = Disassembler(config, backend="cil")
+        # load encrypted malicious win.cutwail
+        with open(os.path.join(config.PROJECT_ROOT, "tests", "njrat_xored"), "rb") as f_binary:
+            binary = f_binary.read()
+        decrypted_njrat = bytearray()
+        for index, byte in enumerate(binary):
+            if isinstance(byte, str):
+                byte = ord(byte)
+            decrypted_njrat.append(byte ^ (index % 256))
+        njrat_binary = bytes(decrypted_njrat)
+        # run FileLoader and disassemble as file
+        njrat_unmapped_disassembly = disasm.disassembleUnmappedBuffer(njrat_binary)
+        assert njrat_unmapped_disassembly.num_functions == 64
+        assert len([f.function_name for f in njrat_unmapped_disassembly.getFunctions() if f.function_name]) == 64
+
     def testMacOsParsingWithKomplex(self):
-        disasm = Disassembler(config)
+        disasm = Disassembler(config, backend="intel")
         # load encrypted malicious osx.komplex
         with open(os.path.join(config.PROJECT_ROOT, "tests", "komplex_xored"), "rb") as f_binary:
             binary = f_binary.read()

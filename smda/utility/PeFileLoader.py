@@ -107,6 +107,17 @@ class PeFileLoader(object):
             if pe_offset and len(binary) >= pe_offset + 0x2c:
                 oep_rva = struct.unpack("I", binary[pe_offset + 0x28:pe_offset + 0x2C])[0]
         return oep_rva
+    
+    @staticmethod
+    def getArchitecture(binary):
+        architecture = "intel"
+        pefile = lief.parse(binary)
+        if pefile:
+            for d in pefile.data_directories:
+                 if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER:
+                     if d.size > 0:
+                        architecture = "cil"
+        return architecture
 
     @staticmethod
     def checkPe(binary):

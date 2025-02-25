@@ -1,3 +1,5 @@
 pytest
 capstone
+dncil
+dnfile
 lief>=0.16.0

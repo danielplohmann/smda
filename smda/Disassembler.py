@@ -12,6 +12,7 @@ from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
 from .intel.IntelDisassembler import IntelDisassembler
+from .cil.CilDisassembler import CilDisassembler
 from .ida.IdaExporter import IdaExporter
 
 LOGGER = logging.getLogger(__name__)
@@ -19,19 +20,29 @@ LOGGER = logging.getLogger(__name__)
 
 class Disassembler(object):
 
-    def __init__(self, config=None, backend="intel"):
+    def __init__(self, config=None, backend=None):
         if config is None:
             config = SmdaConfig()
         self.config = config
         self.disassembler = None
         if backend == "intel":
             self.disassembler = IntelDisassembler(self.config)
+        elif backend == "cil":
+            self.disassembler = CilDisassembler(self.config)
         elif backend == "IDA":
             self.disassembler = IdaExporter(self.config)
         self._start_time = None
         self._timeout = 0
         # cache the last DisassemblyResult
         self.disassembly = None
+
+    def initDisassembler(self, architecture="intel"):
+        """ Initialize disassembler backend to given architecture, if not initialized yet, default: intel """
+        if self.disassembler is None:
+            if architecture == "intel":
+                self.disassembler = IntelDisassembler(self.config)
+            elif architecture == "cil":
+                self.disassembler = CilDisassembler(self.config)
 
     def _getDurationInSeconds(self, start_ts, end_ts):
         return (end_ts - start_ts).seconds + ((end_ts - start_ts).microseconds / 1000000.0)
@@ -63,7 +74,9 @@ class Disassembler(object):
         binary_info.file_path = file_path
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
+        binary_info.architecture = loader.getArchitecture()
         binary_info.code_areas = loader.getCodeAreas()
+        self.initDisassembler(binary_info.architecture)
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
             self.disassembler.addPdbFile(binary_info, pdb_path)
@@ -90,7 +103,9 @@ class Disassembler(object):
         binary_info.file_path = ""
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
+        binary_info.architecture = loader.getArchitecture()
         binary_info.code_areas = loader.getCodeAreas()
+        self.initDisassembler(binary_info.architecture)
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
@@ -104,19 +119,21 @@ class Disassembler(object):
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
-    def disassembleBuffer(self, file_content, base_addr, bitness=None, code_areas=None, oep=None):
+    def disassembleBuffer(self, file_content, base_addr, bitness=None, code_areas=None, oep=None, architecture="intel"):
         """
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
         """
+        binary_info = BinaryInfo(file_content)
+        binary_info.base_addr = base_addr
+        binary_info.bitness = bitness
+        binary_info.is_buffer = True
+        binary_info.code_areas = code_areas
+        binary_info.architecture = architecture
+        binary_info.oep = oep
+        self.initDisassembler(binary_info.architecture)
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
-            binary_info = BinaryInfo(file_content)
-            binary_info.base_addr = base_addr
-            binary_info.bitness = bitness
-            binary_info.is_buffer = True
-            binary_info.code_areas = code_areas
-            binary_info.oep = oep
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
                 self._addStringsToReport(smda_report, file_content)
