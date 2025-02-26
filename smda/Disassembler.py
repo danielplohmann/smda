@@ -11,9 +11,9 @@ from smda.utility.StringExtractor import extract_strings
 from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
-from .intel.IntelDisassembler import IntelDisassembler
-from .cil.CilDisassembler import CilDisassembler
-from .ida.IdaExporter import IdaExporter
+from smda.intel.IntelDisassembler import IntelDisassembler
+from smda.cil.CilDisassembler import CilDisassembler
+from smda.ida.IdaExporter import IdaExporter
 
 LOGGER = logging.getLogger(__name__)
 
