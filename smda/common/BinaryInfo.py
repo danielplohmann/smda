@@ -75,3 +75,12 @@ class BinaryInfo(object):
         else:
             is_inside = any([a[0] <= address < a[1] for a in self.code_areas])
         return is_inside
+
+    def getHeaderBytes(self):
+        if self.raw_data:
+            lief_result = lief.parse(self.raw_data)
+            if isinstance(lief_result, lief.PE.Binary):
+                return self.raw_data[:0x400]
+            elif isinstance(lief_result, lief.ELF.Binary):
+                return self.raw_data[:0x40]
+        return None

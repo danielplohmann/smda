@@ -55,6 +55,7 @@ class SmdaReport(object):
     timestamp = None
     version = None
     xcfg = None
+    xheader = None
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False
@@ -95,6 +96,7 @@ class SmdaReport(object):
             self.timestamp = datetime.datetime.now(datetime.timezone.utc)
             self.version = disassembly.binary_info.version
             self.xcfg = self._convertCfg(disassembly, config=config)
+            self.xheader = disassembly.binary_info.getHeaderBytes()
 
     def _convertCfg(self, disassembly, config=None):
         function_results = {}
@@ -257,6 +259,7 @@ class SmdaReport(object):
         binary_info.binary_size = smda_report.binary_size
         binary_info.oep = smda_report.oep
         smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version, smda_report=smda_report) for function_addr, function_dict in report_dict["xcfg"].items()}
+        smda_report.xheader = bytes.fromhex(report_dict["xheader"]) if "xheader" in report_dict else None
         return smda_report
 
     def toDict(self) -> dict:
@@ -289,7 +292,8 @@ class SmdaReport(object):
             "statistics": self.statistics.toDict(),
             "status": self.status,
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
-            "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()}
+            "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
+            "xheader": self.xheader.hex(),
         }
 
     @classmethod

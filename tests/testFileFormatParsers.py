@@ -2,6 +2,7 @@
 
 import logging
 import os
+import lief
 import unittest
 
 from smda.utility.FileLoader import FileLoader
@@ -46,6 +47,10 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
         cutwail_binary_info = binary_info
+        # parse bytes of 0x400 truncated PE header
+        pe_header = lief.parse(binary_info.getHeaderBytes())
+        assert pe_header.dos_header.magic == 0x5A4D
+        assert pe_header.header.machine == 0x14C
         cutwail_disassembly = disasm._disassemble(binary_info)
         cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cutwail_binary)
         assert cutwail_unmapped_disassembly.num_functions == 33
