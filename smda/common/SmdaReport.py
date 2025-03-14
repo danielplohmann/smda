@@ -293,7 +293,7 @@ class SmdaReport(object):
             "status": self.status,
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
-            "xheader": self.xheader.hex(),
+            "xheader": self.xheader.hex() if self.xheader else "",
         }
 
     @classmethod
