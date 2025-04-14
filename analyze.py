@@ -23,7 +23,7 @@ def parseBaseAddrFromArgs(args):
     return 0
 
 def parseOepFromArgs(args):
-    if args.oep is not None:
+    if args.oep and args.oep != '':
         parsed_oep = int(args.oep, 16) if args.oep.startswith("0x") else int(args.oep)
         logging.info("using provided OEP(RVA): 0x%08x", parsed_oep)
         return parsed_oep
