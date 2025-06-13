@@ -32,7 +32,7 @@ class IdaInterface(object):
     instance = None
     def __init__(self):
         if not IdaInterface.instance:
-            if idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION <= 900:
+            if idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 900:
                 IdaInterface.instance = Ida74Interface()
             if idaapi.IDA_SDK_VERSION >= 900:
                 IdaInterface.instance = Ida90Interface()
