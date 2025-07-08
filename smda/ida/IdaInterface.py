@@ -297,7 +297,7 @@ class Ida90Interface(BackendInterface):
         self._import_module_name = ""
 
     def getArchitecture(self):
-        procname = idaapi.inf_get_procname
+        procname = idaapi.inf_get_procname()
         if procname in self._processor_map:
             return self._processor_map[procname]
         else:
