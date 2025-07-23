@@ -130,6 +130,7 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:
             if len(data_refs) == 1:
                 data_ref = data_refs[0]
                 # check if next two instructions are movs
+                found_string = False
                 if index + 2 < len(instructions) and instructions[index + 1].mnemonic == "mov" and instructions[index + 2].mnemonic == "mov":
                     operands = instructions[index + 2].operands.split(",")
                     if len(operands) == 2:
@@ -140,10 +141,11 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:
                                 string_result = read_string(f.smda_report, data_ref, potential_string_len)
                                 if string_result:
                                     string_read, string_type = string_result
+                                    found_string = True
                                     yield string_read.rstrip("\x00"), insn.offset, data_ref, string_type
                         except:
                             pass
-                else:
+                if not found_string:
                     string_result = read_go_string(f.smda_report, data_ref)
                     if string_result:
                         string_read, string_type = string_result
