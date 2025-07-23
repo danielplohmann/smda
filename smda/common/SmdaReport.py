@@ -97,6 +97,10 @@ class SmdaReport(object):
             self.version = disassembly.binary_info.version
             self.xcfg = self._convertCfg(disassembly, config=config)
             self.xheader = disassembly.binary_info.getHeaderBytes()
+            self.xmetadata = {
+                "exported_functions": disassembly.binary_info.getExportedFunctions(),
+                "imported_functions": disassembly.binary_info.getImportedFunctions(),
+            }
 
     def _convertCfg(self, disassembly, config=None):
         function_results = {}
@@ -260,6 +264,7 @@ class SmdaReport(object):
         binary_info.oep = smda_report.oep
         smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version, smda_report=smda_report) for function_addr, function_dict in report_dict["xcfg"].items()}
         smda_report.xheader = bytes.fromhex(report_dict["xheader"]) if "xheader" in report_dict else None
+        smda_report.xmetadata = report_dict["xmetadata"] if "xmetadata" in report_dict else None
         return smda_report
 
     def toDict(self) -> dict:
@@ -294,6 +299,7 @@ class SmdaReport(object):
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
             "xheader": self.xheader.hex() if self.xheader else "",
+            "xmetadata": self.xmetadata,
         }
 
     @classmethod

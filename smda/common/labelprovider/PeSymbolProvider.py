@@ -2,6 +2,7 @@
 
 import logging
 from .AbstractLabelProvider import AbstractLabelProvider
+from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,11 +43,12 @@ class PeSymbolProvider(AbstractLabelProvider):
         lief_binary = lief.parse(binary_info.file_path)
         if lief_binary is not None:
             self._parseOep(lief_binary)
-            self._parseExports(lief_binary)
-            self._parseSymbols(lief_binary)
+            self._func_symbols.update(self.parseExports(lief_binary))
+            self._func_symbols.update(self.parseSymbols(lief_binary))
 
-    def _parseExports(self, binary):
-        for function in binary.exported_functions:
+    def parseExports(self, lief_binary):
+        function_symbols = {}
+        for function in lief_binary.exported_functions:
             function_name = ""
             try:
                 # here may occur a LIEF exception that we want to skip ->
@@ -54,11 +56,13 @@ class PeSymbolProvider(AbstractLabelProvider):
                 function_name = function.name
             except:
                 pass
-            if function_name and all(c in range(0x20, 0x7f) for c in function_name):
-                self._func_symbols[binary.imagebase + function.address] = function_name
+            if function_name and all(ord(c) in range(0x20, 0x7f) for c in function_name):
+                function_symbols[lief_binary.imagebase + function.address] = function_name
+        return function_symbols
 
-    def _parseSymbols(self, lief_binary):
+    def parseSymbols(self, lief_binary):
         # find VA of first code section
+        function_symbols = {}
         code_base_address = None
         for section in lief_binary.sections:
             if section.characteristics & 0x20000000:
@@ -78,8 +82,21 @@ class PeSymbolProvider(AbstractLabelProvider):
                 if function_name and all(ord(c) in range(0x20, 0x7f) for c in function_name):
                     # for some reason, we need to add the section_offset of .text here
                     function_offset = code_base_address + symbol.value
-                    if function_offset not in self._func_symbols:
-                        self._func_symbols[function_offset] = function_name
+                    if function_offset not in function_symbols:
+                        function_symbols[function_offset] = function_name
+        return function_symbols
+    
+    def parseImports(self, lief_binary):  
+        import_symbols = {}
+        for imported_library in lief_binary.imports:
+            for func in imported_library.entries:
+                if func.name:
+                    import_symbols[func.iat_address + lief_binary.imagebase] = (imported_library.name.lower(), func.name)
+                elif func.is_ordinal:
+                    resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
+                    ordinal_name = resolved_ordinal if resolved_ordinal else "#%s" % func.ordinal
+                    import_symbols[func.iat_address + lief_binary.imagebase] = (imported_library.name.lower(), ordinal_name)
+        return import_symbols
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")

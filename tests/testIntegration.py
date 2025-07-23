@@ -81,10 +81,11 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
     def testAsproxStringRefs(self):
         function_with_strings = self.asprox_disassembly.getFunction(0x008d2850)
-        assert function_with_strings.stringrefs[9251000] == "Software"
+        assert len(function_with_strings.stringrefs) == 6
+        assert function_with_strings.stringrefs[0]["string"] == "Software"
         marshalled = function_with_strings.toDict()
         unmarshalled = SmdaFunction.fromDict(marshalled)
-        assert unmarshalled.stringrefs[9251000] == "Software"
+        assert unmarshalled.stringrefs[0]["string"] == "Software"
 
     def testAsproxApiCoverage(self):
         num_api_ref_srcs = 0

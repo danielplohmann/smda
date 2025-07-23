@@ -227,7 +227,7 @@ class SmdaFunction(object):
         smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else None
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
-        smda_function.stringrefs = {addr: string for addr, string in function_dict["stringrefs"].items()} if "stringrefs" in function_dict else {}
+        smda_function.stringrefs = function_dict["stringrefs"] if "stringrefs" in function_dict else {}
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         else:
@@ -264,7 +264,7 @@ class SmdaFunction(object):
             "offset": self.offset,
             "blocks": blocks_as_dict,
             "apirefs": self.apirefs,
-            "stringrefs": {addr: string for addr, string in self.stringrefs.items()} if self.stringrefs is not None else {},
+            "stringrefs": self.stringrefs if self.stringrefs is not None else {},
             "blockrefs": self.blockrefs,
             "inrefs": self.inrefs,
             "outrefs": self.outrefs,

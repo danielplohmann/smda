@@ -19,8 +19,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         # addr:func_name
         self._func_symbols = {}
 
-    def update(self, binary_info):
-        binary = binary_info.binary
+    def getPcLntabOffset(self, binary):
         pclntab_offset = None
         try:
             lief_binary = lief.parse(binary)
@@ -37,10 +36,13 @@ class GoSymbolProvider(AbstractLabelProvider):
             # scan for offset of structure
             pclntab_regex = re.compile(b".\xFF\xFF\xFF\x00\x00\x01(\x04|\x08)")
             hits = [match.start() for match in re.finditer(pclntab_regex, binary)]
-            if len(hits) > 1:
-                logging.error("GoLabelProvider found too many candidates for pclntab")
-            elif len(hits) == 1:
+            if len(hits) == 1:
                 pclntab_offset = hits[0]
+        return pclntab_offset is not None
+
+    def update(self, binary_info):
+        binary = binary_info.binary
+        pclntab_offset = self.getPcLntabOffset(binary)
         # if we found a valid offset, do the pclntab parsing
         if pclntab_offset:
             try:

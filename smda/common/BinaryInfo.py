@@ -3,6 +3,9 @@ import hashlib
 import lief
 lief.logging.disable()
 
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+
 
 class BinaryInfo(object):
     """ simple DTO to contain most information related to the binary/buffer to be analyzed """
@@ -24,6 +27,7 @@ class BinaryInfo(object):
     md5 = ""
     version = ""
     exported_functions = None
+    imported_functions = None
     oep = None
 
     def __init__(self, binary):
@@ -46,11 +50,21 @@ class BinaryInfo(object):
     def getExportedFunctions(self):
         if self.exported_functions is None:
             lief_result = lief.parse(self.raw_data)
-            if isinstance(lief_result, lief.PE.Binary) or isinstance(lief_result, lief.ELF.Binary):
-                self.exported_functions = {}
-                for function in lief_result.exported_functions:
-                    self.exported_functions[function.address] = function.name
+            if isinstance(lief_result, lief.PE.Binary):
+                self.exported_functions = PeSymbolProvider(None).parseExports(lief_result)
+            elif isinstance(lief_result, lief.ELF.Binary):
+                self.exported_functions = ElfSymbolProvider(None).parseExports(lief_result)
         return self.exported_functions
+    
+    def getImportedFunctions(self):
+        if self.imported_functions is None:
+            lief_result = lief.parse(self.raw_data)
+            if isinstance(lief_result, lief.PE.Binary):
+                imports = PeSymbolProvider(None).parseSymbols(lief_result)
+                self.imported_functions = PeSymbolProvider(None).parseImports(lief_result)
+            elif isinstance(lief_result, lief.ELF.Binary):
+                self.imported_functions = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
+        return self.imported_functions
 
     def getSections(self):
         pefile = lief.parse(self.raw_data)

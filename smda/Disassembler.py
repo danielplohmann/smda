@@ -10,6 +10,7 @@ from smda.utility.MemoryFileLoader import MemoryFileLoader
 from smda.utility.StringExtractor import extract_strings
 from smda.SmdaConfig import SmdaConfig
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.cil.CilDisassembler import CilDisassembler
@@ -54,12 +55,18 @@ class Disassembler(object):
         LOGGER.debug("Current analysis callback time %s", (time_diff))
         return time_diff.seconds >= self._timeout
 
-    def _addStringsToReport(self, smda_report, buffer):
+    def _addStringsToReport(self, smda_report, buffer, mode=None):
         smda_report.buffer = buffer
         for smda_function in smda_report.getFunctions():
-            function_strings = {}
-            for string, addr in extract_strings(smda_function):
-                function_strings[addr] = string
+            function_strings = []
+            for string_result in extract_strings(smda_function, mode=mode):
+                string, referencing_addr, string_addr, string_type = string_result
+                function_strings.append({
+                    "string": string,
+                    "ins_addr": referencing_addr,
+                    "data_addr": string_addr,
+                    "type": string_type
+                })
             smda_function.stringrefs = function_strings
 
     def disassembleFile(self, file_path, pdb_path=""):
@@ -82,7 +89,9 @@ class Disassembler(object):
             self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                self._addStringsToReport(smda_report, file_content)
+                is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                string_mode = "go" if is_go_binary else None
+                self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
@@ -110,7 +119,9 @@ class Disassembler(object):
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                self._addStringsToReport(smda_report, file_content)
+                is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                string_mode = "go" if is_go_binary else None
+                self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
@@ -136,7 +147,9 @@ class Disassembler(object):
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                self._addStringsToReport(smda_report, file_content)
+                is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                string_mode = "go" if is_go_binary else None
+                self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:

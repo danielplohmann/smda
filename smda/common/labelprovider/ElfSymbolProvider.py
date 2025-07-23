@@ -46,27 +46,31 @@ class ElfSymbolProvider(AbstractLabelProvider):
         lief_binary = lief.parse(data)
         self._parseOep(lief_binary)
         # TODO split resolution into API/dynamic part and local symbols
-        self._parseExports(lief_binary)
-        self._parseSymbols(lief_binary.symtab_symbols)
-        self._parseSymbols(lief_binary.dynamic_symbols)
+        self._func_symbols.update(self.parseExports(lief_binary))
+        self._func_symbols.update(self.parseSymbols(lief_binary.symtab_symbols))
+        self._func_symbols.update(self.parseSymbols(lief_binary.dynamic_symbols))
         for reloc in lief_binary.relocations:
             if reloc.has_symbol:
                 self._func_symbols[reloc.address] = reloc.symbol.name
 
-    def _parseExports(self, binary):
+    def parseExports(self, binary):
+        function_symbols = {}
         for function in binary.exported_functions:
-            self._func_symbols[function.address] = function.name
+            function_symbols[function.address] = function.name
+        return function_symbols
 
-    def _parseSymbols(self, symbols):
+    def parseSymbols(self, symbols):
+        function_symbols = {}
         for symbol in symbols:
-            if symbol.is_function:
+            if symbol is not None and symbol.is_function:
                 if symbol.value != 0:
                     func_name = ""
                     try:
                         func_name = symbol.demangled_name
                     except:
                         func_name = symbol.name
-                    self._func_symbols[symbol.value] = func_name
+                    function_symbols[symbol.value] = func_name
+        return function_symbols
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
