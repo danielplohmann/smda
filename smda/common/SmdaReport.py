@@ -269,11 +269,12 @@ class SmdaReport(object):
 
     def toDict(self) -> dict:
         transformed_code_sections = []
-        for section in self.code_sections:
-            if section is not None:
-                transformed_code_sections.append(("", section[1], section[2]))
-            else:
-                transformed_code_sections.append(("", 0, 0))  # Handle None sections gracefully
+        if self.code_sections:
+            for section in self.code_sections:
+                if section is not None:
+                    transformed_code_sections.append(("", section[1], section[2]))
+                else:
+                    transformed_code_sections.append(("", 0, 0))
         return {
             "architecture": self.architecture,
             "base_addr": self.base_addr,

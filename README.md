@@ -56,7 +56,7 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Version History
- * 2025-07-25: v2.2.2 - Minor bugfixes.
+ * 2025-07-25: v2.2.3 - Minor bugfixes.
  * 2025-07-23: v2.2.1 - Added xmetadata field to SmdaReport, with information about imports and exports. Improved string extraction from Go binaries.
  * 2025-06-13: v2.1.0 - Support for export from IDA 9.0+ (THX to @jershmagersh for the update!).
  * 2025-02-26: v2.0.2 - Adjusting relative import, adding init file.
