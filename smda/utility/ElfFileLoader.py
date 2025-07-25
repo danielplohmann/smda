@@ -225,7 +225,7 @@ class ElfFileLoader(object):
             if segment.flags.value & lief.ELF.Section.FLAGS.EXECINSTR.value:
                 segment_start = segment.virtual_address
                 segment_size = segment.virtual_size
-                if segment_size % segment.alignment != 0:
+                if segment.alignment and segment_size % segment.alignment != 0:
                     segment_size += segment.alignment - (segment_size % segment.alignment)
                 segment_end = segment_start + segment_size
                 code_areas.append([segment_start, segment_end])    
