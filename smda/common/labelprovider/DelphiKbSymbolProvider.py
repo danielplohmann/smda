@@ -79,7 +79,7 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
             function_info["name"] = fh.read(len_name).decode()
             fh.read(9)
             len_type = int.from_bytes(fh.read(2), byteorder="little")
-            fh.read(len_type).decode()
+            fh.read(len_type)
             fh.read(5)
             function_info["dump_size"] = int.from_bytes(fh.read(4), byteorder="little")
             fh.read(4)
