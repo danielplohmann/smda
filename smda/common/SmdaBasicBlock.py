@@ -1,12 +1,11 @@
-import struct
 import hashlib
+import struct
 from typing import Iterator
 
 from smda.common.SmdaInstruction import SmdaInstruction
 
 
 class SmdaBasicBlock:
-
     smda_function = None
     instructions = None
     picblockhash = None
@@ -25,8 +24,7 @@ class SmdaBasicBlock:
             self.opcblockhash = self.getOpcBlockHash()
 
     def getInstructions(self) -> Iterator["SmdaInstruction"]:
-        for instruction in self.instructions:
-            yield instruction
+        yield from self.instructions
 
     def getPicBlockHash(self):
         if self.picblockhash is not None:
@@ -37,14 +35,28 @@ class SmdaBasicBlock:
         return self.picblockhash
 
     def getPicBlockHashSequence(self):
-        """ if we have a SmdaFunction as parent, we can try to generate the PicBlockHash ad-hoc """
+        """if we have a SmdaFunction as parent, we can try to generate the PicBlockHash ad-hoc"""
         # check all the prerequisites
-        if self.smda_function and self.smda_function.smda_report and self.smda_function._escaper and self.smda_function.smda_report.base_addr is not None and self.smda_function.smda_report.binary_size:
+        if (
+            self.smda_function
+            and self.smda_function.smda_report
+            and self.smda_function._escaper
+            and self.smda_function.smda_report.base_addr is not None
+            and self.smda_function.smda_report.binary_size
+        ):
             escaped_binary_seqs = []
             for instruction in self.getInstructions():
-                escaped_binary_seqs.append(instruction.getEscapedBinary(self.smda_function._escaper, escape_intraprocedural_jumps=True, lower_addr=self.smda_function.smda_report.base_addr, upper_addr=self.smda_function.smda_report.base_addr + self.smda_function.smda_report.binary_size))
+                escaped_binary_seqs.append(
+                    instruction.getEscapedBinary(
+                        self.smda_function._escaper,
+                        escape_intraprocedural_jumps=True,
+                        lower_addr=self.smda_function.smda_report.base_addr,
+                        upper_addr=self.smda_function.smda_report.base_addr
+                        + self.smda_function.smda_report.binary_size,
+                    )
+                )
             return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-    
+
     def getOpcBlockHash(self):
         if self.opcblockhash is not None:
             return self.opcblockhash
@@ -54,14 +66,14 @@ class SmdaBasicBlock:
         return self.opcblockhash
 
     def getOpcBlockHashSequence(self):
-        """ if we have a SmdaFunction as parent, we can try to generate the OpcBlockHash ad-hoc """
+        """if we have a SmdaFunction as parent, we can try to generate the OpcBlockHash ad-hoc"""
         # check all the prerequisites
         if self.smda_function and self.smda_function.smda_report and self.smda_function._escaper:
             escaped_binary_seqs = []
             for instruction in self.getInstructions():
                 escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self.smda_function._escaper))
             return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-        
+
     def getPredecessors(self):
         predecessors = []
         if self.smda_function is not None:
@@ -69,12 +81,11 @@ class SmdaBasicBlock:
                 if self.offset in to:
                     predecessors.append(frm)
         return predecessors
-    
+
     def getSuccessors(self):
         successors = []
-        if self.smda_function is not None:
-            if self.offset in self.smda_function.blockrefs:
-                successors.extend(self.smda_function.blockrefs[self.offset])
+        if self.smda_function is not None and self.offset in self.smda_function.blockrefs:
+            successors.extend(self.smda_function.blockrefs[self.offset])
         return successors
 
     @classmethod
@@ -91,4 +102,4 @@ class SmdaBasicBlock:
         return self.offset
 
     def __str__(self):
-        return "0x{:08x}: ({:>4})".format(self.offset, self.length)
+        return f"0x{self.offset:08x}: ({self.length:>4})"

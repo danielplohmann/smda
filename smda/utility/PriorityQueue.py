@@ -1,6 +1,7 @@
 import heapq
 
-class PriorityQueue(object):
+
+class PriorityQueue:
     def __init__(self, content=None):
         if content is None:
             content = []
@@ -27,7 +28,7 @@ class PriorityQueue(object):
 
     def add(self, element):
         self.heap.append(element)
-        heapq._siftdown_max(self.heap, 0, len(self.heap)-1)
+        heapq._siftdown_max(self.heap, 0, len(self.heap) - 1)
 
     def update(self, target_candidate=None):
         if target_candidate is None:

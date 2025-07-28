@@ -6,9 +6,10 @@ LOGGER = logging.getLogger(__name__)
 LIEF_AVAILABLE = False
 try:
     import lief
+
     lief.logging.disable()
     LIEF_AVAILABLE = True
-except:
+except ImportError:
     LOGGER.warning("LIEF not available, will not be able to parse data from ELF files.")
 
 
@@ -18,7 +19,7 @@ def align(v, alignment):
         return v
     else:
         return v + (alignment - remainder)
-    
+
 
 def has_bogus_sections(elffile, base_addr=0):
     max_virtual_address = 0
@@ -29,14 +30,13 @@ def has_bogus_sections(elffile, base_addr=0):
         return True
 
 
-class ElfFileLoader(object):
-
+class ElfFileLoader:
     @staticmethod
     def isCompatible(data):
         if not LIEF_AVAILABLE:
             return False
         # check for ELF magic
-        return data[:4] == b"\x7FELF"
+        return data[:4] == b"\x7fELF"
 
     @staticmethod
     def getBaseAddress(binary):
@@ -94,7 +94,9 @@ class ElfFileLoader(object):
             for section in sorted(elffile.sections, key=lambda section: section.size, reverse=True):
                 if not section.virtual_address:
                     continue
-                LOGGER.debug(f"ELF: section: 0x{section.virtual_address:x} 0x{section.size:x} 0x{section.file_offset:x}")
+                LOGGER.debug(
+                    f"ELF: section: 0x{section.virtual_address:x} 0x{section.size:x} 0x{section.file_offset:x}"
+                )
                 max_virtual_address = max(max_virtual_address, section.size + section.virtual_address)
                 min_virtual_address = min(min_virtual_address, section.virtual_address)
                 min_raw_offset = min(min_raw_offset, section.file_offset)
@@ -104,7 +106,9 @@ class ElfFileLoader(object):
         for segment in elffile.segments:
             if not segment.virtual_address:
                 continue
-            LOGGER.debug(f"ELF: segment: 0x{segment.virtual_address:x} 0x{segment.virtual_size:x} 0x{segment.file_offset:x}")
+            LOGGER.debug(
+                f"ELF: segment: 0x{segment.virtual_address:x} 0x{segment.virtual_size:x} 0x{segment.file_offset:x}"
+            )
             max_virtual_address = max(max_virtual_address, segment.virtual_size + segment.virtual_address)
             min_virtual_address = min(min_virtual_address, segment.virtual_address)
             min_raw_offset = min(min_raw_offset, segment.file_offset)
@@ -114,7 +118,7 @@ class ElfFileLoader(object):
 
         if not max_virtual_address:
             LOGGER.debug("ELF: no section or segment data")
-            return bytes()
+            return b""
 
         # create mapped region.
         # offset 0x0 corresponds to the ELF base address
@@ -138,18 +142,26 @@ class ElfFileLoader(object):
             if not segment.virtual_address:
                 continue
             rva = segment.virtual_address - base_addr
-            LOGGER.debug("ELF: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)", segment.physical_size, rva, rva + segment.physical_size, segment.virtual_address)
+            LOGGER.debug(
+                "ELF: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)",
+                segment.physical_size,
+                rva,
+                rva + segment.physical_size,
+                segment.virtual_address,
+            )
             if len(segment.content) != segment.physical_size:
                 LOGGER.warn("ELF: Mismatch in segment content vs. header-specified physical size!")
                 if len(segment.content) < segment.physical_size:
                     LOGGER.warn("ELF: Padding to physical size with zeroes!")
-                    mapped_binary[rva:rva + len(segment.content)] = segment.content 
-                    mapped_binary[rva + len(segment.content):rva + segment.physical_size] = b"\x00" * (segment.physical_size - len(segment.content))
+                    mapped_binary[rva : rva + len(segment.content)] = segment.content
+                    mapped_binary[rva + len(segment.content) : rva + segment.physical_size] = b"\x00" * (
+                        segment.physical_size - len(segment.content)
+                    )
                 else:
                     LOGGER.warn("ELF: More content than physical size!? Aborting, please report this case. :)")
                     raise AssertionError("Received more content than physical size, which should never be possible?")
             else:
-                mapped_binary[rva:rva + segment.physical_size] = segment.content
+                mapped_binary[rva : rva + segment.physical_size] = segment.content
 
         # map sections.
         # may overwrite some segment data, but we expect the content to be identical.
@@ -158,17 +170,28 @@ class ElfFileLoader(object):
                 if not section.virtual_address:
                     continue
                 rva = section.virtual_address - base_addr
-                LOGGER.debug("ELF: mapping section of 0x%04x bytes (content: 0x%04x bytes) at 0x%08x-0x%08x (0x%08x)", section.size, len(section.content), rva, rva + section.size, section.virtual_address)
+                LOGGER.debug(
+                    "ELF: mapping section of 0x%04x bytes (content: 0x%04x bytes) at 0x%08x-0x%08x (0x%08x)",
+                    section.size,
+                    len(section.content),
+                    rva,
+                    rva + section.size,
+                    section.virtual_address,
+                )
                 # potentially perform zero padding if we have less content than section size
                 content_to_be_mapped = bytearray(section.content)
                 if len(section.content) < section.size:
                     content_to_be_mapped += b"\x00" * (section.size - len(section.content))
-                mapped_binary[rva:rva + section.size] = content_to_be_mapped
+                mapped_binary[rva : rva + section.size] = content_to_be_mapped
 
         # map header.
         # we consider the headers to be any data found before the first section/segment
         if min_raw_offset != 0:
-            LOGGER.debug("ELF: mapping 0x%x bytes of header at 0x0 (0x%x)", min_raw_offset, base_addr)
+            LOGGER.debug(
+                "ELF: mapping 0x%x bytes of header at 0x0 (0x%x)",
+                min_raw_offset,
+                base_addr,
+            )
             mapped_binary[0:min_raw_offset] = binary[0:min_raw_offset]
 
         LOGGER.debug("ELF: final mapped size: 0x%x", len(mapped_binary))
@@ -203,7 +226,9 @@ class ElfFileLoader(object):
                 result.append(this_area)
                 index += 1
             else:
-                merged_code_areas = merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2:]
+                merged_code_areas = (
+                    merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2 :]
+                )
         return merged_code_areas
 
     @staticmethod
@@ -219,7 +244,7 @@ class ElfFileLoader(object):
                 if section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])    
+                code_areas.append([section_start, section_end])
         for segment in sorted(elffile.segments, key=lambda segment: segment.physical_size, reverse=True):
             # SHF_EXECINSTR = 4
             if segment.flags.value & lief.ELF.Section.FLAGS.EXECINSTR.value:
@@ -228,5 +253,5 @@ class ElfFileLoader(object):
                 if segment.alignment and segment_size % segment.alignment != 0:
                     segment_size += segment.alignment - (segment_size % segment.alignment)
                 segment_end = segment_start + segment_size
-                code_areas.append([segment_start, segment_end])    
+                code_areas.append([segment_start, segment_end])
         return ElfFileLoader.mergeCodeAreas(code_areas)

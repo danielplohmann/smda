@@ -1,25 +1,28 @@
 #!/usr/bin/python
 
 import logging
+
 from .AbstractLabelProvider import AbstractLabelProvider
 
 LOGGER = logging.getLogger(__name__)
 
 try:
     import lief
-    lief.logging.disable()
-except:
-    lief = None
-    LOGGER.warning("3rd party library LIEF not installed - won't be able to extract symbols for ELF files where available.")
 
+    lief.logging.disable()
+except ImportError:
+    lief = None
+    LOGGER.warning(
+        "3rd party library LIEF not installed - won't be able to extract symbols for ELF files where available."
+    )
 
 
 class ElfSymbolProvider(AbstractLabelProvider):
-    """ Minimal resolver for ELF symbols """
+    """Minimal resolver for ELF symbols"""
 
     def __init__(self, config):
         self._config = config
-        #addr:func_name
+        # addr:func_name
         self._func_symbols = {}
 
     def isSymbolProvider(self):
@@ -30,7 +33,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
             self._func_symbols[lief_result.header.entrypoint] = "original_entry_point"
 
     def update(self, binary_info):
-        #works both for PE and ELF
+        # works both for PE and ELF
         self._func_symbols = {}
         data = b""
         if binary_info.file_path:
@@ -41,7 +44,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
             data = binary_info.raw_data
         else:
             return
-        if data[:4] != b"\x7FELF" or lief is None:
+        if data[:4] != b"\x7fELF" or lief is None:
             return
         lief_binary = lief.parse(data)
         self._parseOep(lief_binary)
@@ -62,14 +65,13 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def parseSymbols(self, symbols):
         function_symbols = {}
         for symbol in symbols:
-            if symbol is not None and symbol.is_function:
-                if symbol.value != 0:
-                    func_name = ""
-                    try:
-                        func_name = symbol.demangled_name
-                    except:
-                        func_name = symbol.name
-                    function_symbols[symbol.value] = func_name
+            if symbol is not None and symbol.is_function and symbol.value != 0:
+                func_name = ""
+                try:
+                    func_name = symbol.demangled_name
+                except AttributeError:
+                    func_name = symbol.name
+                function_symbols[symbol.value] = func_name
         return function_symbols
 
     def getSymbol(self, address):

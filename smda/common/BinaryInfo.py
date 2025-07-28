@@ -1,14 +1,15 @@
 import hashlib
 
 import lief
+
+from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+
 lief.logging.disable()
 
-from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
-from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 
-
-class BinaryInfo(object):
-    """ simple DTO to contain most information related to the binary/buffer to be analyzed """
+class BinaryInfo:
+    """simple DTO to contain most information related to the binary/buffer to be analyzed"""
 
     architecture = ""
     base_addr = 0
@@ -55,12 +56,12 @@ class BinaryInfo(object):
             elif isinstance(lief_result, lief.ELF.Binary):
                 self.exported_functions = ElfSymbolProvider(None).parseExports(lief_result)
         return self.exported_functions
-    
+
     def getImportedFunctions(self):
         if self.imported_functions is None:
             lief_result = lief.parse(self.raw_data)
             if isinstance(lief_result, lief.PE.Binary):
-                imports = PeSymbolProvider(None).parseSymbols(lief_result)
+                PeSymbolProvider(None).parseSymbols(lief_result)
                 self.imported_functions = PeSymbolProvider(None).parseImports(lief_result)
             elif isinstance(lief_result, lief.ELF.Binary):
                 self.imported_functions = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
@@ -87,7 +88,7 @@ class BinaryInfo(object):
             if self.base_addr <= address <= self.base_addr + self.binary_size:
                 is_inside = True
         else:
-            is_inside = any([a[0] <= address < a[1] for a in self.code_areas])
+            is_inside = any(a[0] <= address < a[1] for a in self.code_areas)
         return is_inside
 
     def getHeaderBytes(self):

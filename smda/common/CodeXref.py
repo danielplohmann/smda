@@ -1,7 +1,4 @@
-
-
-class CodeXref(object):
-
+class CodeXref:
     def __init__(self, smda_ins_from, smda_ins_to):
         self.smda_ins_from = smda_ins_from
         self.smda_ins_to = smda_ins_to
@@ -23,7 +20,7 @@ class CodeXref(object):
         return self.smda_ins_to
 
     def __str__(self):
-        return "0x%x (0x%x) -> 0x%x (0x%x)" % (self.smda_ins_from.offset, self.smda_ins_from.smda_function.offset, self.smda_ins_to.offset, self.smda_ins_to.smda_function.offset)
+        return f"0x{self.smda_ins_from.offset:x} (0x{self.smda_ins_from.smda_function.offset:x}) -> 0x{self.smda_ins_to.offset:x} (0x{self.smda_ins_to.smda_function.offset:x})"
 
     def __repr__(self):
-        return "<CodeXref(SmdaInstruction({}), SmdaInstruction({}))>".format(self.smda_ins_from.offset, self.smda_ins_to.offset)
+        return f"<CodeXref(SmdaInstruction({self.smda_ins_from.offset}), SmdaInstruction({self.smda_ins_to.offset}))>"

@@ -1,9 +1,8 @@
-import os
 import logging
+import os
 
 
-class SmdaConfig(object):
-
+class SmdaConfig:
     # note to self: always change this in setup.py as well!
     VERSION = "2.2.3"
     ESCAPER_DOWNWARD_COMPATIBILITY = "1.13.16"

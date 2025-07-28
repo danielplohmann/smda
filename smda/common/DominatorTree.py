@@ -14,8 +14,8 @@ import logging
 
 LOGGER = logging.getLogger(__name__)
 
-class DominatorTree(object):
 
+class DominatorTree:
     def __init__(self, G, r):
         assert r in G
         self.succ = G
@@ -45,7 +45,7 @@ class DominatorTree(object):
                 self.pred[w].add(v)
                 if w not in self.semi:
                     self.parent[w] = v
-                    self.semi[w] = None     # temporarily
+                    self.semi[w] = None  # temporarily
                     stack.append(w)
 
     def LINK(self, v, w):
@@ -62,8 +62,8 @@ class DominatorTree(object):
         if self.ancestor[v] in self.ancestor:
             self.COMPRESS(self.ancestor[v])
             w = self.ancestor[v]
-            if self.semi[self.label.get(w,w)] < self.semi[self.label.get(v,v)]:
-                self.label[v] = self.label.get(w,w)
+            if self.semi[self.label.get(w, w)] < self.semi[self.label.get(v, v)]:
+                self.label[v] = self.label.get(w, w)
             self.ancestor[v] = self.ancestor[w]
 
     def steps_2_3(self):
@@ -109,9 +109,10 @@ def fix_graph(graph):
 # Calculation of Nesting Depth by walking down dominators and summarizing weights
 # Implementation by Steffen Enders and Daniel Plohmann
 
+
 def build_dominator_tree(G, r):
     expanded_graph = fix_graph(G)
-    if not r in expanded_graph:
+    if r not in expanded_graph:
         # print("r not in G:", r, G)
         LOGGER.debug("r not in G: %s %s", r, G)
         return None
@@ -124,47 +125,70 @@ def build_dominator_tree(G, r):
         inverted[value].append(key)
     return inverted
 
+
 def get_nesting_depth(graph, domtree, root):
     expanded_graph = fix_graph(graph)
     significant_nodes = set.union(*([set(v) for v in expanded_graph.values() if len(v) > 1] + [set()]))
+
     # print("significant_nodes", significant_nodes)
     def maximum_costs(cn):
         # print("  maximum_costs cn", cn)
         if cn not in domtree or not domtree[cn]:
             # print("    %d not in domtree or not domtree[%d]" % (cn, cn), 1 if cn in significant_nodes else 0)
-            return (1 if cn in significant_nodes else 0)
+            return 1 if cn in significant_nodes else 0
         val = max(maximum_costs(n) for n in domtree[cn]) + (1 if cn in significant_nodes else 0)
         # print("   ", val, 1 if cn in significant_nodes else 0)
         return val
+
     try:
         return maximum_costs(root)
-    except:
+    except Exception:
         return 0
-
 
 
 if __name__ == "__main__":
     test_data = [
         {
-            "smda": {10208: [10229], 10229: [10240, 10253], 10240: [10244, 10246], 10244: [10246], 10246: [10240, 10253], 10253: [10229, 10261]},
+            "smda": {
+                10208: [10229],
+                10229: [10240, 10253],
+                10240: [10244, 10246],
+                10244: [10246],
+                10246: [10240, 10253],
+                10253: [10229, 10261],
+            },
             "smda_function": 10208,
-            "fixed": {10208: [10229], 10229: [10240, 10253], 10240: [10244, 10246], 10253: [10229, 10261], 10244: [10246], 10246: [10240, 10253], 10261: []},
-            "dt": {10240: [10244, 10246], 10229: [10240, 10253], 10253: [10261], 10208: [10229]},
-            "nd": 3
-        }, {
+            "fixed": {
+                10208: [10229],
+                10229: [10240, 10253],
+                10240: [10244, 10246],
+                10253: [10229, 10261],
+                10244: [10246],
+                10246: [10240, 10253],
+                10261: [],
+            },
+            "dt": {
+                10240: [10244, 10246],
+                10229: [10240, 10253],
+                10253: [10261],
+                10208: [10229],
+            },
+            "nd": 3,
+        },
+        {
             "smda": {1: [2], 2: [3, 4, 6], 3: [5], 4: [5], 5: [2]},
             "smda_function": 1,
             "fixed": {1: [2], 2: [3, 4, 6], 3: [5], 4: [5], 6: [], 5: [2]},
             "dt": {2: [3, 4, 5, 6], 1: [2]},
-            "nd": 1
-        }, {
+            "nd": 1,
+        },
+        {
             "smda": {1: [2], 2: [3, 6], 3: [41, 42], 41: [5], 42: [5], 5: [2]},
             "smda_function": 1,
             "fixed": {1: [2], 2: [3, 6], 3: [41, 42], 6: [], 41: [5], 42: [5], 5: [2]},
             "dt": {3: [41, 42, 5], 2: [3, 6], 1: [2]},
-            "nd": 2
+            "nd": 2,
         },
-
     ]
     for data in test_data:
         print("*" * 80)

@@ -1,5 +1,4 @@
-class BackendInterface(object):
-
+class BackendInterface:
     def __init__(self):
         pass
 

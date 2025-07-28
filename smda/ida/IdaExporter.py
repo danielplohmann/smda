@@ -1,12 +1,13 @@
 import datetime
 
-from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
+from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.DisassemblyResult import DisassemblyResult
+
 from .IdaInterface import IdaInterface
 
-class IdaExporter(object):
 
+class IdaExporter:
     def __init__(self, config, bitness=None):
         self.config = config
         self.ida_interface = IdaInterface()
@@ -22,23 +23,29 @@ class IdaExporter(object):
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
 
     def _convertIdaInsToSmda(self, offset, instruction_bytes):
-        cache = [i for i in self.capstone.disasm_lite(instruction_bytes, offset)]
+        cache = list(self.capstone.disasm_lite(instruction_bytes, offset))
         if cache:
             i_address, i_size, i_mnemonic, i_op_str = cache[0]
             smda_ins = (i_address, i_size, i_mnemonic, i_op_str, instruction_bytes)
         else:
             # record error and emit placeholder instruction
-            bytes_as_hex = "".join(["%02x" % c for c in bytearray(instruction_bytes)])
-            print("missing capstone disassembly output at 0x%x (%s)" % (offset, bytes_as_hex))
+            bytes_as_hex = "".join([f"{c:02x}" for c in bytearray(instruction_bytes)])
+            print(f"missing capstone disassembly output at 0x{offset:x} ({bytes_as_hex})")
             self.disassembly.errors[offset] = {
                 "type": "capstone disassembly failure",
-                "instruction_bytes": bytes_as_hex
+                "instruction_bytes": bytes_as_hex,
             }
-            smda_ins = (offset, len(instruction_bytes), "error", "error", bytearray(instruction_bytes))
+            smda_ins = (
+                offset,
+                len(instruction_bytes),
+                "error",
+                "error",
+                bytearray(instruction_bytes),
+            )
         return smda_ins
 
     def analyzeBuffer(self, binary_info, cb_analysis_timeout=None):
-        """ instead of performing a full analysis, simply collect all data from IDA and convert it into a report """
+        """instead of performing a full analysis, simply collect all data from IDA and convert it into a report"""
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.binary_info = binary_info
         self.disassembly.binary_info.architecture = self.ida_interface.getArchitecture()
@@ -60,7 +67,10 @@ class IdaExporter(object):
                     instruction_bytes = self.ida_interface.getInstructionBytes(instruction_offset)
                     smda_instruction = self._convertIdaInsToSmda(instruction_offset, instruction_bytes)
                     converted_block.append(smda_instruction)
-                    self.disassembly.instructions[smda_instruction[0]] = (smda_instruction[2], smda_instruction[1])
+                    self.disassembly.instructions[smda_instruction[0]] = (
+                        smda_instruction[2],
+                        smda_instruction[1],
+                    )
                     in_refs = self.ida_interface.getCodeInRefs(smda_instruction[0])
                     for in_ref in in_refs:
                         self.disassembly.addCodeRefs(in_ref[0], in_ref[1])

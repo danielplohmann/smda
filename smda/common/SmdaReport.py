@@ -1,30 +1,23 @@
-import binascii
 import datetime
 import json
-import os
-import zipfile
 import logging
-from typing import Optional, Iterator
-try:
-    from StringIO import StringIO ## for Python 2
-except ImportError:
-    from io import StringIO ## for Python 3
+import os
+from typing import Iterator, Optional
 
-from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
+from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
-from .BinaryInfo import BinaryInfo
-from .SmdaFunction import SmdaFunction
-from .SmdaBasicBlock import SmdaBasicBlock
-from smda.common.CodeXref import CodeXref
 from smda.common.BlockLocator import BlockLocator
+from smda.common.CodeXref import CodeXref
 from smda.DisassemblyStatistics import DisassemblyStatistics
 
+from .BinaryInfo import BinaryInfo
+from .SmdaBasicBlock import SmdaBasicBlock
+from .SmdaFunction import SmdaFunction
 
 LOGGER = logging.getLogger(__name__)
 
 
-class SmdaReport(object):
-
+class SmdaReport:
     architecture = None
     base_addr = None
     binary_size = None
@@ -71,7 +64,7 @@ class SmdaReport(object):
             self.bitness = disassembly.binary_info.bitness
             self.buffer = buffer
             self.code_areas = disassembly.binary_info.code_areas
-            self.code_sections = [section for section in disassembly.binary_info.getSections()]
+            self.code_sections = list(disassembly.binary_info.getSections())
             if self.code_sections is None:
                 self.code_sections = []
             self.component = disassembly.binary_info.component
@@ -105,7 +98,11 @@ class SmdaReport(object):
     def _convertCfg(self, disassembly, config=None):
         function_results = {}
         for function_offset in disassembly.functions:
-            if self.confidence_threshold and function_offset in disassembly.candidates and disassembly.candidates[function_offset].getConfidence() < self.confidence_threshold:
+            if (
+                self.confidence_threshold
+                and function_offset in disassembly.candidates
+                and disassembly.candidates[function_offset].getConfidence() < self.confidence_threshold
+            ):
                 continue
             smda_function = SmdaFunction(disassembly, function_offset, config=config, smda_report=self)
             function_results[function_offset] = smda_function
@@ -133,8 +130,8 @@ class SmdaReport(object):
     def getBuffer(self) -> bytes:
         return self.buffer
 
-    def getFunction(self, function_addr)  -> Optional["SmdaFunction"]:
-        return self.xcfg[function_addr] if function_addr in self.xcfg else None
+    def getFunction(self, function_addr) -> Optional["SmdaFunction"]:
+        return self.xcfg.get(function_addr, None)
 
     def getFunctions(self) -> Iterator["SmdaFunction"]:
         for _, smda_function in sorted(self.xcfg.items()):
@@ -215,7 +212,7 @@ class SmdaReport(object):
     def fromFile(cls, file_path):
         smda_json = {}
         if os.path.isfile(file_path):
-            with open(file_path, "r") as fjson:
+            with open(file_path) as fjson:
                 smda_json = json.load(fjson)
         else:
             raise FileNotFoundError
@@ -229,7 +226,11 @@ class SmdaReport(object):
         smda_report.binary_size = report_dict["binary_size"]
         smda_report.bitness = report_dict["bitness"]
         smda_report.code_areas = report_dict["code_areas"]
-        smda_report.code_sections = [("", section[1], section[2]) for section in report_dict["code_sections"]] if "code_sections" in report_dict else []
+        smda_report.code_sections = (
+            [("", section[1], section[2]) for section in report_dict["code_sections"]]
+            if "code_sections" in report_dict
+            else []
+        )
         smda_report.confidence_threshold = report_dict["confidence_threshold"]
         smda_report.disassembly_errors = report_dict["disassembly_errors"]
         smda_report.execution_time = report_dict["execution_time"]
@@ -247,12 +248,12 @@ class SmdaReport(object):
                 smda_report.is_library = report_dict["metadata"]["is_library"]
             if "version" in report_dict["metadata"]:
                 smda_report.version = report_dict["metadata"]["version"]
-            smda_report.is_buffer = report_dict["metadata"]["is_buffer"] if "is_buffer" in report_dict["metadata"] else False
+            smda_report.is_buffer = report_dict["metadata"].get("is_buffer", False)
         smda_report.message = report_dict["message"]
-        smda_report.oep = report_dict["oep"] if "oep" in report_dict else None
+        smda_report.oep = report_dict.get("oep", None)
         smda_report.sha256 = report_dict["sha256"]
-        smda_report.sha1 = report_dict["sha1"] if "sha1" in report_dict else None
-        smda_report.md5 = report_dict["md5"] if "md5" in report_dict else None
+        smda_report.sha1 = report_dict.get("sha1", None)
+        smda_report.md5 = report_dict.get("md5", None)
         smda_report.smda_version = report_dict["smda_version"]
         smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
         smda_report.status = report_dict["status"]
@@ -262,9 +263,17 @@ class SmdaReport(object):
         binary_info.base_addr = smda_report.base_addr
         binary_info.binary_size = smda_report.binary_size
         binary_info.oep = smda_report.oep
-        smda_report.xcfg = {int(function_addr): SmdaFunction.fromDict(function_dict, binary_info=binary_info, version=smda_report.smda_version, smda_report=smda_report) for function_addr, function_dict in report_dict["xcfg"].items()}
+        smda_report.xcfg = {
+            int(function_addr): SmdaFunction.fromDict(
+                function_dict,
+                binary_info=binary_info,
+                version=smda_report.smda_version,
+                smda_report=smda_report,
+            )
+            for function_addr, function_dict in report_dict["xcfg"].items()
+        }
         smda_report.xheader = bytes.fromhex(report_dict["xheader"]) if "xheader" in report_dict else None
-        smda_report.xmetadata = report_dict["xmetadata"] if "xmetadata" in report_dict else None
+        smda_report.xmetadata = report_dict.get("xmetadata", None)
         return smda_report
 
     def toDict(self) -> dict:
@@ -286,7 +295,7 @@ class SmdaReport(object):
             "disassembly_errors": self.disassembly_errors,
             "execution_time": self.execution_time,
             "identified_alignment": self.identified_alignment,
-            "metadata" : {
+            "metadata": {
                 "binweight": self.binweight,
                 "component": self.component,
                 "family": self.family,
@@ -309,20 +318,6 @@ class SmdaReport(object):
             "xmetadata": self.xmetadata,
         }
 
-    @classmethod
-    def fromFile(cls, input_filepath) -> Optional["SmdaReport"]:
-        smda_report = cls(None)
-        if not os.path.exists(input_filepath):
-            LOGGER.error(f"File could not be found: {input_filepath}")
-        else:
-            try:
-                with open(input_filepath, "r") as fin:
-                    data = json.load(fin)
-                smda_report = SmdaReport().fromDict(data)
-            except Exception as e:
-                LOGGER.error(f"Import failed on: {input_filepath}")
-        return smda_report
-
     def toFile(self, output_filepath) -> None:
         with open(output_filepath, "w") as fout:
             json.dump(self.toDict(), fout, indent=1, sort_keys=True)
@@ -330,5 +325,5 @@ class SmdaReport(object):
 
     def __str__(self):
         if self.status == "error":
-            return "{:>6.3f}s -> {}".format(self.execution_time, self.message)
-        return "{:>6.3f}s -> (architecture: {}.{}bit, base_addr: 0x{:08x}): {} functions".format(self.execution_time, self.architecture, self.bitness, self.base_addr, len(self.xcfg))
+            return f"{self.execution_time:>6.3f}s -> {self.message}"
+        return f"{self.execution_time:>6.3f}s -> (architecture: {self.architecture}.{self.bitness}bit, base_addr: 0x{self.base_addr:08x}): {len(self.xcfg)} functions"

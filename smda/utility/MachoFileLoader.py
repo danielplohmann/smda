@@ -5,9 +5,10 @@ LOGGER = logging.getLogger(__name__)
 LIEF_AVAILABLE = False
 try:
     import lief
+
     lief.logging.disable()
     LIEF_AVAILABLE = True
-except:
+except ImportError:
     LOGGER.warning("LIEF not available, will not be able to parse data from MachO files.")
 
 
@@ -19,14 +20,13 @@ def align(v, alignment):
         return v + (alignment - remainder)
 
 
-class MachoFileLoader(object):
-
+class MachoFileLoader:
     @staticmethod
     def isCompatible(data):
         if not LIEF_AVAILABLE:
             return False
         # check for MachO magic
-        return data[:4] == b"\xCE\xFA\xED\xFE" or data[:4] == b"\xCF\xFA\xED\xFE"
+        return data[:4] == b"\xce\xfa\xed\xfe" or data[:4] == b"\xcf\xfa\xed\xfe"
 
     @staticmethod
     def getBaseAddress(binary):
@@ -86,7 +86,7 @@ class MachoFileLoader(object):
 
         if not max_virtual_address:
             LOGGER.debug("MachO: no section or segment data")
-            return bytes()
+            return b""
 
         # create mapped region.
         # offset 0x0 corresponds to the MachO base address
@@ -109,9 +109,15 @@ class MachoFileLoader(object):
             if not segment.virtual_address:
                 continue
             rva = segment.virtual_address - base_addr
-            LOGGER.debug("MachO: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)", segment.file_size, rva, rva + segment.file_size, segment.virtual_address)
+            LOGGER.debug(
+                "MachO: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)",
+                segment.file_size,
+                rva,
+                rva + segment.file_size,
+                segment.virtual_address,
+            )
             assert len(segment.content) == segment.file_size
-            mapped_binary[rva:rva + segment.file_size] = segment.content
+            mapped_binary[rva : rva + segment.file_size] = segment.content
 
         # map sections.
         # may overwrite some segment data, but we expect the content to be identical.
@@ -119,16 +125,26 @@ class MachoFileLoader(object):
             if not section.virtual_address:
                 continue
             rva = section.virtual_address - base_addr
-            LOGGER.debug("MachO: mapping section of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)", section.size, rva, rva + section.size, section.virtual_address)
+            LOGGER.debug(
+                "MachO: mapping section of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)",
+                section.size,
+                rva,
+                rva + section.size,
+                section.virtual_address,
+            )
             # section may be empty or smaller, so we may not always copy data here
             if len(section.content) == section.size:
-                mapped_binary[rva:rva + section.size] = section.content
+                mapped_binary[rva : rva + section.size] = section.content
             # assert len(section.content) == section.size
 
         # map header.
         # we consider the headers to be any data found before the first section/segment
         if min_raw_offset != 0:
-            LOGGER.debug("MachO: mapping 0x%x bytes of header at 0x0 (0x%x)", min_raw_offset, base_addr)
+            LOGGER.debug(
+                "MachO: mapping 0x%x bytes of header at 0x0 (0x%x)",
+                min_raw_offset,
+                base_addr,
+            )
             mapped_binary[0:min_raw_offset] = binary[0:min_raw_offset]
 
         LOGGER.debug("MachO: final mapped size: 0x%x", len(mapped_binary))
@@ -139,9 +155,15 @@ class MachoFileLoader(object):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
         machine_type = macho_file.header.cpu_type
-        if machine_type in [lief.MachO.Header.CPU_TYPE.X86_64, lief.MachO.Header.CPU_TYPE.X86]:
+        if machine_type in [
+            lief.MachO.Header.CPU_TYPE.X86_64,
+            lief.MachO.Header.CPU_TYPE.X86,
+        ]:
             return "intel"
-        elif machine_type == [lief.MachO.Header.CPU_TYPE.ARM64, lief.MachO.Header.CPU_TYPE.ARM]:
+        elif machine_type == [
+            lief.MachO.Header.CPU_TYPE.ARM64,
+            lief.MachO.Header.CPU_TYPE.ARM,
+        ]:
             return "arm"
         raise NotImplementedError("SMDA does not support this architecture yet.")
 
@@ -170,7 +192,9 @@ class MachoFileLoader(object):
                 result.append(this_area)
                 index += 1
             else:
-                merged_code_areas = merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2:]
+                merged_code_areas = (
+                    merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2 :]
+                )
         return merged_code_areas
 
     @staticmethod
@@ -178,9 +202,9 @@ class MachoFileLoader(object):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
         ins_flags = (
-            lief.MachO.Section.FLAGS.PURE_INSTRUCTIONS.value +
-            lief.MachO.Section.FLAGS.SELF_MODIFYING_CODE.value +
-            lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS.value
+            lief.MachO.Section.FLAGS.PURE_INSTRUCTIONS.value
+            + lief.MachO.Section.FLAGS.SELF_MODIFYING_CODE.value
+            + lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS.value
         )
         code_areas = []
         for section in macho_file.sections:
@@ -191,5 +215,5 @@ class MachoFileLoader(object):
                 if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])              
+                code_areas.append([section_start, section_end])
         return MachoFileLoader.mergeCodeAreas(code_areas)

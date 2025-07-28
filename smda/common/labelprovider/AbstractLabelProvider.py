@@ -1,19 +1,18 @@
 #!/usr/bin/python
 
+import logging
 from abc import abstractmethod
 
-import logging
 LOGGER = logging.getLogger(__name__)
 
 
 class AbstractLabelProvider:
-
     def __init__(self, config):
         raise NotImplementedError
 
     @abstractmethod
     def update(self, binary_info):
-        """If the LabelProvider needs to parse from the given target, update() can be used to populate the provider """
+        """If the LabelProvider needs to parse from the given target, update() can be used to populate the provider"""
         raise NotImplementedError
 
     @abstractmethod
@@ -38,5 +37,5 @@ class AbstractLabelProvider:
 
     @abstractmethod
     def getFunctionSymbols(self):
-        """Return all function symbol data """
+        """Return all function symbol data"""
         return {}
