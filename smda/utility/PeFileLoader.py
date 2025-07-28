@@ -88,7 +88,7 @@ class PeFileLoader:
     def getBitness(binary):
         bitness_id = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
-        if pe_offset and pe_offset and len(binary) >= pe_offset + 0x6:
+        if pe_offset and len(binary) >= pe_offset + 0x6:
             bitness_id = struct.unpack("H", binary[pe_offset + 0x4 : pe_offset + 0x6])[0]
         return PeFileLoader.BITNESS_MAP.get(bitness_id, 0)
 
