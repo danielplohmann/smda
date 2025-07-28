@@ -1,15 +1,12 @@
-class BracketQueue(object):
+class BracketQueue:
     """
     This queue is tailored based on our research rsults regarding function entry point identification
     """
+
     def __init__(self, candidates=None, initial_brackets=None):
         self.update_count = 0
         self.update_shift_count = 0
-        self.brackets = {
-            0: {},
-            1: {},
-            2: {}
-        }
+        self.brackets = {0: {}, 1: {}, 2: {}}
         if candidates is not None:
             for candidate in candidates:
                 self.add(candidate)
@@ -17,7 +14,7 @@ class BracketQueue(object):
         elif initial_brackets is not None:
             self.brackets = initial_brackets
             self.ensure_order()
-        
+
     def __iter__(self):
         return self
 
@@ -51,7 +48,12 @@ class BracketQueue(object):
     def ensure_order(self):
         for bracket_index in range(2, -1, -1):
             if self.brackets[bracket_index]:
-                self.brackets[bracket_index] = {offset: candidate for offset, candidate in sorted(self.brackets[bracket_index].items(), key=lambda x: x[1].getScore())}
+                self.brackets[bracket_index] = dict(
+                    sorted(
+                        self.brackets[bracket_index].items(),
+                        key=lambda x: x[1].getScore(),
+                    )
+                )
 
     def __str__(self):
         return f"BracketQueue | 2: {len(self.brackets[2])} candidates, 1: {len(self.brackets[1])} candidates, 0: {len(self.brackets[0])} candidates,"

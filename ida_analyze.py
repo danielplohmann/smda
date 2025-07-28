@@ -1,13 +1,12 @@
-from smda.SmdaConfig import SmdaConfig
-from smda.Disassembler import Disassembler
-
 from export import detectBackend
-
+from smda.Disassembler import Disassembler
+from smda.SmdaConfig import SmdaConfig
 
 if __name__ == "__main__":
     BACKEND, VERSION = detectBackend()
     if BACKEND == "IDA":
         from smda.ida.IdaInterface import IdaInterface
+
         ida_interface = IdaInterface()
         binary = ida_interface.getBinary()
         base_addr = ida_interface.getBaseAddr()

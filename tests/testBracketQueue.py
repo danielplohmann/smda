@@ -1,13 +1,11 @@
 #!/usr/bin/python
 
 import logging
-import os
 import unittest
 
-from smda.utility.BracketQueue import BracketQueue
 from smda.common.BinaryInfo import BinaryInfo
 from smda.intel.FunctionCandidate import FunctionCandidate
-
+from smda.utility.BracketQueue import BracketQueue
 
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
@@ -111,36 +109,36 @@ B9 4F E6 40 BB EB 0E 85 CE 75 0A 0D 11 47 00 00 C1 E0 10 0B C8 89 0D 1C D6 41 00
 18 D6 41 00 5E C3 33 C0 C3 33 C0 40 C3 B8 00 40 00 00 C3 68 20 E2 41 00 FF 15 2C 60 41 00 C3
 """
 FEP_OFFSETS = {
-0x0: [],
-0x30: [],
-0x160: [],
-0x200: [0x160],
-0x270: [0x54B],
-0x4C0: [],
-0x4D0: [0xBAD],
-0x500: [],
-0x53A: [0x610],
-0x54B: [0x54B],
-0x5F6: [0x54B],
-0x5FE: [0x933],
-0x610: [0x610],
-0x792: [0x7C4],
-0x79C: [0x96C, 0x9F3, 0x933],
-0x7C4: [0x7C4],
-0x8BD: [0xBAD],
-0x901: [],
-0x933: [0x96C],
-0x96C: [],
-0x9F3: [0x270],
-0xA87: [],
-0xAA4: [0xBAD, 0x9F3, 0x54B, 0x8BD],
-0xACC: [],
-0xAF9: [0x270],
-0xB0E: [],
-0xB5B: [0x160],
-0xBA6: [0x933, 0x160],
-0xBA9: [0x270],
-0xBAD: [],
+    0x0: [],
+    0x30: [],
+    0x160: [],
+    0x200: [0x160],
+    0x270: [0x54B],
+    0x4C0: [],
+    0x4D0: [0xBAD],
+    0x500: [],
+    0x53A: [0x610],
+    0x54B: [0x54B],
+    0x5F6: [0x54B],
+    0x5FE: [0x933],
+    0x610: [0x610],
+    0x792: [0x7C4],
+    0x79C: [0x96C, 0x9F3, 0x933],
+    0x7C4: [0x7C4],
+    0x8BD: [0xBAD],
+    0x901: [],
+    0x933: [0x96C],
+    0x96C: [],
+    0x9F3: [0x270],
+    0xA87: [],
+    0xAA4: [0xBAD, 0x9F3, 0x54B, 0x8BD],
+    0xACC: [],
+    0xAF9: [0x270],
+    0xB0E: [],
+    0xB5B: [0x160],
+    0xBA6: [0x933, 0x160],
+    0xBA9: [0x270],
+    0xBAD: [],
 }
 
 
@@ -209,15 +207,15 @@ class BracketQueueTestSuite(unittest.TestCase):
 
     def testQueueOrder(self):
         candidates, queue = self.fillQueue()
-        for index, candidate in enumerate(queue):
+        for _index, candidate in enumerate(queue):
             print(candidate)
         candidates, queue = self.fillQueue()
         print("*" * 20)
         # run a check that ensures that scores per bracket are decreasing linearly
         queue.ensure_order()
-        for index, candidate in enumerate(queue):
+        for _index, candidate in enumerate(queue):
             print(candidate)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

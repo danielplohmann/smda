@@ -1,4 +1,4 @@
-class OrdinalHelper(object):
+class OrdinalHelper:
     # TODO POC implementation, extend list. ole32.dll and mfc42.dll are candidates here
     ORDINALS = {
         "ws2_32.dll": {
@@ -34,7 +34,7 @@ class OrdinalHelper(object):
             20: "sendto",
             21: "setsockopt",
             22: "shutdown",
-            23: "socket"
+            23: "socket",
         }
     }
 

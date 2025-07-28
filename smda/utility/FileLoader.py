@@ -1,11 +1,12 @@
 import os
-from smda.utility.PeFileLoader import PeFileLoader
+
+from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.MachoFileLoader import MachoFileLoader
-from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
+from smda.utility.PeFileLoader import PeFileLoader
 
-class FileLoader(object):
 
+class FileLoader:
     _file_path = None
     _map_file = False
     _data = b""

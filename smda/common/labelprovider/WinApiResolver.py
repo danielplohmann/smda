@@ -1,27 +1,27 @@
 #!/usr/bin/python
 
-import os
 import json
 import logging
+import os
 
 import lief
+
 lief.logging.disable()
 
-from .AbstractLabelProvider import AbstractLabelProvider
-from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
+from smda.common.labelprovider.OrdinalHelper import OrdinalHelper  # noqa: E402
+
+from .AbstractLabelProvider import AbstractLabelProvider  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
 
 class WinApiResolver(AbstractLabelProvider):
-    """ Minimal WinAPI reference resolver, extracted from ApiScout """
+    """Minimal WinAPI reference resolver, extracted from ApiScout"""
 
     def __init__(self, config):
         self._config = config
         self._has_64bit = False
-        self._api_map = {
-            "lief": {}
-        }
+        self._api_map = {"lief": {}}
         self._os_name = None
         self._is_buffer = False
         for os_name, db_filepath in self._config.API_COLLECTION_FILES.items():
@@ -31,18 +31,24 @@ class WinApiResolver(AbstractLabelProvider):
     def update(self, binary_info):
         self._is_buffer = binary_info.is_buffer
         if not self._is_buffer:
-            #setup import table info from LIEF
+            # setup import table info from LIEF
             lief_binary = lief.parse(binary_info.raw_data)
             if not isinstance(lief_binary, lief.PE.Binary):
                 return
             for imported_library in lief_binary.imports:
                 for func in imported_library.entries:
                     if func.name:
-                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (imported_library.name.lower(), func.name)
+                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (
+                            imported_library.name.lower(),
+                            func.name,
+                        )
                     elif func.is_ordinal:
                         resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
-                        ordinal_name = resolved_ordinal if resolved_ordinal else "#%s" % func.ordinal
-                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (imported_library.name.lower(), ordinal_name)
+                        ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
+                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (
+                            imported_library.name.lower(),
+                            ordinal_name,
+                        )
 
     def setOsName(self, os_name):
         self._os_name = os_name
@@ -50,10 +56,13 @@ class WinApiResolver(AbstractLabelProvider):
     def _loadDbFile(self, os_name, db_filepath):
         api_db = {}
         if os.path.isfile(db_filepath):
-            with open(db_filepath, "r") as f_json:
+            with open(db_filepath) as f_json:
                 api_db = json.loads(f_json.read())
         else:
-            LOGGER.error("Can't find ApiScout collection file: \"%s\" -- continuing without ApiResolver.", db_filepath)
+            LOGGER.error(
+                'Can\'t find ApiScout collection file: "%s" -- continuing without ApiResolver.',
+                db_filepath,
+            )
             return
         num_apis_loaded = 0
         api_map = {}
@@ -61,7 +70,7 @@ class WinApiResolver(AbstractLabelProvider):
             LOGGER.debug("  building address map for: %s", dll_entry)
             for export in api_db["dlls"][dll_entry]["exports"]:
                 num_apis_loaded += 1
-                api_name = "%s" % (export["name"])
+                api_name = "{}".format(export["name"])
                 if api_name == "None":
                     api_name = "None<{}>".format(export["ordinal"])
                 dll_name = "_".join(dll_entry.split("_")[2:])
@@ -70,7 +79,12 @@ class WinApiResolver(AbstractLabelProvider):
                 base_address = api_db["dlls"][dll_entry]["base_address"]
                 virtual_address = base_address + export["address"]
                 api_map[virtual_address] = (dll_name, api_name)
-        LOGGER.debug("loaded %d exports from %d DLLs (%s).", num_apis_loaded, len(api_db["dlls"]), api_db["os_name"])
+        LOGGER.debug(
+            "loaded %d exports from %d DLLs (%s).",
+            num_apis_loaded,
+            len(api_db["dlls"]),
+            api_db["os_name"],
+        )
         self._api_map[os_name] = api_map
 
     def isApiProvider(self):

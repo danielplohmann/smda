@@ -1,5 +1,5 @@
-from typing import Optional
 import logging
+from typing import Optional
 
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
@@ -9,7 +9,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 class SmdaInstruction:
-
     smda_function = None
     offset = None
     bytes = None
@@ -44,12 +43,12 @@ class SmdaInstruction:
     def getDetailed(self):
         if self.detailed is None:
             capstone = self.smda_function.smda_report.getCapstone()
-            with_details = [i for i in capstone.disasm(bytes.fromhex(self.bytes), self.offset)]
+            with_details = list(capstone.disasm(bytes.fromhex(self.bytes), self.offset))
             # TODO
-            # this may diverge on instructions like 
-            # 9bd93c24 - 
+            # this may diverge on instructions like
+            # 9bd93c24 -
             # <CsInsn 0x4d3f1f0 [9b]: wait >
-            # 1 wait 
+            # 1 wait
             # <CsInsn 0x4d3f1f1 [d93c24]: fnstcw word ptr [esp]>
             # 3 fnstcw word ptr [esp]
             # which is split by capstone but treated as one / prefix by IDA
@@ -60,7 +59,9 @@ class SmdaInstruction:
             # WAIT instruction before the wait version and the NOP instruction
             # before the no-wait version.
             if len(with_details) > 1:
-                LOGGER.warn(f"Sequence {self.bytes} disassembles to {len(with_details)} instructions but expected one - taking the last instruction only!")
+                LOGGER.warn(
+                    f"Sequence {self.bytes} disassembles to {len(with_details)} instructions but expected one - taking the last instruction only!"
+                )
                 self.detailed = with_details[-1]
             else:
                 assert len(with_details) == 1
@@ -87,9 +88,20 @@ class SmdaInstruction:
             return escaper.escapeToOpcodeOnly(self)
         return self.bytes
 
-    def getEscapedBinary(self, escaper, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
+    def getEscapedBinary(
+        self,
+        escaper,
+        escape_intraprocedural_jumps=False,
+        lower_addr=None,
+        upper_addr=None,
+    ):
         if escaper:
-            return escaper.escapeBinary(self, escape_intraprocedural_jumps=escape_intraprocedural_jumps, lower_addr=lower_addr, upper_addr=upper_addr)
+            return escaper.escapeBinary(
+                self,
+                escape_intraprocedural_jumps=escape_intraprocedural_jumps,
+                lower_addr=lower_addr,
+                upper_addr=upper_addr,
+            )
         return self.bytes
 
     @classmethod
@@ -109,4 +121,4 @@ class SmdaInstruction:
         return self.offset
 
     def __str__(self):
-        return "0x{:08x}: ({:>14s}) - {} {}".format(self.offset, self.bytes, self.mnemonic, self.operands)
+        return f"0x{self.offset:08x}: ({self.bytes:>14s}) - {self.mnemonic} {self.operands}"

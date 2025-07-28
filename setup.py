@@ -1,36 +1,29 @@
-# -*- coding: utf-8 -*-
-import sys
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
-with open("README.md", "r") as fh:
+with open("README.md") as fh:
     long_description = fh.read()
 
 
 requirements = ["capstone", "dncil", "dnfile"]
 
-if sys.version_info >= (3, 0):
-    # py3
-    requirements.append("lief>=0.16.0")
-else:
-    # py2 - newer LIEF is Python3 only
-    requirements.append("lief==0.9.0")
+requirements.append("lief>=0.16.0")
 
 
 setup(
-    name='smda',
+    name="smda",
     # note to self: always change this in config as well.
-    version='2.2.3',
-    description='A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.',
+    version="2.2.3",
+    description="A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.",
     long_description_content_type="text/markdown",
     long_description=long_description,
-    author='Daniel Plohmann',
-    author_email='daniel.plohmann@mailbox.org',
-    url='https://github.com/danielplohmann/smda',
+    author="Daniel Plohmann",
+    author_email="daniel.plohmann@mailbox.org",
+    url="https://github.com/danielplohmann/smda",
     license="BSD 2-Clause",
-    packages=find_packages(exclude=('tests', 'docs')),
+    packages=find_packages(exclude=("tests", "docs")),
     install_requires=requirements,
     data_files=[
-        ('', ['LICENSE']),
+        ("", ["LICENSE"]),
     ],
     classifiers=[
         "Development Status :: 4 - Beta",

@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
+import hashlib
 import re
 import struct
-import hashlib
 from typing import Iterator
 
-from smda.common.Tarjan import Tarjan
-from smda.common.CodeXref import CodeXref
-from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
+from smda.common.SmdaBasicBlock import SmdaBasicBlock
+from smda.common.Tarjan import Tarjan
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
+
 from .SmdaInstruction import SmdaInstruction
 
 
-class SmdaFunction(object):
-
+class SmdaFunction:
     smda_report = None
     offset = None
     blocks = None
@@ -48,9 +47,21 @@ class SmdaFunction(object):
             self.is_exported = self.offset in disassembly.exported_functions
             # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
-            self.characteristics = disassembly.candidates[function_offset].getCharacteristics() if function_offset in disassembly.candidates else None
-            self.confidence = disassembly.candidates[function_offset].getConfidence() if function_offset in disassembly.candidates else None
-            self.tfidf = disassembly.candidates[function_offset].getTfIdf() if function_offset in disassembly.candidates else None
+            self.characteristics = (
+                disassembly.candidates[function_offset].getCharacteristics()
+                if function_offset in disassembly.candidates
+                else None
+            )
+            self.confidence = (
+                disassembly.candidates[function_offset].getConfidence()
+                if function_offset in disassembly.candidates
+                else None
+            )
+            self.tfidf = (
+                disassembly.candidates[function_offset].getTfIdf()
+                if function_offset in disassembly.candidates
+                else None
+            )
             if config and config.WITH_STRINGS:
                 self.stringrefs = disassembly.getStringRefsForFunction(function_offset)
             if config and config.CALCULATE_HASHING:
@@ -87,10 +98,6 @@ class SmdaFunction(object):
     @property
     def num_returns(self):
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
-    
-    @property
-    def opc_hash(self):
-        return self.getOpcHash()
 
     def isApiThunk(self):
         if self.num_instructions != 1:
@@ -98,9 +105,7 @@ class SmdaFunction(object):
         first_ins = self.blocks[self.offset][0]
         if first_ins.mnemonic not in ["jmp", "call"]:
             return False
-        if len(self.apirefs) == 0:
-            return False
-        return True
+        return len(self.apirefs) != 0
 
     def isExported(self):
         return self.is_exported
@@ -117,8 +122,7 @@ class SmdaFunction(object):
 
     def getInstructions(self):
         for block in self.getBlocks():
-            for ins in block.getInstructions():
-                yield ins
+            yield from block.getInstructions()
 
     def getInstructionsForBlock(self, offset) -> Iterator["SmdaInstruction"]:
         if offset is None:
@@ -130,14 +134,12 @@ class SmdaFunction(object):
     def getCodeInrefs(self):
         self.smda_report.initCodeXrefs()
         # potentially lazy initialize CodeXrefs externally via SmdaReport
-        for inref in self.code_inrefs:
-            yield inref
+        yield from self.code_inrefs
 
     def getCodeOutrefs(self):
         self.smda_report.initCodeXrefs()
         # potentially lazy initialize CodeXrefs externally via SmdaReport
-        for outref in self.code_outrefs:
-            yield outref
+        yield from self.code_outrefs
 
     def _calculateSccs(self):
         tarjan = Tarjan(self.blockrefs)
@@ -151,7 +153,7 @@ class SmdaFunction(object):
                 tree = build_dominator_tree(self.blockrefs, self.offset)
                 if tree:
                     nesting_depth = get_nesting_depth(self.blockrefs, tree, self.offset)
-        except:
+        except Exception:
             pass
         return nesting_depth
 
@@ -162,9 +164,16 @@ class SmdaFunction(object):
         escaped_binary_seqs = []
         for _, block in sorted(self.blocks.items()):
             for instruction in block:
-                escaped_binary_seqs.append(instruction.getEscapedBinary(self._escaper, escape_intraprocedural_jumps=True, lower_addr=binary_info.base_addr, upper_addr=binary_info.base_addr + binary_info.binary_size))
+                escaped_binary_seqs.append(
+                    instruction.getEscapedBinary(
+                        self._escaper,
+                        escape_intraprocedural_jumps=True,
+                        lower_addr=binary_info.base_addr,
+                        upper_addr=binary_info.base_addr + binary_info.binary_size,
+                    )
+                )
         return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
-    
+
     def getOpcHash(self):
         return struct.unpack("Q", hashlib.sha256(self.getOpcHashSequence()).digest()[:8])[0]
 
@@ -195,14 +204,14 @@ class SmdaFunction(object):
                     if apiref_str:
                         printable_api = f"[{apiref_str}]"
                 if printable_api:
-                    instructions_as_strings.append(f'{smda_ins.offset:x}: {smda_ins.mnemonic} {printable_api}')
+                    instructions_as_strings.append(f"{smda_ins.offset:x}: {smda_ins.mnemonic} {printable_api}")
                 else:
-                    instructions_as_strings.append(f'{smda_ins.offset:x}: {smda_ins.mnemonic} {smda_ins.operands}')
-            block_entry += "\l".join(instructions_as_strings)
+                    instructions_as_strings.append(f"{smda_ins.offset:x}: {smda_ins.mnemonic} {smda_ins.operands}")
+            block_entry += r"\l".join(instructions_as_strings)
             dot_graph += block_entry + '"];\n'
             if smda_block.offset in self.blockrefs:
                 for target_offset in self.blockrefs[smda_block.offset]:
-                    dot_graph += f'  Node0x{smda_block.offset:x} -> Node0x{target_offset:x};\n'
+                    dot_graph += f"  Node0x{smda_block.offset:x} -> Node0x{target_offset:x};\n"
         dot_graph += "}"
         return dot_graph
 
@@ -219,15 +228,15 @@ class SmdaFunction(object):
         smda_function.inrefs = function_dict["inrefs"]
         smda_function.outrefs = {int(k): v for k, v in function_dict["outrefs"].items()}
         # provide some legacy support by assuming functions are not exported for SMDA reports < 1.7.0
-        smda_function.is_exported = function_dict["is_exported"] if "is_exported" in function_dict else False
+        smda_function.is_exported = function_dict.get("is_exported", False)
         smda_function.binweight = function_dict["metadata"]["binweight"]
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]
         smda_function.function_name = function_dict["metadata"]["function_name"]
-        smda_function.pic_hash = function_dict["metadata"]["pic_hash"] if "pic_hash" in function_dict["metadata"] else None
+        smda_function.pic_hash = function_dict["metadata"].get("pic_hash", None)
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
-        smda_function.stringrefs = function_dict["stringrefs"] if "stringrefs" in function_dict else {}
+        smda_function.stringrefs = function_dict.get("stringrefs", {})
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         else:
@@ -236,7 +245,7 @@ class SmdaFunction(object):
         if version and version.startswith("MCRIT4IDA"):
             version = version.rsplit(" ", 1)[-1]
         # modernize older reports on import
-        if version and re.match("(v)?\d+(.\d+)*", version):
+        if version and re.match(r"(v)?\d+(.\d+)*", version):
             version = version.replace("v", "")
             version = [int(v) for v in version.split(".")]
             if version < [1, 3, 0]:
@@ -260,7 +269,7 @@ class SmdaFunction(object):
         blocks_as_dict = {}
         for addr, block in self.blocks.items():
             blocks_as_dict[addr] = [ins.toDict() for ins in block]
-        return  {
+        return {
             "offset": self.offset,
             "blocks": blocks_as_dict,
             "apirefs": self.apirefs,
@@ -277,12 +286,12 @@ class SmdaFunction(object):
                 "pic_hash": self.pic_hash,
                 "nesting_depth": self.nesting_depth,
                 "strongly_connected_components": self.strongly_connected_components,
-                "tfidf": self.tfidf
-            }
+                "tfidf": self.tfidf,
+            },
         }
 
     def __int__(self):
         return self.offset
 
     def __str__(self):
-        return "0x{:08x}: (->{:>4d}, {:>4d}->) {:>3d} blocks, {:>4d} instructions.".format(self.offset, self.num_inrefs, self.num_outrefs, self.num_blocks, self.num_instructions)
+        return f"0x{self.offset:08x}: (->{self.num_inrefs:>4d}, {self.num_outrefs:>4d}->) {self.num_blocks:>3d} blocks, {self.num_instructions:>4d} instructions."

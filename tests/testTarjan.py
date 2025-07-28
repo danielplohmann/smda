@@ -1,12 +1,9 @@
 #!/usr/bin/python
 
 import logging
-import os
 import unittest
 
 from smda.common.Tarjan import Tarjan
-
-from .context import config
 
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
@@ -29,5 +26,5 @@ class TarjanTestSuite(unittest.TestCase):
         self.assertEqual(1001, len(sccs))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

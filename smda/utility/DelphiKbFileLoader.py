@@ -3,8 +3,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
-class DelphiKbFileLoader(object):
-
+class DelphiKbFileLoader:
     @staticmethod
     def isCompatible(data):
         return data[:23] == b"IDR Knowledge Base File"

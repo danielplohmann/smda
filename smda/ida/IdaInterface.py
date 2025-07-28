@@ -1,3 +1,4 @@
+import contextlib
 import re
 
 from .BackendInterface import BackendInterface
@@ -5,31 +6,30 @@ from .BackendInterface import BackendInterface
 try:
     import idaapi
     import idautils
-except:
+except ImportError:
     pass
 
 try:
     # we only need these when we are in IDA - IDA 7.4 and above
-    import ida_idaapi
+    import ida_bytes
     import ida_funcs
     import ida_gdl
-    import ida_bytes
+    import ida_idaapi
     import ida_nalt
-    import ida_segment
     import ida_name
-except:
+    import ida_segment
+except ImportError:
     pass
 
-try:
+with contextlib.suppress(ImportError):
     # we only need these when we are in IDA - IDA 7.3 and below
     import idc
-except:
-    pass
 
 
-class IdaInterface(object):
+class IdaInterface:
     # derived from https://python-3-patterns-idioms-test.readthedocs.io/en/latest/Singleton.html
     instance = None
+
     def __init__(self):
         if not IdaInterface.instance:
             if idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 900:
@@ -47,22 +47,16 @@ class IdaInterface(object):
 
 
 class Ida74Interface(BackendInterface):
-
     def __init__(self):
         self.version = "IDA Pro 7.4"
-        self._processor_map = {
-            "metapc": "intel"
-        }
+        self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
 
     def getArchitecture(self):
         # https://reverseengineering.stackexchange.com/a/11398
         info = ida_idaapi.get_inf_structure()
-        if idaapi.IDA_SDK_VERSION >= 800:
-            procname = info.procname
-        else:
-            procname = info.procName
+        procname = info.procname if idaapi.IDA_SDK_VERSION >= 800 else info.procName
         if procname in self._processor_map:
             return self._processor_map[procname]
         else:
@@ -81,7 +75,7 @@ class Ida74Interface(BackendInterface):
         return bits
 
     def getFunctions(self):
-        return sorted([offset for offset in idautils.Functions()])
+        return sorted(idautils.Functions())
 
     def getBlocks(self, function_offset):
         blocks = []
@@ -122,7 +116,7 @@ class Ida74Interface(BackendInterface):
 
     def getBaseAddr(self):
         base_addr = 0
-        segment_starts = [ea for ea in idautils.Segments()]
+        segment_starts = list(idautils.Segments())
         if segment_starts:
             first_segment_start = segment_starts[0]
             # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
@@ -141,7 +135,7 @@ class Ida74Interface(BackendInterface):
     def getApiMap(self):
         self._api_map = {}
         num_imports = ida_nalt.get_import_module_qty()
-        for i in range(0, num_imports):
+        for i in range(num_imports):
             self._import_module_name = ida_nalt.get_import_module_name(i)
             ida_nalt.enum_import_names(i, self._cbEnumImports)
         return self._api_map
@@ -157,7 +151,7 @@ class Ida74Interface(BackendInterface):
 
     def makeNameEx(self, address, name, warning_level=None):
         if warning_level is None:
-            warning_level=idc.SN_NOWARN
+            warning_level = idc.SN_NOWARN
         return idc.set_name(address, name, warning_level)
 
     def _cbEnumImports(self, addr, name, ordinal):
@@ -169,14 +163,10 @@ class Ida74Interface(BackendInterface):
         return True
 
 
-
 class Ida73Interface(BackendInterface):
-
     def __init__(self):
         self.version = "IDA Pro 7.3 and below"
-        self._processor_map = {
-            "metapc": "intel"
-        }
+        self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
 
@@ -202,7 +192,7 @@ class Ida73Interface(BackendInterface):
         return bits
 
     def getFunctions(self):
-        return sorted([offset for offset in idautils.Functions()])
+        return sorted(idautils.Functions())
 
     def getBlocks(self, function_offset):
         blocks = []
@@ -240,7 +230,7 @@ class Ida73Interface(BackendInterface):
         return function_symbols
 
     def getBaseAddr(self):
-        segment_starts = [ea for ea in idautils.Segments()]
+        segment_starts = list(idautils.Segments())
         first_segment_start = segment_starts[0]
         # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
         first_segment_start = (first_segment_start / 0x10000) * 0x10000
@@ -248,7 +238,7 @@ class Ida73Interface(BackendInterface):
 
     def getBinary(self):
         result = b""
-        segment_starts = [ea for ea in idautils.Segments()]
+        segment_starts = list(idautils.Segments())
         offsets = []
         start_len = 0
         for start in segment_starts:
@@ -261,7 +251,7 @@ class Ida73Interface(BackendInterface):
     def getApiMap(self):
         self._api_map = {}
         num_imports = idaapi.get_import_module_qty()
-        for i in range(0, num_imports):
+        for i in range(num_imports):
             self._import_module_name = idaapi.get_import_module_name(i)
             idaapi.enum_import_names(i, self._cbEnumImports)
         return self._api_map
@@ -275,7 +265,7 @@ class Ida73Interface(BackendInterface):
 
     def makeNameEx(self, address, name, warning_level=None):
         if warning_level is None:
-            warning_level=idc.SN_NOWARN
+            warning_level = idc.SN_NOWARN
         return idc.set_name(address, name, warning_level)
 
     def _cbEnumImports(self, addr, name, ordinal):
@@ -286,13 +276,11 @@ class Ida73Interface(BackendInterface):
             self._api_map[addr] = name
         return True
 
-class Ida90Interface(BackendInterface):
 
+class Ida90Interface(BackendInterface):
     def __init__(self):
         self.version = "IDA Pro 9.0"
-        self._processor_map = {
-            "metapc": "intel"
-        }
+        self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
 
@@ -315,7 +303,7 @@ class Ida90Interface(BackendInterface):
         return bits
 
     def getFunctions(self):
-        return sorted([offset for offset in idautils.Functions()])
+        return sorted(idautils.Functions())
 
     def getBlocks(self, function_offset):
         blocks = []
@@ -356,7 +344,7 @@ class Ida90Interface(BackendInterface):
 
     def getBaseAddr(self):
         base_addr = 0
-        segment_starts = [ea for ea in idautils.Segments()]
+        segment_starts = list(idautils.Segments())
         if segment_starts:
             first_segment_start = segment_starts[0]
             # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
@@ -375,7 +363,7 @@ class Ida90Interface(BackendInterface):
     def getApiMap(self):
         self._api_map = {}
         num_imports = ida_nalt.get_import_module_qty()
-        for i in range(0, num_imports):
+        for i in range(num_imports):
             self._import_module_name = ida_nalt.get_import_module_name(i)
             ida_nalt.enum_import_names(i, self._cbEnumImports)
         return self._api_map
@@ -391,7 +379,7 @@ class Ida90Interface(BackendInterface):
 
     def makeNameEx(self, address, name, warning_level=None):
         if warning_level is None:
-            warning_level=idc.SN_NOWARN
+            warning_level = idc.SN_NOWARN
         return idc.set_name(address, name, warning_level)
 
     def _cbEnumImports(self, addr, name, ordinal):

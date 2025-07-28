@@ -3,6 +3,7 @@
 import logging
 
 from smda.utility.PeFileLoader import PeFileLoader
+
 from .AbstractLabelProvider import AbstractLabelProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -10,18 +11,20 @@ LOGGER = logging.getLogger(__name__)
 try:
     import pdbparse
     from pdbparse.undname import undname
-except:
+except ImportError:
     pdbparse = None
-    LOGGER.debug("3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available.")
+    LOGGER.debug(
+        "3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available."
+    )
 
 
-class DummyOmap(object):
+class DummyOmap:
     def remap(self, addr):
         return addr
 
 
 class PdbSymbolProvider(AbstractLabelProvider):
-    """ Minimal resolver for PDB symbols """
+    """Minimal resolver for PDB symbols"""
 
     def __init__(self, config):
         self._config = config
@@ -51,7 +54,11 @@ class PdbSymbolProvider(AbstractLabelProvider):
             pdb = pdbparse.parse(binary_info.file_path)
             self._parseSymbols(pdb)
         except Exception as exc:
-            LOGGER.error("Failed parsing \"%s\" with exception type: %s", binary_info.file_path, type(exc))
+            LOGGER.error(
+                'Failed parsing "%s" with exception type: %s',
+                binary_info.file_path,
+                type(exc),
+            )
 
     def _parseSymbols(self, pdb):
         try:
@@ -67,7 +74,7 @@ class PdbSymbolProvider(AbstractLabelProvider):
                 if len(sects) < sym.segment:
                     continue
                 virt_base = sects[sym.segment - 1].VirtualAddress
-                function_address = (self._base_addr + omap.remap(off + virt_base))
+                function_address = self._base_addr + omap.remap(off + virt_base)
                 demangled_name = undname(sym.name)
                 if sym.symtype == 2:
                     # print("0x%x + 0x%x + 0x%x = 0x%x: %s || %s (type: %d)" % (self._base_addr, off, virt_base, function_address, sym.name, demangled_name, sym.symtype))

@@ -1,26 +1,23 @@
-import hashlib
 import datetime
-import json
-import os
-import traceback
+import hashlib
 import logging
+import traceback
 
-from smda.utility.FileLoader import FileLoader
-from smda.utility.MemoryFileLoader import MemoryFileLoader
-from smda.utility.StringExtractor import extract_strings
-from smda.SmdaConfig import SmdaConfig
+from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
-from smda.intel.IntelDisassembler import IntelDisassembler
-from smda.cil.CilDisassembler import CilDisassembler
 from smda.ida.IdaExporter import IdaExporter
+from smda.intel.IntelDisassembler import IntelDisassembler
+from smda.SmdaConfig import SmdaConfig
+from smda.utility.FileLoader import FileLoader
+from smda.utility.MemoryFileLoader import MemoryFileLoader
+from smda.utility.StringExtractor import extract_strings
 
 LOGGER = logging.getLogger(__name__)
 
 
-class Disassembler(object):
-
+class Disassembler:
     def __init__(self, config=None, backend=None):
         if config is None:
             config = SmdaConfig()
@@ -38,7 +35,7 @@ class Disassembler(object):
         self.disassembly = None
 
     def initDisassembler(self, architecture="intel"):
-        """ Initialize disassembler backend to given architecture, if not initialized yet, default: intel """
+        """Initialize disassembler backend to given architecture, if not initialized yet, default: intel"""
         if self.disassembler is None:
             if architecture == "intel":
                 self.disassembler = IntelDisassembler(self.config)
@@ -61,12 +58,14 @@ class Disassembler(object):
             function_strings = []
             for string_result in extract_strings(smda_function, mode=mode):
                 string, referencing_addr, string_addr, string_type = string_result
-                function_strings.append({
-                    "string": string,
-                    "ins_addr": referencing_addr,
-                    "data_addr": string_addr,
-                    "type": string_type
-                })
+                function_strings.append(
+                    {
+                        "string": string,
+                        "ins_addr": referencing_addr,
+                        "data_addr": string_addr,
+                        "type": string_type,
+                    }
+                )
             smda_function.stringrefs = function_strings
 
     def disassembleFile(self, file_path, pdb_path=""):
@@ -130,7 +129,15 @@ class Disassembler(object):
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
-    def disassembleBuffer(self, file_content, base_addr, bitness=None, code_areas=None, oep=None, architecture="intel"):
+    def disassembleBuffer(
+        self,
+        file_content,
+        base_addr,
+        bitness=None,
+        code_areas=None,
+        oep=None,
+        architecture="intel",
+    ):
         """
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)

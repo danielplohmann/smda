@@ -1,14 +1,14 @@
-from collections import defaultdict
-from operator import itemgetter
 import bisect
 import json
+from collections import defaultdict
+from operator import itemgetter
 
-class TailcallAnalyzer(object):
 
+class TailcallAnalyzer:
     def __init__(self):
         self.__jumps = defaultdict(set)
         self.__tmp_jumps = defaultdict(list)
-        self.__functions = list()
+        self.__functions = []
 
     def initFunction(self):
         self.__tmp_jumps = defaultdict(list)
@@ -23,9 +23,12 @@ class TailcallAnalyzer(object):
         self.__functions.append(function_state)
 
     def getTailcalls(self):
-        result = list()
+        result = []
         # jumps sorted by (destination, source)
-        jumps = list(sorted(((s, d) for s in self.__jumps for d in self.__jumps[s]), key=itemgetter(1, 0)))
+        jumps = sorted(
+            ((s, d) for s in self.__jumps for d in self.__jumps[s]),
+            key=itemgetter(1, 0),
+        )
         jumps_dest = [d for s, d in jumps]
         # for each function generate the intervals that contain the instructions
         for function in self.__functions:
@@ -36,25 +39,31 @@ class TailcallAnalyzer(object):
                 continue
             min_addr = min(interval[0] for interval in function_intervals)
             max_addr = max(interval[1] for interval in function_intervals)
-            for source, destination in jumps[bisect.bisect_left(jumps_dest, min_addr):bisect.bisect_right(jumps_dest, max_addr)]:
+            for source, destination in jumps[
+                bisect.bisect_left(jumps_dest, min_addr) : bisect.bisect_right(jumps_dest, max_addr)
+            ]:
                 if (
-                        # the jumps destination is different from the functions start address
-                        destination != function.start_addr and
-                        # the jumps destination is in one of the functions intervals
-                        any((first <= destination <= last) for first, last in function_intervals) and
-                        # the jump originates from outside the function (outside all intervals)
-                        all((source < first or source > last) for first, last in function_intervals)):
-
-                    result.append({
-                        "source_addr": source,
-                        "destination_addr": destination,
-                        "destination_function": function.start_addr
-                    })
+                    # the jumps destination is different from the functions start address
+                    destination != function.start_addr
+                    and
+                    # the jumps destination is in one of the functions intervals
+                    any((first <= destination <= last) for first, last in function_intervals)
+                    and
+                    # the jump originates from outside the function (outside all intervals)
+                    all((source < first or source > last) for first, last in function_intervals)
+                ):
+                    result.append(
+                        {
+                            "source_addr": source,
+                            "destination_addr": destination,
+                            "destination_function": function.start_addr,
+                        }
+                    )
 
         return result
 
     def __getFunctionIntervals(self, function_state):
-        intervals = list()
+        intervals = []
         instructions = sorted(function_state.instructions, key=itemgetter(0))
         first_instruction = instructions[0] if instructions else None
         last_instruction = first_instruction
@@ -76,14 +85,15 @@ class TailcallAnalyzer(object):
         # return
         if len(intervals) < 25:
             for one, two in intervals:
-                print("  0x{:x} -> 0x{:x}".format(one, two))
-        else: print("Function has too many intervals to display")
+                print(f"  0x{one:x} -> 0x{two:x}")
+        else:
+            print("Function has too many intervals to display")
 
     def resolveTailcalls(self, disassembler, verbose=False):
-        newly_created_functions = set([])
+        newly_created_functions = set()
         for tailcall in self.getTailcalls():
             if verbose:
-                print("Processing tailcall:\n{}".format(json.dumps(tailcall, indent=2, sort_keys=True)))
+                print(f"Processing tailcall:\n{json.dumps(tailcall, indent=2, sort_keys=True)}")
             # remove the information from the function-analysis state of the disassembly
             function = self.__getFunctionByStartAddr(tailcall["destination_function"])
             if not function or function.is_tailcall_function:
@@ -101,17 +111,21 @@ class TailcallAnalyzer(object):
             disassembler.analyzeFunction(tailcall["destination_addr"])
             newly_created_functions.add(tailcall["destination_addr"])
             function = self.__getFunctionByStartAddr(tailcall["destination_addr"])
-            if function and not tailcall["destination_function"] in function.instruction_start_bytes:
+            if function and tailcall["destination_function"] not in function.instruction_start_bytes:
                 # analyze the (previously) broken function a second time
                 try:
                     disassembler.analyzeFunction(tailcall["destination_function"])
                     function = self.__getFunctionByStartAddr(tailcall["destination_function"])
                     function.is_tailcall_function = True
-                except:
+                except Exception:
                     pass
                     # print ("0x{:x} -> 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
             elif verbose:
-                print("**** 0x{:x} IS NOW PART OF 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
+                print(
+                    "**** 0x{:x} IS NOW PART OF 0x{:x}".format(
+                        tailcall["destination_function"], tailcall["destination_addr"]
+                    )
+                )
 
             if verbose:
                 function = self.__getFunctionByStartAddr(tailcall["destination_function"])
@@ -122,4 +136,4 @@ class TailcallAnalyzer(object):
                 print("Re-disassembled old function:")
                 if function:
                     self.__printIntervals(self.__getFunctionIntervals(function))
-        return sorted(list(newly_created_functions))
+        return sorted(newly_created_functions)

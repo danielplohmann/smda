@@ -1,37 +1,74 @@
-
 # some mnemonics as specific to capstone
-CJMP_INS = ["je", "jne", "js", "jns", "jp", "jnp", "jo", "jno", "jl", "jle", "jg", "jge", "jb", "jbe", "ja", "jae", "jcxz", "jecxz", "jrcxz"]
+CJMP_INS = [
+    "je",
+    "jne",
+    "js",
+    "jns",
+    "jp",
+    "jnp",
+    "jo",
+    "jno",
+    "jl",
+    "jle",
+    "jg",
+    "jge",
+    "jb",
+    "jbe",
+    "ja",
+    "jae",
+    "jcxz",
+    "jecxz",
+    "jrcxz",
+]
 LOOP_INS = ["loop", "loopne", "loope"]
 JMP_INS = ["jmp", "ljmp"]
 CALL_INS = ["call", "lcall"]
 RET_INS = ["ret", "retn", "retf", "iret"]
 END_INS = ["ret", "retn", "retf", "iret", "int3", "hlt"]
 REGS_32BIT = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
-REGS_64BIT = ["rax", "rbx", "rcx", "rdx", "rsp", "rbp", "rsi", "rdi", "rip", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]
+REGS_64BIT = [
+    "rax",
+    "rbx",
+    "rcx",
+    "rdx",
+    "rsp",
+    "rbp",
+    "rsi",
+    "rdi",
+    "rip",
+    "r8",
+    "r9",
+    "r10",
+    "r11",
+    "r12",
+    "r13",
+    "r14",
+    "r15",
+]
 DOUBLE_ZERO = bytearray(b"\x00\x00")
 
 DEFAULT_PROLOGUES = [
-    b"\x8B\xFF\x55\x8B\xEC",
-    b"\x89\xFF\x55\x8B\xEC",
-    b"\x55\x8B\xEC",
-    b"\x55\x89\xE5"
+    b"\x8b\xff\x55\x8b\xec",
+    b"\x89\xff\x55\x8b\xec",
+    b"\x55\x8b\xec",
+    b"\x55\x89\xe5",
 ]
 
 # these cover 99% of confirmed function starts in the reference data set
 COMMON_PROLOGUES = {
     "5": {
         32: {
-            b"\x8B\xFF\x55\x8B\xEC": 50,  # mov edi, edi, push ebp, mov ebp, esp
-            b"\x89\xFF\x55\x8B\xEC": 50,  # mov edi, edi, push ebp, mov ebp, esp
+            b"\x8b\xff\x55\x8b\xec": 50,  # mov edi, edi, push ebp, mov ebp, esp
+            b"\x89\xff\x55\x8b\xec": 50,  # mov edi, edi, push ebp, mov ebp, esp
         },
-        64: {}
-        },
+        64: {},
+    },
     "3": {
         32: {
-            b"\x55\x8B\xEC": 50,  # push ebp, mov ebp, esp
+            b"\x55\x8b\xec": 50,  # push ebp, mov ebp, esp
         },
-        64: {}
-        },
+        64: {},
+    },
     "1": {
         32: {
             b"\x55": 51,  # 311150 (51.09%) -- cumulative:  51.09%
@@ -86,16 +123,16 @@ COMMON_PROLOGUES = {
             b"\xc7": 1,  #   1034 (0.18%) -- cumulative:  98.60%
             b"\xb0": 1,  #    911 (0.15%) -- cumulative:  98.75%
             b"\xbf": 1,  #    894 (0.15%) -- cumulative:  98.90%
-        }
-    }
+        },
+    },
 }
 
-#TODO: 2018-06-27 expand the coverage in this list
+# TODO: 2018-06-27 expand the coverage in this list
 # https://stackoverflow.com/questions/25545470/long-multi-byte-nops-commonly-understood-macros-or-other-notation
 GAP_SEQUENCES = {
     1: [
         b"\x90",  # NOP1_OVERRIDE_NOP - AMD / nop - INTEL
-        b"\xCC",  # int3
+        b"\xcc",  # int3
         b"\x00",  # pass over sequences of null bytes
     ],
     2: [
@@ -113,59 +150,57 @@ GAP_SEQUENCES = {
         b"\x8d\x49\x00",  # lea ecx, dword ptr [ecx]
         b"\x8d\x64\x24",  # lea esp, dword ptr [esp]
         b"\x8d\x76\x00",
-        b"\x66\x66\x90"
+        b"\x66\x66\x90",
     ],
     4: [
         b"\x0f\x1f\x40\x00",  # NOP4_OVERRIDE_NOP - AMD / nop - INTEL
         b"\x8d\x74\x26\x00",
-        b"\x66\x66\x66\x90"
+        b"\x66\x66\x66\x90",
     ],
     5: [
         b"\x0f\x1f\x44\x00\x00",  # NOP5_OVERRIDE_NOP - AMD / nop - INTEL
-        b"\x90\x8d\x74\x26\x00"
+        b"\x90\x8d\x74\x26\x00",
     ],
     6: [
         b"\x66\x0f\x1f\x44\x00\x00",  # NOP6_OVERRIDE_NOP - AMD / nop - INTEL
-        b"\x8d\xb6\x00\x00\x00\x00"
+        b"\x8d\xb6\x00\x00\x00\x00",
     ],
     7: [
         b"\x0f\x1f\x80\x00\x00\x00\x00",  # NOP7_OVERRIDE_NOP - AMD / nop - INTEL,
         b"\x8d\xb4\x26\x00\x00\x00\x00",
-        b"\x8D\xBC\x27\x00\x00\x00\x00"
+        b"\x8d\xbc\x27\x00\x00\x00\x00",
     ],
     8: [
         b"\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP8_OVERRIDE_NOP - AMD / nop - INTEL
-        b"\x90\x8d\xb4\x26\x00\x00\x00\x00"
+        b"\x90\x8d\xb4\x26\x00\x00\x00\x00",
     ],
     9: [
         b"\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP9_OVERRIDE_NOP - AMD / nop - INTEL
-        b"\x89\xf6\x8d\xbc\x27\x00\x00\x00\x00"
+        b"\x89\xf6\x8d\xbc\x27\x00\x00\x00\x00",
     ],
     10: [
         b"\x66\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP10_OVERRIDE_NOP - AMD
         b"\x8d\x76\x00\x8d\xbc\x27\x00\x00\x00\x00",
-        b"\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+        b"\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
     ],
     11: [
         b"\x66\x66\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",  # NOP11_OVERRIDE_NOP - AMD
         b"\x8d\x74\x26\x00\x8d\xbc\x27\x00\x00\x00\x00",
-        b"\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+        b"\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
     ],
     12: [
         b"\x8d\xb6\x00\x00\x00\x00\x8d\xbf\x00\x00\x00\x00",
-        b"\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+        b"\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
     ],
     13: [
         b"\x8d\xb6\x00\x00\x00\x00\x8d\xbc\x27\x00\x00\x00\x00",
-        b"\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+        b"\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
     ],
     14: [
         b"\x8d\xb4\x26\x00\x00\x00\x00\x8d\xbc\x27\x00\x00\x00\x00",
-        b"\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
+        b"\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
     ],
-    15: [
-        b"\x66\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"
-    ]
+    15: [b"\x66\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"],
 }
 
 
@@ -177,7 +212,7 @@ COMMON_START_BYTES = {
         "51": 312,
         "8d": 566,
         "83": 558,
-        "53": 548
+        "53": 548,
     },
     "64": {
         "48": 1341,
@@ -187,5 +222,5 @@ COMMON_START_BYTES = {
         "44": 18,
         "45": 17,
         "e9": 16,
-    }
+    },
 }

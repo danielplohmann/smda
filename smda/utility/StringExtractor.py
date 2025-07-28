@@ -1,9 +1,6 @@
-import re
 import string
 import struct
-from typing import Tuple, Iterator
-
-import lief
+from typing import Iterator, Tuple
 
 from smda.common import SmdaFunction
 
@@ -124,14 +121,18 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:
         # we address stack assigned strings and String structs
         # as detailed in https://cloud.google.com/blog/topics/threat-intelligence/extracting-strings-go-rust-executables/
         # first go over the whole function and detect the stack-assigned string constructs
-        instructions = [i for i in f.getInstructions()]
+        instructions = list(f.getInstructions())
         for index, insn in enumerate(instructions):
-            data_refs = [d for d in insn.getDataRefs()]
+            data_refs = list(insn.getDataRefs())
             if len(data_refs) == 1:
                 data_ref = data_refs[0]
                 # check if next two instructions are movs
                 found_string = False
-                if index + 2 < len(instructions) and instructions[index + 1].mnemonic == "mov" and instructions[index + 2].mnemonic == "mov":
+                if (
+                    index + 2 < len(instructions)
+                    and instructions[index + 1].mnemonic == "mov"
+                    and instructions[index + 2].mnemonic == "mov"
+                ):
                     operands = instructions[index + 2].operands.split(",")
                     if len(operands) == 2:
                         # check if the second instruction has an immediate value as second operand
@@ -142,14 +143,24 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:
                                 if string_result:
                                     string_read, string_type = string_result
                                     found_string = True
-                                    yield string_read.rstrip("\x00"), insn.offset, data_ref, string_type
-                        except:
+                                    yield (
+                                        string_read.rstrip("\x00"),
+                                        insn.offset,
+                                        data_ref,
+                                        string_type,
+                                    )
+                        except Exception:
                             pass
                 if not found_string:
                     string_result = read_go_string(f.smda_report, data_ref)
                     if string_result:
                         string_read, string_type = string_result
-                        yield string_read.rstrip("\x00"), insn.offset, data_ref, string_type
+                        yield (
+                            string_read.rstrip("\x00"),
+                            insn.offset,
+                            data_ref,
+                            string_type,
+                        )
     else:
         for insn in f.getInstructions():
             for data_ref in insn.getDataRefs():

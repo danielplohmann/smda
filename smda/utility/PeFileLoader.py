@@ -1,16 +1,15 @@
-import struct
 import logging
+import struct
 
 import lief
+
 lief.logging.disable()
 
 LOG = logging.getLogger(__name__)
 
 
-
-class PeFileLoader(object):
-
-    BITNESS_MAP = {0x14c: 32, 0x8664: 64}
+class PeFileLoader:
+    BITNESS_MAP = {0x14C: 32, 0x8664: 64}
 
     @staticmethod
     def isCompatible(data):
@@ -27,7 +26,7 @@ class PeFileLoader(object):
             section_infos = []
             optional_header_size = 0xF8
             if pe_offset and len(binary) >= pe_offset + 0x8:
-                num_sections = struct.unpack("H", binary[pe_offset + 0x6:pe_offset + 0x8])[0]
+                num_sections = struct.unpack("H", binary[pe_offset + 0x6 : pe_offset + 0x8])[0]
                 bitness = PeFileLoader.getBitness(binary)
                 if bitness == 64:
                     optional_header_size = 0x108
@@ -49,8 +48,14 @@ class PeFileLoader(object):
             min_raw_section_offset = 0xFFFFFFFF
             if section_infos:
                 for section_info in section_infos:
-                    max_virt_section_offset = max(max_virt_section_offset, section_info["virt_size"] + section_info["virt_offset"])
-                    max_virt_section_offset = max(max_virt_section_offset, section_info["raw_size"] + section_info["virt_offset"])
+                    max_virt_section_offset = max(
+                        max_virt_section_offset,
+                        section_info["virt_size"] + section_info["virt_offset"],
+                    )
+                    max_virt_section_offset = max(
+                        max_virt_section_offset,
+                        section_info["raw_size"] + section_info["virt_offset"],
+                    )
                     if section_info["raw_offset"] > 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
             # support up to 100MB for now.
@@ -60,23 +65,31 @@ class PeFileLoader(object):
             for section_info in section_infos:
                 mapped_from = section_info["virt_offset"]
                 mapped_to = section_info["virt_offset"] + section_info["raw_size"]
-                mapped_binary[mapped_from:mapped_to] = binary[section_info["raw_offset"]:section_info["raw_offset"] + section_info["raw_size"]]
-                LOG.debug("Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)",
-                          section_info["section_index"],
-                          section_info["raw_offset"],
-                          section_info["raw_size"],
-                          section_info["virt_offset"],
-                          section_info["virt_size"])
-            LOG.debug("Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes", len(binary), num_sections, len(mapped_binary))
+                mapped_binary[mapped_from:mapped_to] = binary[
+                    section_info["raw_offset"] : section_info["raw_offset"] + section_info["raw_size"]
+                ]
+                LOG.debug(
+                    "Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)",
+                    section_info["section_index"],
+                    section_info["raw_offset"],
+                    section_info["raw_size"],
+                    section_info["virt_offset"],
+                    section_info["virt_size"],
+                )
+            LOG.debug(
+                "Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes",
+                len(binary),
+                num_sections,
+                len(mapped_binary),
+            )
         return bytes(mapped_binary)
 
     @staticmethod
     def getBitness(binary):
         bitness_id = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
-        if pe_offset:
-            if pe_offset and len(binary) >= pe_offset + 0x6:
-                bitness_id = struct.unpack("H", binary[pe_offset + 0x4:pe_offset + 0x6])[0]
+        if pe_offset and len(binary) >= pe_offset + 0x6:
+            bitness_id = struct.unpack("H", binary[pe_offset + 0x4 : pe_offset + 0x6])[0]
         return PeFileLoader.BITNESS_MAP.get(bitness_id, 0)
 
     @staticmethod
@@ -85,17 +98,20 @@ class PeFileLoader(object):
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 0x38:
             if PeFileLoader.getBitness(binary) == 32:
-                base_addr = struct.unpack("I", binary[pe_offset + 0x34:pe_offset + 0x38])[0]
+                base_addr = struct.unpack("I", binary[pe_offset + 0x34 : pe_offset + 0x38])[0]
             elif PeFileLoader.getBitness(binary) == 64:
-                base_addr = struct.unpack("Q", binary[pe_offset + 0x30:pe_offset + 0x38])[0]
+                base_addr = struct.unpack("Q", binary[pe_offset + 0x30 : pe_offset + 0x38])[0]
         if base_addr:
-            LOG.debug("Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)", base_addr)
+            LOG.debug(
+                "Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)",
+                base_addr,
+            )
         return base_addr
 
     @staticmethod
     def getPeOffset(binary):
         if len(binary) >= 0x40:
-            pe_offset = struct.unpack("H", binary[0x3c:0x3c + 2])[0]
+            pe_offset = struct.unpack("H", binary[0x3C : 0x3C + 2])[0]
             return pe_offset
         return 0
 
@@ -104,26 +120,25 @@ class PeFileLoader(object):
         oep_rva = 0
         if PeFileLoader.checkPe(binary):
             pe_offset = PeFileLoader.getPeOffset(binary)
-            if pe_offset and len(binary) >= pe_offset + 0x2c:
-                oep_rva = struct.unpack("I", binary[pe_offset + 0x28:pe_offset + 0x2C])[0]
+            if pe_offset and len(binary) >= pe_offset + 0x2C:
+                oep_rva = struct.unpack("I", binary[pe_offset + 0x28 : pe_offset + 0x2C])[0]
         return oep_rva
-    
+
     @staticmethod
     def getArchitecture(binary):
         architecture = "intel"
         pefile = lief.parse(binary)
         if pefile:
             for d in pefile.data_directories:
-                 if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER:
-                     if d.size > 0:
-                        architecture = "cil"
+                if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER and d.size > 0:
+                    architecture = "cil"
         return architecture
 
     @staticmethod
     def checkPe(binary):
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 6:
-            bitness = struct.unpack("H", binary[pe_offset + 4:pe_offset + 4 + 2])[0]
+            bitness = struct.unpack("H", binary[pe_offset + 4 : pe_offset + 4 + 2])[0]
             return bitness in PeFileLoader.BITNESS_MAP
         return False
 
@@ -156,5 +171,7 @@ class PeFileLoader(object):
                 result.append(this_area)
                 index += 1
             else:
-                merged_code_areas = merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2:]
+                merged_code_areas = (
+                    merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2 :]
+                )
         return merged_code_areas

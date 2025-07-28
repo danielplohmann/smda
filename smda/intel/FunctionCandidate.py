@@ -2,13 +2,13 @@ from binascii import hexlify
 
 from .definitions import COMMON_PROLOGUES
 
-class FunctionCandidate(object):
 
+class FunctionCandidate:
     def __init__(self, binary_info, addr):
         self.bitness = binary_info.bitness
         self.addr = addr
         rel_start_addr = addr - binary_info.base_addr
-        self.bytes = binary_info.binary[rel_start_addr:rel_start_addr + 5]
+        self.bytes = binary_info.binary[rel_start_addr : rel_start_addr + 5]
         self.lang_spec = None
         self.call_ref_sources = []
         self.finished = False
@@ -42,12 +42,12 @@ class FunctionCandidate(object):
             weighted_confidence = 0.298 * (1 if self.hasCommonFunctionStart() else 0)
             if self._tfidf_score is not None:
                 weighted_confidence += (
-                    0.321 * (1 if self._tfidf_score < 0 else 0) +
-                    0.124 * (1 if self._tfidf_score < -2 else 0) +
-                    0.120 * (1 if self._tfidf_score < -4 else 0) +
-                    0.101 * (1 if self._tfidf_score < -1 else 0) +
-                    0.025 * (1 if self._tfidf_score < -8 else 0)
-                    )
+                    0.321 * (1 if self._tfidf_score < 0 else 0)
+                    + 0.124 * (1 if self._tfidf_score < -2 else 0)
+                    + 0.120 * (1 if self._tfidf_score < -4 else 0)
+                    + 0.101 * (1 if self._tfidf_score < -1 else 0)
+                    + 0.025 * (1 if self._tfidf_score < -8 else 0)
+                )
             # above experiments show that multiple inbound call references are basically always indeed functions
             if len(self.call_ref_sources) > 1:
                 self._confidence = 1.0
@@ -59,18 +59,18 @@ class FunctionCandidate(object):
         return self._confidence
 
     def hasCommonFunctionStart(self):
-        for length in sorted([int(l) for l in COMMON_PROLOGUES], reverse=True):
+        for length in sorted([int(length_str) for length_str in COMMON_PROLOGUES], reverse=True):
             byte_sequence = self.bytes[:length]
-            if byte_sequence in COMMON_PROLOGUES["%d" % length][self.bitness]:
+            if byte_sequence in COMMON_PROLOGUES[f"{length}"][self.bitness]:
                 return True
         return False
 
     def getFunctionStartScore(self):
         if self.function_start_score is None:
-            for length in sorted([int(l) for l in COMMON_PROLOGUES], reverse=True):
+            for length in sorted([int(length_str) for length_str in COMMON_PROLOGUES], reverse=True):
                 byte_sequence = self.bytes[:length]
-                if byte_sequence in COMMON_PROLOGUES["%d" % length][self.bitness]:
-                    self.function_start_score = COMMON_PROLOGUES["%d" % length][self.bitness][byte_sequence]
+                if byte_sequence in COMMON_PROLOGUES[f"{length}"][self.bitness]:
+                    self.function_start_score = COMMON_PROLOGUES[f"{length}"][self.bitness][byte_sequence]
                     break
             self.function_start_score = self.function_start_score if self.function_start_score else 0
         return self.function_start_score
@@ -130,10 +130,7 @@ class FunctionCandidate(object):
         score += 100 if self.lang_spec is not None else 0
         score += self.getFunctionStartScore()
         num_call_refs = len(self.call_ref_sources)
-        if num_call_refs >= 10:
-            call_ref_score = 10 + int(num_call_refs / 10)
-        else:
-            call_ref_score = num_call_refs
+        call_ref_score = 10 + int(num_call_refs / 10) if num_call_refs >= 10 else num_call_refs
         score += 10 * call_ref_score
         score += 1 if self.alignment else 0
         return score
@@ -162,14 +159,30 @@ class FunctionCandidate(object):
         is_tailcall = "t" if self.is_tailcall else "-"
         is_stub = "u" if self.is_stub else "-"
         is_aborted = "x" if self.analysis_aborted else "-"
-        characteristics = is_initial + is_symbol + is_stub + is_aligned + is_lang_spec + is_prologue + is_ref + is_tailcall + is_gap + is_finished + is_aborted
+        characteristics = (
+            is_initial
+            + is_symbol
+            + is_stub
+            + is_aligned
+            + is_lang_spec
+            + is_prologue
+            + is_ref
+            + is_tailcall
+            + is_gap
+            + is_finished
+            + is_aborted
+        )
         return characteristics
 
     def __str__(self):
         characteristics = self.getCharacteristics()
-        prologue_score = "%d" % self.getFunctionStartScore()
-        ref_summary = "{}".format(len(self.call_ref_sources)) if len(self.call_ref_sources) != 1 else "{}: 0x{:x}".format(len(self.call_ref_sources), self.call_ref_sources[0])
-        return "0x{:x}: {} -> {} (total score: {}), inref: {} | {}".format(self.addr, hexlify(self.bytes), prologue_score, self.getScore(), ref_summary, characteristics)
+        prologue_score = f"{self.getFunctionStartScore()}"
+        ref_summary = (
+            f"{len(self.call_ref_sources)}"
+            if len(self.call_ref_sources) != 1
+            else f"{len(self.call_ref_sources)}: 0x{self.call_ref_sources[0]:x}"
+        )
+        return f"0x{self.addr:x}: {hexlify(self.bytes)} -> {prologue_score} (total score: {self.getScore()}), inref: {ref_summary} | {characteristics}"
 
     def toJson(self):
         return {
@@ -181,5 +194,5 @@ class FunctionCandidate(object):
             "characteristics": self.getCharacteristics(),
             "prologue_score": self.getFunctionStartScore(),
             "score": self.calculateScore(),
-            "confidence": self.getConfidence()
+            "confidence": self.getConfidence(),
         }

@@ -1,20 +1,21 @@
 """
-    Tarjan's Algorithm (named for its discoverer, Robert Tarjan) is a graph theory algorithm
-    for finding the strongly connected components of a graph.
-    This can be used to find loops.
-    Based on: http://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
-    - Refactored into a class to allow pooled computation by Daniel Plohmann
-    - Implementation by Bas Westerbaan:
-      https://github.com/bwesterb/py-tarjan
+Tarjan's Algorithm (named for its discoverer, Robert Tarjan) is a graph theory algorithm
+for finding the strongly connected components of a graph.
+This can be used to find loops.
+Based on: http://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
+- Refactored into a class to allow pooled computation by Daniel Plohmann
+- Implementation by Bas Westerbaan:
+  https://github.com/bwesterb/py-tarjan
 """
 
-class Tarjan(object):
-    """ g is the graph represented as a dictionary { <vertex> : <successors of vertex> } """
+
+class Tarjan:
+    """g is the graph represented as a dictionary { <vertex> : <successors of vertex> }"""
 
     def __init__(self, graph):
         self._graph = graph
         self._stack = []
-        self._stack_set = set([])
+        self._stack_set = set()
         self._index = {}
         self._lowlink = {}
         self._nonrecursive_stack = []
@@ -61,7 +62,7 @@ class Tarjan(object):
                 self._tarjan_body(it, v)
 
     def closure(self):
-        """ Given a graph @g, returns the transitive closure of @g """
+        """Given a graph @g, returns the transitive closure of @g"""
         ret = {}
         for scc in self.calculateScc():
             ws = set()

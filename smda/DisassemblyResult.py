@@ -1,12 +1,10 @@
 import datetime
 import struct
-import sys
 
 from smda.common.BasicBlock import BasicBlock
 
 
-class DisassemblyResult(object):
-
+class DisassemblyResult:
     def __init__(self):
         self.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.analysis_end_ts = self.analysis_start_ts
@@ -15,15 +13,15 @@ class DisassemblyResult(object):
         self.identified_alignment = 0
         self.oep = None
         self.code_map = {}
-        self.data_map = set([])
+        self.data_map = set()
         # key: offset, value: {"type": <str>, "instruction_bytes": <hexstr>}
         self.errors = {}
         # stored as key:
         self.functions = {}
-        self.recursive_functions = set([])
-        self.leaf_functions = set([])
-        self.thunk_functions = set([])
-        self.exported_functions = set([])
+        self.recursive_functions = set()
+        self.leaf_functions = set()
+        self.thunk_functions = set()
+        self.exported_functions = set()
         self.failed_analysis_addr = []
         self.function_borders = {}
         # stored as key: int(i.address) = (i.size, i.mnemonic, i.op_str)
@@ -50,7 +48,7 @@ class DisassemblyResult(object):
         self.binary_info = binary_info
         exported = binary_info.getExportedFunctions()
         if exported is not None:
-            self.exported_functions = set([key + binary_info.base_addr for key in exported.keys()])
+            self.exported_functions = {key + binary_info.base_addr for key in exported}
         self.oep = binary_info.getOep()
 
     def getByte(self, addr):
@@ -64,11 +62,11 @@ class DisassemblyResult(object):
     def getBytes(self, addr, num_bytes):
         if self.isAddrWithinMemoryImage(addr):
             rel_start_addr = addr - self.binary_info.base_addr
-            return self.binary_info.binary[rel_start_addr:rel_start_addr + num_bytes]
+            return self.binary_info.binary[rel_start_addr : rel_start_addr + num_bytes]
         return None
 
     def getRawBytes(self, offset, num_bytes):
-        return self.binary_info.binary[offset:offset + num_bytes]
+        return self.binary_info.binary[offset : offset + num_bytes]
 
     def setConfidenceThreshold(self, threshold):
         self._confidence_threshold = threshold
@@ -77,7 +75,9 @@ class DisassemblyResult(object):
         return self._confidence_threshold
 
     def getAnalysisDuration(self):
-        return (self.analysis_end_ts - self.analysis_start_ts).seconds + ((self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0)
+        return (self.analysis_end_ts - self.analysis_start_ts).seconds + (
+            (self.analysis_end_ts - self.analysis_start_ts).microseconds / 1000000.0
+        )
 
     def getAnalysisOutcome(self):
         outcome = "ok"
@@ -100,17 +100,14 @@ class DisassemblyResult(object):
             bblock.end_addr = block[-1][0]
             bblock.instructions = [ins[0] for ins in block]
             if bblock.end_addr in self.code_refs_from:
-                bblock.successors = [ref for ref in self.code_refs_from[bblock.end_addr]]
+                bblock.successors = list(self.code_refs_from[bblock.end_addr])
             bblocks.append(bblock)
         return bblocks
 
     def _transformInstruction(self, ins_tuple):
         ins_addr, _, ins_mnem, ins_ops, ins_raw_bytes = ins_tuple
         # python3  and python2 do handling differently...
-        if sys.version_info >= (3, 0):
-            ins_hexbytes = "".join(["%02x" % c for c in ins_tuple[4]])
-        else:
-            ins_hexbytes = ins_raw_bytes.encode("hex")
+        ins_hexbytes = "".join([f"{c:02x}" for c in ins_tuple[4]])
         return [ins_addr, ins_hexbytes, str(ins_mnem), str(ins_ops)]
 
     def getBlocksAsDict(self, function_addr):
@@ -135,7 +132,9 @@ class DisassemblyResult(object):
 
     def isAddrWithinMemoryImage(self, destination):
         if destination is not None:
-            return self.binary_info.base_addr <= destination < (self.binary_info.base_addr + self.binary_info.binary_size)
+            return (
+                self.binary_info.base_addr <= destination < (self.binary_info.base_addr + self.binary_info.binary_size)
+            )
         return False
 
     def dereferenceDword(self, addr):
@@ -159,41 +158,41 @@ class DisassemblyResult(object):
         return None
 
     def addCodeRefs(self, addr_from, addr_to):
-        refs_from = self.code_refs_from.get(addr_from, set([]))
+        refs_from = self.code_refs_from.get(addr_from, set())
         refs_from.update([addr_to])
         self.code_refs_from[addr_from] = refs_from
-        refs_to = self.code_refs_to.get(addr_to, set([]))
+        refs_to = self.code_refs_to.get(addr_to, set())
         refs_to.update([addr_from])
         self.code_refs_to[addr_to] = refs_to
 
     def removeCodeRefs(self, addr_from, addr_to):
-        refs_from = self.code_refs_from.get(addr_from, set([]))
+        refs_from = self.code_refs_from.get(addr_from, set())
         refs_from.discard(addr_to)
         self.code_refs_from[addr_from] = refs_from
-        refs_to = self.code_refs_to.get(addr_to, set([]))
+        refs_to = self.code_refs_to.get(addr_to, set())
         refs_to.discard(addr_from)
         self.code_refs_to[addr_to] = refs_to
 
     def addDataRefs(self, addr_from, addr_to):
-        refs_from = self.data_refs_from.get(addr_from, set([]))
+        refs_from = self.data_refs_from.get(addr_from, set())
         refs_from.update([addr_to])
         self.data_refs_from[addr_from] = refs_from
-        refs_to = self.data_refs_to.get(addr_to, set([]))
+        refs_to = self.data_refs_to.get(addr_to, set())
         refs_to.update([addr_from])
         self.data_refs_to[addr_to] = refs_to
 
     def removeDataRefs(self, addr_from, addr_to):
-        refs_from = self.data_refs_from.get(addr_from, set([]))
+        refs_from = self.data_refs_from.get(addr_from, set())
         refs_from.discard(addr_to)
         self.data_refs_from[addr_from] = refs_from
-        refs_to = self.data_refs_to.get(addr_to, set([]))
+        refs_to = self.data_refs_to.get(addr_to, set())
         refs_to.discard(addr_from)
         self.data_refs_to[addr_to] = refs_to
 
     def getBlockRefs(self, func_addr):
-        """ blocks refs should stay within function context, thus kill all references outside function """
+        """blocks refs should stay within function context, thus kill all references outside function"""
         block_refs = {}
-        ins_addrs = set([])
+        ins_addrs = set()
         for block in self.functions[func_addr]:
             for ins in block:
                 ins_addr = ins[0]
@@ -201,7 +200,7 @@ class DisassemblyResult(object):
         for block in self.functions[func_addr]:
             last_ins_addr = block[-1][0]
             if last_ins_addr in self.code_refs_from:
-                verified_refs = sorted(list(ins_addrs.intersection(self.code_refs_from[last_ins_addr])))
+                verified_refs = sorted(ins_addrs.intersection(self.code_refs_from[last_ins_addr]))
                 if verified_refs:
                     block_refs[block[0][0]] = verified_refs
         return block_refs
@@ -213,7 +212,7 @@ class DisassemblyResult(object):
         return sorted(in_refs)
 
     def getOutRefs(self, func_addr):
-        ins_addrs = set([])
+        ins_addrs = set()
         code_refs = []
         out_refs = {}
         for block in self.functions[func_addr]:
@@ -238,8 +237,8 @@ class DisassemblyResult(object):
         return {src: sorted(dst) for src, dst in out_refs.items()}
 
     def isRecursiveFunction(self, func_addr):
-        ins_addrs = set([])
-        out_refs = set([])
+        ins_addrs = set()
+        out_refs = set()
         for block in self.functions[func_addr]:
             for ins in block:
                 ins_addr = ins[0]
@@ -250,8 +249,8 @@ class DisassemblyResult(object):
         return func_addr in out_refs
 
     def isLeafFunction(self, func_addr):
-        ins_addrs = set([])
-        out_refs = set([])
+        ins_addrs = set()
+        out_refs = set()
         for block in self.functions[func_addr]:
             for ins in block:
                 ins_addr = ins[0]
@@ -265,7 +264,7 @@ class DisassemblyResult(object):
         for api_offset in self.apis:
             api = self.apis[api_offset]
             for ref in api["referencing_addr"]:
-                self.addr_to_api[ref] = "%s!%s" % (api["dll_name"], api["api_name"])
+                self.addr_to_api[ref] = "{}!{}".format(api["dll_name"], api["api_name"])
 
     def getAllApiRefs(self):
         all_api_refs = {}
@@ -282,7 +281,7 @@ class DisassemblyResult(object):
                 if ins[0] in self.addr_to_api:
                     api_refs[ins[0]] = self.addr_to_api[ins[0]]
         return api_refs
-    
+
     def addStringRef(self, func_addr, ref_addr, string):
         if func_addr not in self.stringrefs:
             self.stringrefs[func_addr] = {}
@@ -295,4 +294,4 @@ class DisassemblyResult(object):
         return {}
 
     def __str__(self):
-        return "-> {:5.2f}s | {:5d} Func (status: {})".format(self.getAnalysisDuration(), len(self.functions), self.getAnalysisOutcome())
+        return f"-> {self.getAnalysisDuration():5.2f}s | {len(self.functions):5d} Func (status: {self.getAnalysisOutcome()})"

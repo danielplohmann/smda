@@ -55,6 +55,51 @@ To take full advantage of SMDA's capabilities, make sure to (optionally) install
  * lief 
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
+## Development
+
+### Code Quality
+
+This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code formatting. To set up the development environment:
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Install pre-commit hooks (optional but recommended)
+make init
+
+# Run linting
+make lint
+# or
+ruff check .
+
+# Run formatting
+make format
+# or
+ruff format .
+
+# Fix auto-fixable issues
+make ruff-fix
+# or
+ruff check . --fix
+```
+
+### Pre-commit Hooks
+
+Pre-commit hooks are configured to run ruff automatically on commit. Install them with:
+
+```bash
+pre-commit install
+```
+
+### Testing
+
+Run tests with:
+
+```bash
+make test
+```
+
 ## Version History
  * 2025-07-25: v2.2.3 - Minor bugfixes.
  * 2025-07-23: v2.2.1 - Added xmetadata field to SmdaReport, with information about imports and exports. Improved string extraction from Go binaries.

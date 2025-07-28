@@ -3,7 +3,6 @@
 import logging
 
 import dnfile
-from dnfile.enums import MetadataTables
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
@@ -11,19 +10,19 @@ LOGGER = logging.getLogger(__name__)
 
 
 class CilSymbolProvider(AbstractLabelProvider):
-    """ Minimal resolver for CIL/DOTNET symbols """
+    """Minimal resolver for CIL/DOTNET symbols"""
 
     def __init__(self, config):
         self._config = config
-        #addr:func_name
+        # addr:func_name
         self._addr_to_func_symbols = {}
         self._func_symbol_to_addr = {}
 
     def isSymbolProvider(self):
         return True
-    
+
     def decodeSymbolName(self, value):
-        """ ensure a proper utf-8 escaped string """
+        """ensure a proper utf-8 escaped string"""
         return value.encode("utf-8").decode("utf-8")
 
     def update(self, binary_info):

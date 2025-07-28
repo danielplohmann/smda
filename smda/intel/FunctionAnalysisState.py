@@ -1,12 +1,11 @@
 import logging
 
-from .definitions import END_INS, CALL_INS
+from .definitions import CALL_INS, END_INS
 
 LOGGER = logging.getLogger(__name__)
 
 
-class FunctionAnalysisState(object):
-
+class FunctionAnalysisState:
     def __init__(self, start_addr, disassembly):
         self.start_addr = start_addr
         self.disassembly = disassembly
@@ -15,15 +14,15 @@ class FunctionAnalysisState(object):
         self.blocks = []
         self.num_blocks_analyzed = 0
         self.instructions = []
-        self.instruction_start_bytes = set([])
-        self.processed_blocks = set([])
-        self.processed_bytes = set([])
-        self.jump_targets = set([])
+        self.instruction_start_bytes = set()
+        self.processed_blocks = set()
+        self.processed_bytes = set()
+        self.jump_targets = set()
         self.call_register_ins = []
         self.block_start = 0xFFFFFFFF
-        self.data_bytes = set([])
-        self.data_refs = set([])
-        self.code_refs = set([])
+        self.data_bytes = set()
+        self.data_refs = set()
+        self.code_refs = set()
         self.code_refs_from = {}
         self.code_refs_to = {}
         self.suspicious_ins_count = 0
@@ -47,7 +46,7 @@ class FunctionAnalysisState(object):
         return self.block_start
 
     def addBlockToQueue(self, block_start):
-        if not block_start in self.processed_blocks:
+        if block_start not in self.processed_blocks:
             self.block_queue.append(block_start)
 
     def endBlock(self):
@@ -69,10 +68,10 @@ class FunctionAnalysisState(object):
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.update([(addr_from, addr_to)])
-        refs_from = self.code_refs_from.get(addr_from, set([]))
+        refs_from = self.code_refs_from.get(addr_from, set())
         refs_from.update([addr_to])
         self.code_refs_from[addr_from] = refs_from
-        refs_to = self.code_refs_to.get(addr_to, set([]))
+        refs_to = self.code_refs_to.get(addr_to, set())
         refs_to.update([addr_from])
         self.code_refs_to[addr_to] = refs_to
         if by_jump:
@@ -139,8 +138,14 @@ class FunctionAnalysisState(object):
 
     def finalizeAnalysis(self, as_gap=False):
         if as_gap:
-            LOGGER.debug("0x%08x had sanity state: %s (%d ins, blocks: %d)", self.start_addr, self.is_sanely_ending, len(self.instructions), self.num_blocks_analyzed)
-            #for instruction in sorted(self.instructions):
+            LOGGER.debug(
+                "0x%08x had sanity state: %s (%d ins, blocks: %d)",
+                self.start_addr,
+                self.is_sanely_ending,
+                len(self.instructions),
+                self.num_blocks_analyzed,
+            )
+            # for instruction in sorted(self.instructions):
             #    print("0x%08x: %s %s" % (instruction[0], instruction[2], instruction[3]))
         if as_gap and not self.is_sanely_ending:
             if len(self.instructions) == 1 and self.instructions[0][2] == "jmp":
@@ -150,7 +155,10 @@ class FunctionAnalysisState(object):
                 if byte == "\xeb":
                     return False
                 # sane case, stub found that just jumps to a referenced function
-            elif self.num_blocks_analyzed == 1 and self.instructions[-1][2] in ["jmp", "call"]:
+            elif self.num_blocks_analyzed == 1 and self.instructions[-1][2] in [
+                "jmp",
+                "call",
+            ]:
                 # similar case to the one above, mostly stubs with tailcalls to a function or shared tail block.
                 pass
             else:
@@ -187,22 +195,25 @@ class FunctionAnalysisState(object):
         if self.blocks:
             return self.blocks
         self.instructions.sort()
-        ins = {i[0]:ind for ind, i in enumerate(self.instructions)}
-        potential_starts = set([self.start_addr])
+        ins = {i[0]: ind for ind, i in enumerate(self.instructions)}
+        potential_starts = {self.start_addr}
         potential_starts.update(list(self.jump_targets))
         blocks = []
         for start in sorted(potential_starts):
-            if not start in ins:
+            if start not in ins:
                 continue
             block = []
             for i in range(ins[start], len(self.instructions)):
                 current = self.instructions[i]
                 block.append(current)
                 # if one code reference is to another address than the next
-                if current[0] in self.code_refs_from:
-                    if not current[2] in CALL_INS and not i == len(self.instructions) - 1:
-                        if any([r != self.instructions[i+1][0] for r in self.code_refs_from[current[0]]]):
-                            break
+                if (
+                    current[0] in self.code_refs_from
+                    and current[2] not in CALL_INS
+                    and i != len(self.instructions) - 1
+                    and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
+                ):
+                    break
                     # if we can reach a colliding address from here, the block is broken and should end.
                     reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
                     next_addr = current[0] + current[1]
@@ -211,9 +222,15 @@ class FunctionAnalysisState(object):
                         # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
                         self.removeCodeRef(current[0], next_addr)
                         break
-                if not i == len(self.instructions) - 1 and self.instructions[i+1][0] in self.code_refs_to:
-                    if len(self.code_refs_to[self.instructions[i+1][0]]) > 1 or self.instructions[i+1][0] in potential_starts:
-                        break
+                if (
+                    i != len(self.instructions) - 1
+                    and self.instructions[i + 1][0] in self.code_refs_to
+                    and (
+                        len(self.code_refs_to[self.instructions[i + 1][0]]) > 1
+                        or self.instructions[i + 1][0] in potential_starts
+                    )
+                ):
+                    break
                 if current[2] in END_INS:
                     break
             if block:
@@ -266,11 +283,11 @@ class FunctionAnalysisState(object):
             self.start_addr,
             self.block_start,
             len(self.getBlocks()),
-            ",".join(["0x%x" % b for b in sorted(self.block_queue)]),
-            ",".join(["0x%x" % b for b in sorted(list(self.processed_blocks))]),
+            ",".join([f"0x{b:x}" for b in sorted(self.block_queue)]),
+            ",".join([f"0x{b:x}" for b in sorted(self.processed_blocks)]),
             len(self.code_refs),
             len(self.data_refs),
             self.suspicious_ins_count,
-            self.is_sanely_ending
+            self.is_sanely_ending,
         )
         return result
