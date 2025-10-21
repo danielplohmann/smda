@@ -1,6 +1,6 @@
+import logging
 import re
 import struct
-import logging
 from collections import Counter
 
 from .definitions import COMMON_START_BYTES
@@ -8,8 +8,7 @@ from .definitions import COMMON_START_BYTES
 LOGGER = logging.getLogger(__name__)
 
 
-class BitnessAnalyzer(object):
-
+class BitnessAnalyzer:
     def determineBitnessFromFile(self, filepath):
         LOGGER.debug("Running Bitness test on %s", filepath)
         with open(filepath, "rb") as infile:
@@ -25,11 +24,11 @@ class BitnessAnalyzer(object):
         candidate_first_bytes = {"32": Counter(), "64": Counter()}
         # check for potential call instructions and collect their first bytes
         for bitness in ["32", "64"]:
-            for call_match in re.finditer(b"\xE8", binary):
+            for call_match in re.finditer(b"\xe8", binary):
                 if len(binary) - call_match.start() > 5:
-                    packed_call = binary[call_match.start() + 1:call_match.start() + 5]
+                    packed_call = binary[call_match.start() + 1 : call_match.start() + 5]
                     rel_call_offset = struct.unpack("i", packed_call)[0]
-                    call_destination = (rel_call_offset + call_match.start() + 5)  # & bitmask
+                    call_destination = rel_call_offset + call_match.start() + 5  # & bitmask
                     if call_destination > 0 and call_destination < len(binary):
                         first_byte = binary[call_destination]
                         candidate_first_bytes[bitness][first_byte] += 1
@@ -37,7 +36,7 @@ class BitnessAnalyzer(object):
         for bitness in ["32", "64"]:
             for candidate_sequence in candidate_first_bytes[bitness]:
                 if isinstance(candidate_sequence, int):
-                    candidate_sequence = "%02x" % candidate_sequence
+                    candidate_sequence = f"{candidate_sequence:02x}"
                 elif isinstance(candidate_sequence, str):
                     candidate_sequence = candidate_sequence.encode("hex")
                 for common_sequence, sequence_score in COMMON_START_BYTES[bitness].items():

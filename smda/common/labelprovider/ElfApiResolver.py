@@ -1,17 +1,16 @@
 #!/usr/bin/python
 import lief
+
 lief.logging.disable()
 
-from .AbstractLabelProvider import AbstractLabelProvider
+from .AbstractLabelProvider import AbstractLabelProvider  # noqa: E402
 
 
 class ElfApiResolver(AbstractLabelProvider):
-    """ Minimal ELF API reference resolver, extracting APIs from ELF imports """
+    """Minimal ELF API reference resolver, extracting APIs from ELF imports"""
 
     def __init__(self, config):
-        self._api_map = {
-            "lief": {}
-        }
+        self._api_map = {"lief": {}}
 
     def update(self, binary_info):
         if binary_info.is_buffer:

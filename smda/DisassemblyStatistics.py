@@ -1,7 +1,4 @@
-
-
-class DisassemblyStatistics(object):
-
+class DisassemblyStatistics:
     num_functions = None
     num_recursive_functions = None
     num_leaf_functions = None
@@ -71,7 +68,7 @@ class DisassemblyStatistics(object):
             "num_api_calls": self.num_api_calls,
             "num_function_calls": self.num_function_calls,
             "num_failed_functions": self.num_failed_functions,
-            "num_failed_instructions": self.num_failed_instructions
+            "num_failed_instructions": self.num_failed_instructions,
         }
 
     def __add__(self, other):

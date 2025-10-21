@@ -1,32 +1,32 @@
-import struct
-import re
 import logging
+import re
+import struct
 
 LOGGER = logging.getLogger(__name__)
 
 
-class JumpTableAnalyzer(object):
-    """ Perform jump table handling.
-        There are generally a few typical patterns here:
-        A) multiplicative
-            cmp     eax, jumptable_size
-            ja      loc_default
-            mov     eax, ds:off_jumptable[eax*4]
-            jmp     eax
-        B) additive
-            cmp     [ebp+arg_4], jumptable_size
-            ja      loc_default
-            mov     eax, [ebp+arg_4]
-            shl     eax, 2
-            add     eax, off_jumptable
-            mov     eax, [eax]
-            jmp     eax
-        C) multiplicative, relative
-            cmp     rcx, jumptable_size
-            lea     r11, off_jumptable
-            movsxd  rcx, ds:(off_jumptable)[r11+rdx*4]
-            lea     rcx, [r11+rcx]
-            jmp     rcx
+class JumpTableAnalyzer:
+    """Perform jump table handling.
+    There are generally a few typical patterns here:
+    A) multiplicative
+        cmp     eax, jumptable_size
+        ja      loc_default
+        mov     eax, ds:off_jumptable[eax*4]
+        jmp     eax
+    B) additive
+        cmp     [ebp+arg_4], jumptable_size
+        ja      loc_default
+        mov     eax, [ebp+arg_4]
+        shl     eax, 2
+        add     eax, off_jumptable
+        mov     eax, [eax]
+        jmp     eax
+    C) multiplicative, relative
+        cmp     rcx, jumptable_size
+        lea     r11, off_jumptable
+        movsxd  rcx, ds:(off_jumptable)[r11+rdx*4]
+        lea     rcx, [r11+rcx]
+        jmp     rcx
     """
 
     def __init__(self, disassembler):
@@ -35,8 +35,11 @@ class JumpTableAnalyzer(object):
         self.table_offsets = self._findJumpTables()
 
     def _findJumpTables(self):
-        jumptables = set([])
-        for match_offset in re.finditer(b"(\x48|\x4c)\x8d.{5}(.\x63|\x77|.\x89..\x63)", self.disassembly.binary_info.binary):
+        jumptables = set()
+        for match_offset in re.finditer(
+            b"(\x48|\x4c)\x8d.{5}(.\x63|\x77|.\x89..\x63)",
+            self.disassembly.binary_info.binary,
+        ):
             rel_table_offset = struct.unpack("I", self.disassembly.getRawBytes(match_offset.start() + 3, 4))[0]
             ins_offset = self.disassembly.binary_info.base_addr + match_offset.start()
             table_offset = ins_offset + rel_table_offset + 7
@@ -100,19 +103,19 @@ class JumpTableAnalyzer(object):
         return bonus_offset
 
     def _extractDirectTableOffsets(self, jumptable_size, off_jumptable):
-        jump_targets = set([])
+        jump_targets = set()
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
                 try:
                     entry = struct.unpack("I", self.disassembly.getBytes(off_jumptable + index * 4, 4))[0]
                     jump_targets.add(entry)
-                except:
+                except (struct.error, IndexError):
                     continue
-        return sorted(list(jump_targets))
+        return sorted(jump_targets)
 
     def _extractRelativeTableOffsets(self, jumptable_size, off_jumptable, alternative_base=None, bonus_offset=0):
         jumptable_size = jumptable_size if jumptable_size else 0xFF
-        jump_targets = set([])
+        jump_targets = set()
         jump_base = alternative_base if alternative_base else off_jumptable
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
@@ -131,9 +134,9 @@ class JumpTableAnalyzer(object):
                         # state.addDataRef(off_jumptable, rebased + index * 4, size=4)
                     elif not alternative_base:
                         break
-                except:
+                except (struct.error, IndexError):
                     continue
-        return sorted(list(jump_targets))
+        return sorted(jump_targets)
 
     def _resolveExplicitTable(self, jump_instruction_address, state, jumptable_address, jumptable_size=None):
         jumptable_size = jumptable_size if jumptable_size is not None else 0xFF
@@ -143,17 +146,32 @@ class JumpTableAnalyzer(object):
         if self.disassembly.isAddrWithinMemoryImage(jumptable_address):
             for i in range(jumptable_size):
                 if bitness == 32:
-                    table_entry = struct.unpack("I", self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size))[0]
+                    table_entry = struct.unpack(
+                        "I",
+                        self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
+                    )[0]
                 elif bitness == 64:
-                    table_entry = struct.unpack("Q", self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size))[0]
+                    table_entry = struct.unpack(
+                        "Q",
+                        self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
+                    )[0]
                 if not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
-                state.addDataRef(jump_instruction_address, jumptable_address + i * entry_size, size=entry_size)
+                state.addDataRef(
+                    jump_instruction_address,
+                    jumptable_address + i * entry_size,
+                    size=entry_size,
+                )
                 jumptable_addresses.append(table_entry)
         return jumptable_addresses
 
     def getJumpTargets(self, jump_instruction, state):
-        jump_instruction_address, jump_instruction_size, jump_instruction_mnemonic, jump_instruction_op_str = jump_instruction
+        (
+            jump_instruction_address,
+            jump_instruction_size,
+            jump_instruction_mnemonic,
+            jump_instruction_op_str,
+        ) = jump_instruction
         table_offsets = []
         off_jumptable = None
         backtracked = state.backtrackInstructions(jump_instruction_address, 50)
@@ -161,7 +179,7 @@ class JumpTableAnalyzer(object):
         jumptable_size = self._findJumpTableSize(backtracked)
         # if False and jump_instruction_address:
         #     print("0x%x %s %s -> %s" % (jump_instruction_address, jump_instruction_mnemonic, jump_instruction_op_str, backtracked_sequence))
-        if jump_instruction_op_str.startswith("dword ptr [") or jump_instruction_op_str.startswith("qword ptr ["):
+        if jump_instruction_op_str.startswith(("dword ptr [", "qword ptr [")):
             off_jumptable = self.disassembler.getReferencedAddr(jump_instruction_op_str)
             table_offsets = self._resolveExplicitTable(jump_instruction_address, state, off_jumptable, jumptable_size)
         else:
@@ -175,12 +193,10 @@ class JumpTableAnalyzer(object):
                 alternative_base = 0
                 if "rsi" in backtracked[::-1][0][3]:
                     alternative_base = self._x64Handler(state, backtracked, "rsi")
-                table_offsets = self._extractRelativeTableOffsets(jumptable_size, off_jumptable, alternative_base=alternative_base)
-            elif backtracked_sequence.startswith("lea"):
-                jumptable_size = self._findJumpTableSize(backtracked)
-                off_jumptable = self._x64Handler(state, backtracked)
-                table_offsets = self._extractRelativeTableOffsets(jumptable_size, off_jumptable)
-            elif backtracked_sequence.startswith("add-add") or backtracked_sequence.startswith("add-shr"):
+                table_offsets = self._extractRelativeTableOffsets(
+                    jumptable_size, off_jumptable, alternative_base=alternative_base
+                )
+            elif backtracked_sequence.startswith(("lea", "add-add", "add-shr")):
                 jumptable_size = self._findJumpTableSize(backtracked)
                 off_jumptable = self._x64Handler(state, backtracked)
                 table_offsets = self._extractRelativeTableOffsets(jumptable_size, off_jumptable)

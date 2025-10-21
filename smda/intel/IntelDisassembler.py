@@ -4,30 +4,40 @@ import datetime
 import logging
 import re
 
-from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_MODE_64
+from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
-from smda.DisassemblyResult import DisassemblyResult
 from smda.common.BinaryInfo import BinaryInfo
-from smda.common.labelprovider.WinApiResolver import WinApiResolver
-from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
-from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
-from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
-from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
-from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
+from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
+from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
-from .definitions import CJMP_INS, LOOP_INS, JMP_INS, CALL_INS, RET_INS, REGS_32BIT, REGS_64BIT, DOUBLE_ZERO
-from .FunctionCandidateManager import FunctionCandidateManager
+from smda.DisassemblyResult import DisassemblyResult
+
+from .BitnessAnalyzer import BitnessAnalyzer
+from .definitions import (
+    CALL_INS,
+    CJMP_INS,
+    DOUBLE_ZERO,
+    JMP_INS,
+    LOOP_INS,
+    REGS_32BIT,
+    REGS_64BIT,
+    RET_INS,
+)
 from .FunctionAnalysisState import FunctionAnalysisState
+from .FunctionCandidateManager import FunctionCandidateManager
 from .IndirectCallAnalyzer import IndirectCallAnalyzer
 from .JumpTableAnalyzer import JumpTableAnalyzer
 from .MnemonicTfIdf import MnemonicTfIdf
-from .BitnessAnalyzer import BitnessAnalyzer
 
 LOGGER = logging.getLogger(__name__)
 
 
-class SimpleIns(object):
+class SimpleIns:
     address = None
     size = None
     mnemonic = None
@@ -42,8 +52,7 @@ class SimpleIns(object):
         self.bytes = bytes
 
 
-class IntelDisassembler(object):
-
+class IntelDisassembler:
     def __init__(self, config, forced_bitness=None):
         self.config = config
         self._forced_bitness = forced_bitness
@@ -61,10 +70,14 @@ class IntelDisassembler(object):
         self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
 
     def _initCapstone(self):
-        self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.disassembly.binary_info.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
+        self.capstone = (
+            Cs(CS_ARCH_X86, CS_MODE_64) if self.disassembly.binary_info.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
+        )
 
     def _initTfIdf(self):
-        self._tfidf = MnemonicTfIdf(bitness=64) if self.disassembly.binary_info.bitness == 64 else MnemonicTfIdf(bitness=32)
+        self._tfidf = (
+            MnemonicTfIdf(bitness=64) if self.disassembly.binary_info.bitness == 64 else MnemonicTfIdf(bitness=32)
+        )
 
     def getBitMask(self):
         if self.disassembly.binary_info.bitness == 64:
@@ -113,7 +126,7 @@ class IntelDisassembler(object):
         return ""
 
     def getSymbolCandidates(self):
-        symbol_offsets = set([])
+        symbol_offsets = set()
         for provider in self.label_providers:
             if not provider.isSymbolProvider():
                 continue
@@ -131,11 +144,15 @@ class IntelDisassembler(object):
         indirect_switch_bytes = []
         current_offset = addr_switch_array + size * 4
         if self.disassembly.isAddrWithinMemoryImage(current_offset):
-            LOGGER.debug("0x%08x analyzing potentially indirect switch table (size: 0x%08x).", current_offset, size)
+            LOGGER.debug(
+                "0x%08x analyzing potentially indirect switch table (size: 0x%08x).",
+                current_offset,
+                size,
+            )
             current_byte = self.disassembly.getByte(current_offset)
             if isinstance(current_byte, str):
                 current_byte = ord(current_byte)
-            while current_byte < size and not current_offset in self.fc_manager.getFunctionStartCandidates():
+            while current_byte < size and current_offset not in self.fc_manager.getFunctionStartCandidates():
                 indirect_switch_bytes.append(current_offset)
                 current_offset += 1
                 current_byte = self.disassembly.getByte(current_offset)
@@ -298,15 +315,21 @@ class IntelDisassembler(object):
         i = None
         state = FunctionAnalysisState(start_addr, self.disassembly)
         if state.isProcessedFunction():
-            self.fc_manager.updateAnalysisAborted(start_addr, "collision with existing code of function 0x{:08x}".format(self.disassembly.ins2fn[start_addr]))
+            self.fc_manager.updateAnalysisAborted(
+                start_addr,
+                f"collision with existing code of function 0x{self.disassembly.ins2fn[start_addr]:08x}",
+            )
             return []
         while state.hasUnprocessedBlocks():
-            LOGGER.debug("  current block queue: %s", ", ".join(["0x%x" % addr for addr in state.block_queue]))
+            LOGGER.debug(
+                "  current block queue: %s",
+                ", ".join([f"0x{addr:x}" for addr in state.block_queue]),
+            )
             state.chooseNextBlock()
             LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
             # in capstone, disassembly is more expensive than calling the function, so we use maximum x86/64 instruction size (14 bytes) as lookeahead.
             # disasm_lite() also provides up to 30% faster disassembly than disasm(), so we work with tuples instead of objects
-            cache = [i for i in self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start)]
+            cache = list(self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start))
             cache_pos = 0
             previous_address = None
             previous_mnemonic = None
@@ -316,16 +339,26 @@ class IntelDisassembler(object):
                     i_address, i_size, i_mnemonic, i_op_str = i
                     i_op_str = i_op_str.strip()
                     i_relative_address = i_address - self.disassembly.binary_info.base_addr
-                    i_bytes = self.disassembly.binary_info.binary[i_relative_address:i_relative_address + i_size]
-                    LOGGER.debug("  analyzeFunction() now processing instruction @0x%08x: %s", i_address, i_mnemonic + " " + i_op_str)
+                    i_bytes = self.disassembly.binary_info.binary[i_relative_address : i_relative_address + i_size]
+                    LOGGER.debug(
+                        "  analyzeFunction() now processing instruction @0x%08x: %s",
+                        i_address,
+                        i_mnemonic + " " + i_op_str,
+                    )
                     cache_pos += i_size
                     state.setNextInstructionReachable(True)
                     # count appearences of "suspicious" byte patterns (like 00 00) that indicate non-function code
                     if i_bytes == DOUBLE_ZERO:
                         state.suspicious_ins_count += 1
-                        LOGGER.debug("    analyzeFunction() found suspicious function @0x%08x", i_address)
+                        LOGGER.debug(
+                            "    analyzeFunction() found suspicious function @0x%08x",
+                            i_address,
+                        )
                         if state.suspicious_ins_count > 1:
-                            self.fc_manager.updateAnalysisAborted(start_addr, "too many suspicious instructions @0x%08x" % i_address)
+                            self.fc_manager.updateAnalysisAborted(
+                                start_addr,
+                                f"too many suspicious instructions @0x{i_address:08x}",
+                            )
                             return state
                     # remove potential "bnd" prefix
                     i_mnemonic_noprefix = i_mnemonic.split(" ")[-1]
@@ -338,28 +371,54 @@ class IntelDisassembler(object):
                     elif i_mnemonic_noprefix in CJMP_INS:
                         self._analyzeCondJmpInstruction(i, state)
                     elif i_mnemonic_noprefix.startswith("j"):
-                        LOGGER.error("unsupported jump @0x%08x (0x%08x): %s %s", i_address, start_addr, i_mnemonic, i_op_str)
+                        LOGGER.error(
+                            "unsupported jump @0x%08x (0x%08x): %s %s",
+                            i_address,
+                            start_addr,
+                            i_mnemonic,
+                            i_op_str,
+                        )
                         # we do not analyze any potential exception handler (tricks), so treat breakpoints as exit condition
                     elif i_mnemonic_noprefix in RET_INS:
                         self._analyzeEndInstruction(state)
-                        LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
+                        LOGGER.debug(
+                            "  analyzeFunction() found ending instruction @0x%08x",
+                            i_address,
+                        )
                         if previous_address and previous_mnemonic == "push":
                             push_ret_destination = self.getReferencedAddr(previous_op_str)
                             if self.disassembly.isAddrWithinMemoryImage(push_ret_destination):
-                                LOGGER.debug("  analyzeFunction() found push-return jump obfuscation: @0x%08x", i_address)
+                                LOGGER.debug(
+                                    "  analyzeFunction() found push-return jump obfuscation: @0x%08x",
+                                    i_address,
+                                )
                                 state.addBlockToQueue(push_ret_destination)
                                 state.addCodeRef(i_address, push_ret_destination, by_jump=True)
                     elif i_mnemonic_noprefix in ["int3", "hlt"]:
                         self._analyzeEndInstruction(state)
-                        LOGGER.debug("  analyzeFunction() found ending instruction @0x%08x", i_address)
+                        LOGGER.debug(
+                            "  analyzeFunction() found ending instruction @0x%08x",
+                            i_address,
+                        )
                     elif previous_address and i_address != start_addr and previous_mnemonic == "call":
-                        instruction_sequence = [ins for ins in self.capstone.disasm(self._getDisasmWindowBuffer(i_address), i_address)]
-                        if (not self.disassembly.language['_guess'] == "go" and self.fc_manager.isAlignmentSequence(instruction_sequence)) or self.fc_manager.isFunctionCandidate(i_address):
+                        instruction_sequence = list(
+                            self.capstone.disasm(self._getDisasmWindowBuffer(i_address), i_address)
+                        )
+                        if (
+                            self.disassembly.language["_guess"] != "go"
+                            and self.fc_manager.isAlignmentSequence(instruction_sequence)
+                        ) or self.fc_manager.isFunctionCandidate(i_address):
                             # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
                             # however, Go tends to insert alignment NOPs after calls, too, but in this case, they are no tailcall indicator
                             # apparently calls are frequently padded with NOPs, so one last chance to continue disassembly is when we already have instructions for our function beyond this call.
-                            if not any([disassembled_addr > i_address for disassembled_addr in state.instruction_start_bytes]):
-                                LOGGER.debug("    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.", start_addr, i_address)
+                            if not any(
+                                disassembled_addr > i_address for disassembled_addr in state.instruction_start_bytes
+                            ):
+                                LOGGER.debug(
+                                    "    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.",
+                                    start_addr,
+                                    i_address,
+                                )
                                 # remove next instruction from references
                                 state.removeCodeRef(previous_address, i_address)
                                 # end block
@@ -368,19 +427,39 @@ class IntelDisassembler(object):
                                 state.setSanelyEnding(True)
                                 if self.fc_manager.isAlignmentSequence(instruction_sequence):
                                     next_aligned_address = previous_address + (16 - previous_address % 16)
-                                    LOGGER.debug("  Adding: 0x%x as candidate.", next_aligned_address)
+                                    LOGGER.debug(
+                                        "  Adding: 0x%x as candidate.",
+                                        next_aligned_address,
+                                    )
                                     self.fc_manager.addCandidate(next_aligned_address, is_gap=True)
                                 break
                             else:
-                                LOGGER.debug("    current function: 0x%x ---> alignment sequence seems to just pad a call -> 0x%08x, NOT cutting block here.", start_addr, i_address)
+                                LOGGER.debug(
+                                    "    current function: 0x%x ---> alignment sequence seems to just pad a call -> 0x%08x, NOT cutting block here.",
+                                    start_addr,
+                                    i_address,
+                                )
                     previous_address = i_address
                     previous_mnemonic = i_mnemonic_noprefix
                     previous_op_str = i_op_str
-                    if not i_address in self.disassembly.code_map and not i_address in self.disassembly.data_map and not state.isProcessed(i_address):
-                        LOGGER.debug("  analyzeFunction() booked instruction @0x%08x: %s for processed state", i_address, i_mnemonic + " " + i_op_str)
+                    if (
+                        i_address not in self.disassembly.code_map
+                        and i_address not in self.disassembly.data_map
+                        and not state.isProcessed(i_address)
+                    ):
+                        LOGGER.debug(
+                            "  analyzeFunction() booked instruction @0x%08x: %s for processed state",
+                            i_address,
+                            i_mnemonic + " " + i_op_str,
+                        )
                         state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
                     elif i_address in self.disassembly.code_map:
-                        LOGGER.debug("  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)", i_address, i_mnemonic + " " + i_op_str, self.disassembly.ins2fn[i_address])
+                        LOGGER.debug(
+                            "  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)",
+                            i_address,
+                            i_mnemonic + " " + i_op_str,
+                            self.disassembly.ins2fn[i_address],
+                        )
                         state.setBlockEndingInstruction(True)
                         state.addCollision(i_address)
                     else:
@@ -390,24 +469,33 @@ class IntelDisassembler(object):
                         state.endBlock()
                         break
                 else:
-                    #if the inner loop did not break, we need to refill the cache in order to finish the block-analysis
-                    cache = [i for i in self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start + cache_pos), state.block_start + cache_pos)]
+                    # if the inner loop did not break, we need to refill the cache in order to finish the block-analysis
+                    cache = list(
+                        self.capstone.disasm_lite(
+                            self._getDisasmWindowBuffer(state.block_start + cache_pos),
+                            state.block_start + cache_pos,
+                        )
+                    )
                     if not cache:
                         break
                     continue
-                #if the inner loop did break, the cache didn't run empty and thus block-analysis is finished
+                # if the inner loop did break, the cache didn't run empty and thus block-analysis is finished
                 break
             if not state.isBlockEndingInstruction():
                 if i is not None:
-                    LOGGER.debug("No block submitted, last instruction: 0x%08x -> 0x%08x %s || %s",
-                                 start_addr,
-                                 i_address,
-                                 i_mnemonic + " " + i_op_str,
-                                 self.fc_manager.getFunctionCandidate(start_addr))
+                    LOGGER.debug(
+                        "No block submitted, last instruction: 0x%08x -> 0x%08x %s || %s",
+                        start_addr,
+                        i_address,
+                        i_mnemonic + " " + i_op_str,
+                        self.fc_manager.getFunctionCandidate(start_addr),
+                    )
                 else:
-                    LOGGER.debug("No block submitted with no ins, last instruction: 0x%08x || %s",
-                                 start_addr,
-                                 self.fc_manager.getFunctionCandidate(start_addr))
+                    LOGGER.debug(
+                        "No block submitted with no ins, last instruction: 0x%08x || %s",
+                        start_addr,
+                        self.fc_manager.getFunctionCandidate(start_addr),
+                    )
         state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis(as_gap)
         if analysis_result and self.config.RESOLVE_REGISTER_CALLS:
@@ -418,7 +506,11 @@ class IntelDisassembler(object):
         return state
 
     def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
-        LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
+        LOGGER.debug(
+            "Analyzing buffer with %d bytes @0x%08x",
+            binary_info.binary_size,
+            binary_info.base_addr,
+        )
         self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
@@ -428,7 +520,10 @@ class IntelDisassembler(object):
         if self.disassembly.binary_info.bitness not in [32, 64]:
             bitness_analyzer = BitnessAnalyzer()
             self.disassembly.binary_info.bitness = bitness_analyzer.determineBitnessFromDisassembly(self.disassembly)
-            LOGGER.debug("Automatically Recognized Bitness as: %d", self.disassembly.binary_info.bitness)
+            LOGGER.debug(
+                "Automatically Recognized Bitness as: %d",
+                self.disassembly.binary_info.bitness,
+            )
         else:
             LOGGER.debug("Using defined Bitness as: %d", self.disassembly.binary_info.bitness)
         if self._forced_bitness:
@@ -454,7 +549,10 @@ class IntelDisassembler(object):
             if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
             state = self.analyzeFunction(candidate.addr)
-        LOGGER.debug("Finished heuristical analysis, functions: %d", len(self.disassembly.functions))
+        LOGGER.debug(
+            "Finished heuristical analysis, functions: %d",
+            len(self.disassembly.functions),
+        )
         # second pass, analyze remaining gaps for additional candidates in an iterative way
         gap_candidate = self.fc_manager.nextGapCandidate()
         while gap_candidate is not None:

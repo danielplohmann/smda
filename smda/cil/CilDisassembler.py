@@ -2,22 +2,20 @@
 
 import datetime
 import logging
-import re
-from typing import TYPE_CHECKING, Any, Union, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from dnfile import dnPE
-    from dnfile.mdtable import MethodDefRow
 import dnfile
-from dnfile.enums import MetadataTables
 from dncil.cil.body import CilMethodBody
-from dncil.cil.error import MethodBodyFormatError
-from dncil.clr.token import Token, StringToken, InvalidToken
 from dncil.cil.body.reader import CilMethodBodyReaderBase
+from dncil.cil.error import MethodBodyFormatError
+from dncil.clr.token import InvalidToken, StringToken, Token
+from dnfile.enums import MetadataTables
 
-from smda.DisassemblyResult import DisassemblyResult
-from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.CilSymbolProvider import CilSymbolProvider
+from smda.DisassemblyResult import DisassemblyResult
+
 from .FunctionAnalysisState import FunctionAnalysisState
 
 LOGGER = logging.getLogger(__name__)
@@ -28,7 +26,7 @@ def read_dotnet_user_string(pe, token: StringToken) -> Union[str, InvalidToken]:
     """read user string from #US stream"""
     try:
         user_string: Optional[dnfile.stream.UserString] = pe.net.user_strings.get(token.rid)
-    except UnicodeDecodeError as e:
+    except UnicodeDecodeError:
         return InvalidToken(token.value)
 
     if user_string is None or (isinstance(user_string, bytes) or user_string.value is None):
@@ -68,7 +66,7 @@ def format_operand(pe, operand: Any) -> str:
     elif isinstance(operand, int):
         return hex(operand)
     elif isinstance(operand, list):
-        return f"[{', '.join(['({:04X})'.format(x) for x in operand])}]"
+        return f"[{', '.join([f'({x:04X})' for x in operand])}]"
     elif isinstance(operand, dnfile.mdtable.MemberRefRow):
         if isinstance(operand.Class.row, (dnfile.mdtable.TypeRefRow,)):
             return f"{str(operand.Class.row.TypeNamespace)}.{operand.Class.row.TypeName}::{operand.Name}"
@@ -112,8 +110,7 @@ class DnfileMethodBodyReader(CilMethodBodyReaderBase):
         return self.offset
 
 
-class CilDisassembler(object):
-
+class CilDisassembler:
     def __init__(self, config):
         self.config = config
         self._tfidf = None
@@ -163,36 +160,60 @@ class CilDisassembler(object):
             if False:
                 from smda.cil.CilInstructionEscaper import CilInstructionEscaper
                 from smda.common.SmdaInstruction import SmdaInstruction
+
                 smda_ins = SmdaInstruction([i_address, i_bytes.hex(), i_mnemonic, i_op_str])
                 escaped = CilInstructionEscaper.escapeBinary(smda_ins)
                 print(
                     f"{escaped:<20}"
-                    + "{:04X}".format(insn.offset)
+                    + f"{insn.offset:04X}"
                     + "    "
-                    + f"{' '.join('{:02x}'.format(b) for b in insn.get_bytes()) : <20}"
-                    + f"{str(insn.opcode) : <15}"
+                    + f"{' '.join(f'{b:02x}' for b in insn.get_bytes()): <20}"
+                    + f"{str(insn.opcode): <15}"
                     + format_operand(pe, insn.operand)
                 )
             # https://en.wikipedia.org/wiki/List_of_CIL_instructions
             if i_mnemonic in ["ret"]:
                 state.setNextInstructionReachable(False)
             if i_mnemonic in [
-                    "beq", "beq.s", 
-                    "bge", "bge.s", "bge.un", "bge.un.s",
-                    "bgt", "bgt.s", "bgt.un", "bgt.un.s",
-                    "ble", "ble.s", "ble.un", "ble.un.s",
-                    "blt", "blt.s", "blt.un", "blt.un.s",
-                    "bne.un", "bne.un.s", 
-                    "br", "br.s", 
-                    "brfalse", "brfalse.s", 
-                    "brinst", "brinst.s", 
-                    "brnull", "brnull.s", 
-                    "brtrue", "brtrue.s", 
-                    "brzero", "brzero.s"]:
+                "beq",
+                "beq.s",
+                "bge",
+                "bge.s",
+                "bge.un",
+                "bge.un.s",
+                "bgt",
+                "bgt.s",
+                "bgt.un",
+                "bgt.un.s",
+                "ble",
+                "ble.s",
+                "ble.un",
+                "ble.un.s",
+                "blt",
+                "blt.s",
+                "blt.un",
+                "blt.un.s",
+                "bne.un",
+                "bne.un.s",
+                "br",
+                "br.s",
+                "brfalse",
+                "brfalse.s",
+                "brinst",
+                "brinst.s",
+                "brnull",
+                "brnull.s",
+                "brtrue",
+                "brtrue.s",
+                "brzero",
+                "brzero.s",
+            ]:
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
             if i_mnemonic in ["jmp"]:
-                raise Exception("Found unhandled CIL jmp instruction, report back its structure and have Daniel fix it.")
+                raise Exception(
+                    "Found unhandled CIL jmp instruction, report back its structure and have Daniel fix it."
+                )
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
                 state.setNextInstructionReachable(False)
@@ -209,7 +230,7 @@ class CilDisassembler(object):
                     if isinstance(operand, dnfile.mdtable.MethodDefRow):
                         # override operand string with "address" of the method
                         method_name = self.cil_label_provider.decodeSymbolName(operand.Name.value)
-                        i_op = f"0x{self.cil_label_provider.getAddress(method_name):x}"
+                        i_op_str = f"0x{self.cil_label_provider.getAddress(method_name):x}"
             if i_mnemonic in ["throw"]:
                 state.setNextInstructionReachable(False)
             if i_mnemonic in ["switch"]:
@@ -220,11 +241,15 @@ class CilDisassembler(object):
             state.prev_opcode = i_mnemonic
             state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
         state.label = self.resolveSymbol(state.start_addr)
-        analysis_result = state.finalizeAnalysis()
+        state.finalizeAnalysis()
         return state
 
     def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
-        LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
+        LOGGER.debug(
+            "Analyzing buffer with %d bytes @0x%08x",
+            binary_info.binary_size,
+            binary_info.base_addr,
+        )
         self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
@@ -235,7 +260,6 @@ class CilDisassembler(object):
 
         LOGGER.debug("Starting parser-based analysis.")
         pe = dnfile.dnPE(data=binary_info.raw_data)
-        all_instruction_offsets = set([])
         for row in pe.net.mdtables.MethodDef:
             if not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
                 # skip methods that do not have a method body
@@ -249,7 +273,7 @@ class CilDisassembler(object):
                 continue
             if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
-            function_result_state = self.analyzeFunction(pe, method_body.offset, method_body)
+            self.analyzeFunction(pe, method_body.offset, method_body)
         # package up and finish
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout():
