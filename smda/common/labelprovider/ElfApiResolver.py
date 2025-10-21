@@ -1,9 +1,9 @@
 #!/usr/bin/python
 import lief
 
-lief.logging.disable()
+from .AbstractLabelProvider import AbstractLabelProvider
 
-from .AbstractLabelProvider import AbstractLabelProvider  # noqa: E402
+lief.logging.disable()
 
 
 class ElfApiResolver(AbstractLabelProvider):

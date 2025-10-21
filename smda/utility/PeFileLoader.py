@@ -4,8 +4,7 @@ import struct
 import lief
 
 lief.logging.disable()
-
-LOG = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class PeFileLoader:
@@ -68,7 +67,7 @@ class PeFileLoader:
                 mapped_binary[mapped_from:mapped_to] = binary[
                     section_info["raw_offset"] : section_info["raw_offset"] + section_info["raw_size"]
                 ]
-                LOG.debug(
+                LOGGER.debug(
                     "Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)",
                     section_info["section_index"],
                     section_info["raw_offset"],
@@ -76,7 +75,7 @@ class PeFileLoader:
                     section_info["virt_offset"],
                     section_info["virt_size"],
                 )
-            LOG.debug(
+            LOGGER.debug(
                 "Mapped binary of size %d bytes (%d sections) to memory view of size %d bytes",
                 len(binary),
                 num_sections,
@@ -102,7 +101,7 @@ class PeFileLoader:
             elif PeFileLoader.getBitness(binary) == 64:
                 base_addr = struct.unpack("Q", binary[pe_offset + 0x30 : pe_offset + 0x38])[0]
         if base_addr:
-            LOG.debug(
+            LOGGER.debug(
                 "Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)",
                 base_addr,
             )

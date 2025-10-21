@@ -50,7 +50,8 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         pe_header = lief.parse(binary_info.getHeaderBytes())
         assert pe_header.dos_header.magic == 0x5A4D
         assert pe_header.header.machine == 0x14C
-        disasm._disassemble(binary_info)
+        controlled_disassembly = disasm._disassemble(binary_info)
+        assert controlled_disassembly.num_functions == 33
         cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cutwail_binary)
         assert cutwail_unmapped_disassembly.num_functions == 33
         # TODO test label extraction for PE, add another binary for testing
@@ -77,7 +78,8 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
-        disasm._disassemble(binary_info)
+        controlled_disassembly = disasm._disassemble(binary_info)
+        assert controlled_disassembly.num_functions == 177
         bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
         assert bashlite_unmapped_disassembly.num_functions == 177
         assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174

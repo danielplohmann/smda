@@ -1,15 +1,14 @@
 #!/usr/bin/python
+import logging
 import re
+import struct
+from collections import OrderedDict
 
 import lief
 
+from .AbstractLabelProvider import AbstractLabelProvider
+
 lief.logging.disable()
-import logging  # noqa: E402
-import struct  # noqa: E402
-from collections import OrderedDict  # noqa: E402
-
-from .AbstractLabelProvider import AbstractLabelProvider  # noqa: E402
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -76,6 +75,7 @@ class GoSymbolProvider(AbstractLabelProvider):
     def _parse_pclntab(self, pclntab_offset, binary):
         pclntab_buffer = binary[pclntab_offset:]
 
+        # marker are defined here https://go.dev/src/debug/gosym/pclntab.go
         marker = struct.unpack("I", pclntab_buffer[0:4])[0]
         if marker == 0xFFFFFFFB:
             version = "1.12"

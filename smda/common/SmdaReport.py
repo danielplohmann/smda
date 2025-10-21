@@ -93,6 +93,7 @@ class SmdaReport:
             self.xmetadata = {
                 "exported_functions": disassembly.binary_info.getExportedFunctions(),
                 "imported_functions": disassembly.binary_info.getImportedFunctions(),
+                "symbols": disassembly.binary_info.getSymbols(),
             }
 
     def _convertCfg(self, disassembly, config=None):
@@ -310,7 +311,7 @@ class SmdaReport:
             "sha1": self.sha1,
             "md5": self.md5,
             "smda_version": self.smda_version,
-            "statistics": self.statistics.toDict(),
+            "statistics": self.statistics.toDict() if self.statistics else {},
             "status": self.status,
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},

@@ -29,6 +29,7 @@ class BinaryInfo:
     version = ""
     exported_functions = None
     imported_functions = None
+    symbols = None
     oep = None
 
     def __init__(self, binary):
@@ -66,6 +67,15 @@ class BinaryInfo:
             elif isinstance(lief_result, lief.ELF.Binary):
                 self.imported_functions = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
         return self.imported_functions
+
+    def getSymbols(self):
+        if self.symbols is None:
+            lief_result = lief.parse(self.raw_data)
+            if isinstance(lief_result, lief.PE.Binary):
+                self.symbols = PeSymbolProvider(None).parseSymbols(lief_result)
+            elif isinstance(lief_result, lief.ELF.Binary):
+                self.symbols = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
+        return self.symbols
 
     def getSections(self):
         pefile = lief.parse(self.raw_data)

@@ -3,21 +3,14 @@
 import contextlib
 import logging
 
+import lief
+
 from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
+lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
-
-try:
-    import lief
-
-    lief.logging.disable()
-except ImportError:
-    lief = None
-    LOGGER.warning(
-        "3rd party library LIEF not installed - won't be able to extract symbols for ELF files where available."
-    )
 
 
 class PeSymbolProvider(AbstractLabelProvider):

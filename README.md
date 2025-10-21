@@ -9,7 +9,7 @@ Optionally, references to the Windows API can be inferred by using the ApiScout 
 
 ## Installation
 
-With version 1.2.0, we have finally simplified things by moving to [PyPI](https://pypi.org/project/smda/)!  
+With version 1.2.0, we have finally simplified things by moving to [PyPI](https://pypi.org/project/smda/)!
 So installation now is as easy as:
 
 ```
@@ -38,11 +38,11 @@ A typical workflow using SMDA could like this:
 0x0000172e: (          7402) - je 0x1732
 0x00001730: (          ffd0) - call rax
 0x00001732: (      4883c408) - add rsp, 8
-0x00001736: (            c3) - ret 
+0x00001736: (            c3) - ret
 0x00001ad0: (->   1,    4->)   1 blocks,   12 instructions.
 [...]
 >>> json_report = report.toDict()
-``` 
+```
 
 There is also a demo script:
 
@@ -52,7 +52,7 @@ The code should be fully compatible with Python 3.8+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
 To take full advantage of SMDA's capabilities, make sure to (optionally) install:
- * lief 
+ * lief
  * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Development
@@ -63,7 +63,7 @@ This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code form
 
 ```bash
 # Install development dependencies
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 
 # Install pre-commit hooks (optional but recommended)
 make init
@@ -101,46 +101,16 @@ make test
 ```
 
 ## Version History
+ * 2025-10-21: v2.3.1 - Fixed lief error for section/segment flags in ELF files crashing file loading. Now properly parsing and providing symbol info for PEs in their own xmetadata section.
+ * 2025-10-21: v2.3.0 - Major code refactor and cleanup, with many thanks to the contribution @r0ny123!!
  * 2025-07-25: v2.2.3 - Minor bugfixes.
  * 2025-07-23: v2.2.1 - Added xmetadata field to SmdaReport, with information about imports and exports. Improved string extraction from Go binaries.
  * 2025-06-13: v2.1.0 - Support for export from IDA 9.0+ (THX to @jershmagersh for the update!).
  * 2025-02-26: v2.0.2 - Adjusting relative import, adding init file.
  * 2025-02-25: v2.0.0 - Initial experimental support for CIL (.NET) disassembly.
- * 2025-02-24: v1.14.3 - PicHashing can now be disabled via SmdaConfig to save some processing time. (THX to @Nalexander-hanel!)
- * 2025-02-24: v1.14.2 - We are Python 3.8+ compatible again (changed UTC usage) and (DWARF) PE symbols for PE files should be extracted again (THX to @N0fix for the update!)
- * 2025-02-21: v1.14.1 - Fixed changed field names in LIEF usage that broke ELF parsing, added tests for ELF+macOS parsing (THX to @N0fix for the update!)
  * 2025-01-29: v1.14.0 - Bump to LIEF 0.16.0+ (THX to @huettenhain for the ping!). Migrated tests to `pytest`, UTC datetime handling fixes.
- * 2025-01-26: v1.13.24 - Added functionality to import and export SMDA reports as JSON. Fixed byte patterns matching special regex chars (THX to @alexander-hanel!).
- * 2024-07-26: v1.13.23 - Now using OEP as symbol function candidate when available (THX to @alexander-hanel for reporting!).
- * 2024-05-10: v1.13.22 - Handled odd case where disassembly with capstone and IDA would return different results (THX to @r0ny123 for reporting!).
- * 2024-04-17: v1.13.21 - Fixed handling of Go binaries for version 1.20+ (THX to @Manny684!).
- * 2024-04-08: v1.13.20 - Fixed handling of bnd prefix in CFG instructions to help with parsing PLT (THX to @Manny684!).
- * 2024-04-02: v1.13.19 - Fixed bug in string parsing, added tests, strings now no longer are hex-encoded as they are always printable anyway.
- * 2024-03-12: v1.13.18 - Added functionality to extract and store all referenced strings along SmdaFunctions (has to be enabled via SmdaConfig).
- * 2024-03-12: v1.13.17 - Extended disassembleBuffer() to now take additional arguments `code_areas` and `oep`.
- * 2024-02-21: v1.13.16 - BREAKING IntelInstructionEscaper.escapeMnemonic: Escaper now handles another 200 instruction names found in other capstone source files (THX for reporting @malwarefrank!).
- * 2024-02-15: v1.13.15 - Fixed issues with version recognition in SmdaFunction which cause issues in MCRIT (THX to @
-malwarefrank!) 
- * 2024-02-02: v1.13.12 - Versions might be non-numerical, addressed that in SmdaFunction.
- * 2024-01-23: v1.13.11 - Introduced indicator in SmdaConfig for compatibility of instruction escaping.
- * 2024-01-23: v1.13.10 - Parsing of PE files should work again with lief >=0.14.0.
- * 2024-01-23: v1.13.9  - Improved parsing robustness for section/segment tables in ELF files, also now padding with zeroes when finding less content than expected physical size in a segment (THX for reporting @schrodyn!).
- * 2024-01-23: v1.13.8  - BREAKING adjustments to IntelInstructionEscaper.escapeMnemonic: Escaper now is capable of handling all known x86/x64 instructions in capstone (THX for reporting @schrodyn!).
- * 2023-12-01: v1.13.7  - Skip processing of Delphi structs for large files, workaround until this is properly reimplemented.
- * 2023-11-29: v1.13.6  - Made OpcodeHash an attribute with on-demand calculation to save processing time.
- * 2023-11-29: v1.13.3  - Implemented an alternative queue working with reference count based brackets in pursuit of accelerated processing.
- * 2023-11-28: v1.13.2  - IndirectCallAnalyzer will now analyze at most a configurable amount of calls per basic block, default 50.
- * 2023-11-21: v1.13.1  - SmdaBasicBlock now has `getPredecessors()` and `getSuccessors()`.
  * 2023-11-21: v1.13.0  - BREAKING adjustments to PicHashing (now wildcarding intraprocedural jumps in functions, additionally more immediates if within address space). Introduction of OpcodeHash (OpcHash), which wildcards all but prefixes and opcode bytes.
- * 2023-10-12: v1.12.7  - Bugfix for parsing Delphi structs.
- * 2023-09-15: v1.12.6  - Bugfix in BlockLocator (THX to @cccs-ay!).
- * 2023-08-28: v1.12.5  - Bugfix for address dereferencing where buffer sizes were not properly checked (THX to @yankovs!).
- * 2023-08-08: v1.12.4  - SmdaBasicBlock can now do getPicBlockHash().
- * 2023-05-23: v1.12.3  - Fixed bugs in PE parser and Go parser.
- * 2023-05-08: v1.12.1  - Get rid of deprecation warning in IDA 8.0+.
  * 2023-03-24: v1.12.0  - SMDA now parses PE export directories for symbols, as well as MinGW DWARF information if available.
- * 2023-03-14: v1.11.2  - SMDA report now also contains SHA1 and MD5.
- * 2023-03-14: v1.11.1  - rendering dotGraph can now include API references instead of plain calls.
  * 2023-02-06: v1.11.0  - SmdaReport now has functionality to find a function/block by a given offset contained within in (THX to @cccs-ay!).
  * 2023-02-06: v1.10.0  - Adjusted to LIEF 0.12.3 API for binary parsing (THX to @lainswork!).
  * 2022-08-12: v1.9.1   - Added support for parsing intel MachO files, including Go parsing.
@@ -149,21 +119,22 @@ malwarefrank!)
  * 2021-08-20: v1.6.0   - Bugfix for alignment calculation of binary mappings. (THX: @williballenthin)
  * 2021-08-19: v1.6.0   - Bugfix for truncation during ELF segment/section loading. API usage in ELF files is now resolved as well! (THX: @williballenthin)
  * 2020-10-30: v1.5.0   - PE section table now contained in SmdaReport and added `SmdaReport.getSection(offset)`.
- * 2020-10-26: v1.4.0   - Adding SmdaBasicBlock. Some convenience code to ease intgration with capa. (GeekWeek edition!) 
+ * 2020-10-26: v1.4.0   - Adding SmdaBasicBlock. Some convenience code to ease intgration with capa. (GeekWeek edition!)
  * 2020-06-22: v1.3.0   - Added DominatorTree (Implementation by Armin Rigo) to calculate function nesting depth, shortened PIC hash to 8 byte, added some missing instructions for the InstructionEscaper, IdaInterface now demangles names.
  * 2020-04-29: v1.2.0   - Restructured config.py into smda/SmdaConfig.py to similfy usage and now available via PyPI! The smda/Disassembler.py now emits a report object (smda.common.SmdaReport) that allows direct (pythonic) interaction with the results - a JSON can still be easily generated by using toDict() on the report.
  * 2020-04-28: v1.1.0   - Several improvements, including: x64 jump table handling, better data flow handling for calls using registers and tailcalls, extended list of common prologues based on much more groundtruth data, extended padding instruction list for gap function discovery, adjusted weights in candidate priority score, filtering code areas based on section tables, using exported symbols as candidates, new function output metadata: confidence score based on instruction mnemonic histogram, PIC hash based on escaped binary instruction sequence
  * 2018-07-01: v1.0.0   - Initial Release.
 
+For full earlier history, check `version_history.md`.
 
 ## Credits
 
 Thanks to Steffen Enders for his extensive contributions to this project!
 Thanks to Paul Hordiienko for adding symbol parsing support (ELF+PDB)!
 Thanks to Jonathan Crussell for helping me to beef up SMDA enough to make it a disassembler backend in capa!
-Thanks to Willi Ballenthin for improving handling of ELF files, including properly handling API usage!
+Thanks to Willi Ballenthin for improving the handling of ELF files, including properly handling API usage!
 Thanks to Daniel Enders for his contributions to the parsing of the Golang function registry and label information!
 The project uses the implementation of Tarjan's Algorithm by Bas Westerbaan and the implementation of Lengauer-Tarjan's Algorithm for the DominatorTree by Armin Rigo.
+Thanks to r0ny123 for his major code quality improvements added via ruff to this project!
 
 Pull requests welcome! :)
-

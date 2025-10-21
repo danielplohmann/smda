@@ -12,7 +12,7 @@ requirements.append("lief>=0.16.0")
 setup(
     name="smda",
     # note to self: always change this in config as well.
-    version="2.2.3",
+    version="2.3.1",
     description="A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone.",
     long_description_content_type="text/markdown",
     long_description=long_description,

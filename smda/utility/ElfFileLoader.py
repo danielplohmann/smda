@@ -1,16 +1,11 @@
+import contextlib
 import logging
 import sys
 
+import lief
+
+lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
-
-LIEF_AVAILABLE = False
-try:
-    import lief
-
-    lief.logging.disable()
-    LIEF_AVAILABLE = True
-except ImportError:
-    LOGGER.warning("LIEF not available, will not be able to parse data from ELF files.")
 
 
 def align(v, alignment):
@@ -33,8 +28,6 @@ def has_bogus_sections(elffile, base_addr=0):
 class ElfFileLoader:
     @staticmethod
     def isCompatible(data):
-        if not LIEF_AVAILABLE:
-            return False
         # check for ELF magic
         return data[:4] == b"\x7fELF"
 
@@ -237,8 +230,12 @@ class ElfFileLoader:
         elffile = lief.parse(binary)
         code_areas = []
         for section in elffile.sections:
+            section_flags = 0
+            # ignore invalid section flags and assume it's not a code section
+            with contextlib.suppress(ValueError):
+                section_flags = section.flags
             # SHF_EXECINSTR = 4
-            if section.flags & lief.ELF.Section.FLAGS.EXECINSTR.value:
+            if section_flags & lief.ELF.Section.FLAGS.EXECINSTR.value:
                 section_start = section.virtual_address
                 section_size = section.size
                 if section_size % section.alignment != 0:
@@ -246,8 +243,12 @@ class ElfFileLoader:
                 section_end = section_start + section_size
                 code_areas.append([section_start, section_end])
         for segment in sorted(elffile.segments, key=lambda segment: segment.physical_size, reverse=True):
+            segment_flags = 0
+            # ignore invalid segment flags and assume it's not a code section
+            with contextlib.suppress(ValueError):
+                segment_flags = segment.flags.value
             # SHF_EXECINSTR = 4
-            if segment.flags.value & lief.ELF.Section.FLAGS.EXECINSTR.value:
+            if segment_flags & lief.ELF.Section.FLAGS.EXECINSTR.value:
                 segment_start = segment.virtual_address
                 segment_size = segment.virtual_size
                 if segment.alignment and segment_size % segment.alignment != 0:
