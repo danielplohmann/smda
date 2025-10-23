@@ -1,11 +1,9 @@
-
 import unittest
 
 from smda.utility.PeFileLoader import PeFileLoader
 
 
 class PeFileLoaderTestSuite(unittest.TestCase):
-
     def test_mergeCodeAreas(self):
         # Test case 1: Overlapping intervals
         intervals1 = [[1, 5], [3, 7], [8, 12]]
@@ -37,5 +35,6 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         expected6 = [[1, 10], [11, 20]]
         self.assertEqual(PeFileLoader.mergeCodeAreas(intervals6), expected6)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
