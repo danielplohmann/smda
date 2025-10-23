@@ -160,17 +160,15 @@ class PeFileLoader:
 
     @staticmethod
     def mergeCodeAreas(code_areas):
+        if not code_areas:
+            return []
         merged_code_areas = sorted(code_areas)
-        result = []
-        index = 0
-        while index < len(merged_code_areas) - 1:
-            this_area = merged_code_areas[index]
-            next_area = merged_code_areas[index + 1]
-            if this_area[1] != next_area[0]:
-                result.append(this_area)
-                index += 1
+        result = [merged_code_areas[0]]
+        for i in range(1, len(merged_code_areas)):
+            last_area = result[-1]
+            current_area = merged_code_areas[i]
+            if last_area[1] == current_area[0]:
+                result[-1] = [last_area[0], current_area[1]]
             else:
-                merged_code_areas = (
-                    merged_code_areas[:index] + [[this_area[0], next_area[1]]] + merged_code_areas[index + 2 :]
-                )
-        return merged_code_areas
+                result.append(current_area)
+        return result
