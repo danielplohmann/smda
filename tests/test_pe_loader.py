@@ -3,6 +3,7 @@ import unittest
 
 from smda.utility.PeFileLoader import PeFileLoader
 
+
 class PeFileLoaderTestSuite(unittest.TestCase):
 
     def test_mergeCodeAreas(self):
