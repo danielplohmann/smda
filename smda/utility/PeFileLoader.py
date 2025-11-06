@@ -162,11 +162,11 @@ class PeFileLoader:
     def mergeCodeAreas(code_areas):
         if not code_areas:
             return []
-        merged_code_areas = sorted(code_areas)
-        result = [merged_code_areas[0]]
-        for i in range(1, len(merged_code_areas)):
+        sorted_areas = sorted(code_areas)
+        result = [sorted_areas[0]]
+        for i in range(1, len(sorted_areas)):
             last_area = result[-1]
-            current_area = merged_code_areas[i]
+            current_area = sorted_areas[i]
             if last_area[1] == current_area[0]:
                 result[-1] = [last_area[0], current_area[1]]
             else:
