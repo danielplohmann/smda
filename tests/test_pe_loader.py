@@ -8,6 +8,7 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         test_cases = [
             ("Overlapping intervals", [[1, 5], [3, 7], [8, 12]], [[1, 5], [3, 7], [8, 12]]),
             ("Contiguous intervals", [[1, 5], [5, 10], [10, 15]], [[1, 15]]),
+            ("Unsorted contiguous intervals", [[10, 15], [1, 5], [5, 10]], [[1, 15]]),
             ("Separated intervals", [[1, 5], [6, 10], [11, 15]], [[1, 5], [6, 10], [11, 15]]),
             ("Empty list", [], []),
             ("Single interval", [[1, 5]], [[1, 5]]),
