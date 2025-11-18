@@ -9,11 +9,30 @@ Supports Delphi versions 2010 through 12 Athens.
 import logging
 import struct
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
 LOGGER = logging.getLogger(__name__)
+
+# VMT (Virtual Method Table) structure constants
+VMT_MDT_FIELD_INDEX = 6  # Index of MDT pointer field in VMT
+VMT_RTTI_FIELD_INDEX = 4  # Index of RTTI_Class pointer field in VMT
+VMT_VMETHOD_START_INDEX = 11  # First virtual method field index
+VMT_VMETHOD_END_INDEX = 22  # Last virtual method field index (exclusive)
+VMT_SAFECALL_EXCEPTION_INDEX = 14  # SafeCallException field (optional, skip in validation)
+
+# Architecture-specific VMT jump distances (distance from VMT start to first method)
+VMT_JUMP_DIST_32BIT = 88
+VMT_JUMP_DIST_64BIT = 200
+
+# RTTI (Runtime Type Information) constants
+RTTI_MAX_MAGIC_BYTE = 0x15  # Maximum valid magic byte value for RTTI objects
+RTTI_CLASS_MAGIC_BYTE = 0x07  # Magic byte indicating RTTI_Class type
+
+# Method entry structure magic value for parameter offset calculation
+# This value is from the original DelphiReSym and works for Delphi 11
+PARAM_ENTRY_PADDING = 3
 
 
 @dataclass
@@ -21,17 +40,17 @@ class ArchitectureSettings:
     """Architecture-specific settings for VMT/MDT parsing."""
 
     ptr_size: int
-    jump_dist: int  # Expected distance from VMT to first method (88 for 32-bit, 200 for 64-bit)
+    jump_dist: int  # Expected distance from VMT to first method
 
     @property
     def mdt_offset(self) -> int:
         """Offset to MDT pointer within VMT structure."""
-        return self.ptr_size * 6
+        return self.ptr_size * VMT_MDT_FIELD_INDEX
 
     @property
     def rtti_offset(self) -> int:
         """Offset to RTTI_Class pointer within VMT structure."""
-        return self.ptr_size * 4
+        return self.ptr_size * VMT_RTTI_FIELD_INDEX
 
 
 @dataclass
@@ -49,7 +68,7 @@ class MethodInfo:
     function_offset: int
     function_name: str = ""
     return_type: str = "void"
-    parameters: list = field(default_factory=list)
+    parameters: List[ParameterInfo] = field(default_factory=list)
 
 
 class DelphiReSymProvider(AbstractLabelProvider):
@@ -90,9 +109,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
         # Set up architecture-specific settings
         if self._bitness == 32:
-            self._settings = ArchitectureSettings(ptr_size=4, jump_dist=88)
+            self._settings = ArchitectureSettings(ptr_size=4, jump_dist=VMT_JUMP_DIST_32BIT)
         elif self._bitness == 64:
-            self._settings = ArchitectureSettings(ptr_size=8, jump_dist=200)
+            self._settings = ArchitectureSettings(ptr_size=8, jump_dist=VMT_JUMP_DIST_64BIT)
         else:
             LOGGER.warning(f"Unsupported bitness: {self._bitness}")
             return
@@ -180,9 +199,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
             if mdt_offset <= vmt_offset:
                 return False
 
-        # Check virtual method pointers (fields 11-22, excluding 14 which is optional)
-        for field_num in range(11, 22):
-            if field_num != 14:
+        # Check virtual method pointers (fields 11-22, excluding SafeCallException which is optional)
+        for field_num in range(VMT_VMETHOD_START_INDEX, VMT_VMETHOD_END_INDEX):
+            if field_num != VMT_SAFECALL_EXCEPTION_INDEX:
                 field_offset = vmt_offset + (self._settings.ptr_size * field_num)
                 method_addr = self._read_ptr(field_offset)
                 if method_addr is not None:
@@ -226,7 +245,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
         Returns the type name (with namespace for RTTI_Class types).
         """
         magic_byte = self._read_byte(rtti_offset)
-        if magic_byte is None or magic_byte > 0x15:
+        if magic_byte is None or magic_byte > RTTI_MAX_MAGIC_BYTE:
             return None
 
         # Read object name (Pascal string at offset +1)
@@ -234,10 +253,10 @@ class DelphiReSymProvider(AbstractLabelProvider):
         if not object_name:
             return None
 
-        # RTTI_Class (magic byte 0x07) contains namespace information
+        # RTTI_Class contains namespace information
         # RTTI_Class structure layout:
         #   MagicByte(1) + ObjectName(pascal) + Unknown(1) + Pointers(2*ptr_size) + Unknown(2) + Namespace(pascal)
-        if magic_byte == 0x07:
+        if magic_byte == RTTI_CLASS_MAGIC_BYTE:
             namespace_offset = rtti_offset + 1 + len(object_name) + 1 + 2 * self._settings.ptr_size + 2
             namespace = self._read_pascal_string(namespace_offset)
             if namespace:
@@ -303,8 +322,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
                     method_info.parameters.append(ParameterInfo(type_name=param_type_name, parameter_name=param_name))
 
                     # Move to next parameter entry
-                    # Magic value 3 from original DelphiReSym - works for Delphi 11
-                    param_offset = param_name_offset + len(param_name) + 1 + 3
+                    param_offset = param_name_offset + len(param_name) + 1 + PARAM_ENTRY_PADDING
 
             return method_info
 
