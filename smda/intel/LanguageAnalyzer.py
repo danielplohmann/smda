@@ -5,6 +5,7 @@ import struct
 from io import BytesIO
 
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
+from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ class LanguageAnalyzer:
         self.disassembly = disassembly
         self.go_resolver = GoSymbolProvider(None)
         self.delphi_kb_resolver = DelphiKbSymbolProvider(None)
+        self.delphi_resym_resolver = DelphiReSymProvider(None)
         self.strings = None
 
     def validPEHeader(self):
@@ -222,6 +224,11 @@ class LanguageAnalyzer:
     def getDelphiKbObjects(self):
         self.delphi_kb_resolver.update(self.disassembly.binary_info)
         return self.delphi_kb_resolver.getFunctionSymbols()
+
+    def getDelphiReSymObjects(self):
+        """Extract Delphi symbols using DelphiReSym metadata parsing."""
+        self.delphi_resym_resolver.update(self.disassembly.binary_info)
+        return self.delphi_resym_resolver.getFunctionSymbols()
 
     def identify(self):
         result = {

@@ -566,6 +566,13 @@ class FunctionCandidateManager:
             for obj in delphi_objects:
                 self.addLanguageSpecCandidate(obj, "delphi")
 
+            # Also extract symbols using DelphiReSym metadata parsing
+            LOGGER.debug("Extracting Delphi symbols using DelphiReSym metadata parsing")
+            delphi_resym_objects = self.lang_analyzer.getDelphiReSymObjects()
+            LOGGER.debug("delphi candidates based on DelphiReSym analysis: %d", len(delphi_resym_objects))
+            for obj in delphi_resym_objects:
+                self.addLanguageSpecCandidate(obj, "delphi_resym")
+
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates
         for block in re.finditer(b"(?P<block>(\xff\x25[\\S\\s]{4}){2,})", self.disassembly.binary_info.binary):
