@@ -122,10 +122,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def _read_byte(self, offset: int) -> Optional[int]:
         """Read a byte at the given offset."""
-        try:
-            return self._binary[offset] if 0 <= offset < len(self._binary) else None
-        except IndexError:
-            return None
+        if 0 <= offset < len(self._binary):
+            return self._binary[offset]
+        return None
 
     def _read_short(self, offset: int) -> Optional[int]:
         """Read a 16-bit value at the given offset."""
@@ -236,6 +235,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
             return None
 
         # RTTI_Class (magic byte 0x07) contains namespace information
+        # RTTI_Class structure layout:
+        #   MagicByte(1) + ObjectName(pascal) + Unknown(1) + Pointers(2*ptr_size) + Unknown(2) + Namespace(pascal)
         if magic_byte == 0x07:
             namespace_offset = rtti_offset + 1 + len(object_name) + 1 + 2 * self._settings.ptr_size + 2
             namespace = self._read_pascal_string(namespace_offset)
@@ -243,6 +244,23 @@ class DelphiReSymProvider(AbstractLabelProvider):
                 return f"{namespace}.{object_name}"
 
         return object_name
+
+    def _resolve_type_from_double_ptr(self, ptr_field_offset: int) -> Optional[str]:
+        """
+        Resolve a type name from a double-dereferenced pointer to an RTTI object.
+        Used for both return types and parameter types.
+        """
+        ptr_addr = self._read_ptr(ptr_field_offset)
+        if ptr_addr is None or ptr_addr == 0:
+            return None
+
+        ptr_offset = self._addr_to_offset(ptr_addr)
+        rtti_addr = self._read_ptr(ptr_offset)
+        if rtti_addr is None or rtti_addr == 0:
+            return None
+
+        rtti_offset = self._addr_to_offset(rtti_addr)
+        return self._traverse_rtti_object(rtti_offset)
 
     def _extract_method_info(self, method_entry_offset: int) -> Optional[MethodInfo]:
         """Extract detailed information about a method from its MethodEntry structure."""
@@ -263,15 +281,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
             # Return type (at offset +function_name_len+ptr_size+4)
             return_type_field_offset = method_entry_offset + len(func_name) + 1 + self._settings.ptr_size + 4
-            return_type_ptr_addr = self._read_ptr(return_type_field_offset)
-            if return_type_ptr_addr is not None and return_type_ptr_addr != 0:
-                return_type_ptr_offset = self._addr_to_offset(return_type_ptr_addr)
-                rtti_addr = self._read_ptr(return_type_ptr_offset)
-                if rtti_addr is not None and rtti_addr != 0:
-                    rtti_offset = self._addr_to_offset(rtti_addr)
-                    return_type_name = self._traverse_rtti_object(rtti_offset)
-                    if return_type_name:
-                        method_info.return_type = return_type_name
+            return_type_name = self._resolve_type_from_double_ptr(return_type_field_offset)
+            if return_type_name:
+                method_info.return_type = return_type_name
 
             # Parameter count (at offset +function_name_len+2*ptr_size+6)
             param_count_offset = method_entry_offset + len(func_name) + 1 + 2 * self._settings.ptr_size + 6
@@ -282,14 +294,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
                 param_offset = param_count_offset + 2
                 for _ in range(param_count):
                     # Parameter RTTI (double-dereferenced pointer)
-                    param_type_name = None
-                    rtti_ptr_addr = self._read_ptr(param_offset)
-                    if rtti_ptr_addr is not None and rtti_ptr_addr != 0:
-                        rtti_ptr_offset = self._addr_to_offset(rtti_ptr_addr)
-                        rtti_addr = self._read_ptr(rtti_ptr_offset)
-                        if rtti_addr is not None and rtti_addr != 0:
-                            rtti_offset = self._addr_to_offset(rtti_addr)
-                            param_type_name = self._traverse_rtti_object(rtti_offset)
+                    param_type_name = self._resolve_type_from_double_ptr(param_offset)
 
                     # Parameter name (Pascal string at offset +ptr_size+2)
                     param_name_offset = param_offset + self._settings.ptr_size + 2
@@ -298,6 +303,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
                     method_info.parameters.append(ParameterInfo(type_name=param_type_name, parameter_name=param_name))
 
                     # Move to next parameter entry
+                    # Magic value 3 from original DelphiReSym - works for Delphi 11
                     param_offset = param_name_offset + len(param_name) + 1 + 3
 
             return method_info
