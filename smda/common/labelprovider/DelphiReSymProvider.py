@@ -148,7 +148,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
                 return ""
 
             return string_data.decode("latin-1", errors="ignore")
-        except Exception:
+        except (IndexError, UnicodeDecodeError):
             return ""
 
     def _offset_in_code_area(self, offset: int) -> bool:
