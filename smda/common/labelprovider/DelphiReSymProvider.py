@@ -103,9 +103,21 @@ class DelphiReSymProvider(AbstractLabelProvider):
             LOGGER.debug("No code areas found, skipping DelphiReSym parsing")
             return
 
+        # Code areas are virtual addresses - convert to file offsets for scanning
         # Use the first code area (typically .text section)
-        self._code_start = code_areas[0][0]
-        self._code_end = code_areas[0][1]
+        code_area_start_va = code_areas[0][0]
+        code_area_end_va = code_areas[0][1]
+
+        # Convert virtual addresses to file offsets
+        self._code_start = code_area_start_va - self._base_addr
+        self._code_end = code_area_end_va - self._base_addr
+
+        # Validate the offsets are within binary bounds
+        if self._code_start < 0 or self._code_end > len(self._binary):
+            LOGGER.debug(
+                f"Code area offsets out of bounds: {self._code_start}-{self._code_end}, binary size: {len(self._binary)}"
+            )
+            return
 
         # Set up architecture-specific settings
         if self._bitness == 32:
