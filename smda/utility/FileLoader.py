@@ -24,7 +24,7 @@ class FileLoader:
             self._loadFile()
 
     def _loadRawFileContent(self):
-        binary = ""
+        binary = b""
         if os.path.isfile(self._file_path):
             with open(self._file_path, "rb") as inf:
                 binary = inf.read()
