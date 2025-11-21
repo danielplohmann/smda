@@ -94,7 +94,7 @@ class BinaryInfo:
     def isInCodeAreas(self, address):
         is_inside = False
         # if no code areas found, assume the whole image is code and calculate according to base address and size
-        if len(self.code_areas) == 0:
+        if self.code_areas is None or len(self.code_areas) == 0:
             if self.base_addr <= address <= self.base_addr + self.binary_size:
                 is_inside = True
         else:

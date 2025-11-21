@@ -562,7 +562,7 @@ class FunctionCandidateManager:
         elif self.lang_analyzer.checkDelphi():
             LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from VMTs")
             delphi_objects = self.lang_analyzer.getDelphiObjects()
-            LOGGER.debug("delphi candidates based on VMT analysis: %d", len(delphi_objects))
+            LOGGER.debug("delphi candidates based on legacy VMT analysis: %d", len(delphi_objects))
             for obj in delphi_objects:
                 self.addLanguageSpecCandidate(obj, "delphi")
 

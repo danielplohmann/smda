@@ -129,9 +129,12 @@ class DelphiReSymProvider(AbstractLabelProvider):
             return
 
         try:
-            LOGGER.info("Starting DelphiReSym symbol extraction...")
+            LOGGER.debug("Starting DelphiReSym symbol extraction...")
             self._parse_delphi_symbols()
-            LOGGER.info(f"Extracted {len(self._func_symbols)} Delphi symbols")
+            if self._func_symbols:
+                LOGGER.info(f"Extracted {len(self._func_symbols)} Delphi symbols")
+            else:
+                LOGGER.debug("No Delphi symbols extracted")
         except Exception as e:
             LOGGER.warning(f"Error during DelphiReSym parsing: {e}")
 
@@ -373,7 +376,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
         """Main parsing routine to extract Delphi symbols."""
         # Step 1: Find all VMT structures
         vmt_offsets = self._find_vmts()
-        LOGGER.info(f"Found {len(vmt_offsets)} VMT candidates")
+        LOGGER.debug(f"Found {len(vmt_offsets)} VMT candidates")
 
         if not vmt_offsets:
             return
@@ -424,7 +427,11 @@ class DelphiReSymProvider(AbstractLabelProvider):
         return None
 
     def getSymbol(self, address):
-        return self._func_symbols.get(address, "")
+        # sanitize output because the extractor may produce non-printable characters
+        symbol = self._func_symbols.get(address, "")
+        if not all(c.isprintable() or c.isspace() for c in symbol):
+            symbol = ""
+        return symbol
 
     def getFunctionSymbols(self):
         return self._func_symbols

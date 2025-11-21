@@ -8,6 +8,7 @@ from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
+from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
@@ -92,6 +93,7 @@ class IntelDisassembler:
         self.label_providers.append(PdbSymbolProvider(self.config))
         self.label_providers.append(GoSymbolProvider(self.config))
         self.label_providers.append(DelphiKbSymbolProvider(self.config))
+        self.label_providers.append(DelphiReSymProvider(self.config))
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
