@@ -562,9 +562,16 @@ class FunctionCandidateManager:
         elif self.lang_analyzer.checkDelphi():
             LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from VMTs")
             delphi_objects = self.lang_analyzer.getDelphiObjects()
-            LOGGER.debug("delphi candidates based on VMT analysis: %d", len(delphi_objects))
+            LOGGER.debug("delphi candidates based on legacy VMT analysis: %d", len(delphi_objects))
             for obj in delphi_objects:
                 self.addLanguageSpecCandidate(obj, "delphi")
+
+            # Also extract symbols using DelphiReSym metadata parsing
+            LOGGER.debug("Extracting Delphi symbols using DelphiReSym metadata parsing")
+            delphi_resym_objects = self.lang_analyzer.getDelphiReSymObjects()
+            LOGGER.debug("delphi candidates based on DelphiReSym analysis: %d", len(delphi_resym_objects))
+            for obj in delphi_resym_objects:
+                self.addLanguageSpecCandidate(obj, "delphi_resym")
 
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates

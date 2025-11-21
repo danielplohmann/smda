@@ -226,7 +226,7 @@ class SmdaReport:
         smda_report.base_addr = report_dict["base_addr"]
         smda_report.binary_size = report_dict["binary_size"]
         smda_report.bitness = report_dict["bitness"]
-        smda_report.code_areas = report_dict["code_areas"]
+        smda_report.code_areas = report_dict["code_areas"] if report_dict["code_areas"] is not None else []
         smda_report.code_sections = (
             [("", section[1], section[2]) for section in report_dict["code_sections"]]
             if "code_sections" in report_dict

@@ -5,6 +5,7 @@ import struct
 from io import BytesIO
 
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
+from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ class LanguageAnalyzer:
         self.disassembly = disassembly
         self.go_resolver = GoSymbolProvider(None)
         self.delphi_kb_resolver = DelphiKbSymbolProvider(None)
+        self.delphi_resym_resolver = DelphiReSymProvider(None)
         self.strings = None
 
     def validPEHeader(self):
@@ -89,12 +91,13 @@ class LanguageAnalyzer:
             match.group("string")
             # Regex: <DWORD_LEN_STRING><STRING><TERMINATOR>
             for match in re.finditer(
-                b"(?P<length>[\\S\\s]{4})(?P<string>[ -~]{6,128})\x00",
+                b"\x00\x00.(?P<length>.)(?P<string>[ -~]{6,128})\x00",
                 self.disassembly.binary_info.binary,
             )
-            if len(match.group("string")) == struct.unpack("<I", match.group("length"))[0]
+            if len(match.group("string")) == ord(match.group("length"))
         ]
         if len(delphi_strings) > 100:
+            LOGGER.info("Detected %d Delphi-like strings.", len(delphi_strings))
             delphi_score = max(delphi_score, 0.8)
         return delphi_score
 
@@ -222,6 +225,11 @@ class LanguageAnalyzer:
     def getDelphiKbObjects(self):
         self.delphi_kb_resolver.update(self.disassembly.binary_info)
         return self.delphi_kb_resolver.getFunctionSymbols()
+
+    def getDelphiReSymObjects(self):
+        """Extract Delphi symbols using DelphiReSym metadata parsing."""
+        self.delphi_resym_resolver.update(self.disassembly.binary_info)
+        return self.delphi_resym_resolver.getFunctionSymbols()
 
     def identify(self):
         result = {
