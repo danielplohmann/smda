@@ -101,6 +101,7 @@ make test
 ```
 
 ## Version History
+ * 2025-11-21: v2.4.0 - Integration of DelphiReSym by @WenzWenzWenz for Delphi VMT parsing, thanks to @r0ny123 for adapting it!!
  * 2025-10-21: v2.3.1 - Fixed lief error for section/segment flags in ELF files crashing file loading. Now properly parsing and providing symbol info for PEs in their own xmetadata section.
  * 2025-10-21: v2.3.0 - Major code refactor and cleanup, with many thanks to the contribution @r0ny123!!
  * 2025-07-25: v2.2.3 - Minor bugfixes.
