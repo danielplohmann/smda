@@ -3,7 +3,7 @@ init:
 	pre-commit install
 package:
 	rm -rf dist/*
-	python setup.py sdist
+	python -m build
 publish:
 	python -m twine upload dist/* -u __token__
 pylint:
