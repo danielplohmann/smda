@@ -52,6 +52,8 @@ DEFAULT_PROLOGUES = [
     b"\x89\xff\x55\x8b\xec",
     b"\x55\x8b\xec",
     b"\x55\x89\xe5",
+    b"\x55\x48\x89\xec",
+    b"\x55\x48\x89\xe5",
 ]
 
 # these cover 99% of confirmed function starts in the reference data set
