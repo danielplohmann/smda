@@ -68,8 +68,7 @@ class Disassembler:
                 )
             smda_function.stringrefs = function_strings
 
-    def disassembleFile(self, file_path, pdb_path=""):
-        loader = FileLoader(file_path, map_file=True)
+    def _populateBinaryInfo(self, loader, file_path=""):
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
@@ -82,10 +81,16 @@ class Disassembler:
         binary_info.bitness = loader.getBitness()
         binary_info.architecture = loader.getArchitecture()
         binary_info.code_areas = loader.getCodeAreas()
-        self.initDisassembler(binary_info.architecture)
+        return binary_info, file_content
+
+    def disassembleFile(self, file_path, pdb_path=""):
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
-            self.disassembler.addPdbFile(binary_info, pdb_path)
+            loader = FileLoader(file_path, map_file=True)
+            binary_info, file_content = self._populateBinaryInfo(loader, file_path)
+            self.initDisassembler(binary_info.architecture)
+            if self.disassembler:
+                self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
                 is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
@@ -100,22 +105,11 @@ class Disassembler:
         return smda_report
 
     def disassembleUnmappedBuffer(self, file_content):
-        loader = MemoryFileLoader(file_content, map_file=True)
-        file_content = loader.getData()
-        binary_info = BinaryInfo(file_content)
-        binary_info.raw_data = loader.getRawData()
-        # we want the SHA256/SHA1/MD5 of the unmapped file not how we mapped it to memory
-        binary_info.sha256 = hashlib.sha256(binary_info.raw_data).hexdigest()
-        binary_info.sha1 = hashlib.sha1(binary_info.raw_data).hexdigest()
-        binary_info.md5 = hashlib.md5(binary_info.raw_data).hexdigest()
-        binary_info.file_path = ""
-        binary_info.base_addr = loader.getBaseAddress()
-        binary_info.bitness = loader.getBitness()
-        binary_info.architecture = loader.getArchitecture()
-        binary_info.code_areas = loader.getCodeAreas()
-        self.initDisassembler(binary_info.architecture)
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
+            loader = MemoryFileLoader(file_content, map_file=True)
+            binary_info, file_content = self._populateBinaryInfo(loader)
+            self.initDisassembler(binary_info.architecture)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
                 is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
@@ -168,8 +162,10 @@ class Disassembler:
     def _disassemble(self, binary_info, timeout=0):
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
-        self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
-        return SmdaReport(self.disassembly, config=self.config)
+        if self.disassembler:
+            self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
+            return SmdaReport(self.disassembly, config=self.config)
+        raise Exception("Disassembler backend not initialized.")
 
     def _createErrorReport(self, start, exception):
         report = SmdaReport(config=self.config)

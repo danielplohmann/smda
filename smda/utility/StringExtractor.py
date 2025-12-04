@@ -59,8 +59,15 @@ def detect_ascii_len(smda_report, offset, maxlen=None):
         return 0
     ascii_len = 0
     rva = offset - smda_report.base_addr
+    if not 0 <= rva < len(smda_report.buffer):
+        return 0
     char = smda_report.buffer[rva]
-    while char < 127 and chr(char) in string.printable:
+    while (
+        char < 127
+        and chr(char) in string.printable
+        and (maxlen is None or ascii_len < maxlen)
+        and rva + 1 < len(smda_report.buffer)
+    ):
         ascii_len += 1
         rva += 1
         char = smda_report.buffer[rva]
@@ -74,9 +81,17 @@ def detect_unicode_len(smda_report, offset, maxlen=None):
         return 0
     unicode_len = 0
     rva = offset - smda_report.base_addr
+    if not 0 <= rva < len(smda_report.buffer) - 1:
+        return 0
     char = smda_report.buffer[rva]
     second_char = smda_report.buffer[rva + 1]
-    while char < 127 and chr(char) in string.printable and second_char == 0:
+    while (
+        char < 127
+        and chr(char) in string.printable
+        and second_char == 0
+        and (maxlen is None or unicode_len < 2 * maxlen)
+        and rva + 3 < len(smda_report.buffer)
+    ):
         unicode_len += 2
         rva += 2
         char = smda_report.buffer[rva]
