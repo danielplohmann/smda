@@ -1,12 +1,13 @@
 import logging
 
+from smda.SmdaConfig import SmdaConfig
+
 LOGGER = logging.getLogger(__name__)
 
 LIEF_AVAILABLE = False
 try:
     import lief
 
-    lief.logging.disable()
     LIEF_AVAILABLE = True
 except ImportError:
     LOGGER.warning("LIEF not available, will not be able to parse data from MachO files.")
@@ -91,6 +92,8 @@ class MachoFileLoader:
         # create mapped region.
         # offset 0x0 corresponds to the MachO base address
         virtual_size = max_virtual_address - base_addr
+        if virtual_size > SmdaConfig.MAX_IMAGE_SIZE:
+            raise ValueError("MachO file larger than MAX_IMAGE_SIZE")
         LOGGER.debug("MachO: max virtual section offset: 0x%x", max_virtual_address)
         LOGGER.debug("MachO: mapped size: 0x%x", virtual_size)
         LOGGER.debug("MachO: min raw offset: 0x%x", min_raw_offset)

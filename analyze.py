@@ -126,6 +126,13 @@ if __name__ == "__main__":
     if ARGS.strings:
         config.WITH_STRINGS = True
     logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
+    # disable excessive logging from LIEF
+    try:
+        import lief
+
+        lief.logging.disable()
+    except ImportError:
+        pass
 
     SMDA_REPORT = None
     INPUT_FILENAME = ""
