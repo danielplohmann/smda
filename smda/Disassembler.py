@@ -165,7 +165,7 @@ class Disassembler:
         if self.disassembler:
             self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
             return SmdaReport(self.disassembly, config=self.config)
-        raise Exception("Disassembler backend not initialized.")
+        raise RuntimeError("Disassembler backend not initialized.")
 
     def _createErrorReport(self, start, exception):
         report = SmdaReport(config=self.config)
