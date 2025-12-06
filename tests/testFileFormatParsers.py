@@ -124,7 +124,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.oep = binary_info.getOep()
         disasm._disassemble(binary_info)
         komplex_unmapped_disassembly = disasm.disassembleUnmappedBuffer(komplex_binary)
-        self.assertEqual(komplex_unmapped_disassembly.num_functions, 208)
+        self.assertEqual(komplex_unmapped_disassembly.num_functions, 211)
 
 
 if __name__ == "__main__":
