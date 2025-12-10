@@ -32,10 +32,10 @@ class IdaInterface:
 
     def __init__(self):
         if not IdaInterface.instance:
-            if idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 900:
+            if idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 850:
                 IdaInterface.instance = Ida74Interface()
-            if idaapi.IDA_SDK_VERSION >= 900:
-                IdaInterface.instance = Ida90Interface()
+            if idaapi.IDA_SDK_VERSION >= 850:
+                IdaInterface.instance = Ida85Interface()
             else:
                 IdaInterface.instance = Ida73Interface()
 
@@ -48,7 +48,7 @@ class IdaInterface:
 
 class Ida74Interface(BackendInterface):
     def __init__(self):
-        self.version = "IDA Pro 7.4"
+        self.version = "IDA Pro 7.4 - 8.4"
         self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
@@ -277,9 +277,9 @@ class Ida73Interface(BackendInterface):
         return True
 
 
-class Ida90Interface(BackendInterface):
+class Ida85Interface(BackendInterface):
     def __init__(self):
-        self.version = "IDA Pro 9.0"
+        self.version = "IDA Pro 8.5+"
         self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
