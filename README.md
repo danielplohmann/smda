@@ -101,6 +101,7 @@ make test
 ```
 
 ## Version History
+ * 2025-12-10: v2.4.3 - Compatibility issue for IDA export, API changes happened already in 8.5, so adjusted the version check.
  * 2025-11-28: v2.4.2 - Fix for a bug when extracting and merging code areas from section tables. (THX: @r0ny123)
  * 2025-11-28: v2.4.1 - Modernized packaging by also building a wheel. (THX: @dimbleby)
  * 2025-11-21: v2.4.0 - Integration of DelphiReSym by @WenzWenzWenz for Delphi VMT parsing, thanks to @r0ny123 for adapting it!!
