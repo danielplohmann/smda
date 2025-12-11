@@ -30,11 +30,14 @@ class MachoFileLoader:
         return data[:4] == b"\xce\xfa\xed\xfe" or data[:4] == b"\xcf\xfa\xed\xfe"
 
     @staticmethod
-    def getBaseAddress(binary):
-        macho_file = lief.parse(binary)
+    def getBaseAddress(binary, macho_file=None):
+        if macho_file is None:
+            macho_file = lief.parse(binary)
         # Determine base address of binary
         #
         base_addr = 0
+        if not macho_file:
+            return base_addr
         candidates = [0xFFFFFFFFFFFFFFFF, macho_file.imagebase]
         for section in macho_file.sections:
             if section.virtual_address:
@@ -52,7 +55,9 @@ class MachoFileLoader:
         # MachO needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
         macho_file = lief.parse(binary)
-        base_addr = MachoFileLoader.getBaseAddress(binary)
+        if not macho_file:
+            return b""
+        base_addr = MachoFileLoader.getBaseAddress(binary, macho_file=macho_file)
 
         LOGGER.debug("MachO: base address: 0x%x", base_addr)
 
@@ -157,13 +162,15 @@ class MachoFileLoader:
     def getArchitecture(binary):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
+        if not macho_file:
+            return "intel"
         machine_type = macho_file.header.cpu_type
         if machine_type in [
             lief.MachO.Header.CPU_TYPE.X86_64,
             lief.MachO.Header.CPU_TYPE.X86,
         ]:
             return "intel"
-        elif machine_type == [
+        elif machine_type in [
             lief.MachO.Header.CPU_TYPE.ARM64,
             lief.MachO.Header.CPU_TYPE.ARM,
         ]:
@@ -174,6 +181,8 @@ class MachoFileLoader:
     def getBitness(binary):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
+        if not macho_file:
+            return 0
         machine_type = macho_file.header.cpu_type
         if machine_type == lief.MachO.Header.CPU_TYPE.X86_64:
             return 64
@@ -204,6 +213,8 @@ class MachoFileLoader:
     def getCodeAreas(binary):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
+        if not macho_file:
+            return []
         ins_flags = (
             lief.MachO.Section.FLAGS.PURE_INSTRUCTIONS.value
             + lief.MachO.Section.FLAGS.SELF_MODIFYING_CODE.value
