@@ -163,7 +163,7 @@ class MachoFileLoader:
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)
         if not macho_file:
-            return "intel"
+            return ""
         machine_type = macho_file.header.cpu_type
         if machine_type in [
             lief.MachO.Header.CPU_TYPE.X86_64,
