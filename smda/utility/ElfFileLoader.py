@@ -4,7 +4,8 @@ import sys
 
 import lief
 
-lief.logging.disable()
+from smda.SmdaConfig import SmdaConfig
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -32,12 +33,15 @@ class ElfFileLoader:
         return data[:4] == b"\x7fELF"
 
     @staticmethod
-    def getBaseAddress(binary):
-        elffile = lief.parse(binary)
+    def getBaseAddress(binary, elffile=None):
+        if elffile is None:
+            elffile = lief.parse(binary)
         # Determine base address of binary
         #
         base_addr = 0
         candidates = [0xFFFFFFFFFFFFFFFF]
+        if not elffile:
+            return base_addr
         if not has_bogus_sections(elffile):
             for section in elffile.sections:
                 if section.virtual_address:
@@ -65,7 +69,9 @@ class ElfFileLoader:
         # ELFFile needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
         elffile = lief.parse(binary)
-        base_addr = ElfFileLoader.getBaseAddress(binary)
+        if not elffile:
+            return b""
+        base_addr = ElfFileLoader.getBaseAddress(binary, elffile=elffile)
 
         LOGGER.debug("ELF: base address: 0x%x", base_addr)
 
@@ -116,6 +122,8 @@ class ElfFileLoader:
         # create mapped region.
         # offset 0x0 corresponds to the ELF base address
         virtual_size = max_virtual_address - base_addr
+        if virtual_size > SmdaConfig.MAX_IMAGE_SIZE:
+            raise ValueError("ELF file larger than MAX_IMAGE_SIZE")
         LOGGER.debug("ELF: max virtual section offset: 0x%x", max_virtual_address)
         LOGGER.debug("ELF: min virtual section offset: 0x%x", min_virtual_address)
         LOGGER.debug("ELF: mapped size: 0x%x", virtual_size)
@@ -200,6 +208,8 @@ class ElfFileLoader:
     def getBitness(binary):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary)
+        if not elffile:
+            return 0
         machine_type = elffile.header.machine_type
         if machine_type == lief.ELF.ARCH.X86_64:
             return 64

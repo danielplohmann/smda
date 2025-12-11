@@ -3,7 +3,8 @@ import struct
 
 import lief
 
-lief.logging.disable()
+from smda.SmdaConfig import SmdaConfig
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -58,9 +59,12 @@ class PeFileLoader:
                     if section_info["raw_offset"] > 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
             # support up to 100MB for now.
-            if max_virt_section_offset and max_virt_section_offset < 100 * 1024 * 1024:
+            if max_virt_section_offset and max_virt_section_offset <= SmdaConfig.MAX_IMAGE_SIZE:
                 mapped_binary = bytearray([0] * max_virt_section_offset)
                 mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
+            else:
+                raise ValueError("PE file larger than MAX_IMAGE_SIZE")
+
             for section_info in section_infos:
                 mapped_from = section_info["virt_offset"]
                 mapped_to = section_info["virt_offset"] + section_info["raw_size"]
