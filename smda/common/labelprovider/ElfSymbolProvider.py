@@ -66,7 +66,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
                     func_name = symbol.name
                 if not func_name:
                     func_name = symbol.name
-                if func_name.startswith(('_ZN', 'ZN', '__ZN', '_R', 'R', '__R')):
+                if func_name.startswith(("_ZN", "ZN", "__ZN", "_R", "R", "__R")):
                     try:
                         demangled_name = demangle(func_name)
                         if demangled_name:
