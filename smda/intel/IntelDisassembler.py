@@ -89,13 +89,15 @@ class IntelDisassembler:
     def _addLabelProviders(self):
         self.label_providers.append(WinApiResolver(self.config))
         self.label_providers.append(ElfApiResolver(self.config))
-        self.label_providers.append(ElfSymbolProvider(self.config))
-        self.label_providers.append(PeSymbolProvider(self.config))
-        self.label_providers.append(PdbSymbolProvider(self.config))
+        # Language-specific symbol providers (checked first for proper demangling)
         self.label_providers.append(RustSymbolProvider(self.config))
         self.label_providers.append(GoSymbolProvider(self.config))
         self.label_providers.append(DelphiKbSymbolProvider(self.config))
         self.label_providers.append(DelphiReSymProvider(self.config))
+        # Generic binary format providers (fallback)
+        self.label_providers.append(ElfSymbolProvider(self.config))
+        self.label_providers.append(PeSymbolProvider(self.config))
+        self.label_providers.append(PdbSymbolProvider(self.config))
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:

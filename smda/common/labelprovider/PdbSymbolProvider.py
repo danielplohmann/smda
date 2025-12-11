@@ -5,7 +5,6 @@ import logging
 from smda.utility.PeFileLoader import PeFileLoader
 
 from .AbstractLabelProvider import AbstractLabelProvider
-from .rust_demangler import demangle
 
 LOGGER = logging.getLogger(__name__)
 
@@ -77,13 +76,6 @@ class PdbSymbolProvider(AbstractLabelProvider):
                 virt_base = sects[sym.segment - 1].VirtualAddress
                 function_address = self._base_addr + omap.remap(off + virt_base)
                 demangled_name = undname(sym.name)
-                if sym.name[:3] == "_ZN" or sym.name[:2] == "_R":
-                    try:
-                        rust_demangled = demangle(sym.name)
-                        if rust_demangled:
-                            demangled_name = rust_demangled
-                    except Exception:
-                        pass
                 if sym.symtype == 2:
                     # print("0x%x + 0x%x + 0x%x = 0x%x: %s || %s (type: %d)" % (self._base_addr, off, virt_base, function_address, sym.name, demangled_name, sym.symtype))
                     self._func_symbols[function_address] = demangled_name

@@ -43,10 +43,14 @@ class RustDemangler:
 
         Returns:
             int: type of the string
+
+        Note:
+            We intentionally exclude bare 'R' and 'ZN' prefixes as they are
+            too broad and could match non-Rust symbols.
         """
-        if inpstr.startswith(("_ZN", "ZN", "__ZN")):
+        if inpstr.startswith(("_ZN", "__ZN")):
             return self.LEGACYTYPE
-        elif inpstr.startswith(("_R", "R", "__R")):
+        elif inpstr.startswith(("_R", "__R")):
             return self.V0TYPE
         else:
             raise TypeNotFoundError(inpstr)

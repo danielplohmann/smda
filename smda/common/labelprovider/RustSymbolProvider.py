@@ -20,6 +20,12 @@ class RustSymbolProvider(AbstractLabelProvider):
     def isSymbolProvider(self):
         return True
 
+    def isApiProvider(self):
+        return False
+
+    def getApi(self, to_address, api_address=None):
+        return ("", "")
+
     def update(self, binary_info):
         self._func_symbols = {}
 
@@ -76,7 +82,8 @@ class RustSymbolProvider(AbstractLabelProvider):
 
         try:
             lief_binary = lief.parse(data)
-        except Exception:
+        except Exception as exc:
+            LOGGER.debug("Failed to parse ELF binary with LIEF: %s", type(exc).__name__)
             return
 
         if not lief_binary:
@@ -101,7 +108,8 @@ class RustSymbolProvider(AbstractLabelProvider):
 
         try:
             lief_binary = lief.parse(binary_info.file_path)
-        except Exception:
+        except Exception as exc:
+            LOGGER.debug("Failed to parse PE binary with LIEF: %s", type(exc).__name__)
             return
 
         if not lief_binary:
@@ -116,8 +124,8 @@ class RustSymbolProvider(AbstractLabelProvider):
                     if demangled:
                         demangled = remove_bad_spaces(demangled)
                         self._func_symbols[lief_binary.imagebase + function.address] = demangled
-            except Exception:
-                pass
+            except Exception as exc:
+                LOGGER.debug("Failed to demangle Rust symbol %s: %s", function.name, exc)
 
         # Parse PE symbols (COFF) if available and LIEF extracted them
         # (Similar logic to PeSymbolProvider but focusing on Rust)
@@ -140,8 +148,8 @@ class RustSymbolProvider(AbstractLabelProvider):
                                 function_offset = code_base_address + symbol.value
                                 if function_offset not in self._func_symbols:
                                     self._func_symbols[function_offset] = demangled
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        LOGGER.debug("Failed to demangle Rust symbol %s: %s", symbol.name, exc)
 
     def _parse_lief_symbols(self, symbols):
         function_symbols = {}
@@ -155,12 +163,21 @@ class RustSymbolProvider(AbstractLabelProvider):
                         if demangled:
                             demangled = remove_bad_spaces(demangled)
                             function_symbols[symbol.value] = demangled
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
         return function_symbols
 
     def _is_rust_symbol(self, name):
-        return name.startswith(("_ZN", "_R", "ZN", "R", "__ZN", "__R"))
+        """Check if a symbol name appears to be a Rust mangled symbol.
+
+        Legacy Rust mangling uses _ZN prefix (compatible with C++ Itanium ABI).
+        Rust v0 mangling uses _R prefix.
+        Some platforms may use __ prefix variants.
+
+        Note: We intentionally exclude bare 'R' and 'ZN' prefixes as they are
+        too broad and could match non-Rust symbols.
+        """
+        return name.startswith(("_ZN", "_R", "__ZN", "__R"))
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
