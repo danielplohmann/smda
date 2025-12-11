@@ -14,6 +14,7 @@ from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from smda.DisassemblyResult import DisassemblyResult
@@ -91,6 +92,7 @@ class IntelDisassembler:
         self.label_providers.append(ElfSymbolProvider(self.config))
         self.label_providers.append(PeSymbolProvider(self.config))
         self.label_providers.append(PdbSymbolProvider(self.config))
+        self.label_providers.append(RustSymbolProvider(self.config))
         self.label_providers.append(GoSymbolProvider(self.config))
         self.label_providers.append(DelphiKbSymbolProvider(self.config))
         self.label_providers.append(DelphiReSymProvider(self.config))
