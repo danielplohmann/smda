@@ -57,36 +57,33 @@ class Ident:
         self.punycode = punycode
         self.small_punycode_len = 128
         self.disp = ""
+        # Instance variables for punycode decoding (previously misused as globals)
+        self.out = []
+        self.out_len = 0
 
     def try_small_punycode_decode(self):
-        global out
-        global out_len
-
         def f(inp):
             inp = "".join(inp)
             self.disp += inp
             return "Ok"
 
-        out = ["\0"] * self.small_punycode_len
-        out_len = 0
+        self.out = ["\0"] * self.small_punycode_len
+        self.out_len = 0
         r = self.punycode_decode()
 
         if r == "Error":
             return
         else:
-            return f(out[:out_len])
+            return f(self.out[:self.out_len])
 
     def insert(self, i, c):
-        global out
-        global out_len
-
-        j = out_len
-        out_len += 1
+        j = self.out_len
+        self.out_len += 1
 
         while j > i:
-            out[j] = out[j - 1]
+            self.out[j] = self.out[j - 1]
             j -= 1
-        out[i] = c
+        self.out[i] = c
         return
 
     def punycode_decode(self):
@@ -213,7 +210,7 @@ class Parser:
     def peek(self):
         return self.inn[self.next_val]
 
-    def eat(self, b: bytes):
+    def eat(self, b: str):
         if self.peek() == b:
             self.next_val += 1
             return True
@@ -475,7 +472,6 @@ class Printer:
 
     def invalid(self):
         self.out += "?"
-        print(self.out)
         raise UnableTov0Demangle("Error")
 
     def parser_mut(self):
