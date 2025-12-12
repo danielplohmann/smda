@@ -74,7 +74,7 @@ class Ident:
         if r == "Error":
             return
         else:
-            return f(self.out[:self.out_len])
+            return f(self.out[: self.out_len])
 
     def insert(self, i, c):
         j = self.out_len
