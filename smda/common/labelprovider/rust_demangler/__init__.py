@@ -1,1 +1,1 @@
-from .main import demangle
+from .main import demangle as demangle
