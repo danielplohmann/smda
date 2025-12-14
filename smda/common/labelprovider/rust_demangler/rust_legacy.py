@@ -12,6 +12,8 @@ class UnableToLegacyDemangle(Exception):
 
 
 class LegacyDemangler:
+    _UNESCAPED = {"SP": "@", "BP": "*", "RF": "&", "LT": "<", "GT": ">", "LP": "(", "RP": ")", "C": ","}
+
     def demangle(self, inpstr: str) -> str:
         self.elements = 0
 
@@ -70,8 +72,6 @@ class LegacyDemangler:
                     escape = rest[1 : end + 1]
                     after_escape = rest[end + 2 :]
 
-                    unescaped = {"SP": "@", "BP": "*", "RF": "&", "LT": "<", "GT": ">", "LP": "(", "RP": ")", "C": ","}
-
                     if escape.startswith("u"):
                         digits = escape[1:]
 
@@ -86,7 +86,7 @@ class LegacyDemangler:
                         continue
 
                     else:
-                        disp += unescaped[escape]
+                        disp += self._UNESCAPED[escape]
                         rest = after_escape
                         continue
 
