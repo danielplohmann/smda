@@ -57,7 +57,6 @@ class Ident:
         self.punycode = punycode
         self.small_punycode_len = 128
         self.disp = ""
-        # Instance variables for punycode decoding (previously misused as globals)
         self.out = []
         self.out_len = 0
 
@@ -65,16 +64,16 @@ class Ident:
         def f(inp):
             inp = "".join(inp)
             self.disp += inp
-            return "Ok"
+            return True
 
         self.out = ["\0"] * self.small_punycode_len
         self.out_len = 0
         r = self.punycode_decode()
 
-        if r == "Error":
-            return
+        if r is None:
+            return None
         else:
-            return f(self.out[: self.out_len])
+            return f(self.out[:self.out_len])
 
     def insert(self, i, c):
         j = self.out_len
@@ -92,7 +91,7 @@ class Ident:
         try:
             punycode_bytes[count]
         except IndexError:
-            return "Error"
+            return None
 
         lent = 0
         for c in self.ascii:
@@ -121,7 +120,7 @@ class Ident:
                 elif d in string.digits:
                     d = 26 + (ord(d) - ord("0"))
                 else:
-                    return "Error"
+                    return None
 
                 delta = delta + (d * w)
                 if d < t:
@@ -136,7 +135,7 @@ class Ident:
             try:
                 c = chr(n)
             except Exception:
-                return "Error"
+                return None
 
             self.insert(i, c)
             i += 1
@@ -210,7 +209,7 @@ class Parser:
     def peek(self):
         return self.inn[self.next_val]
 
-    def eat(self, b: str):
+    def eat(self, b: bytes):
         if self.peek() == b:
             self.next_val += 1
             return True
@@ -239,7 +238,7 @@ class Parser:
         if d.isdigit():
             d = int(d)
         else:
-            return "Error"
+            return None
         self.next_val += 1
         return d
 
@@ -294,13 +293,15 @@ class Parser:
     def ident(self):
         is_punycode = self.eat("u")
         length = self.digit_10()
-        if length != 0:
+        if length is not None and length != 0:
             while True:
                 d = self.digit_10()
-                if d == "Error":
+                if d is None:
                     break
                 length *= 10
                 length += d
+        if length is None:
+            length = 0
 
         self.eat("_")
 
@@ -472,6 +473,7 @@ class Printer:
 
     def invalid(self):
         self.out += "?"
+        print(self.out)
         raise UnableTov0Demangle("Error")
 
     def parser_mut(self):
