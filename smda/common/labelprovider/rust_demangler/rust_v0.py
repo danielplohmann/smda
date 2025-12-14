@@ -91,7 +91,7 @@ class Ident:
         punycode_bytes = self.punycode
         try:
             punycode_bytes[count]
-        except Exception:
+        except IndexError:
             return "Error"
 
         lent = 0
