@@ -100,14 +100,19 @@ class RustSymbolProvider(AbstractLabelProvider):
         except ImportError:
             return
 
-        if not binary_info.file_path:
-            return
-
-        # We need the file path for LIEF PE parsing usually, or raw data?
-        # LIEF python API usually takes a file path or list of ints/bytes.
+        data = binary_info.raw_data
+        if not data:
+            if binary_info.file_path:
+                try:
+                    with open(binary_info.file_path, "rb") as fin:
+                        data = fin.read()
+                except OSError:
+                    return
+            else:
+                return
 
         try:
-            lief_binary = lief.parse(binary_info.file_path)
+            lief_binary = lief.parse(data)
         except Exception as exc:
             LOGGER.debug("Failed to parse PE binary with LIEF: %s", type(exc).__name__)
             return
