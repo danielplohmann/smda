@@ -28,12 +28,14 @@ class V0Demangler:
                     raise UnableTov0Demangle(inpstr)
             self.inpstr = self.inpstr[:length]
 
-        self.parser = Parser(self.inpstr, 0)
-        self.parser.skip_path()
-        if (len(self.parser.inn) > self.parser.next_val) and self.parser.inn[self.parser.next_val].isupper():
-            self.parser.skip_path()
-
         parser = Parser(self.inpstr, 0)
+        # Validate the path structure
+        parser.skip_path()
+        if (len(parser.inn) > parser.next_val) and parser.inn[parser.next_val].isupper():
+            parser.skip_path()
+
+        # Reset parser position for printing
+        parser.next_val = 0
         printer = Printer(parser, self.disp, 0)
         printer.print_path(True)
 
