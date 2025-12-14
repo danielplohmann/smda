@@ -75,7 +75,7 @@ class Ident:
         if r is None:
             return None
         else:
-            return f(self.out[:self.out_len])
+            return f(self.out[: self.out_len])
 
     def insert(self, i, c):
         j = self.out_len
@@ -456,7 +456,6 @@ class Printer:
         if self.recursion >= self.RUST_MAX_RECURSION_COUNT:
             raise UnableTov0Demangle("Recursion limit exceeded")
 
-
     def invalid(self):
         self.out += "?"
         print(self.out)
@@ -531,7 +530,7 @@ class Printer:
             self.print_sep_list("print_dyn_trait", " + ")
             return ""
 
-        bound_lifetimes = self.parser_mut().opt_integer_62('G')
+        bound_lifetimes = self.parser_mut().opt_integer_62("G")
 
         if bound_lifetimes > 0:
             self.out += "for<"
