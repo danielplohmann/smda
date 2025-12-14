@@ -454,22 +454,6 @@ class Printer:
         if self.recursion >= self.RUST_MAX_RECURSION_COUNT:
             raise UnableTov0Demangle("Recursion limit exceeded")
 
-    def parser_macro(self, method):
-        self.check_recursion_limit()
-        p = self.parser_mut()
-
-        if "(" in method:
-            arg = method.split("'")[1]
-            method = method.split("'")[0][:-1]
-            try:
-                return getattr(p, method)(*arg)
-            except Exception:
-                self.out += "?"
-
-        try:
-            return getattr(p, method)()
-        except Exception:
-            self.out += "?"
 
     def invalid(self):
         self.out += "?"
@@ -510,7 +494,7 @@ class Printer:
                 if self.eat("C"):
                     abi = "C"
                 else:
-                    ab = self.parser_macro("ident")
+                    ab = self.parser_mut().ident()
                     if not ab.ascii or ab.punycode:
                         self.invalid()
                     abi = ab.ascii
@@ -545,7 +529,7 @@ class Printer:
             self.print_sep_list("print_dyn_trait", " + ")
             return ""
 
-        bound_lifetimes = self.parser_macro("opt_integer_62('G')")
+        bound_lifetimes = self.parser_mut().opt_integer_62('G')
 
         if bound_lifetimes > 0:
             self.out += "for<"
@@ -575,18 +559,20 @@ class Printer:
         return i
 
     def print_path(self, in_value):
-        tag = self.parser_macro("next_func")
+        self.check_recursion_limit()
+        p = self.parser_mut()
+        tag = p.next_func()
         if tag == "C":
-            dis = self.parser_macro("disambiguator")
-            name = self.parser_macro("ident")
+            p.disambiguator()
+            name = p.ident()
             name.display()
             self.out += name.disp
 
         elif tag == "N":
-            ns = self.parser_macro("namespace")
+            ns = p.namespace()
             self.print_path(in_value)
-            dis = self.parser_macro("disambiguator")
-            name = self.parser_macro("ident")
+            dis = p.disambiguator()
+            name = p.ident()
             if ns:
                 self.out += "::{"
                 if ns == "C":
@@ -611,8 +597,8 @@ class Printer:
 
         elif tag == "M" or tag == "X" or tag == "Y":
             if tag != "Y":
-                self.parser_macro("disambiguator")
-                self.parser_macro("skip_path")
+                p.disambiguator()
+                p.skip_path()
 
             self.out += "<"
             self.print_type()
@@ -642,7 +628,7 @@ class Printer:
 
     def print_generic_arg(self):
         if self.eat("L"):
-            lt = self.parser_macro("integer_62")
+            lt = self.parser_mut().integer_62()
             self.print_lifetime_from_index(lt)
         elif self.eat("K"):
             self.print_const()
@@ -650,7 +636,9 @@ class Printer:
             self.print_type()
 
     def print_type(self):
-        tag = self.parser_macro("next_func")
+        self.check_recursion_limit()
+        p = self.parser_mut()
+        tag = p.next_func()
         if basic_type(tag):
             ty = basic_type(tag)
             self.out += ty
@@ -659,7 +647,7 @@ class Printer:
         if tag == "R" or tag == "Q":
             self.out += "&"
             if self.eat("L"):
-                lt = self.parser_macro("integer_62")
+                lt = p.integer_62()
                 if lt != 0:
                     self.print_lifetime_from_index(lt)
                     self.out += " "
@@ -703,7 +691,7 @@ class Printer:
             if not self.eat("L"):
                 self.invalid()
 
-            lt = self.parser_macro("integer_62")
+            lt = p.integer_62()
             if lt != 0:
                 self.out += " + "
                 self.print_lifetime_from_index(lt)
@@ -741,7 +729,7 @@ class Printer:
             else:
                 self.out += ", "
 
-            name = self.parser_macro("ident")
+            name = self.parser_mut().ident()
             name.display()
             self.out += name.disp
             self.out += " = "
@@ -751,10 +739,11 @@ class Printer:
             self.out += ">"
 
     def print_const(self):
+        self.check_recursion_limit()
         if self.eat("B"):
             return self.backref_printer().print_const()
 
-        ty_tag = self.parser_macro("next_func")
+        ty_tag = self.parser_mut().next_func()
         if ty_tag == "p":
             self.out += "_"
             return
@@ -776,7 +765,7 @@ class Printer:
         return
 
     def print_const_uint(self):
-        hex_val = self.parser_macro("hex_nibbles")
+        hex_val = self.parser_mut().hex_nibbles()
 
         if len(hex_val) > 16:
             self.out += "0x"
@@ -791,7 +780,7 @@ class Printer:
         self.print_const_uint()
 
     def print_const_bool(self):
-        hex_val = self.parser_macro("hex_nibbles")
+        hex_val = self.parser_mut().hex_nibbles()
 
         if hex_val == "0":
             self.out += "false"
@@ -801,7 +790,7 @@ class Printer:
             self.invalid()
 
     def print_const_char(self):
-        hex_val = self.parser_macro("hex_nibbles")
+        hex_val = self.parser_mut().hex_nibbles()
 
         if len(hex_val) > 8:
             self.invalid()
