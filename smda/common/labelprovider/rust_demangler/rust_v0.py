@@ -458,7 +458,6 @@ class Printer:
 
     def invalid(self):
         self.out += "?"
-        print(self.out)
         raise UnableTov0Demangle("Error")
 
     def parser_mut(self):

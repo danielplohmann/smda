@@ -1,5 +1,12 @@
+from enum import Enum
+
 from .rust_legacy import LegacyDemangler
 from .rust_v0 import V0Demangler
+
+
+class ManglingType(Enum):
+    LEGACY = 0
+    V0 = 1
 
 
 class TypeNotFoundError(Exception):
@@ -13,9 +20,6 @@ class TypeNotFoundError(Exception):
 
 
 class RustDemangler:
-    LEGACYTYPE = 0
-    V0TYPE = 1
-
     def __init__(self):
         self.legacy = LegacyDemangler()
         self.v0 = V0Demangler()
@@ -27,12 +31,12 @@ class RustDemangler:
             inpstr (str): String to be demangled
         """
         curr_type = self.determine_type(inpstr)
-        if curr_type == self.LEGACYTYPE:
+        if curr_type == ManglingType.LEGACY:
             return self.legacy.demangle(inpstr)
         else:
             return self.v0.demangle(inpstr)
 
-    def determine_type(self, inpstr: str) -> int:
+    def determine_type(self, inpstr: str) -> ManglingType:
         """Determine the type of the given string
 
         Args:
@@ -42,15 +46,15 @@ class RustDemangler:
             TypeNotFoundError: If the string can't be determined
 
         Returns:
-            int: type of the string
+            ManglingType: type of the string
 
         Note:
             We intentionally exclude bare 'R' and 'ZN' prefixes as they are
             too broad and could match non-Rust symbols.
         """
         if inpstr.startswith(("_ZN", "__ZN")):
-            return self.LEGACYTYPE
+            return ManglingType.LEGACY
         elif inpstr.startswith(("_R", "__R")):
-            return self.V0TYPE
+            return ManglingType.V0
         else:
             raise TypeNotFoundError(inpstr)
