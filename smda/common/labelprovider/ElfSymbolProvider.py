@@ -32,7 +32,6 @@ class ElfSymbolProvider(AbstractLabelProvider):
         if binary_info.file_path:
             with open(binary_info.file_path, "rb") as fin:
                 data = fin.read()
-            return
         elif binary_info.raw_data:
             data = binary_info.raw_data
         else:
