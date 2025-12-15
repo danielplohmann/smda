@@ -402,6 +402,21 @@ class IntelDisassembler:
                             "  analyzeFunction() found ending instruction @0x%08x",
                             i_address,
                         )
+                    elif i_mnemonic_noprefix in ["syscall"]:
+                        if previous_address and previous_mnemonic == "mov":
+                            prev_operands = previous_op_str.split(",")
+                            if len(prev_operands) == 2:
+                                reg = prev_operands[0].strip().lower()
+                                if (self.disassembly.binary_info.bitness == 64 and reg == "rax") or (
+                                    self.disassembly.binary_info.bitness == 32 and reg == "eax"
+                                ):
+                                    syscall_number_str = int(prev_operands[1].strip(), 16)
+                                    if syscall_number_str == 60:
+                                        self._analyzeEndInstruction(state)
+                                        LOGGER.debug(
+                                            "  analyzeFunction() found program ending instruction @0x%08x",
+                                            i_address,
+                                        )
                     elif previous_address and i_address != start_addr and previous_mnemonic == "call":
                         instruction_sequence = list(
                             self.capstone.disasm(self._getDisasmWindowBuffer(i_address), i_address)
