@@ -1,5 +1,6 @@
 import string
 from functools import lru_cache
+from typing import Optional
 
 
 class UnableTov0Demangle(Exception):
@@ -175,7 +176,7 @@ class Ident:
 
 
 @lru_cache(maxsize=32)
-def basic_type(tag: str) -> str | None:
+def basic_type(tag: str) -> Optional[str]:
     tagval = {
         "b": "bool",
         "c": "char",
