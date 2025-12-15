@@ -86,6 +86,8 @@ class LegacyDemangler:
                         continue
 
                     else:
+                        if escape not in self._UNESCAPED:
+                            raise UnableToLegacyDemangle(inpstr)
                         disp += self._UNESCAPED[escape]
                         rest = after_escape
                         continue

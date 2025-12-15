@@ -173,7 +173,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                         LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
         return function_symbols
 
-    def _is_rust_symbol(self, name):
+    def _is_rust_symbol(self, name: str) -> bool:
         """Check if a symbol name appears to be a Rust mangled symbol.
 
         Legacy Rust mangling uses _ZN prefix (compatible with C++ Itanium ABI).
