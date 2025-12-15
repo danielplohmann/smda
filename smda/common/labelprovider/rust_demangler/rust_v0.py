@@ -1,4 +1,5 @@
 import string
+from functools import lru_cache
 
 
 class UnableTov0Demangle(Exception):
@@ -136,7 +137,7 @@ class Ident:
 
             try:
                 c = chr(n)
-            except Exception:
+            except (ValueError, OverflowError):
                 return None
 
             self.insert(i, c)
@@ -144,7 +145,7 @@ class Ident:
 
             try:
                 punycode_bytes[count]
-            except Exception:
+            except IndexError:
                 return
 
             delta = delta // damp
@@ -173,7 +174,8 @@ class Ident:
                 self.disp += self.ascii
 
 
-def basic_type(tag):
+@lru_cache(maxsize=32)
+def basic_type(tag: str) -> str | None:
     tagval = {
         "b": "bool",
         "c": "char",
@@ -476,6 +478,7 @@ class Printer:
         self.out += "'"
         if lt == 0:
             self.out += "_"
+            return
         depth = self.bound_lifetime_depth - lt
         if depth:
             if depth < 26:
@@ -543,7 +546,7 @@ class Printer:
 
         if val == 1:
             r = f1()
-        if val == 2:
+        elif val == 2:
             r = f2()
         self.bound_lifetime_depth -= bound_lifetimes
 
