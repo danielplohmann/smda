@@ -64,6 +64,18 @@ class RustSymbolProvider(AbstractLabelProvider):
 
         return any(sig in data for sig in signatures)
 
+    def _get_binary_data(self, binary_info):
+        """Safely retrieves binary data from either raw_data or a file path."""
+        data = binary_info.raw_data
+        if not data and binary_info.file_path:
+            try:
+                with open(binary_info.file_path, "rb") as fin:
+                    data = fin.read()
+            except OSError as e:
+                LOGGER.debug("Failed to read binary from path %s: %s", binary_info.file_path, e)
+                return None
+        return data
+
     def _update_elf(self, binary_info):
         try:
             import lief
@@ -72,13 +84,9 @@ class RustSymbolProvider(AbstractLabelProvider):
         except ImportError:
             return
 
-        data = binary_info.raw_data
+        data = self._get_binary_data(binary_info)
         if not data:
-            if binary_info.file_path:
-                with open(binary_info.file_path, "rb") as fin:
-                    data = fin.read()
-            else:
-                return
+            return
 
         try:
             lief_binary = lief.parse(data)
@@ -100,16 +108,9 @@ class RustSymbolProvider(AbstractLabelProvider):
         except ImportError:
             return
 
-        data = binary_info.raw_data
+        data = self._get_binary_data(binary_info)
         if not data:
-            if binary_info.file_path:
-                try:
-                    with open(binary_info.file_path, "rb") as fin:
-                        data = fin.read()
-                except OSError:
-                    return
-            else:
-                return
+            return
 
         try:
             lief_binary = lief.parse(data)
