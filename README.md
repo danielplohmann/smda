@@ -101,6 +101,7 @@ make test
 ```
 
 ## Version History
+ * 2025-12-17: v2.4.5 - Improved security and reliability in various spots. (THX: @r0ny123)
  * 2025-12-15: v2.4.4 - Extended set of default prologues for additional 64bit GCC-style byte combinations. Added exit syscall check to improve function end recognition. (THX: @N0fix)
  * 2025-12-10: v2.4.3 - Compatibility issue for IDA export, API changes happened already in 8.5, so adjusted the version check.
  * 2025-11-28: v2.4.2 - Fix for a bug when extracting and merging code areas from section tables. (THX: @r0ny123)
