@@ -42,3 +42,15 @@ class SmdaConfig:
     CALCULATE_HASHING = True
     # confidence score to use for filtering functions before including them in the output
     CONFIDENCE_THRESHOLD = 0.0
+
+    def __init__(self):
+        self._disableLiefLogging()
+
+    def _disableLiefLogging(self):
+        # disable excessive logging from LIEF
+        try:
+            import lief
+
+            lief.logging.disable()
+        except ImportError:
+            pass

@@ -81,13 +81,13 @@ class Disassembler:
         binary_info.bitness = loader.getBitness()
         binary_info.architecture = loader.getArchitecture()
         binary_info.code_areas = loader.getCodeAreas()
-        return binary_info, file_content
+        return binary_info
 
     def disassembleFile(self, file_path, pdb_path=""):
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
             loader = FileLoader(file_path, map_file=True)
-            binary_info, file_content = self._populateBinaryInfo(loader, file_path)
+            binary_info = self._populateBinaryInfo(loader, file_path)
             self.initDisassembler(binary_info.architecture)
             if self.disassembler:
                 self.disassembler.addPdbFile(binary_info, pdb_path)
@@ -95,9 +95,9 @@ class Disassembler:
             if self.config.WITH_STRINGS:
                 is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
                 string_mode = "go" if is_go_binary else None
-                self._addStringsToReport(smda_report, file_content, mode=string_mode)
+                self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
-                smda_report.buffer = file_content
+                smda_report.buffer = binary_info.binary
         except Exception as exc:
             LOGGER.error("An error occurred while disassembling file.")
             # print("-> an error occured (", str(exc), ").")
@@ -108,7 +108,7 @@ class Disassembler:
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
             loader = MemoryFileLoader(file_content, map_file=True)
-            binary_info, file_content = self._populateBinaryInfo(loader)
+            binary_info = self._populateBinaryInfo(loader)
             self.initDisassembler(binary_info.architecture)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
