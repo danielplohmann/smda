@@ -48,14 +48,7 @@ class RustSymbolProvider(AbstractLabelProvider):
         Checks for Rust signatures in the binary data.
         Based on Ghidra's Rust detection logic.
         """
-        data = binary_info.raw_data
-        if not data and binary_info.file_path:
-            try:
-                with open(binary_info.file_path, "rb") as fin:
-                    data = fin.read()
-            except OSError:
-                return False
-
+        data = self._get_binary_data(binary_info)
         if not data:
             return False
 
