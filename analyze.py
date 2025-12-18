@@ -19,8 +19,7 @@ def parseBaseAddrFromArgs(args):
     if baddr_match:
         parsed_base_addr = int(baddr_match.group("base_addr"), 16)
         logging.info(
-            "Parsed base address from file name: 0x%08x %d",
-            parsed_base_addr,
+            "Parsed base address from file name: 0x%08x",
             parsed_base_addr,
         )
         return parsed_base_addr
@@ -126,7 +125,6 @@ if __name__ == "__main__":
     if ARGS.strings:
         config.WITH_STRINGS = True
     logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
-
     SMDA_REPORT = None
     INPUT_FILENAME = ""
     BITNESS = ARGS.bitness if (ARGS.bitness in [32, 64]) else None

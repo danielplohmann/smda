@@ -5,8 +5,6 @@ import lief
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 
-lief.logging.disable()
-
 
 class BinaryInfo:
     """simple DTO to contain most information related to the binary/buffer to be analyzed"""
