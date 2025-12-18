@@ -128,21 +128,20 @@ class RustSymbolProvider(AbstractLabelProvider):
 
         # Parse PE symbols (COFF) if available and LIEF extracted them
         # (Similar logic to PeSymbolProvider but focusing on Rust)
-        if lief_binary.has_symbols:
-            for symbol in lief_binary.symbols:
-                # Check if it is a function symbol and has a section
-                if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION" and symbol.section:
-                    try:
-                        raw_name = symbol.name
-                        if self._is_rust_symbol(raw_name):
-                            demangled = demangle(raw_name)
-                            if demangled:
-                                demangled = remove_bad_spaces(demangled)
-                                function_offset = lief_binary.imagebase + symbol.section.virtual_address + symbol.value
-                                if function_offset not in self._func_symbols:
-                                    self._func_symbols[function_offset] = demangled
-                    except Exception as exc:
-                        LOGGER.debug("Failed to demangle Rust symbol %s: %s", symbol.name, exc)
+        for symbol in lief_binary.symbols:
+            # Check if it is a function symbol and has a section
+            if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION" and symbol.section:
+                try:
+                    raw_name = symbol.name
+                    if self._is_rust_symbol(raw_name):
+                        demangled = demangle(raw_name)
+                        if demangled:
+                            demangled = remove_bad_spaces(demangled)
+                            function_offset = lief_binary.imagebase + symbol.section.virtual_address + symbol.value
+                            if function_offset not in self._func_symbols:
+                                self._func_symbols[function_offset] = demangled
+                except Exception as exc:
+                    LOGGER.debug("Failed to demangle Rust symbol %s: %s", symbol.name, exc)
 
     def _parse_lief_symbols(self, symbols):
         function_symbols = {}
