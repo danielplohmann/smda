@@ -488,7 +488,7 @@ class Printer:
         if depth:
             if depth < 26:
                 c = ord("a") + depth
-                self.out += str(c)
+                self.out += chr(c)
             else:
                 self.out += "_"
                 self.out += str(depth)
