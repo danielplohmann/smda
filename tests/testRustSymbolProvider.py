@@ -87,6 +87,25 @@ class TestRustDemangler(unittest.TestCase):
         expected = "foo::bar"
         self.assertEqual(demangle(valid_hash), expected)
 
+    def test_v0_suffix_not_retained_between_calls(self):
+        """Test that suffix state is not retained between demangle calls.
+
+        Regression test: The global _demangler instance was retaining self.suffix
+        across calls, causing symbols without dots to get stale suffixes appended.
+        """
+        # First demangle a symbol that would have a suffix (contains .llvm.)
+        # Note: .llvm. suffix gets stripped during processing
+        symbol_with_suffix = "_RNvC3foo3bar.llvm.1234567890abcdef"
+        _result1 = demangle(symbol_with_suffix)  # noqa: F841
+
+        # Now demangle a symbol WITHOUT any suffix
+        symbol_without_suffix = "_RNvC6_123foo3bar"
+        result2 = demangle(symbol_without_suffix)
+
+        # The second result should NOT have any suffix from the first call
+        self.assertEqual(result2, "123foo::bar")
+        self.assertNotIn(".llvm.", result2)
+
 
 class TestRustSymbolProvider(unittest.TestCase):
     """Tests for the RustSymbolProvider class."""

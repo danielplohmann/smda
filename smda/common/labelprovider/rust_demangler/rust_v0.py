@@ -19,6 +19,10 @@ class V0Demangler:
         self.suffix = ""
 
     def demangle(self, inpstr: str) -> str:
+        # Reset state for each call to ensure independent demangling
+        self.suffix = ""
+        self.disp = ""
+
         self.inpstr = inpstr[inpstr.index("R") + 1 :]
         self.sanity_check(self.inpstr)
 
