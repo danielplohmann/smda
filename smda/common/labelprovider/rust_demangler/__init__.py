@@ -1,3 +1,3 @@
-from .main import demangle as demangle
+from .main import demangle
 
 __all__ = ["demangle"]
