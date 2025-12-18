@@ -51,7 +51,7 @@ class V0Demangler:
         return printer.out + self.suffix
 
     def sanity_check(self, inpstr: str):
-        if not inpstr[0].isupper():
+        if not inpstr or not inpstr[0].isupper():
             raise UnableTov0Demangle(inpstr)
 
         for i in inpstr:
@@ -121,6 +121,8 @@ class Ident:
             while True:
                 k += base
                 t = min(max((k - bias), t_min), t_max)
+                if count >= len(punycode_bytes):
+                    return None
                 d = punycode_bytes[count]
                 count += 1
                 if d in string.ascii_lowercase:
