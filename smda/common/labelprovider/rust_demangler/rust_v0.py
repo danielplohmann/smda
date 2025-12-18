@@ -492,8 +492,7 @@ class Printer:
             c = ord("a") + depth - 1
             self.out += chr(c)
         else:
-            self.out += "_"
-            self.out += str(depth)
+            self.out += f"_{depth}"
 
     def in_binder(self, val):
         def f1():
