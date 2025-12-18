@@ -484,16 +484,16 @@ class Printer:
         if lt == 0:
             self.out += "_"
             return
-        depth = self.bound_lifetime_depth - lt
-        if depth:
-            if depth < 26:
-                c = ord("a") + depth
-                self.out += chr(c)
-            else:
-                self.out += "_"
-                self.out += str(depth)
-        else:
+        depth = self.bound_lifetime_depth - lt + 1
+        if depth <= 0:
             self.invalid()
+
+        if depth < 26:
+            c = ord("a") + depth - 1
+            self.out += chr(c)
+        else:
+            self.out += "_"
+            self.out += str(depth)
 
     def in_binder(self, val):
         def f1():

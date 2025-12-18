@@ -1,10 +1,15 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.rust_demangler import demangle
 from smda.common.labelprovider.rust_demangler.rust import TypeNotFoundError
+from smda.common.labelprovider.rust_demangler.rust_v0 import (
+    Printer,
+    UnableTov0Demangle,
+)
 from smda.common.labelprovider.rust_demangler.utils import remove_bad_spaces
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
@@ -105,6 +110,46 @@ class TestRustDemangler(unittest.TestCase):
         # The second result should NOT have any suffix from the first call
         self.assertEqual(result2, "123foo::bar")
         self.assertNotIn(".llvm.", result2)
+
+    def test_v0_lifetime_letter_mapping(self):
+        """Ensure lifetime indexes map to alphabet letters starting at 'a'."""
+
+        printer = Printer(None, "", bound=1)
+        printer.print_lifetime_from_index(1)
+        self.assertEqual(printer.out, "'a")
+
+        printer = Printer(None, "", bound=3)
+        printer.print_lifetime_from_index(2)
+        self.assertEqual(printer.out, "'b")
+
+    def test_v0_lifetime_invalid_depth_raises(self):
+        """Invalid lifetime depths should raise demangling errors."""
+
+        printer = Printer(None, "", bound=0)
+        with self.assertRaises(UnableTov0Demangle):
+            printer.print_lifetime_from_index(2)
+
+    def test_demangle_thread_safety(self):
+        """Demangling should be safe when run concurrently."""
+
+        symbols = [
+            "_RNvC3foo3bar.llvm.1234567890abcdef",
+            "_RNvC6_123foo3bar",
+            "__RNvC6_123foo3bar",
+            "_ZN3foo3barE",
+        ]
+
+        expected = [
+            "foo::bar",
+            "123foo::bar",
+            "123foo::bar",
+            "foo::bar",
+        ]
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(demangle, symbols * 5))
+
+        self.assertEqual(results, expected * 5)
 
 
 class TestRustSymbolProvider(unittest.TestCase):
