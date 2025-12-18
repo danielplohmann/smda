@@ -128,23 +128,17 @@ class RustSymbolProvider(AbstractLabelProvider):
 
         # Parse PE symbols (COFF) if available and LIEF extracted them
         # (Similar logic to PeSymbolProvider but focusing on Rust)
-        code_base_address = None
-        for section in lief_binary.sections:
-            if section.characteristics & 0x20000000:
-                code_base_address = lief_binary.imagebase + section.virtual_address
-                break
-
-        if code_base_address is not None:
+        if lief_binary.has_symbols:
             for symbol in lief_binary.symbols:
-                # Check if it is a function symbol (simple check)
-                if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
+                # Check if it is a function symbol and has a section
+                if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION" and symbol.section:
                     try:
                         raw_name = symbol.name
                         if self._is_rust_symbol(raw_name):
                             demangled = demangle(raw_name)
                             if demangled:
                                 demangled = remove_bad_spaces(demangled)
-                                function_offset = code_base_address + symbol.value
+                                function_offset = lief_binary.imagebase + symbol.section.virtual_address + symbol.value
                                 if function_offset not in self._func_symbols:
                                     self._func_symbols[function_offset] = demangled
                     except Exception as exc:
