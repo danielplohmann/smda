@@ -154,14 +154,17 @@ class LegacyDemangler:
 
         self.elements = 0
         c = 0
-        while inpstr[c] != "E":
+        while c < len(inpstr) and inpstr[c] != "E":
             length = 0
             if not inpstr[c].isdigit():
                 raise UnableToLegacyDemangle(inpstr)
 
-            while inpstr[c].isdigit():
+            while c < len(inpstr) and inpstr[c].isdigit():
                 length = length * 10 + int(inpstr[c])
                 c += 1
+
+            if c + length > len(inpstr):
+                raise UnableToLegacyDemangle(inpstr)
 
             c += length
             self.elements += 1
