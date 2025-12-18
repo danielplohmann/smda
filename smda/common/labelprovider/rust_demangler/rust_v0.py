@@ -550,6 +550,8 @@ class Printer:
             r = f1()
         elif val == 2:
             r = f2()
+        else:
+            r = ""
         self.bound_lifetime_depth -= bound_lifetimes
 
         return r
