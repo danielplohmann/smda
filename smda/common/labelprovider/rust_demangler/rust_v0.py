@@ -515,11 +515,7 @@ class Printer:
 
             if abi:
                 self.out += 'extern "'
-                parts = abi.split("_")
-                for part in parts:
-                    self.out += part
-                    self.out += "-"
-
+                self.out += "-".join(abi.split("_"))
                 self.out += '"'
 
             self.out += "fn("
