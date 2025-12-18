@@ -4,9 +4,15 @@ import logging
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from .rust_demangler import demangle
+from .rust_demangler.rust import TypeNotFoundError
+from .rust_demangler.rust_legacy import UnableToLegacyDemangle
+from .rust_demangler.rust_v0 import UnableTov0Demangle
 from .rust_demangler.utils import remove_bad_spaces
 
 LOGGER = logging.getLogger(__name__)
+
+# Specific exceptions that can be raised during Rust demangling
+_DEMANGLE_ERRORS = (TypeNotFoundError, UnableTov0Demangle, UnableToLegacyDemangle)
 
 
 class RustSymbolProvider(AbstractLabelProvider):
@@ -123,7 +129,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                     if demangled:
                         demangled = remove_bad_spaces(demangled)
                         self._func_symbols[lief_binary.imagebase + function.address] = demangled
-            except Exception as exc:
+            except _DEMANGLE_ERRORS as exc:
                 LOGGER.debug("Failed to demangle Rust symbol %s: %s", function.name, exc)
 
         # Parse PE symbols (COFF) if available and LIEF extracted them
@@ -140,7 +146,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                             function_offset = lief_binary.imagebase + symbol.section.virtual_address + symbol.value
                             if function_offset not in self._func_symbols:
                                 self._func_symbols[function_offset] = demangled
-                except Exception as exc:
+                except _DEMANGLE_ERRORS as exc:
                     LOGGER.debug("Failed to demangle Rust symbol %s: %s", symbol.name, exc)
 
     def _parse_lief_symbols(self, symbols):
@@ -155,7 +161,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                         if demangled:
                             demangled = remove_bad_spaces(demangled)
                             function_symbols[symbol.value] = demangled
-                    except Exception as exc:
+                    except _DEMANGLE_ERRORS as exc:
                         LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
         return function_symbols
 

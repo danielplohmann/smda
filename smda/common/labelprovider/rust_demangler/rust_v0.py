@@ -60,15 +60,15 @@ class V0Demangler:
 
 
 class Ident:
-    def __init__(self, ascii, punycode):
+    def __init__(self, ascii: str, punycode: str) -> None:
         self.ascii = ascii
         self.punycode = punycode
         self.small_punycode_len = 128
         self.disp = ""
-        self.out = []
+        self.out: list = []
         self.out_len = 0
 
-    def try_small_punycode_decode(self):
+    def try_small_punycode_decode(self) -> Optional[bool]:
         def f(inp):
             inp = "".join(inp)
             self.disp += inp
@@ -83,7 +83,7 @@ class Ident:
         else:
             return f(self.out[: self.out_len])
 
-    def insert(self, i, c):
+    def insert(self, i: int, c: str) -> None:
         j = self.out_len
         self.out_len += 1
 
@@ -91,9 +91,8 @@ class Ident:
             self.out[j] = self.out[j - 1]
             j -= 1
         self.out[i] = c
-        return
 
-    def punycode_decode(self):
+    def punycode_decode(self) -> Optional[None]:
         count = 0
         punycode_bytes = self.punycode
         try:
@@ -165,7 +164,7 @@ class Ident:
                 k += base
             bias = k + ((base - t_min + 1) * delta) // (delta + skew)
 
-    def display(self):
+    def display(self) -> None:
         if self.try_small_punycode_decode():
             return
         else:
@@ -213,26 +212,31 @@ def basic_type(tag: str) -> Optional[str]:
 
 
 class Parser:
-    def __init__(self, inn, next_val):
+    def __init__(self, inn: str, next_val: int) -> None:
         self.inn = inn
         self.next_val = next_val
 
-    def peek(self):
+    def peek(self) -> str:
+        if self.next_val >= len(self.inn):
+            raise UnableTov0Demangle(self.inn)
         return self.inn[self.next_val]
 
-    def eat(self, b: bytes):
-        if self.peek() == b:
+    def eat(self, b: str) -> bool:
+        if self.next_val >= len(self.inn):
+            return False
+        if self.inn[self.next_val] == b:
             self.next_val += 1
             return True
-        else:
-            return False
+        return False
 
-    def next_func(self):
-        b = self.peek()
+    def next_func(self) -> str:
+        if self.next_val >= len(self.inn):
+            raise UnableTov0Demangle(self.inn)
+        b = self.inn[self.next_val]
         self.next_val += 1
         return b
 
-    def hex_nibbles(self):
+    def hex_nibbles(self) -> str:
         start = self.next_val
         while True:
             n = self.next_func()
@@ -244,7 +248,7 @@ class Parser:
                 raise UnableTov0Demangle(self.inn)
         return self.inn[start : self.next_val - 1]
 
-    def digit_10(self):
+    def digit_10(self) -> Optional[int]:
         d = self.peek()
         if d.isdigit():
             d = int(d)
@@ -253,7 +257,7 @@ class Parser:
         self.next_val += 1
         return d
 
-    def digit_62(self):
+    def digit_62(self) -> int:
         d = self.peek()
         if d.isdigit():
             d = int(d)
@@ -266,7 +270,7 @@ class Parser:
         self.next_val += 1
         return d
 
-    def integer_62(self):
+    def integer_62(self) -> int:
         if self.eat("_"):
             return 0
         x = 0
@@ -276,24 +280,24 @@ class Parser:
             x += d
         return x + 1
 
-    def opt_integer_62(self, tag: str):
+    def opt_integer_62(self, tag: str) -> int:
         if not self.eat(tag):
             return 0
         return self.integer_62() + 1
 
-    def disambiguator(self):
+    def disambiguator(self) -> int:
         return self.opt_integer_62("s")
 
-    def namespace(self):
+    def namespace(self) -> Optional[str]:
         n = self.next_func()
         if n.isupper():
             return n
         elif n.islower():
-            return
+            return None
         else:
             raise UnableTov0Demangle(self.inn)
 
-    def backref(self):
+    def backref(self) -> "Parser":
         s_start = self.next_val - 1
         i = self.integer_62()
         if i >= s_start:
