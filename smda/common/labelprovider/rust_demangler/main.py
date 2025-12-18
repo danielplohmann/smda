@@ -1,7 +1,5 @@
 from .rust import RustDemangler
 
-_demangler = RustDemangler()
-
 
 def demangle(inp_str: str) -> str:
     """Demangle a Rust mangled symbol name.
@@ -17,4 +15,5 @@ def demangle(inp_str: str) -> str:
         UnableTov0Demangle: If v0 demangling fails.
         UnableToLegacyDemangle: If legacy demangling fails.
     """
-    return _demangler.demangle(inp_str)
+    demangler = RustDemangler()
+    return demangler.demangle(inp_str)
