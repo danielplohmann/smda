@@ -35,19 +35,31 @@ class RustSymbolProvider(AbstractLabelProvider):
     def update(self, binary_info):
         self._func_symbols = {}
 
-        # Optional: Check if this is likely a Rust binary before proceeding
-        # This can be used to skip processing or to provide a confidence metric,
-        # though currently we just use it for logging or future optimization.
-        # Ideally, if it's NOT a Rust binary, we might want to avoid aggressive symbol checks,
-        # but the _is_rust_symbol check is specific enough.
-        # self.is_rust_binary(binary_info)
+        try:
+            import lief
 
-        # Check if it is ELF
-        if binary_info.raw_data and binary_info.raw_data[:4] == b"\x7fELF":
-            self._update_elf(binary_info)
-        # Check if it is PE (start with MZ)
-        elif binary_info.raw_data and binary_info.raw_data[:2] == b"MZ":
-            self._update_pe(binary_info)
+            lief.logging.disable()
+        except ImportError:
+            return
+
+        data = self._get_binary_data(binary_info)
+        if not data:
+            return
+
+        try:
+            lief_binary = lief.parse(data)
+        except Exception as exc:
+            LOGGER.debug("Failed to parse binary with LIEF: %s", type(exc).__name__)
+            return
+
+        if not lief_binary:
+            return
+
+        # Dispatch to appropriate handler based on binary type
+        if isinstance(lief_binary, lief.ELF.Binary):
+            self._update_elf(lief_binary)
+        elif isinstance(lief_binary, lief.PE.Binary):
+            self._update_pe(lief_binary)
 
     def is_rust_binary(self, binary_info):
         """
@@ -75,51 +87,13 @@ class RustSymbolProvider(AbstractLabelProvider):
                 return None
         return data
 
-    def _update_elf(self, binary_info):
-        try:
-            import lief
-
-            lief.logging.disable()
-        except ImportError:
-            return
-
-        data = self._get_binary_data(binary_info)
-        if not data:
-            return
-
-        try:
-            lief_binary = lief.parse(data)
-        except Exception as exc:
-            LOGGER.debug("Failed to parse ELF binary with LIEF: %s", type(exc).__name__)
-            return
-
-        if not lief_binary:
-            return
-
+    def _update_elf(self, lief_binary):
+        """Process ELF binary symbols for Rust demangling."""
         self._func_symbols.update(self._parse_lief_symbols(lief_binary.symtab_symbols))
         self._func_symbols.update(self._parse_lief_symbols(lief_binary.dynamic_symbols))
 
-    def _update_pe(self, binary_info):
-        try:
-            import lief
-
-            lief.logging.disable()
-        except ImportError:
-            return
-
-        data = self._get_binary_data(binary_info)
-        if not data:
-            return
-
-        try:
-            lief_binary = lief.parse(data)
-        except Exception as exc:
-            LOGGER.debug("Failed to parse PE binary with LIEF: %s", type(exc).__name__)
-            return
-
-        if not lief_binary:
-            return
-
+    def _update_pe(self, lief_binary):
+        """Process PE binary symbols for Rust demangling."""
         # Parse PE exports
         for function in lief_binary.exported_functions:
             try:
