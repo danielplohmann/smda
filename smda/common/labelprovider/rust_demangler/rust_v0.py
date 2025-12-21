@@ -475,8 +475,10 @@ class Printer:
         self.recursion = recursion
 
     def check_recursion_limit(self):
+        """Check and increment recursion counter. Must be paired with decrement."""
         if self.recursion >= self.RUST_MAX_RECURSION_COUNT:
             raise UnableTov0Demangle("Recursion limit exceeded")
+        self.recursion += 1
 
     def invalid(self):
         self.out += "?"
@@ -580,71 +582,74 @@ class Printer:
 
     def print_path(self, in_value):
         self.check_recursion_limit()
-        p = self.parser_mut()
-        tag = p.next_func()
-        if tag == "C":
-            p.disambiguator()
-            name = p.ident()
-            name.display()
-            self.out += name.disp
-
-        elif tag == "N":
-            ns = p.namespace()
-            self.print_path(in_value)
-            dis = p.disambiguator()
-            name = p.ident()
-            if ns:
-                self.out += "::{"
-                if ns == "C":
-                    self.out += "closure"
-                elif ns == "S":
-                    self.out += "shim"
-                else:
-                    self.out += ns
-                if not name.ascii or (not name.punycode):
-                    self.out += ":"
-                    name.display()
-                    self.out += name.disp
-
-                self.out += "#"
-                self.out += str(dis)
-                self.out += "}"
-            else:
-                if name.ascii or name.punycode:
-                    self.out += "::"
-                    name.display()
-                    self.out += name.disp
-
-        elif tag == "M" or tag == "X" or tag == "Y":
-            if tag != "Y":
+        try:
+            p = self.parser_mut()
+            tag = p.next_func()
+            if tag == "C":
                 p.disambiguator()
-                p.skip_path()
+                name = p.ident()
+                name.display()
+                self.out += name.disp
 
-            self.out += "<"
-            self.print_type()
+            elif tag == "N":
+                ns = p.namespace()
+                self.print_path(in_value)
+                dis = p.disambiguator()
+                name = p.ident()
+                if ns:
+                    self.out += "::{"
+                    if ns == "C":
+                        self.out += "closure"
+                    elif ns == "S":
+                        self.out += "shim"
+                    else:
+                        self.out += ns
+                    if not name.ascii or (not name.punycode):
+                        self.out += ":"
+                        name.display()
+                        self.out += name.disp
 
-            if tag != "M":
-                self.out += " as "
-                self.print_path(False)
+                    self.out += "#"
+                    self.out += str(dis)
+                    self.out += "}"
+                else:
+                    if name.ascii or name.punycode:
+                        self.out += "::"
+                        name.display()
+                        self.out += name.disp
 
-            self.out += ">"
+            elif tag == "M" or tag == "X" or tag == "Y":
+                if tag != "Y":
+                    p.disambiguator()
+                    p.skip_path()
 
-        elif tag == "I":
-            self.print_path(in_value)
-            if in_value:
-                self.out += "::"
+                self.out += "<"
+                self.print_type()
 
-            self.out += "<"
-            self.print_sep_list("print_generic_arg", ", ")
-            self.out += ">"
+                if tag != "M":
+                    self.out += " as "
+                    self.print_path(False)
 
-        elif tag == "B":
-            prin = self.backref_printer()
-            prin.print_type()
-            self.out = prin.out
+                self.out += ">"
 
-        else:
-            self.invalid()
+            elif tag == "I":
+                self.print_path(in_value)
+                if in_value:
+                    self.out += "::"
+
+                self.out += "<"
+                self.print_sep_list("print_generic_arg", ", ")
+                self.out += ">"
+
+            elif tag == "B":
+                prin = self.backref_printer()
+                prin.print_type()
+                self.out = prin.out
+
+            else:
+                self.invalid()
+        finally:
+            self.recursion -= 1
 
     def print_generic_arg(self):
         if self.eat("L"):
@@ -657,74 +662,77 @@ class Printer:
 
     def print_type(self):
         self.check_recursion_limit()
-        p = self.parser_mut()
-        tag = p.next_func()
-        if basic_type(tag):
-            ty = basic_type(tag)
-            self.out += ty
-            return
+        try:
+            p = self.parser_mut()
+            tag = p.next_func()
+            if basic_type(tag):
+                ty = basic_type(tag)
+                self.out += ty
+                return
 
-        if tag == "R" or tag == "Q":
-            self.out += "&"
-            if self.eat("L"):
+            if tag == "R" or tag == "Q":
+                self.out += "&"
+                if self.eat("L"):
+                    lt = p.integer_62()
+                    if lt != 0:
+                        self.print_lifetime_from_index(lt)
+                        self.out += " "
+
+                if tag != "R":
+                    self.out += "mut "
+
+                self.print_type()
+
+            elif tag == "P" or tag == "O":
+                self.out += "*"
+                if tag != "P":
+                    self.out += "mut "
+                else:
+                    self.out += "const "
+                self.print_type()
+
+            elif tag == "A" or tag == "S":
+                self.out += "["
+                self.print_type()
+
+                if tag == "A":
+                    self.out += "; "
+                    self.print_const()
+                self.out += "]"
+
+            elif tag == "T":
+                self.out += "("
+                count = self.print_sep_list("print_type", ", ")
+                if count == 1:
+                    self.out += ","
+                self.out += ")"
+
+            elif tag == "F":
+                self.in_binder(1)
+
+            elif tag == "D":
+                self.out += "dyn "
+                self.in_binder(2)
+
+                if not self.eat("L"):
+                    self.invalid()
+
                 lt = p.integer_62()
                 if lt != 0:
+                    self.out += " + "
                     self.print_lifetime_from_index(lt)
-                    self.out += " "
 
-            if tag != "R":
-                self.out += "mut "
+            elif tag == "B":
+                prin = self.backref_printer()
+                prin.print_type()
+                self.out = prin.out
 
-            self.print_type()
-
-        elif tag == "P" or tag == "O":
-            self.out += "*"
-            if tag != "P":
-                self.out += "mut "
             else:
-                self.out += "const "
-            self.print_type()
-
-        elif tag == "A" or tag == "S":
-            self.out += "["
-            self.print_type()
-
-            if tag == "A":
-                self.out += "; "
-                self.print_const()
-            self.out += "]"
-
-        elif tag == "T":
-            self.out += "("
-            count = self.print_sep_list("print_type", ", ")
-            if count == 1:
-                self.out += ","
-            self.out += ")"
-
-        elif tag == "F":
-            self.in_binder(1)
-
-        elif tag == "D":
-            self.out += "dyn "
-            self.in_binder(2)
-
-            if not self.eat("L"):
-                self.invalid()
-
-            lt = p.integer_62()
-            if lt != 0:
-                self.out += " + "
-                self.print_lifetime_from_index(lt)
-
-        elif tag == "B":
-            prin = self.backref_printer()
-            prin.print_type()
-            self.out = prin.out
-
-        else:
-            p = self.parser_mut()
-            p.next_val -= 1
-            self.print_path(False)
+                p = self.parser_mut()
+                p.next_val -= 1
+                self.print_path(False)
+        finally:
+            self.recursion -= 1
 
     def print_path_maybe_open_generics(self):
         if self.eat("B"):
@@ -760,29 +768,32 @@ class Printer:
 
     def print_const(self):
         self.check_recursion_limit()
-        if self.eat("B"):
-            return self.backref_printer().print_const()
+        try:
+            if self.eat("B"):
+                return self.backref_printer().print_const()
 
-        ty_tag = self.parser_mut().next_func()
-        if ty_tag == "p":
-            self.out += "_"
+            ty_tag = self.parser_mut().next_func()
+            if ty_tag == "p":
+                self.out += "_"
+                return
+
+            type1 = ["h", "t", "m", "y", "o", "j"]
+            type2 = ["a", "s", "l", "x", "n", "i"]
+
+            if ty_tag in type1:
+                self.print_const_uint()
+            elif ty_tag in type2:
+                self.print_const_int()
+            elif ty_tag == "b":
+                self.print_const_bool()
+            elif ty_tag == "c":
+                self.print_const_char()
+            else:
+                self.invalid()
+
             return
-
-        type1 = ["h", "t", "m", "y", "o", "j"]
-        type2 = ["a", "s", "l", "x", "n", "i"]
-
-        if ty_tag in type1:
-            self.print_const_uint()
-        elif ty_tag in type2:
-            self.print_const_int()
-        elif ty_tag == "b":
-            self.print_const_bool()
-        elif ty_tag == "c":
-            self.print_const_char()
-        else:
-            self.invalid()
-
-        return
+        finally:
+            self.recursion -= 1
 
     def print_const_uint(self):
         hex_val = self.parser_mut().hex_nibbles()
