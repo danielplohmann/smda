@@ -83,7 +83,13 @@ class Ident:
         else:
             return f(self.out[: self.out_len])
 
-    def insert(self, i: int, c: str) -> None:
+    def insert(self, i: int, c: str) -> bool:
+        """Insert character at position i, shifting existing chars right.
+
+        Returns True on success, False if buffer overflow would occur.
+        """
+        if self.out_len >= self.small_punycode_len:
+            return False
         j = self.out_len
         self.out_len += 1
 
@@ -91,6 +97,7 @@ class Ident:
             self.out[j] = self.out[j - 1]
             j -= 1
         self.out[i] = c
+        return True
 
     def punycode_decode(self) -> Optional[None]:
         count = 0
@@ -102,7 +109,8 @@ class Ident:
 
         lent = 0
         for c in self.ascii:
-            self.insert(lent, c)
+            if not self.insert(lent, c):
+                return None
             lent += 1
 
         base = 36
@@ -146,7 +154,8 @@ class Ident:
             except (ValueError, OverflowError):
                 return None
 
-            self.insert(i, c)
+            if not self.insert(i, c):
+                return None
             i += 1
 
             try:
