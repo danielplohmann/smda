@@ -59,12 +59,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
         for symbol in symbols:
             if symbol is not None and symbol.is_function and symbol.value != 0:
                 func_name = ""
-                try:
-                    func_name = symbol.demangled_name
-                except AttributeError:
-                    func_name = symbol.name
-                if not func_name:
-                    func_name = symbol.name
+                func_name = getattr(symbol, "demangled_name", None) or symbol.name
                 function_symbols[symbol.value] = func_name
         return function_symbols
 
