@@ -643,7 +643,7 @@ class Printer:
 
             elif tag == "B":
                 prin = self.backref_printer()
-                prin.print_type()
+                prin.print_path(in_value)
                 self.out = prin.out
 
             else:
