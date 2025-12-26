@@ -114,9 +114,12 @@ class RustSymbolProvider(AbstractLabelProvider):
         # (Similar logic to PeSymbolProvider but focusing on Rust)
         for symbol in lief_binary.symbols:
             # Check if it is a function symbol and has a section
-            if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION" and symbol.section:
+            if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION" and symbol.has_section:
                 try:
-                    raw_name = symbol.name
+                    try:
+                        raw_name = symbol.name
+                    except (UnicodeDecodeError, AttributeError):
+                        continue
                     if self._is_rust_symbol(raw_name):
                         demangled = demangle(raw_name)
                         if demangled:
