@@ -97,7 +97,11 @@ class RustSymbolProvider(AbstractLabelProvider):
         # Parse PE exports
         for function in lief_binary.exported_functions:
             try:
-                raw_name = function.name
+                try:
+                    raw_name = function.name
+                except (UnicodeDecodeError, AttributeError):
+                    continue
+
                 if self._is_rust_symbol(raw_name):
                     demangled = demangle(raw_name)
                     if demangled:
