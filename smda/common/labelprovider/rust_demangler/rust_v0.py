@@ -736,7 +736,7 @@ class Printer:
 
     def print_path_maybe_open_generics(self):
         if self.eat("B"):
-            self.backref_printer().print_path_maybe_open_generics()
+            return self.backref_printer().print_path_maybe_open_generics()
 
         elif self.eat("I"):
             self.print_path(False)
