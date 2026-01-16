@@ -131,7 +131,7 @@ class Ida74Interface(BackendInterface):
         segment = ida_segment.get_first_seg()
         while segment:
             result += ida_bytes.get_bytes(segment.start_ea, segment.end_ea - segment.start_ea)
-            segment = ida_segment.get_next_seg(segment.end_ea)
+            segment = ida_segment.get_next_seg(segment.end_ea - 1)
         return result
 
     def getApiMap(self):
@@ -359,7 +359,7 @@ class Ida85Interface(BackendInterface):
         segment = ida_segment.get_first_seg()
         while segment:
             result += ida_bytes.get_bytes(segment.start_ea, segment.end_ea - segment.start_ea)
-            segment = ida_segment.get_next_seg(segment.end_ea)
+            segment = ida_segment.get_next_seg(segment.end_ea - 1)
         return result
 
     def getApiMap(self):
