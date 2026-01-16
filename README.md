@@ -101,6 +101,7 @@ make test
 ```
 
 ## Version History
+ * 2025-01-16: v2.5.1 - Reducing calls to lief by caching the object. (THX: @r0ny123)
  * 2025-01-16: v2.5.0 - Introduced Rust symbol extraction and demangling. (THX: @r0ny123)
  * 2025-01-16: v2.4.7 - Improved reliability of exception handler candidate extraction. (THX: @r0ny123)
  * 2025-01-07: v2.4.6 - Fixed version check for IDA compatibility decision
