@@ -32,12 +32,14 @@ class IdaInterface:
 
     def __init__(self):
         if not IdaInterface.instance:
-            if idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 850:
+            if idaapi.IDA_SDK_VERSION < 740:
+                IdaInterface.instance = Ida73Interface()
+            elif idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 850:
                 IdaInterface.instance = Ida74Interface()
-            if idaapi.IDA_SDK_VERSION >= 850:
+            elif idaapi.IDA_SDK_VERSION >= 850:
                 IdaInterface.instance = Ida85Interface()
             else:
-                IdaInterface.instance = Ida73Interface()
+                raise ValueError("Unsupported IDA version")
 
     def __getattr__(self, name):
         return getattr(self.instance, name)
