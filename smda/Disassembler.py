@@ -144,6 +144,9 @@ class Disassembler:
         binary_info.code_areas = code_areas
         binary_info.architecture = architecture
         binary_info.oep = oep
+        binary_info.sha256 = hashlib.sha256(binary_info.binary).hexdigest()
+        binary_info.sha1 = hashlib.sha1(binary_info.binary).hexdigest()
+        binary_info.md5 = hashlib.md5(binary_info.binary).hexdigest()
         self.initDisassembler(binary_info.architecture)
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
