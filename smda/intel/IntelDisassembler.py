@@ -414,7 +414,16 @@ class IntelDisassembler:
                                 if (self.disassembly.binary_info.bitness == 64 and reg == "rax") or (
                                     self.disassembly.binary_info.bitness == 32 and reg == "eax"
                                 ):
-                                    syscall_number_str = int(prev_operands[1].strip(), 16)
+                                    try:
+                                        syscall_number_str = int(prev_operands[1].strip(), 16)
+                                    except ValueError:
+                                        # TODO we should do backtracking on the basic block to resolve the value properly
+                                        LOGGER.debug(
+                                            "failed to extract syscall number from: %s at 0x%x",
+                                            prev_operands,
+                                            i_address,
+                                        )
+                                        syscall_number_str = None
                                     if syscall_number_str == 60:
                                         self._analyzeEndInstruction(state)
                                         LOGGER.debug(

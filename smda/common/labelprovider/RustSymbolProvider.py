@@ -55,6 +55,9 @@ class RustSymbolProvider(AbstractLabelProvider):
         if not lief_binary:
             return
 
+        if not self.is_rust_binary(binary_info):
+            return
+
         # Dispatch to appropriate handler based on binary type
         if isinstance(lief_binary, lief.ELF.Binary):
             self._update_elf(lief_binary)
@@ -110,11 +113,21 @@ class RustSymbolProvider(AbstractLabelProvider):
             except _DEMANGLE_ERRORS as exc:
                 LOGGER.debug("Failed to demangle Rust symbol %s: %s", function.name, exc)
 
+        code_base_address = None
+        for section in lief_binary.sections:
+            if section.characteristics & 0x20000000:
+                code_base_address = lief_binary.imagebase + section.virtual_address
+                break
+        if code_base_address is None:
+            return
+        # working example: 3969e1a88a063155a6f61b0ca1ac33114c1a39151f3c7dd019084abd30553eab
         # Parse PE symbols (COFF) if available and LIEF extracted them
         # (Similar logic to PeSymbolProvider but focusing on Rust)
         for symbol in lief_binary.symbols:
             # Check if it is a function symbol and has a section
-            if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION" and symbol.has_section:
+            if (
+                hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION"
+            ):  # and symbol.has_section:
                 try:
                     try:
                         raw_name = symbol.name
@@ -124,13 +137,14 @@ class RustSymbolProvider(AbstractLabelProvider):
                         demangled = demangle(raw_name)
                         if demangled:
                             demangled = remove_bad_spaces(demangled)
-                            function_offset = lief_binary.imagebase + symbol.section.virtual_address + symbol.value
+                            function_offset = code_base_address + symbol.value
                             if function_offset not in self._func_symbols:
                                 self._func_symbols[function_offset] = demangled
                 except _DEMANGLE_ERRORS as exc:
                     LOGGER.debug("Failed to demangle Rust symbol %s: %s", symbol.name, exc)
 
     def _parse_lief_symbols(self, symbols):
+        # working example: 3298d203c2acb68c474e5fdad8379181890b4403d6491c523c13730129be3f75
         function_symbols = {}
         for symbol in symbols:
             if symbol is not None and symbol.is_function and symbol.value != 0:
