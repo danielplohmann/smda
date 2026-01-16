@@ -12,7 +12,15 @@ LOGGER = logging.getLogger(__name__)
 class BinaryInfo:
     """simple DTO to contain most information related to the binary/buffer to be analyzed"""
 
-    abi = ""
+    def __init__(self, binary):
+        self.binary = binary
+        self.raw_data = binary
+        self.binary_size = len(binary)
+        self.sha256 = hashlib.sha256(binary).hexdigest()
+        self.sha1 = hashlib.sha1(binary).hexdigest()
+        self.md5 = hashlib.md5(binary).hexdigest()
+        self._lief_binary = None
+        self.abi = ""
     architecture = ""
     base_addr = 0
     binary = b""
