@@ -76,16 +76,19 @@ class BinaryInfo:
         return self.symbols
 
     def getSections(self):
-        pefile = lief.parse(self.raw_data)
-        # TODO 20201030 might want to add ELF sections as well
-        if not isinstance(pefile, lief.PE.Binary):
-            return
-        if pefile and pefile.sections:
-            for section in pefile.sections:
+        parsed_binary = lief.parse(self.raw_data)
+        if isinstance(parsed_binary, lief.PE.Binary) and parsed_binary.sections:
+            for section in parsed_binary.sections:
                 section_start = self.base_addr + section.virtual_address
                 section_size = section.virtual_size
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
+                section_end = section_start + section_size
+                yield section.name, section_start, section_end
+        elif isinstance(parsed_binary, lief.ELF.Binary) and parsed_binary.sections:
+            for section in parsed_binary.sections:
+                section_start = section.virtual_address
+                section_size = section.size
                 section_end = section_start + section_size
                 yield section.name, section_start, section_end
 
