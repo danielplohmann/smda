@@ -76,6 +76,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.file_path = ""
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
+        binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
         controlled_disassembly = disasm._disassemble(binary_info)
@@ -83,6 +84,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
         assert bashlite_unmapped_disassembly.num_functions == 177
         assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174
+        assert binary_info.abi == "SYSTEMV"
 
     def testDotnetParsingWithNjRAT(self):
         disasm = Disassembler(config, backend="cil")

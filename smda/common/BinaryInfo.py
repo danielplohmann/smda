@@ -9,6 +9,7 @@ from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 class BinaryInfo:
     """simple DTO to contain most information related to the binary/buffer to be analyzed"""
 
+    abi = ""
     architecture = ""
     base_addr = 0
     binary = b""

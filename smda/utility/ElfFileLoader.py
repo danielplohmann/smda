@@ -199,9 +199,19 @@ class ElfFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
+    def getAbi(binary):
+        abi = ""
+        try:
+            elffile = lief.parse(binary)
+            if elffile:
+                abi = elffile.header.identity_os_abi.name
+        except Exception:
+            pass
+        return abi
+
+    @staticmethod
     def getArchitecture(binary):
         architecture = "intel"
-        # TODO 20250205 determine ABI based on this: https://lief.re/doc/latest/formats/elf/python.html#header
         return architecture
 
     @staticmethod

@@ -80,6 +80,7 @@ class Disassembler:
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.architecture = loader.getArchitecture()
+        binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         return binary_info
 
