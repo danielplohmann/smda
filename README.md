@@ -101,6 +101,7 @@ make test
 ```
 
 ## Version History
+ * 2025-01-16: v2.4.7 - Improved reliability of exception handler candidate extraction. (THX: @r0ny123)
  * 2025-01-07: v2.4.6 - Fixed version check for IDA compatibility decision
  * 2025-12-17: v2.4.5 - Improved security and reliability in various spots. (THX: @r0ny123)
  * 2025-12-15: v2.4.4 - Extended set of default prologues for additional 64bit GCC-style byte combinations. Added exit syscall check to improve function end recognition. (THX: @N0fix)
