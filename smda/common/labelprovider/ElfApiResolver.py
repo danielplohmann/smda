@@ -18,8 +18,7 @@ class ElfApiResolver(AbstractLabelProvider):
             return
 
         else:
-            lief_binary = lief.parse(binary_info.raw_data)
-
+            lief_binary = binary_info.getLiefBinary()
             if not isinstance(lief_binary, lief.ELF.Binary):
                 return
 

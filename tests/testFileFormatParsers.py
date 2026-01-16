@@ -85,6 +85,10 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert bashlite_unmapped_disassembly.num_functions == 177
         assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174
         assert binary_info.abi == "SYSTEMV"
+        # test section extraction
+        sections = {name: (start, end) for name, start, end in binary_info.getSections()}
+        assert len(sections) > 0
+        assert ".text" in sections
 
     def testDotnetParsingWithNjRAT(self):
         disasm = Disassembler(config, backend="cil")

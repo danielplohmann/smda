@@ -28,17 +28,11 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def update(self, binary_info):
         # works both for PE and ELF
         self._func_symbols = {}
-        data = b""
-        if binary_info.file_path:
-            with open(binary_info.file_path, "rb") as fin:
-                data = fin.read()
-        elif binary_info.raw_data:
-            data = binary_info.raw_data
-        else:
+
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.ELF.Binary):
             return
-        if data[:4] != b"\x7fELF" or lief is None:
-            return
-        lief_binary = lief.parse(data)
+
         self._parseOep(lief_binary)
         # TODO split resolution into API/dynamic part and local symbols
         self._func_symbols.update(self.parseExports(lief_binary))

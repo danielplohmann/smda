@@ -1,9 +1,12 @@
 import hashlib
+import logging
 
 import lief
 
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BinaryInfo:
@@ -38,10 +41,29 @@ class BinaryInfo:
         self.sha256 = hashlib.sha256(binary).hexdigest()
         self.sha1 = hashlib.sha1(binary).hexdigest()
         self.md5 = hashlib.md5(binary).hexdigest()
+        self._lief_binary = None
+
+    def getBinaryData(self):
+        """Safely retrieves binary data from either raw_data or a file path."""
+        data = self.raw_data
+        if not data and self.file_path:
+            try:
+                with open(self.file_path, "rb") as fin:
+                    data = fin.read()
+            except OSError as e:
+                LOGGER.debug("Failed to read binary from path %s: %s", self.file_path, e)
+                return None
+        return data
+
+    def getLiefBinary(self):
+        binary_data = self.getBinaryData()
+        if self._lief_binary is None and binary_data:
+            self._lief_binary = lief.parse(binary_data)
+        return self._lief_binary
 
     def getOep(self):
         if self.oep is None:
-            lief_result = lief.parse(self.raw_data)
+            lief_result = self.getLiefBinary()
             if isinstance(lief_result, lief.PE.Binary):
                 self.oep = lief_result.optional_header.addressof_entrypoint
             elif isinstance(lief_result, lief.ELF.Binary):
@@ -50,7 +72,7 @@ class BinaryInfo:
 
     def getExportedFunctions(self):
         if self.exported_functions is None:
-            lief_result = lief.parse(self.raw_data)
+            lief_result = self.getLiefBinary()
             if isinstance(lief_result, lief.PE.Binary):
                 self.exported_functions = PeSymbolProvider(None).parseExports(lief_result)
             elif isinstance(lief_result, lief.ELF.Binary):
@@ -59,7 +81,7 @@ class BinaryInfo:
 
     def getImportedFunctions(self):
         if self.imported_functions is None:
-            lief_result = lief.parse(self.raw_data)
+            lief_result = self.getLiefBinary()
             if isinstance(lief_result, lief.PE.Binary):
                 PeSymbolProvider(None).parseSymbols(lief_result)
                 self.imported_functions = PeSymbolProvider(None).parseImports(lief_result)
@@ -69,7 +91,7 @@ class BinaryInfo:
 
     def getSymbols(self):
         if self.symbols is None:
-            lief_result = lief.parse(self.raw_data)
+            lief_result = self.getLiefBinary()
             if isinstance(lief_result, lief.PE.Binary):
                 self.symbols = PeSymbolProvider(None).parseSymbols(lief_result)
             elif isinstance(lief_result, lief.ELF.Binary):
@@ -77,18 +99,32 @@ class BinaryInfo:
         return self.symbols
 
     def getSections(self):
-        pefile = lief.parse(self.raw_data)
-        # TODO 20201030 might want to add ELF sections as well
-        if not isinstance(pefile, lief.PE.Binary):
+        """
+        Generator that yields (name, start_addr, end_addr) for each section.
+        Supports PE and ELF binaries.
+        """
+        parsed_binary = self.getLiefBinary()
+        if not parsed_binary:
             return
-        if pefile and pefile.sections:
-            for section in pefile.sections:
+
+        is_pe = isinstance(parsed_binary, lief.PE.Binary)
+        is_elf = isinstance(parsed_binary, lief.ELF.Binary)
+
+        if not (is_pe or is_elf) or not parsed_binary.sections:
+            return
+
+        for section in parsed_binary.sections:
+            if is_pe:
                 section_start = self.base_addr + section.virtual_address
                 section_size = section.virtual_size
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
-                section_end = section_start + section_size
-                yield section.name, section_start, section_end
+            elif is_elf:
+                section_start = section.virtual_address
+                section_size = section.size
+
+            section_end = section_start + section_size
+            yield section.name, section_start, section_end
 
     def isInCodeAreas(self, address):
         is_inside = False
@@ -102,7 +138,7 @@ class BinaryInfo:
 
     def getHeaderBytes(self):
         if self.raw_data:
-            lief_result = lief.parse(self.raw_data)
+            lief_result = self.getLiefBinary()
             if isinstance(lief_result, lief.PE.Binary):
                 return self.raw_data[:0x400]
             elif isinstance(lief_result, lief.ELF.Binary):
