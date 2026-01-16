@@ -2,6 +2,8 @@
 
 import logging
 
+import lief
+
 from .AbstractLabelProvider import AbstractLabelProvider
 from .rust_demangler import demangle
 from .rust_demangler.rust import TypeNotFoundError
@@ -36,26 +38,12 @@ class RustSymbolProvider(AbstractLabelProvider):
         self._func_symbols = {}
 
         try:
-            import lief
-
-            lief.logging.disable()
-        except ImportError:
-            return
-
-        data = self._get_binary_data(binary_info)
-        if not data:
-            return
-
-        try:
-            lief_binary = lief.parse(data)
+            lief_binary = binary_info.getLiefBinary()
         except Exception as exc:
             LOGGER.debug("Failed to parse binary with LIEF: %s", type(exc).__name__)
             return
 
-        if not lief_binary:
-            return
-
-        if not self.is_rust_binary(binary_info):
+        if not lief_binary or not self.is_rust_binary(binary_info):
             return
 
         # Dispatch to appropriate handler based on binary type

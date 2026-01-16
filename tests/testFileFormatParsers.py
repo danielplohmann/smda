@@ -83,6 +83,10 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
         assert bashlite_unmapped_disassembly.num_functions == 177
         assert len([f.function_name for f in bashlite_unmapped_disassembly.getFunctions() if f.function_name]) == 174
+        # test section extraction
+        sections = {name: (start, end) for name, start, end in binary_info.getSections()}
+        assert len(sections) > 0
+        assert ".text" in sections
 
     def testDotnetParsingWithNjRAT(self):
         disasm = Disassembler(config, backend="cil")

@@ -31,18 +31,14 @@ class PeSymbolProvider(AbstractLabelProvider):
     def update(self, binary_info):
         # works both for PE and ELF
         self._func_symbols = {}
-        if not binary_info.file_path:
+
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.PE.Binary):
             return
-        data = ""
-        with open(binary_info.file_path, "rb") as fin:
-            data = fin.read(16)
-        if data[:2] != b"MZ" or lief is None:
-            return
-        lief_binary = lief.parse(binary_info.file_path)
-        if lief_binary is not None:
-            self._parseOep(lief_binary)
-            self._func_symbols.update(self.parseExports(lief_binary))
-            self._func_symbols.update(self.parseSymbols(lief_binary))
+
+        self._parseOep(lief_binary)
+        self._func_symbols.update(self.parseExports(lief_binary))
+        self._func_symbols.update(self.parseSymbols(lief_binary))
 
     def parseExports(self, lief_binary):
         function_symbols = {}
