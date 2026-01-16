@@ -93,7 +93,7 @@ class BinaryInfo:
         is_pe = isinstance(parsed_binary, lief.PE.Binary)
         is_elf = isinstance(parsed_binary, lief.ELF.Binary)
 
-        if (not is_pe and not is_elf) or not parsed_binary.sections:
+        if not (is_pe or is_elf) or not parsed_binary.sections:
             return
 
         for section in parsed_binary.sections:
@@ -102,7 +102,7 @@ class BinaryInfo:
                 section_size = section.virtual_size
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
-            else:
+            elif is_elf:
                 section_start = section.virtual_address
                 section_size = section.size
 
