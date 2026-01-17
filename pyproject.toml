@@ -2,6 +2,11 @@
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.pytest.ini_options]
+python_files = ["test*.py"]
+testpaths = ["tests"]
+addopts = ["-p", "no:cacheprovider"]
+
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
 exclude = [

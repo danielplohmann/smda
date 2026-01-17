@@ -19,6 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 class SmdaReport:
     architecture = None
+    abi = None
     base_addr = None
     binary_size = None
     binweight = None
@@ -58,6 +59,7 @@ class SmdaReport:
     def __init__(self, disassembly=None, config=None, buffer=None):
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
+            self.abi = disassembly.binary_info.abi
             self.base_addr = disassembly.binary_info.base_addr
             self.binary_size = disassembly.binary_info.binary_size
             self.binweight = 0
@@ -223,6 +225,7 @@ class SmdaReport:
     def fromDict(cls, report_dict) -> Optional["SmdaReport"]:
         smda_report = cls(None)
         smda_report.architecture = report_dict["architecture"]
+        smda_report.abi = report_dict.get("abi", "")
         smda_report.base_addr = report_dict["base_addr"]
         smda_report.binary_size = report_dict["binary_size"]
         smda_report.bitness = report_dict["bitness"]
@@ -261,6 +264,7 @@ class SmdaReport:
         smda_report.timestamp = datetime.datetime.strptime(report_dict["timestamp"], "%Y-%m-%dT%H-%M-%S")
         binary_info = BinaryInfo(b"")
         binary_info.architecture = smda_report.architecture
+        binary_info.abi = smda_report.abi
         binary_info.base_addr = smda_report.base_addr
         binary_info.binary_size = smda_report.binary_size
         binary_info.oep = smda_report.oep
@@ -287,6 +291,7 @@ class SmdaReport:
                     transformed_code_sections.append(("", 0, 0))
         return {
             "architecture": self.architecture,
+            "abi": self.abi,
             "base_addr": self.base_addr,
             "binary_size": self.binary_size,
             "bitness": self.bitness,
