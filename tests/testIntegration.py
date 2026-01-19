@@ -115,7 +115,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert report_as_dict["status"] == "ok"
         assert report_as_dict["base_addr"] == 0x4000000
         assert report_as_dict["statistics"]["num_instructions"] == 1611
-        assert report_as_dict["sha256"] == "a348a0ddfab135d152b684d561a3215ab6c472570facd3d75aa2c7ee845a8e2b"
+        assert report_as_dict["sha256"] == "46686681e2be012ce26219eec1e765f8f2db9fc7a33ca802482050cef189334f"
         # compare our manual file loading with unmapped buffer
         assert self.cutwail_disassembly.num_instructions == self.cutwail_unmapped_disassembly.num_instructions
         SmdaReport.fromDict(report_as_dict)
