@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import hashlib
 import logging
 import os
 import unittest
@@ -56,9 +55,6 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.bitness = loader.getBitness()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
-        binary_info.sha256 = hashlib.sha256(binary_info.binary).hexdigest()
-        binary_info.sha1 = hashlib.sha1(binary_info.binary).hexdigest()
-        binary_info.md5 = hashlib.md5(binary_info.binary).hexdigest()
         cls.cutwail_binary_info = binary_info
         cls.cutwail_disassembly = disasm._disassemble(binary_info)
         cls.cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cls.cutwail_binary)

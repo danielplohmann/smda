@@ -205,8 +205,8 @@ class ElfFileLoader:
             elffile = lief.parse(binary)
             if elffile:
                 abi = elffile.header.identity_os_abi.name
-        except Exception as e:
-            LOGGER.warning("Failed to determine ELF ABI: %s", e)
+        except lief.bad_file as exc:
+            LOGGER.warning("Failed to determine ELF ABI: %s", exc)
         return abi
 
     @staticmethod
