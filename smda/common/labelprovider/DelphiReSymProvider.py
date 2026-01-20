@@ -463,7 +463,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
                         if ptr2_file_offset < 0 or ptr2_file_offset >= len(self._binary):
                             return None
 
-                namespace_offset = rtti_offset + 1 + len(object_name) + 1 + 2 * self._settings.ptr_size + 2
+                namespace_offset = ptr2_offset + self._settings.ptr_size + 2
                 namespace = self._read_pascal_string(namespace_offset)
                 if namespace:
                     # Use RecursiveDescentParser for template-aware FQN handling
