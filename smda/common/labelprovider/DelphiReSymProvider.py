@@ -662,7 +662,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
                         parser.parse_fqn()
                     except (ValueError, IndexError) as e:
                         LOGGER.debug(f"Malformed namespace '{namespace}' encountered: {e}. Using as-is.")
-                        pass  # Invalid namespace format, use as-is
+                        # Invalid namespace format, use as-is
                     full_name = f"{namespace}.{method.function_name}"
                 else:
                     full_name = method.function_name
