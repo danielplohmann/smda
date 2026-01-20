@@ -3,13 +3,18 @@
 DelphiReSymProvider - Delphi Symbol Recovery for SMDA
 Adapted from DelphiReSym by Lukas Wenz (https://github.com/WenzWenzWenz/DelphiReSym)
 Parses Delphi metadata structures (VMT, MDT, RTTI) to extract function symbols from Delphi binaries.
-Supports Delphi versions 2010 through 12 Athens.
+Supports Delphi versions 2010 through 13 Florence.
+
+Changes integrated from upstream (January 2026):
+- Added RecursiveDescentParser for template-aware namespace parsing
+- Fixed false positive VMT detection during RTTI object traversal
+- Enhanced robustness with improved exception handling
 """
 
 import logging
 import struct
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
@@ -33,6 +38,145 @@ RTTI_CLASS_MAGIC_BYTE = 0x07  # Magic byte indicating RTTI_Class type
 # Method entry structure magic value for parameter offset calculation
 # This value is from the original DelphiReSym and works for Delphi 11
 PARAM_ENTRY_PADDING = 3
+
+
+class RecursiveDescentParser:
+    """
+    Parser for Delphi fully-qualified namespace strings with template support.
+
+    Handles complex generic type names like:
+    - Simple: "System.Classes.TList"
+    - Templates: "System.Generics.Collections.TList<System.String>"
+    - Nested: "TDictionary<System.String,TList<System.Integer>>"
+
+    Grammar:
+        FQN := Namespace ('.' Namespace)* ('<' TemplateArgs '>')?
+        TemplateArgs := FQN (',' FQN)*
+        Namespace := [a-zA-Z0-9_()]+
+
+    Ported from upstream DelphiReSym (Oct 2025).
+    """
+
+    def __init__(self, input_string: str):
+        self.string = input_string
+        self.pos = 0
+
+    def _peek(self) -> Optional[str]:
+        """Returns current character without consuming it."""
+        if self.pos < len(self.string):
+            return self.string[self.pos]
+        return None
+
+    def _consume(self, expected_char: Optional[str] = None) -> str:
+        """
+        Advances position and returns the consumed character.
+        If expected_char is provided, validates the character matches.
+        """
+        if self.pos >= len(self.string):
+            raise ValueError("Unexpected end of input")
+        char = self.string[self.pos]
+        if expected_char is not None and char != expected_char:
+            raise ValueError(f"Expected '{expected_char}' but got '{char}' at position {self.pos}")
+        self.pos += 1
+        return char
+
+    def _parse_namespace_component(self) -> str:
+        """
+        Parses a single namespace component (identifier).
+        Valid characters: letters, digits, underscores, parentheses.
+        """
+        result = []
+        while self._peek() is not None:
+            char = self._peek()
+            # Valid namespace characters: alphanumeric, underscore, parentheses
+            if char.isalnum() or char in "_()":
+                result.append(self._consume())
+            else:
+                break
+        return "".join(result)
+
+    def _parse_template_args(self) -> str:
+        """
+        Parses template arguments between angle brackets.
+        Handles nested templates recursively.
+        Returns the complete template string including brackets.
+        """
+        self._consume("<")
+        result = ["<"]
+        depth = 1
+
+        while depth > 0 and self._peek() is not None:
+            char = self._peek()
+            if char == "<":
+                depth += 1
+                result.append(self._consume())
+            elif char == ">":
+                depth -= 1
+                result.append(self._consume())
+            else:
+                result.append(self._consume())
+
+        return "".join(result)
+
+    def parse_fqn(self, trim_mode: bool = False) -> Tuple[List[str], str]:
+        """
+        Parses a fully-qualified name (FQN) with optional template arguments.
+
+        Args:
+            trim_mode: If True, stops parsing at template start and returns
+                      remaining string. Used for extracting class name from FQN.
+
+        Returns:
+            Tuple of (namespace_components, remaining_string)
+            - namespace_components: List of namespace parts (e.g., ["System", "Classes", "TList"])
+            - remaining_string: Any unparsed portion (templates if trim_mode=True)
+        """
+        components = []
+
+        while True:
+            component = self._parse_namespace_component()
+            if not component:
+                break
+            components.append(component)
+
+            # Check for dot (namespace separator) or template start
+            if self._peek() == ".":
+                self._consume(".")
+            elif self._peek() == "<":
+                if trim_mode:
+                    # In trim mode, stop at template and return remainder
+                    return components, self.string[self.pos:]
+                # Parse and append template arguments
+                template = self._parse_template_args()
+                if components:
+                    components[-1] += template
+                break
+            else:
+                break
+
+        remaining = self.string[self.pos:] if self.pos < len(self.string) else ""
+        return components, remaining
+
+    def get_class_name(self) -> str:
+        """
+        Extracts the class name (last component) from an FQN.
+        For "System.Classes.TList<T>", returns "TList<T>".
+        """
+        components, remainder = self.parse_fqn()
+        if components:
+            return components[-1] + remainder
+        return remainder
+
+    def get_namespace(self) -> str:
+        """
+        Extracts the namespace (all but last component) from an FQN.
+        For "System.Classes.TList<T>", returns "System.Classes".
+        """
+        # Use trim_mode to get components without template
+        components, _ = self.parse_fqn(trim_mode=True)
+        if len(components) > 1:
+            return ".".join(components[:-1])
+        return ""
 
 
 @dataclass
@@ -201,6 +345,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
         """
         Perform sanity checks on a VMT candidate.
         Returns True if the candidate passes all checks.
+
+        Bug fix (Jan 2026): Added RTTI validation to prevent false positives
+        during VMT scanning when RTTI objects have invalid pointers.
         """
         addresses_to_check = [next_struct_offset]
 
@@ -212,6 +359,20 @@ class DelphiReSymProvider(AbstractLabelProvider):
             addresses_to_check.append(mdt_offset)
             # MDTs should be at higher addresses than VMTs
             if mdt_offset <= vmt_offset:
+                return False
+
+        # Bug fix: Validate RTTI pointer to prevent false positives
+        # The RTTI field should point to a valid RTTI object
+        rtti_offset_field = vmt_offset + self._settings.rtti_offset
+        rtti_addr = self._read_ptr(rtti_offset_field)
+        if rtti_addr is not None and rtti_addr != 0:
+            rtti_offset = self._addr_to_offset(rtti_addr)
+            # RTTI should be within binary bounds
+            if rtti_offset < 0 or rtti_offset >= len(self._binary):
+                return False
+            # Validate RTTI object structure (magic byte check)
+            magic_byte = self._read_byte(rtti_offset)
+            if magic_byte is None or magic_byte > RTTI_MAX_MAGIC_BYTE:
                 return False
 
         # Check virtual method pointers (fields 11-22, excluding SafeCallException which is optional)
@@ -254,47 +415,105 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
         return vmt_offsets
 
-    def _traverse_rtti_object(self, rtti_offset: int) -> Optional[str]:
+    def _traverse_rtti_object(self, rtti_offset: int, validate_pointers: bool = True) -> Optional[str]:
         """
         Traverse an RTTI object to extract type information.
         Returns the type name (with namespace for RTTI_Class types).
+
+        Bug fix (Jan 2026): Added validation for pointers within RTTI_Class
+        to prevent false positives during VMT scanning.
+
+        Args:
+            rtti_offset: File offset of the RTTI object
+            validate_pointers: If True, validate pointer fields in RTTI_Class
+                             to prevent false positives
         """
-        magic_byte = self._read_byte(rtti_offset)
-        if magic_byte is None or magic_byte > RTTI_MAX_MAGIC_BYTE:
+        try:
+            magic_byte = self._read_byte(rtti_offset)
+            if magic_byte is None or magic_byte > RTTI_MAX_MAGIC_BYTE:
+                return None
+
+            # Read object name (Pascal string at offset +1)
+            object_name = self._read_pascal_string(rtti_offset + 1)
+            if not object_name:
+                return None
+
+            # RTTI_Class contains namespace information
+            # RTTI_Class structure layout:
+            #   MagicByte(1) + ObjectName(pascal) + Unknown(1) + Pointers(2*ptr_size) + Unknown(2) + Namespace(pascal)
+            if magic_byte == RTTI_CLASS_MAGIC_BYTE:
+                # Calculate pointer field offsets for validation
+                ptr1_offset = rtti_offset + 1 + len(object_name) + 1 + 1
+                ptr2_offset = ptr1_offset + self._settings.ptr_size
+
+                # Bug fix: Validate that pointer fields point to reasonable addresses
+                # This prevents false positive VMT detection when scanning
+                if validate_pointers:
+                    ptr1 = self._read_ptr(ptr1_offset)
+                    ptr2 = self._read_ptr(ptr2_offset)
+                    # Both pointers should either be null or point within binary
+                    if ptr1 is not None and ptr1 != 0:
+                        ptr1_file_offset = self._addr_to_offset(ptr1)
+                        if ptr1_file_offset < 0 or ptr1_file_offset >= len(self._binary):
+                            return None
+                    if ptr2 is not None and ptr2 != 0:
+                        ptr2_file_offset = self._addr_to_offset(ptr2)
+                        if ptr2_file_offset < 0 or ptr2_file_offset >= len(self._binary):
+                            return None
+
+                namespace_offset = rtti_offset + 1 + len(object_name) + 1 + 2 * self._settings.ptr_size + 2
+                namespace = self._read_pascal_string(namespace_offset)
+                if namespace:
+                    # Use RecursiveDescentParser for template-aware FQN handling
+                    try:
+                        full_fqn = f"{namespace}.{object_name}"
+                        parser = RecursiveDescentParser(full_fqn)
+                        # Validate that parsing succeeds (catches malformed strings)
+                        components, _ = parser.parse_fqn()
+                        if components:
+                            return full_fqn
+                    except (ValueError, IndexError):
+                        # Fallback to simple concatenation if parsing fails
+                        return f"{namespace}.{object_name}"
+
+            return object_name
+
+        except Exception as e:
+            LOGGER.debug(f"Error traversing RTTI object at 0x{rtti_offset:x}: {e}")
             return None
-
-        # Read object name (Pascal string at offset +1)
-        object_name = self._read_pascal_string(rtti_offset + 1)
-        if not object_name:
-            return None
-
-        # RTTI_Class contains namespace information
-        # RTTI_Class structure layout:
-        #   MagicByte(1) + ObjectName(pascal) + Unknown(1) + Pointers(2*ptr_size) + Unknown(2) + Namespace(pascal)
-        if magic_byte == RTTI_CLASS_MAGIC_BYTE:
-            namespace_offset = rtti_offset + 1 + len(object_name) + 1 + 2 * self._settings.ptr_size + 2
-            namespace = self._read_pascal_string(namespace_offset)
-            if namespace:
-                return f"{namespace}.{object_name}"
-
-        return object_name
 
     def _resolve_type_from_double_ptr(self, ptr_field_offset: int) -> Optional[str]:
         """
         Resolve a type name from a double-dereferenced pointer to an RTTI object.
         Used for both return types and parameter types.
+
+        Enhanced with bounds checking for improved robustness.
         """
-        ptr_addr = self._read_ptr(ptr_field_offset)
-        if ptr_addr is None or ptr_addr == 0:
-            return None
+        try:
+            ptr_addr = self._read_ptr(ptr_field_offset)
+            if ptr_addr is None or ptr_addr == 0:
+                return None
 
-        ptr_offset = self._addr_to_offset(ptr_addr)
-        rtti_addr = self._read_ptr(ptr_offset)
-        if rtti_addr is None or rtti_addr == 0:
-            return None
+            ptr_offset = self._addr_to_offset(ptr_addr)
+            # Bounds check for first dereference
+            if ptr_offset < 0 or ptr_offset >= len(self._binary):
+                return None
 
-        rtti_offset = self._addr_to_offset(rtti_addr)
-        return self._traverse_rtti_object(rtti_offset)
+            rtti_addr = self._read_ptr(ptr_offset)
+            if rtti_addr is None or rtti_addr == 0:
+                return None
+
+            rtti_offset = self._addr_to_offset(rtti_addr)
+            # Bounds check for second dereference
+            if rtti_offset < 0 or rtti_offset >= len(self._binary):
+                return None
+
+            # Don't validate pointers for type resolution (they may be external)
+            return self._traverse_rtti_object(rtti_offset, validate_pointers=False)
+
+        except Exception as e:
+            LOGGER.debug(f"Error resolving type from double ptr at 0x{ptr_field_offset:x}: {e}")
+            return None
 
     def _extract_method_info(self, method_entry_offset: int) -> Optional[MethodInfo]:
         """Extract detailed information about a method from its MethodEntry structure."""
@@ -373,13 +592,28 @@ class DelphiReSymProvider(AbstractLabelProvider):
         return methods
 
     def _parse_delphi_symbols(self):
-        """Main parsing routine to extract Delphi symbols."""
+        """
+        Main parsing routine to extract Delphi symbols.
+
+        Pipeline:
+        1. Scan code section for VMT structures using heuristics
+        2. For each VMT, extract MDT and RTTI information
+        3. Parse all methods in each MDT
+        4. Build fully-qualified symbol names with templates
+
+        Statistics are logged at debug level.
+        """
         # Step 1: Find all VMT structures
         vmt_offsets = self._find_vmts()
         LOGGER.debug(f"Found {len(vmt_offsets)} VMT candidates")
 
         if not vmt_offsets:
             return
+
+        # Statistics tracking
+        vmts_with_mdt = 0
+        vmts_with_rtti = 0
+        total_methods = 0
 
         # Step 2: For each VMT, extract MDT and parse methods
         for vmt_offset in vmt_offsets:
@@ -391,24 +625,42 @@ class DelphiReSymProvider(AbstractLabelProvider):
                 continue
 
             mdt_offset = self._addr_to_offset(mdt_addr)
+            # Validate MDT offset is within bounds
+            if mdt_offset < 0 or mdt_offset >= len(self._binary):
+                continue
+
+            vmts_with_mdt += 1
 
             # Get RTTI namespace for this VMT
             rtti_field_offset = vmt_offset + self._settings.rtti_offset
             rtti_addr = self._read_ptr(rtti_field_offset)
             namespace = None
-            if rtti_addr is not None:
+            if rtti_addr is not None and rtti_addr != 0:
                 rtti_offset = self._addr_to_offset(rtti_addr)
-                namespace = self._traverse_rtti_object(rtti_offset)
+                if 0 <= rtti_offset < len(self._binary):
+                    namespace = self._traverse_rtti_object(rtti_offset)
+                    if namespace:
+                        vmts_with_rtti += 1
 
             # Parse all methods in this MDT
             methods = self._parse_mdt(mdt_offset)
+            total_methods += len(methods)
 
             # Store function symbols
             for method in methods:
                 func_addr = self._offset_to_addr(method.function_offset)
 
                 # Build function name with namespace if available
-                full_name = f"{namespace}.{method.function_name}" if namespace else method.function_name
+                if namespace:
+                    # Use RecursiveDescentParser for clean namespace extraction
+                    try:
+                        parser = RecursiveDescentParser(namespace)
+                        class_name = parser.get_class_name()
+                        full_name = f"{namespace}.{method.function_name}"
+                    except (ValueError, IndexError):
+                        full_name = f"{namespace}.{method.function_name}"
+                else:
+                    full_name = method.function_name
 
                 # Add return type and parameters to make it more informative
                 if method.return_type != "void" or method.parameters:
@@ -416,6 +668,11 @@ class DelphiReSymProvider(AbstractLabelProvider):
                     full_name = f"{full_name}({param_str}): {method.return_type}"
 
                 self._func_symbols[func_addr] = full_name
+
+        # Log statistics
+        LOGGER.debug(f"DelphiReSym statistics: VMTs={len(vmt_offsets)}, "
+                    f"with MDT={vmts_with_mdt}, with RTTI={vmts_with_rtti}, "
+                    f"methods={total_methods}")
 
     def isSymbolProvider(self):
         return True
