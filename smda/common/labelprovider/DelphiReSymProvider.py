@@ -442,7 +442,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
             #   MagicByte(1) + ObjectName(pascal) + Unknown(1) + Pointers(2*ptr_size) + Unknown(2) + Namespace(pascal)
             if magic_byte == RTTI_CLASS_MAGIC_BYTE:
                 # Calculate pointer field offsets for validation
-                ptr1_offset = rtti_offset + 1 + len(object_name) + 1 + 1
+                ptr1_offset = rtti_offset + 1 + (1 + len(object_name)) + 1
                 ptr2_offset = ptr1_offset + self._settings.ptr_size
 
                 # Bug fix: Validate that pointer fields point to reasonable addresses
