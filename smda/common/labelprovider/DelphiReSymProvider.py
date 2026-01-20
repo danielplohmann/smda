@@ -106,15 +106,12 @@ class RecursiveDescentParser:
         depth = 1
 
         while depth > 0 and self._peek() is not None:
-            char = self._peek()
+            char = self._consume()
+            result.append(char)
             if char == "<":
                 depth += 1
-                result.append(self._consume())
             elif char == ">":
                 depth -= 1
-                result.append(self._consume())
-            else:
-                result.append(self._consume())
         if depth > 0:
             raise ValueError("Unterminated template arguments")
 
@@ -156,7 +153,7 @@ class RecursiveDescentParser:
             else:
                 break
 
-        remaining = self.string[self.pos :] if self.pos < len(self.string) else ""
+        remaining = self.string[self.pos:]
         return components, remaining
 
     def get_class_name(self) -> str:
@@ -466,9 +463,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
                 namespace_offset = ptr2_offset + self._settings.ptr_size + 2
                 namespace = self._read_pascal_string(namespace_offset)
                 if namespace:
+                    full_fqn = f"{namespace}.{object_name}"
                     # Use RecursiveDescentParser for template-aware FQN handling
                     try:
-                        full_fqn = f"{namespace}.{object_name}"
                         parser = RecursiveDescentParser(full_fqn)
                         # Validate that parsing succeeds (catches malformed strings)
                         components, _ = parser.parse_fqn()
@@ -477,7 +474,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
                     except (ValueError, IndexError) as e:
                         # Fallback to simple concatenation if parsing fails
                         LOGGER.debug(f"Failed to parse FQN '{full_fqn}': {e}. Falling back to simple concatenation.")
-                        return f"{namespace}.{object_name}"
+                    # Fallback for malformed FQN or if parsing yields no components
+                    return full_fqn
 
             return object_name
 
