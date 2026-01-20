@@ -652,13 +652,14 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
                 # Build function name with namespace if available
                 if namespace:
-                    # Use RecursiveDescentParser for clean namespace extraction
+                    # Use RecursiveDescentParser to validate namespace format
                     try:
                         parser = RecursiveDescentParser(namespace)
-                        class_name = parser.get_class_name()
-                        full_name = f"{namespace}.{method.function_name}"
+                        # Validate parsing succeeds (catches malformed namespaces)
+                        parser.parse_fqn()
                     except (ValueError, IndexError):
-                        full_name = f"{namespace}.{method.function_name}"
+                        pass  # Invalid namespace format, use as-is
+                    full_name = f"{namespace}.{method.function_name}"
                 else:
                     full_name = method.function_name
 
