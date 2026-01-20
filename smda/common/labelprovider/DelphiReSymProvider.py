@@ -153,7 +153,7 @@ class RecursiveDescentParser:
             else:
                 break
 
-        remaining = self.string[self.pos:]
+        remaining = self.string[self.pos :]
         return components, remaining
 
     def get_class_name(self) -> str:
