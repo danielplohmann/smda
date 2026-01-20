@@ -145,7 +145,7 @@ class RecursiveDescentParser:
             elif self._peek() == "<":
                 if trim_mode:
                     # In trim mode, stop at template and return remainder
-                    return components, self.string[self.pos:]
+                    return components, self.string[self.pos :]
                 # Parse and append template arguments
                 template = self._parse_template_args()
                 if components:
@@ -154,7 +154,7 @@ class RecursiveDescentParser:
             else:
                 break
 
-        remaining = self.string[self.pos:] if self.pos < len(self.string) else ""
+        remaining = self.string[self.pos :] if self.pos < len(self.string) else ""
         return components, remaining
 
     def get_class_name(self) -> str:
@@ -671,9 +671,11 @@ class DelphiReSymProvider(AbstractLabelProvider):
                 self._func_symbols[func_addr] = full_name
 
         # Log statistics
-        LOGGER.debug(f"DelphiReSym statistics: VMTs={len(vmt_offsets)}, "
-                    f"with MDT={vmts_with_mdt}, with RTTI={vmts_with_rtti}, "
-                    f"methods={total_methods}")
+        LOGGER.debug(
+            f"DelphiReSym statistics: VMTs={len(vmt_offsets)}, "
+            f"with MDT={vmts_with_mdt}, with RTTI={vmts_with_rtti}, "
+            f"methods={total_methods}"
+        )
 
     def isSymbolProvider(self):
         return True
