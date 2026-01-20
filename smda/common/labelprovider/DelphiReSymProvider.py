@@ -115,6 +115,8 @@ class RecursiveDescentParser:
                 result.append(self._consume())
             else:
                 result.append(self._consume())
+        if depth > 0:
+            raise ValueError("Unterminated template arguments")
 
         return "".join(result)
 
@@ -472,8 +474,9 @@ class DelphiReSymProvider(AbstractLabelProvider):
                         components, _ = parser.parse_fqn()
                         if components:
                             return full_fqn
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError) as e:
                         # Fallback to simple concatenation if parsing fails
+                        LOGGER.debug(f"Failed to parse FQN '{full_fqn}': {e}. Falling back to simple concatenation.")
                         return f"{namespace}.{object_name}"
 
             return object_name
@@ -657,7 +660,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
                         parser = RecursiveDescentParser(namespace)
                         # Validate parsing succeeds (catches malformed namespaces)
                         parser.parse_fqn()
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError) as e:
+                        LOGGER.debug(f"Malformed namespace '{namespace}' encountered: {e}. Using as-is.")
                         pass  # Invalid namespace format, use as-is
                     full_name = f"{namespace}.{method.function_name}"
                 else:
