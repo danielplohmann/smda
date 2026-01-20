@@ -451,14 +451,11 @@ class DelphiReSymProvider(AbstractLabelProvider):
                     ptr1 = self._read_ptr(ptr1_offset)
                     ptr2 = self._read_ptr(ptr2_offset)
                     # Both pointers should either be null or point within binary
-                    if ptr1 is not None and ptr1 != 0:
-                        ptr1_file_offset = self._addr_to_offset(ptr1)
-                        if ptr1_file_offset < 0 or ptr1_file_offset >= len(self._binary):
-                            return None
-                    if ptr2 is not None and ptr2 != 0:
-                        ptr2_file_offset = self._addr_to_offset(ptr2)
-                        if ptr2_file_offset < 0 or ptr2_file_offset >= len(self._binary):
-                            return None
+                    for ptr in (ptr1, ptr2):
+                        if ptr is not None and ptr != 0:
+                            ptr_file_offset = self._addr_to_offset(ptr)
+                            if ptr_file_offset < 0 or ptr_file_offset >= len(self._binary):
+                                return None
 
                 namespace_offset = ptr2_offset + self._settings.ptr_size + 2
                 namespace = self._read_pascal_string(namespace_offset)
@@ -466,15 +463,13 @@ class DelphiReSymProvider(AbstractLabelProvider):
                     full_fqn = f"{namespace}.{object_name}"
                     # Use RecursiveDescentParser for template-aware FQN handling
                     try:
+                        # Use RecursiveDescentParser for template-aware FQN handling.
+                        # This is mainly for validation; we return the original string regardless.
                         parser = RecursiveDescentParser(full_fqn)
-                        # Validate that parsing succeeds (catches malformed strings)
-                        components, _ = parser.parse_fqn()
-                        if components:
-                            return full_fqn
+                        parser.parse_fqn()
                     except (ValueError, IndexError) as e:
                         # Fallback to simple concatenation if parsing fails
                         LOGGER.debug(f"Failed to parse FQN '{full_fqn}': {e}. Falling back to simple concatenation.")
-                    # Fallback for malformed FQN or if parsing yields no components
                     return full_fqn
 
             return object_name
