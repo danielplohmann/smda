@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import MagicMock
-import logging
 
 from smda.intel.IndirectCallAnalyzer import IndirectCallAnalyzer
+
 
 class IndirectCallAnalyzerTestSuite(unittest.TestCase):
     """Basic tests for IndirectCallAnalyzer regex and logic"""
@@ -49,10 +49,7 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         analysis_state = MagicMock()
         analyzer.state = analysis_state
         # block is a list of [address, size, mnemonic, op_str]
-        block = [
-            [0x401000, 5, "mov", "eax, 0x402000"],
-            [0x401005, 2, "mov", "ebx, eax"]
-        ]
+        block = [[0x401000, 5, "mov", "eax, 0x402000"], [0x401005, 2, "mov", "ebx, eax"]]
         registers = {}
         register_name = "ebx"
         processed = []
@@ -68,6 +65,7 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         self.assertTrue(result)
         # eax should have 0x402000
         self.assertEqual(registers.get("eax"), 0x402000)
+
 
 if __name__ == "__main__":
     unittest.main()
