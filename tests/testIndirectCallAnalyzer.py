@@ -15,12 +15,20 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group("reg1"), "eax")
         self.assertEqual(match.group("reg2"), "ebx")
+        match = analyzer.RE_MOV_REG_REG.match("r8, r9")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg1"), "r8")
+        self.assertEqual(match.group("reg2"), "r9")
 
         # Test mov <reg>, <const>
         match = analyzer.RE_MOV_REG_CONST.match("ecx, 0x12345678")
         self.assertIsNotNone(match)
         self.assertEqual(match.group("reg"), "ecx")
         self.assertEqual(match.group("val"), "0x12345678")
+        match = analyzer.RE_MOV_REG_CONST.match("r10, 0x1122334455667788")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg"), "r10")
+        self.assertEqual(match.group("val"), "0x1122334455667788")
 
         # Test mov <reg>, dword ptr [<addr>]
         match = analyzer.RE_REG_DWORD_PTR_ADDR.match("edx, dword ptr [0x8048000]")
@@ -39,7 +47,6 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match.group("reg"), "rsi")
         self.assertEqual(match.group("addr"), "0x400000")
-
     def test_processBlock_logic(self):
         disassembler = MagicMock()
         disassembler.resolveApi.return_value = (None, None)
