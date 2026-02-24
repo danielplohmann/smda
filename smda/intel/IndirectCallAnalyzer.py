@@ -8,11 +8,11 @@ LOGGER = logging.getLogger(__name__)
 class IndirectCallAnalyzer:
     """Perform basic dataflow analysis to resolve indirect call targets"""
 
-    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z0-9]+), (?P<reg2>[a-z0-9]+)$")
-    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z0-9]+), (?P<val>0x[0-9a-f]{,16})$")
-    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z0-9]+), dword ptr \[(?P<addr>0x[0-9a-f]{,16})\]$")
-    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z0-9]+), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,16})\]$")
-    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z0-9]+), \[(?P<addr>0x[0-9a-f]{,16})\]$")
+    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z]{3}), (?P<reg2>[a-z]{3})$")
+    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z]{3}), (?P<val>0x[0-9a-f]{,8})$")
+    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$")
+    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$")
+    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z]{3}), \[(?P<addr>0x[0-9a-f]{,8})\]$")
 
     def __init__(self, disassembler):
         self.disassembler = disassembler
@@ -137,10 +137,6 @@ class IndirectCallAnalyzer:
                             abs_value_found = True
                 # not handled: lea <reg>, dword ptr [<reg> +- <val>]
                 # requires state-keeping of multiple registers
-            # there exist potentially many more way how the register being called can be calculated
-            # for now we ignore them
-            elif ins[2] == "other instruction":
-                pass
             # if the absolute value was found for the call <reg> instruction, detect API
             if abs_value_found:
                 candidate = registers.get(register_name, None)
@@ -198,6 +194,7 @@ class IndirectCallAnalyzer:
                 for b in [self.searchBlock(analysis_state, i) for i in refs_in]
             ):
                 return True
+        return False
 
     def resolveRegisterCalls(self, analysis_state, block_depth=3):
         # after block reconstruction do simple data flow analysis to resolve open cases like "call <register>" as stored in self.call_register_ins
