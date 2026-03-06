@@ -62,6 +62,8 @@ class IntelDisassembler:
         self._tfidf = None
         self.binary_info = None
         self.label_providers = []
+        self.api_providers = []
+        self.symbol_providers = []
         self._addLabelProviders()
         self.fc_manager = None
         self.tailcall_analyzer = None
@@ -87,17 +89,24 @@ class IntelDisassembler:
         return 0xFFFFFFFF
 
     def _addLabelProviders(self):
-        self.label_providers.append(WinApiResolver(self.config))
-        self.label_providers.append(ElfApiResolver(self.config))
+        self._registerLabelProvider(WinApiResolver(self.config))
+        self._registerLabelProvider(ElfApiResolver(self.config))
         # Language-specific symbol providers (checked first for proper demangling)
-        self.label_providers.append(RustSymbolProvider(self.config))
-        self.label_providers.append(GoSymbolProvider(self.config))
-        self.label_providers.append(DelphiKbSymbolProvider(self.config))
-        self.label_providers.append(DelphiReSymProvider(self.config))
+        self._registerLabelProvider(RustSymbolProvider(self.config))
+        self._registerLabelProvider(GoSymbolProvider(self.config))
+        self._registerLabelProvider(DelphiKbSymbolProvider(self.config))
+        self._registerLabelProvider(DelphiReSymProvider(self.config))
         # Generic binary format providers (fallback)
-        self.label_providers.append(ElfSymbolProvider(self.config))
-        self.label_providers.append(PeSymbolProvider(self.config))
-        self.label_providers.append(PdbSymbolProvider(self.config))
+        self._registerLabelProvider(ElfSymbolProvider(self.config))
+        self._registerLabelProvider(PeSymbolProvider(self.config))
+        self._registerLabelProvider(PdbSymbolProvider(self.config))
+
+    def _registerLabelProvider(self, provider):
+        self.label_providers.append(provider)
+        if provider.isApiProvider():
+            self.api_providers.append(provider)
+        if provider.isSymbolProvider():
+            self.symbol_providers.append(provider)
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
@@ -113,9 +122,7 @@ class IntelDisassembler:
                 provider.update(pdb_info)
 
     def resolveApi(self, to_address, api_address):
-        for provider in self.label_providers:
-            if not provider.isApiProvider():
-                continue
+        for provider in self.api_providers:
             dll, api = provider.getApi(to_address, api_address)
             if dll or api:
                 return (dll, api)
@@ -123,9 +130,7 @@ class IntelDisassembler:
         return ("", "")
 
     def resolveSymbol(self, address):
-        for provider in self.label_providers:
-            if not provider.isSymbolProvider():
-                continue
+        for provider in self.symbol_providers:
             result = provider.getSymbol(address)
             if result:
                 return result
@@ -133,11 +138,9 @@ class IntelDisassembler:
 
     def getSymbolCandidates(self):
         symbol_offsets = set()
-        for provider in self.label_providers:
-            if not provider.isSymbolProvider():
-                continue
+        for provider in self.symbol_providers:
             function_symbols = provider.getFunctionSymbols()
-            symbol_offsets.update(list(function_symbols.keys()))
+            symbol_offsets.update(function_symbols)
         return list(symbol_offsets)
 
     def getReferencedAddr(self, op_str):
