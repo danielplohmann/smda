@@ -101,6 +101,7 @@ make test
 ```
 
 ## Version History
+ * 2025-03-23: v2.5.3 - Added ELF ABI to SmdaReport info, upgraded DelphiReSym to handle Delphi 13, slight performance improvements by removing redundant label extraction. (THX: @r0ny123)
  * 2025-01-16: v2.5.2 - Fixed bug in IdaInterface where binary data was unproperly extracted.
  * 2025-01-16: v2.5.1 - Reducing calls to lief by caching the object. (THX: @r0ny123)
  * 2025-01-16: v2.5.0 - Introduced Rust symbol extraction and demangling. (THX: @r0ny123)
