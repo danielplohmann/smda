@@ -159,6 +159,10 @@ class MachoFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
+    def getAbi(binary):
+        return ""
+
+    @staticmethod
     def getArchitecture(binary):
         # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary)

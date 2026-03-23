@@ -1,4 +1,3 @@
-import hashlib
 import logging
 
 import lief
@@ -37,10 +36,8 @@ class BinaryInfo:
         self.binary = binary
         self.raw_data = binary
         self.binary_size = len(binary)
-        self.sha256 = hashlib.sha256(binary).hexdigest()
-        self.sha1 = hashlib.sha1(binary).hexdigest()
-        self.md5 = hashlib.md5(binary).hexdigest()
         self._lief_binary = None
+        self.abi = ""
 
     def getBinaryData(self):
         """Safely retrieves binary data from either raw_data or a file path."""

@@ -25,3 +25,11 @@ class DelphiKbFileLoader:
     @staticmethod
     def getCodeAreas(binary):
         return []
+
+    @staticmethod
+    def getArchitecture(binary):
+        return "intel"
+
+    @staticmethod
+    def getAbi(binary):
+        return ""

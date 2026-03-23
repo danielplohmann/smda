@@ -80,8 +80,22 @@ class Disassembler:
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.architecture = loader.getArchitecture()
+        binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         return binary_info
+
+    def _ensureHashes(self, binary_info):
+        if binary_info.sha256 and binary_info.sha1 and binary_info.md5:
+            return
+        data = binary_info.raw_data if binary_info.raw_data else binary_info.binary
+        if data is None:
+            return
+        if not binary_info.sha256:
+            binary_info.sha256 = hashlib.sha256(data).hexdigest()
+        if not binary_info.sha1:
+            binary_info.sha1 = hashlib.sha1(data).hexdigest()
+        if not binary_info.md5:
+            binary_info.md5 = hashlib.md5(data).hexdigest()
 
     def disassembleFile(self, file_path, pdb_path=""):
         start = datetime.datetime.now(datetime.timezone.utc)
@@ -162,6 +176,7 @@ class Disassembler:
     def _disassemble(self, binary_info, timeout=0):
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
+        self._ensureHashes(binary_info)
         if self.disassembler:
             self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
             return SmdaReport(self.disassembly, config=self.config)

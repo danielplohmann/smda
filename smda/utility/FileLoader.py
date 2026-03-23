@@ -13,6 +13,7 @@ class FileLoader:
     _raw_data = b""
     _base_addr = 0
     _bitness = 0
+    _abi = ""
     _architecture = ""
     _code_areas = []
     file_loaders = [PeFileLoader, ElfFileLoader, MachoFileLoader, DelphiKbFileLoader]
@@ -40,6 +41,7 @@ class FileLoader:
                     self._bitness = loader.getBitness(self._raw_data)
                     self._code_areas = loader.getCodeAreas(self._raw_data)
                     self._architecture = loader.getArchitecture(self._raw_data)
+                    self._abi = loader.getAbi(self._raw_data)
                     break
         else:
             self._data = self._raw_data
@@ -52,6 +54,9 @@ class FileLoader:
 
     def getBaseAddress(self):
         return self._base_addr
+
+    def getAbi(self):
+        return self._abi
 
     def getArchitecture(self):
         return self._architecture

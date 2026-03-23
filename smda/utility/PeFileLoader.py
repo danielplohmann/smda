@@ -128,6 +128,10 @@ class PeFileLoader:
         return oep_rva
 
     @staticmethod
+    def getAbi(binary):
+        return ""
+
+    @staticmethod
     def getArchitecture(binary):
         architecture = "intel"
         pefile = lief.parse(binary)
