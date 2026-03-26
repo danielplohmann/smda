@@ -8,6 +8,12 @@ LOGGER = logging.getLogger(__name__)
 class IndirectCallAnalyzer:
     """Perform basic dataflow analysis to resolve indirect call targets"""
 
+    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z]{3}), (?P<reg2>[a-z]{3})$")
+    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z]{3}), (?P<val>0x[0-9a-f]{,8})$")
+    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$")
+    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$")
+    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z]{3}), \[(?P<addr>0x[0-9a-f]{,8})\]$")
+
     def __init__(self, disassembler):
         self.disassembler = disassembler
         self.disassembly = self.disassembler.disassembly
@@ -42,11 +48,11 @@ class IndirectCallAnalyzer:
             LOGGER.debug("0x%08x: %s %s", ins[0], ins[2], ins[3])
             if ins[2] == "mov":
                 # mov <reg>, <reg>
-                match1 = re.match(r"(?P<reg1>[a-z]{3}), (?P<reg2>[a-z]{3})$", ins[3])
+                match1 = self.RE_MOV_REG_REG.match(ins[3])
                 if match1 and match1.group("reg1") == register_name:
                     register_name = match1.group("reg2")
                 # mov <reg>, <const>
-                match2 = re.match(r"(?P<reg>[a-z]{3}), (?P<val>0x[0-9a-f]{,8})$", ins[3])
+                match2 = self.RE_MOV_REG_CONST.match(ins[3])
                 if match2:
                     registers[match2.group("reg")] = int(match2.group("val"), 16)
                     LOGGER.debug(
@@ -57,10 +63,7 @@ class IndirectCallAnalyzer:
                     if match2.group("reg") == register_name:
                         abs_value_found = True
                 # mov <reg>, dword ptr [<addr>]
-                match3 = re.match(
-                    r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$",
-                    ins[3],
-                )
+                match3 = self.RE_REG_DWORD_PTR_ADDR.match(ins[3])
                 if match3:
                     # HACK: test to see if the address points to a import and
                     # use that instead of the actual memory value
@@ -89,10 +92,7 @@ class IndirectCallAnalyzer:
                             if match3.group("reg") == register_name:
                                 abs_value_found = True
                 # mov <reg>, qword ptr [reg + <addr>]
-                match4 = re.match(
-                    r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$",
-                    ins[3],
-                )
+                match4 = self.RE_REG_QWORD_PTR_RIP_ADDR.match(ins[3])
                 if match4:
                     rip = ins[0] + ins[1]
                     dword = self.getDword(rip + int(match4.group("addr"), 16))
@@ -110,10 +110,7 @@ class IndirectCallAnalyzer:
             elif ins[2] == "lea":
                 LOGGER.debug("*checking %s %s", ins[2], ins[3])
                 # lea <reg>, dword ptr [<addr>]
-                match1 = re.match(
-                    r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$",
-                    ins[3],
-                )
+                match1 = self.RE_REG_DWORD_PTR_ADDR.match(ins[3])
                 if match1:
                     dword = self.getDword(int(match1.group("addr"), 16))
                     if dword:
@@ -126,7 +123,7 @@ class IndirectCallAnalyzer:
                         if match1.group("reg") == register_name:
                             abs_value_found = True
                 # lea <reg>, [<addr>]
-                match1 = re.match(r"(?P<reg>[a-z]{3}), \[(?P<addr>0x[0-9a-f]{,8})\]$", ins[3])
+                match1 = self.RE_REG_ADDR.match(ins[3])
                 if match1:
                     dword = self.getDword(int(match1.group("addr"), 16))
                     if dword:
@@ -140,10 +137,6 @@ class IndirectCallAnalyzer:
                             abs_value_found = True
                 # not handled: lea <reg>, dword ptr [<reg> +- <val>]
                 # requires state-keeping of multiple registers
-            # there exist potentially many more way how the register being called can be calculated
-            # for now we ignore them
-            elif ins[2] == "other instruction":
-                pass
             # if the absolute value was found for the call <reg> instruction, detect API
             if abs_value_found:
                 candidate = registers.get(register_name, None)
@@ -201,6 +194,7 @@ class IndirectCallAnalyzer:
                 for b in [self.searchBlock(analysis_state, i) for i in refs_in]
             ):
                 return True
+        return False
 
     def resolveRegisterCalls(self, analysis_state, block_depth=3):
         # after block reconstruction do simple data flow analysis to resolve open cases like "call <register>" as stored in self.call_register_ins
