@@ -448,7 +448,7 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         """Heuristic rejection for obviously invalid class names."""
         if not class_name or len(class_name) > 255:
             return False
-        if not all(character.isprintable() and character != "\x00" for character in class_name):
+        if not all(character.isprintable() for character in class_name):
             return False
         return any(character.isalpha() for character in class_name)
 

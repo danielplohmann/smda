@@ -24,6 +24,8 @@ class TestDelphiPythiaProvider(unittest.TestCase):
         child_candidate_offset = 0x1100
         class_name_parent_offset = 0x1080
         class_name_child_offset = 0x1180
+        child_interface_offset = 0x11D0
+        child_interface_methods_offset = 0x1200
         child_dynamic_offset = 0x1190
         child_method_table_offset = 0x11A0
         child_vmt_offset = child_candidate_offset + 0x4C
@@ -51,6 +53,9 @@ class TestDelphiPythiaProvider(unittest.TestCase):
             binary[child_candidate_offset + 0x1C : child_candidate_offset + 0x20] = self._pack_ptr(
                 base_addr + child_dynamic_offset
             )
+            binary[child_candidate_offset + 0x04 : child_candidate_offset + 0x08] = self._pack_ptr(
+                base_addr + child_interface_offset
+            )
             binary[child_candidate_offset + 0x28 : child_candidate_offset + 0x2C] = self._pack_ptr(
                 base_addr + parent_vmt_offset
             )
@@ -61,6 +66,12 @@ class TestDelphiPythiaProvider(unittest.TestCase):
             binary[child_dynamic_offset : child_dynamic_offset + 2] = struct.pack("<H", 1)
             binary[child_dynamic_offset + 2 : child_dynamic_offset + 4] = struct.pack("<H", 0)
             binary[child_dynamic_offset + 4 : child_dynamic_offset + 8] = self._pack_ptr(0x4013A0)
+
+            binary[child_interface_offset + 20 : child_interface_offset + 24] = self._pack_ptr(
+                base_addr + child_interface_methods_offset
+            )
+            binary[child_interface_methods_offset : child_interface_methods_offset + 4] = self._pack_ptr(0x4013C0)
+            binary[child_interface_methods_offset + 4 : child_interface_methods_offset + 8] = self._pack_ptr(0)
 
             binary[child_method_table_offset : child_method_table_offset + 2] = struct.pack("<H", 2)
             entry_offset = child_method_table_offset + 2
@@ -87,8 +98,10 @@ class TestDelphiPythiaProvider(unittest.TestCase):
         self.assertEqual(symbols.get(0x401390), "Init")
         self.assertEqual(symbols.get(0x4013B0), "DoIt")
         self.assertIn(0x4013A0, symbols)
+        self.assertIn(0x4013C0, symbols)
         self.assertIn(0x401360, symbols)
         self.assertIn(0x401300, symbols)
+        self.assertIn(0x401310, symbols)
         self.assertIn(0x401350, symbols)
 
     def test_provider_rejects_false_positive_candidate(self):
