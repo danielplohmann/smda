@@ -2,9 +2,9 @@
 import logging
 import re
 import struct
-from io import BytesIO
 
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
+from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
 from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 
@@ -16,6 +16,7 @@ class LanguageAnalyzer:
         self.disassembly = disassembly
         self.go_resolver = GoSymbolProvider(None)
         self.delphi_kb_resolver = DelphiKbSymbolProvider(None)
+        self.delphi_pythia_resolver = DelphiPythiaProvider(None)
         self.delphi_resym_resolver = DelphiReSymProvider(None)
         self.strings = None
 
@@ -123,94 +124,14 @@ class LanguageAnalyzer:
         return parsed_string
 
     def getDelphiObjects(self):
-        image_base = self.disassembly.binary_info.base_addr
-        data = BytesIO(self.disassembly.binary_info.binary)
-        length_of_binary = len(self.disassembly.binary_info.binary)
-        if length_of_binary > 5 * 1024 * 1024:
-            LOGGER.info("Filesize exceeds 5 MB, skipping Delphi struct parsing.")
-            return {}
-        function_offsets = set()
-        name_mapping = {}
-        while data.read(4) != b"":
-            data.seek(data.tell() - 4)
-            offset = data.tell()
-            potential_vmt_self_ptr = int.from_bytes(data.read(4), byteorder="little")
-            saved_scan_offset = data.tell()
-            # Delphi VMTs have pointers that indicate their start, spanning an "address frame" that can be searched for
-            if offset + image_base + int("4C", base=16) == potential_vmt_self_ptr:
-                data.seek(saved_scan_offset)
-                interface_table = int.from_bytes(data.read(4), byteorder="little")
-                int.from_bytes(data.read(4), byteorder="little")
-                int.from_bytes(data.read(4), byteorder="little")
-                int.from_bytes(data.read(4), byteorder="little")
-                int.from_bytes(data.read(4), byteorder="little")
-                method_table = int.from_bytes(data.read(4), byteorder="little")
-                dynamic_table = int.from_bytes(data.read(4), byteorder="little")
-                class_name = int.from_bytes(data.read(4), byteorder="little")
-                int.from_bytes(data.read(4), byteorder="little")
-                class_name_saved_offset = data.tell()
-                # not used currently but a candidate for future provided meta data
-                self.parseDelphiString(self.disassembly.binary_info.binary[class_name - image_base :])
-                data.seek(class_name_saved_offset)
-                data.read(8)
-                # search for addresses within our known structures
-                first_address = int.from_bytes(data.read(4), byteorder="little")
-                if self.disassembly.binary_info.isInCodeAreas(first_address):
-                    data.seek(data.tell() - 4)
-                    for _ in range(8):
-                        function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                    if dynamic_table > 0 and (dynamic_table - image_base) > 0:
-                        data.seek(dynamic_table - image_base)
-                        table_length = int.from_bytes(data.read(2), byteorder="little")
-                        data.read(2 * table_length)
-                        for _ in range(table_length):
-                            function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                        data.seek(potential_vmt_self_ptr - image_base)
-                        while data.tell() < dynamic_table - image_base:
-                            function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                            if data.tell() >= length_of_binary:
-                                break
-                    else:
-                        data.seek(potential_vmt_self_ptr - image_base)
-                        while data.tell() < class_name - image_base:
-                            function_offsets.add(int.from_bytes(data.read(4), byteorder="little"))
-                            if data.tell() >= length_of_binary:
-                                break
-                    if method_table > 0 and (method_table - image_base) > 0:
-                        # this should at least work for Delphi 6
-                        data.seek(method_table - image_base)
-                        length = int.from_bytes(data.read(2), byteorder="little")
-                        for _ in range(length):
-                            length_entry = int.from_bytes(data.read(2), byteorder="little")
-                            method_offset = int.from_bytes(data.read(4), byteorder="little")
-                            method_name = self.parseDelphiString(self.disassembly.binary_info.binary[data.tell() :])
-                            name_mapping[method_offset] = method_name
-                            function_offsets.add(method_offset)
-                            data.seek(data.tell() + length_entry - 6)
-                        data.seek(saved_scan_offset)
-                    if interface_table > 0 and (interface_table - image_base) > 0:
-                        data.seek(interface_table - image_base)
-                        data.read(20)
-                        start_interface = int.from_bytes(data.read(4), byteorder="little")
-                        if start_interface >= image_base:
-                            data.seek(start_interface - image_base)
-                            bytes_read = int.from_bytes(data.read(4), byteorder="little")
-                            while self.disassembly.binary_info.isInCodeAreas(bytes_read):
-                                function_offsets.add(bytes_read)
-                                bytes_read = int.from_bytes(data.read(4), byteorder="little")
-                                if data.tell() >= length_of_binary:
-                                    break
-                        data.seek(saved_scan_offset)
-                else:
-                    data.seek(saved_scan_offset)
-            else:
-                data.seek(saved_scan_offset)
-        functions = {}
-        for offset in function_offsets:
-            if self.disassembly.binary_info.isInCodeAreas(offset):
-                function_name = name_mapping.get(offset, "")
-                functions[offset] = function_name
-        return functions
+        """
+        Extract Delphi object methods using a Pythia-style VMT scan.
+
+        The return format intentionally remains unchanged:
+            {absolute_function_address: optional_function_name}
+        """
+        self.delphi_pythia_resolver.update(self.disassembly.binary_info)
+        return self.delphi_pythia_resolver.getFunctionSymbols()
 
     def getGoObjects(self):
         self.go_resolver.update(self.disassembly.binary_info)
