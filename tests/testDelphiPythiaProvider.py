@@ -37,7 +37,9 @@ class TestDelphiPythiaProvider(unittest.TestCase):
                 (child_candidate_offset, class_name_child_offset, b"\x06TChild", 0x401350),
             ):
                 binary[candidate_offset : candidate_offset + 4] = self._pack_ptr(base_addr + candidate_offset + 0x4C)
-                binary[candidate_offset + 0x20 : candidate_offset + 0x24] = self._pack_ptr(base_addr + class_name_offset)
+                binary[candidate_offset + 0x20 : candidate_offset + 0x24] = self._pack_ptr(
+                    base_addr + class_name_offset
+                )
                 binary[candidate_offset + 0x24 : candidate_offset + 0x28] = self._pack_ptr(0x30)
                 binary[class_name_offset : class_name_offset + len(class_name)] = class_name
                 for slot_index in range(8):

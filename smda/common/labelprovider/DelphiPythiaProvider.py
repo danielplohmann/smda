@@ -252,8 +252,12 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         instance_size = self._read_ptr(candidate_offset + profile.instance_size_field_offset, profile.ptr_size)
         parent_vmt_addr = self._read_ptr(candidate_offset + profile.parent_field_offset, profile.ptr_size) or 0
         method_table_addr = self._read_ptr(candidate_offset + profile.method_table_field_offset, profile.ptr_size) or 0
-        dynamic_table_addr = self._read_ptr(candidate_offset + profile.dynamic_table_field_offset, profile.ptr_size) or 0
-        interface_table_addr = self._read_ptr(candidate_offset + profile.interface_table_field_offset, profile.ptr_size) or 0
+        dynamic_table_addr = (
+            self._read_ptr(candidate_offset + profile.dynamic_table_field_offset, profile.ptr_size) or 0
+        )
+        interface_table_addr = (
+            self._read_ptr(candidate_offset + profile.interface_table_field_offset, profile.ptr_size) or 0
+        )
         vmt_offset = candidate_offset + profile.self_ptr_distance
 
         if instance_size is None or instance_size > MAX_INSTANCE_SIZE:
