@@ -489,11 +489,13 @@ class DalvikDisassembler:
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "dalvik"
 
-        # Try raw bytes first, then fallback to bytes() conversion
+        # Try raw bytes first, then fallback to list() conversion
+        # LIEF's Python bindings for parse() interpret bytes() as a filename string!
+        # Do not use bytes() here, use list() as it correctly triggers the raw buffer overload.
         try:
             dex_file = lief.DEX.parse(binary_info.raw_data)
         except TypeError:
-            dex_file = lief.DEX.parse(bytes(binary_info.raw_data))
+            dex_file = lief.DEX.parse(list(binary_info.raw_data))
 
         if dex_file:
             for method in dex_file.methods:
