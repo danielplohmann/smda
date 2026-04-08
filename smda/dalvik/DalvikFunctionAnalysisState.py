@@ -159,8 +159,11 @@ class DalvikFunctionAnalysisState:
                 self.num_blocks_analyzed,
             )
         if as_gap and not self.is_sanely_ending:
-            if len(self.instructions) == 1 and self.instructions[0][2].startswith("goto") or self.num_blocks_analyzed == 1 and (
-                self.instructions[-1][2].startswith("goto") or self.instructions[-1][2].startswith("invoke-")
+            if (
+                len(self.instructions) == 1
+                and self.instructions[0][2].startswith("goto")
+                or self.num_blocks_analyzed == 1
+                and (self.instructions[-1][2].startswith("goto") or self.instructions[-1][2].startswith("invoke-"))
             ):
                 pass
             else:

@@ -103,11 +103,17 @@ class DalvikDisassembler:
         insns_size_bytes = insns_size_units * 2
         bytecode_offset = start_addr + 16
 
-        if bytecode_offset + insns_size_bytes <= len(dex_file.header):
-            pass  # LIEF parsing might just map it, but we have binary_info
-
-        # We need raw bytecode. method_info has raw_data.
         raw_data = method_info["raw_data"]
+
+        if bytecode_offset + insns_size_bytes > len(raw_data):
+            LOGGER.warning(
+                "Bytecode range [0x%x:0x%x] exceeds raw data size (0x%x), skipping method.",
+                bytecode_offset,
+                bytecode_offset + insns_size_bytes,
+                len(raw_data),
+            )
+            return None
+
         bytecode = raw_data[bytecode_offset : bytecode_offset + insns_size_bytes]
 
         state = DalvikFunctionAnalysisState(start_addr, self.disassembly)
@@ -117,7 +123,14 @@ class DalvikDisassembler:
             # A simple loop to read dalvik bytecode. LIEF returns list of bytes.
             op = bytecode[idx]
 
-            mnemonic, length_units = DALVIK_OPCODES.get(op, ("unknown_" + hex(op), 1))
+            if op not in DALVIK_OPCODES:
+                LOGGER.warning(
+                    "Unknown Dalvik opcode 0x%02x at offset 0x%x, aborting method disassembly.",
+                    op,
+                    start_addr + idx,
+                )
+                break
+            mnemonic, length_units = DALVIK_OPCODES[op]
             length_bytes = length_units * 2
 
             if idx + length_bytes > len(bytecode):
