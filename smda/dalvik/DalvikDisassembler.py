@@ -180,15 +180,7 @@ class DalvikDisassembler:
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "dalvik"
 
-        # LIEF natively accepts bytes or bytearray
-        if hasattr(lief.DEX, "parse"):
-            try:  # noqa: SIM105
-                dex_file = lief.DEX.parse(list(binary_info.raw_data))  # Fallback if list is needed
-            except Exception:
-                pass
-
-        # In recent LIEF, we can just pass the raw bytes array
-        # Let's try raw bytes first, then fallback to list
+        # Try raw bytes first, then fallback to list
         try:
             dex_file = lief.DEX.parse(binary_info.raw_data)
         except TypeError:
