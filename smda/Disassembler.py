@@ -7,6 +7,7 @@ from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
+from smda.dalvik.DalvikDisassembler import DalvikDisassembler
 from smda.ida.IdaExporter import IdaExporter
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.SmdaConfig import SmdaConfig
@@ -27,6 +28,8 @@ class Disassembler:
             self.disassembler = IntelDisassembler(self.config)
         elif backend == "cil":
             self.disassembler = CilDisassembler(self.config)
+        elif backend == "dalvik":
+            self.disassembler = DalvikDisassembler(self.config)
         elif backend == "IDA":
             self.disassembler = IdaExporter(self.config)
         self._start_time = None
@@ -41,6 +44,8 @@ class Disassembler:
                 self.disassembler = IntelDisassembler(self.config)
             elif architecture == "cil":
                 self.disassembler = CilDisassembler(self.config)
+            elif architecture == "dalvik":
+                self.disassembler = DalvikDisassembler(self.config)
 
     def _getDurationInSeconds(self, start_ts, end_ts):
         return (end_ts - start_ts).seconds + ((end_ts - start_ts).microseconds / 1000000.0)
