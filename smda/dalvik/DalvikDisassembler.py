@@ -327,7 +327,7 @@ class DalvikDisassembler:
         Returns:
             A list of absolute byte offsets (relative to bytecode start) for each target.
         """
-        if payload_idx + 2 > len(bytecode):
+        if payload_idx < 0 or payload_idx + 2 > len(bytecode):
             return []
         ident = struct.unpack_from("<H", bytecode, payload_idx)[0]
         if payload_idx + 4 > len(bytecode):
@@ -512,7 +512,9 @@ class DalvikDisassembler:
             # Fallback to in-memory list() conversion for raw buffers
             try:
                 dex_file = lief.DEX.parse(binary_info.raw_data)
-            except TypeError:
+            except (TypeError, Exception):
+                dex_file = None
+            if not dex_file:
                 dex_file = lief.DEX.parse(list(binary_info.raw_data))
 
         if dex_file:
