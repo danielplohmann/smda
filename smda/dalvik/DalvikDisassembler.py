@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import logging
 import struct
@@ -276,6 +277,9 @@ class DalvikDisassembler:
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
 
+    def addPdbFile(self, binary_info, pdb_path):
+        pass
+
     def _getPayloadSize(self, bytecode, idx):
         """Calculate the size (in bytes) of a data payload at the given index.
 
@@ -354,15 +358,21 @@ class DalvikDisassembler:
 
     def analyzeFunction(self, dex_file, method_info):
         start_addr = method_info["offset"]
-        code_item = method_info["code_item"]
-
-        # In DEX, the code_item header is 16 bytes. The bytecode immediately follows.
-        insns_size_units = code_item.insns_size
-        insns_size_bytes = insns_size_units * 2
-        # bytecode_offset is the absolute offset of the first instruction in raw_data
-        bytecode_offset = start_addr + 16
 
         raw_data = method_info["raw_data"]
+
+        # In LIEF, method.code_offset (which is passed as start_addr) points directly to the
+        # Dalvik bytecode instructions, NOT the start of the 16-byte code_item header.
+        bytecode_offset = start_addr
+        header_offset = start_addr - 16
+
+        if header_offset < 0 or header_offset + 16 > len(raw_data):
+            return None
+
+        # The LIEF Python API for CodeInfo does not expose insns_size. We manually parse
+        # it from the code_item header. It's a 4-byte integer at offset 12.
+        insns_size_units = struct.unpack_from("<I", raw_data, header_offset + 12)[0]
+        insns_size_bytes = insns_size_units * 2
 
         if bytecode_offset + insns_size_bytes > len(raw_data):
             LOGGER.warning(
@@ -491,11 +501,19 @@ class DalvikDisassembler:
 
         # Try raw bytes first, then fallback to list() conversion
         # LIEF's Python bindings for parse() interpret bytes() as a filename string!
-        # Do not use bytes() here, use list() as it correctly triggers the raw buffer overload.
-        try:
-            dex_file = lief.DEX.parse(binary_info.raw_data)
-        except TypeError:
-            dex_file = lief.DEX.parse(list(binary_info.raw_data))
+        # Parsing a massive binary blob via list() is extremely slow in Python (taking minutes).
+        # We must prioritize loading the file natively using C++ fstream if a file path is provided.
+        dex_file = None
+        if getattr(binary_info, "file_path", "") and not getattr(binary_info, "is_buffer", False):
+            with contextlib.suppress(Exception):
+                dex_file = lief.DEX.parse(binary_info.file_path)
+
+        if not dex_file:
+            # Fallback to in-memory list() conversion for raw buffers
+            try:
+                dex_file = lief.DEX.parse(binary_info.raw_data)
+            except TypeError:
+                dex_file = lief.DEX.parse(list(binary_info.raw_data))
 
         if dex_file:
             for method in dex_file.methods:
