@@ -1,5 +1,6 @@
 import datetime
 import logging
+import struct
 
 import lief
 
@@ -275,6 +276,82 @@ class DalvikDisassembler:
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
 
+    def _getPayloadSize(self, bytecode, idx):
+        """Calculate the size (in bytes) of a data payload at the given index.
+
+        Dalvik embeds data payloads (packed-switch, sparse-switch, fill-array-data)
+        inline in the instruction stream. The first 16-bit code unit is a pseudo-opcode
+        identifying the payload type, and the remaining data follows a defined layout.
+        Returns the total size in bytes, or 0 if not a recognized payload.
+        """
+        if idx + 2 > len(bytecode):
+            return 0
+        ident = struct.unpack_from("<H", bytecode, idx)[0]
+        if ident == 0x0100:
+            # packed-switch-payload: ident(2) + size(2) + first_key(4) + targets(size*4)
+            if idx + 4 > len(bytecode):
+                return 0
+            size = struct.unpack_from("<H", bytecode, idx + 2)[0]
+            return 2 + 2 + 4 + size * 4
+        if ident == 0x0200:
+            # sparse-switch-payload: ident(2) + size(2) + keys(size*4) + targets(size*4)
+            if idx + 4 > len(bytecode):
+                return 0
+            size = struct.unpack_from("<H", bytecode, idx + 2)[0]
+            return 2 + 2 + size * 4 + size * 4
+        if ident == 0x0300:
+            # fill-array-data-payload: ident(2) + element_width(2) + size(4) + data(size*width)
+            if idx + 8 > len(bytecode):
+                return 0
+            element_width = struct.unpack_from("<H", bytecode, idx + 2)[0]
+            size = struct.unpack_from("<I", bytecode, idx + 4)[0]
+            data_size = size * element_width
+            # Pad to 2-byte boundary
+            if data_size % 2:
+                data_size += 1
+            return 2 + 2 + 4 + data_size
+        return 0
+
+    def _resolveSwitchTargets(self, bytecode, switch_insn_idx, payload_idx):
+        """Resolve branch targets from a packed-switch or sparse-switch payload.
+
+        Args:
+            bytecode: The raw bytecode buffer.
+            switch_insn_idx: The byte offset of the switch instruction within bytecode.
+            payload_idx: The byte offset of the payload within bytecode.
+
+        Returns:
+            A list of absolute byte offsets (relative to bytecode start) for each target.
+        """
+        if payload_idx + 2 > len(bytecode):
+            return []
+        ident = struct.unpack_from("<H", bytecode, payload_idx)[0]
+        if payload_idx + 4 > len(bytecode):
+            return []
+        size = struct.unpack_from("<H", bytecode, payload_idx + 2)[0]
+
+        targets = []
+        if ident == 0x0100:
+            # packed-switch: targets start at payload + 8 (after ident + size + first_key)
+            targets_start = payload_idx + 8
+            for i in range(size):
+                off = targets_start + i * 4
+                if off + 4 > len(bytecode):
+                    break
+                rel_offset = struct.unpack_from("<i", bytecode, off)[0]
+                # Offset is in code units (16-bit) relative to the switch instruction
+                targets.append(switch_insn_idx + rel_offset * 2)
+        elif ident == 0x0200:
+            # sparse-switch: targets start at payload + 4 + size*4 (after ident + size + keys)
+            targets_start = payload_idx + 4 + size * 4
+            for i in range(size):
+                off = targets_start + i * 4
+                if off + 4 > len(bytecode):
+                    break
+                rel_offset = struct.unpack_from("<i", bytecode, off)[0]
+                targets.append(switch_insn_idx + rel_offset * 2)
+        return targets
+
     def analyzeFunction(self, dex_file, method_info):
         start_addr = method_info["offset"]
         code_item = method_info["code_item"]
@@ -282,6 +359,7 @@ class DalvikDisassembler:
         # In DEX, the code_item header is 16 bytes. The bytecode immediately follows.
         insns_size_units = code_item.insns_size
         insns_size_bytes = insns_size_units * 2
+        # bytecode_offset is the absolute offset of the first instruction in raw_data
         bytecode_offset = start_addr + 16
 
         raw_data = method_info["raw_data"]
@@ -297,65 +375,102 @@ class DalvikDisassembler:
 
         bytecode = raw_data[bytecode_offset : bytecode_offset + insns_size_bytes]
 
-        state = DalvikFunctionAnalysisState(start_addr, self.disassembly)
+        # Addresses are relative to bytecode_offset (where instructions actually start),
+        # not start_addr (which points to the code_item header).
+        state = DalvikFunctionAnalysisState(bytecode_offset, self.disassembly)
 
-        idx = 0
-        while idx < len(bytecode):
-            # A simple loop to read dalvik bytecode. LIEF returns list of bytes.
-            op = bytecode[idx]
+        # Use block_queue for recursive traversal instead of linear sweep.
+        # This avoids misinterpreting data payloads (packed-switch-payload,
+        # sparse-switch-payload, fill-array-data-payload) as instructions.
+        visited_offsets = set()
 
-            if op not in DALVIK_OPCODES:
-                LOGGER.warning(
-                    "Unknown Dalvik opcode 0x%02x at offset 0x%x, aborting method disassembly.",
-                    op,
-                    start_addr + idx,
-                )
-                break
-            mnemonic, length_units = DALVIK_OPCODES[op]
-            length_bytes = length_units * 2
+        while state.hasUnprocessedBlocks():
+            block_start_addr = state.chooseNextBlock()
+            idx = block_start_addr - bytecode_offset
 
-            if idx + length_bytes > len(bytecode):
-                length_bytes = len(bytecode) - idx
+            while 0 <= idx < len(bytecode):
+                if idx in visited_offsets:
+                    break
+                visited_offsets.add(idx)
 
-            i_bytes = bytes(bytecode[idx : idx + length_bytes])
-            i_address = start_addr + idx
-            i_size = length_bytes
-            i_mnemonic = mnemonic
-            i_op_str = ""
+                op = bytecode[idx]
 
-            state.setNextInstructionReachable(True)
+                if op not in DALVIK_OPCODES:
+                    LOGGER.warning(
+                        "Unknown Dalvik opcode 0x%02x at offset 0x%x, aborting block disassembly.",
+                        op,
+                        bytecode_offset + idx,
+                    )
+                    break
+                mnemonic, length_units = DALVIK_OPCODES[op]
+                length_bytes = length_units * 2
 
-            # Simple CFG handling
-            if i_mnemonic in ["return-void", "return", "return-wide", "return-object", "throw"]:
-                state.setNextInstructionReachable(False)
-            elif i_mnemonic.startswith("goto"):
-                target_offset = 0
-                if i_mnemonic == "goto":
-                    target_offset = int.from_bytes(i_bytes[1:2], byteorder="little", signed=True) * 2
-                elif i_mnemonic == "goto/16":
+                if idx + length_bytes > len(bytecode):
+                    break
+
+                i_bytes = bytes(bytecode[idx : idx + length_bytes])
+                i_address = bytecode_offset + idx
+                i_size = length_bytes
+                i_mnemonic = mnemonic
+                i_op_str = ""
+
+                state.setNextInstructionReachable(True)
+
+                # CFG handling
+                if i_mnemonic in ["return-void", "return", "return-wide", "return-object", "throw"]:
+                    state.setNextInstructionReachable(False)
+                elif i_mnemonic.startswith("goto"):
+                    target_offset = 0
+                    if i_mnemonic == "goto":
+                        target_offset = int.from_bytes(i_bytes[1:2], byteorder="little", signed=True) * 2
+                    elif i_mnemonic == "goto/16":
+                        target_offset = int.from_bytes(i_bytes[2:4], byteorder="little", signed=True) * 2
+                    elif i_mnemonic == "goto/32":
+                        target_offset = int.from_bytes(i_bytes[2:6], byteorder="little", signed=True) * 2
+                    target_address = i_address + target_offset
+                    state.addCodeRef(i_address, target_address, by_jump=True)
+                    state.addBlockToQueue(target_address)
+                    i_op_str = hex(target_address)
+                    state.setNextInstructionReachable(False)
+                elif i_mnemonic.startswith("if-"):
                     target_offset = int.from_bytes(i_bytes[2:4], byteorder="little", signed=True) * 2
-                elif i_mnemonic == "goto/32":
-                    target_offset = int.from_bytes(i_bytes[2:6], byteorder="little", signed=True) * 2
-                target_address = i_address + target_offset
-                state.addCodeRef(i_address, target_address, by_jump=True)
-                i_op_str = hex(target_address)
-                state.setNextInstructionReachable(False)
-            elif i_mnemonic.startswith("if-"):
-                target_offset = int.from_bytes(i_bytes[2:4], byteorder="little", signed=True) * 2
-                target_address = i_address + target_offset
-                state.addCodeRef(i_address, target_address, by_jump=True)
-                i_op_str = hex(target_address)
-            elif i_mnemonic.startswith("invoke-"):
-                method_idx = int.from_bytes(i_bytes[2:4], byteorder="little")
-                try:
-                    target_method = dex_file.methods[method_idx]
-                    i_op_str = target_method.name
-                    # Also we can update API information if we want.
-                except Exception:
-                    i_op_str = f"method_idx_{method_idx}"
+                    target_address = i_address + target_offset
+                    state.addCodeRef(i_address, target_address, by_jump=True)
+                    state.addBlockToQueue(target_address)
+                    # Fall-through is also a valid path
+                    fall_through = i_address + i_size
+                    state.addBlockToQueue(fall_through)
+                    i_op_str = hex(target_address)
+                elif i_mnemonic in ("packed-switch", "sparse-switch"):
+                    # The operand is a relative offset (in code units) to the payload
+                    payload_rel_offset = int.from_bytes(i_bytes[2:6], byteorder="little", signed=True) * 2
+                    payload_byte_idx = idx + payload_rel_offset
+                    switch_targets = self._resolveSwitchTargets(bytecode, idx, payload_byte_idx)
+                    for target_byte_idx in switch_targets:
+                        target_addr = bytecode_offset + target_byte_idx
+                        state.addCodeRef(i_address, target_addr, by_jump=True)
+                        state.addBlockToQueue(target_addr)
+                    # Fall-through after switch is also possible (default case)
+                    fall_through = i_address + i_size
+                    state.addBlockToQueue(fall_through)
+                    i_op_str = f"payload@{hex(bytecode_offset + payload_byte_idx)}"
+                elif i_mnemonic.startswith("invoke-"):
+                    method_idx = int.from_bytes(i_bytes[2:4], byteorder="little")
+                    try:
+                        target_method = dex_file.methods[method_idx]
+                        # Include class name for context (e.g. "Ljava/lang/Object;-><init>")
+                        i_op_str = f"{target_method.cls.fullname}->{target_method.name}"
+                    except Exception:
+                        i_op_str = f"method_idx_{method_idx}"
 
-            state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
-            idx += length_bytes
+                state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
+                idx += length_bytes
+
+                # If this instruction ends the block (return, throw, goto), stop
+                if not state.is_next_instruction_reachable:
+                    break
+
+            state.endBlock()
 
         state.label = method_info["name"]
         state.finalizeAnalysis()
@@ -374,11 +489,11 @@ class DalvikDisassembler:
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "dalvik"
 
-        # Try raw bytes first, then fallback to list
+        # Try raw bytes first, then fallback to bytes() conversion
         try:
             dex_file = lief.DEX.parse(binary_info.raw_data)
         except TypeError:
-            dex_file = lief.DEX.parse(list(binary_info.raw_data))
+            dex_file = lief.DEX.parse(bytes(binary_info.raw_data))
 
         if dex_file:
             for method in dex_file.methods:
@@ -387,8 +502,6 @@ class DalvikDisassembler:
                 code_info = method.code_info
                 if not code_info:
                     continue
-                # method.code_offset gets us an offset but if LIEF returns something we can map:
-                # since DEX doesn't map directly, we use code_offset as address
 
                 method_info = {
                     "offset": method.code_offset,

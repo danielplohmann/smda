@@ -114,17 +114,6 @@ class DalvikFunctionAnalysisState:
             backtracked.append(instruction)
         return backtracked[-num_instructions:]
 
-    def identifyCallConflicts(self, all_refs):
-        conflicts = {}
-        non_instruction_start_bytes = self.processed_bytes.difference(self.instruction_start_bytes)
-        conflict_addrs = set(all_refs.keys()).intersection(non_instruction_start_bytes)
-        for candidate_source_ref in conflict_addrs:
-            candidate = all_refs[candidate_source_ref]
-            if candidate not in conflicts:
-                conflicts[candidate] = []
-            conflicts[candidate].append(candidate_source_ref)
-        return conflicts
-
     def _finalizeRegularAnalysis(self):
         fn_min = min([ins[0] for ins in self.instructions])
         fn_max = max([ins[0] + ins[1] for ins in self.instructions])
