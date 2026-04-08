@@ -26,4 +26,4 @@ class DexFileLoader:
     @staticmethod
     def getCodeAreas(data):
         # We return the whole data as code area
-        return [(0, 0, len(data))]
+        return [(0, len(data))]
