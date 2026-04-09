@@ -156,11 +156,14 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         )
 
     def testBufferDisassembly(self):
-        """Buffer-based disassembly via disassembleUnmappedBuffer"""
+        """Buffer-based disassembly via disassembleUnmappedBuffer produces correct results"""
         self.assertEqual(self.buffer_disassembly.status, "ok")
         self.assertEqual(self.buffer_disassembly.architecture, "dalvik")
         self.assertEqual(self.buffer_disassembly.bitness, 32)
         self.assertEqual(self.buffer_disassembly.base_addr, 0)
+        self.assertEqual(self.buffer_disassembly.num_functions, 2219)
+        self.assertEqual(self.buffer_disassembly.num_instructions, 9593)
+        self.assertEqual(self.buffer_disassembly.num_blocks, 2219)
 
     def testFunctionProperties(self):
         """Individual function properties are well-formed"""

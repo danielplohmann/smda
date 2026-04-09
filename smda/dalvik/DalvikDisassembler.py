@@ -509,13 +509,9 @@ class DalvikDisassembler:
                 dex_file = lief.DEX.parse(binary_info.file_path)
 
         if not dex_file:
-            # Fallback to in-memory list() conversion for raw buffers
-            try:
-                dex_file = lief.DEX.parse(binary_info.raw_data)
-            except (TypeError, Exception):
-                dex_file = None
-            if not dex_file:
-                dex_file = lief.DEX.parse(list(binary_info.raw_data))
+            # Always use list() for in-memory parsing — lief.DEX.parse(bytes) silently
+            # treats bytes as a filename string and returns None without raising TypeError.
+            dex_file = lief.DEX.parse(list(binary_info.raw_data))
 
         if dex_file:
             for method in dex_file.methods:
