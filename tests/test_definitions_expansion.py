@@ -5,7 +5,6 @@ from smda.intel.definitions import COMMON_API_CALLS, GAP_SEQUENCES
 
 
 class TestDefinitionsExpansion(unittest.TestCase):
-
     def test_common_api_calls(self):
         # Check that the list exists and contains a sample of expected APIs
         self.assertTrue(len(COMMON_API_CALLS) > 0)
@@ -25,7 +24,9 @@ class TestDefinitionsExpansion(unittest.TestCase):
         ]
 
         for length, seq in expected_sequences:
-            self.assertIn(seq, GAP_SEQUENCES[length], f"Sequence {seq.hex()} of length {length} not found in GAP_SEQUENCES")
+            self.assertIn(
+                seq, GAP_SEQUENCES[length], f"Sequence {seq.hex()} of length {length} not found in GAP_SEQUENCES"
+            )
 
     def test_ordinal_expansion(self):
         # Test new ordinals
@@ -34,6 +35,7 @@ class TestDefinitionsExpansion(unittest.TestCase):
         self.assertEqual(OrdinalHelper.resolveOrdinal("mfc42.dll", 1), "DllGetClassObject")
         # Case insensitivity
         self.assertEqual(OrdinalHelper.resolveOrdinal("OLEAUT32.DLL", 144), "DllCanUnloadNow")
+
 
 if __name__ == "__main__":
     unittest.main()

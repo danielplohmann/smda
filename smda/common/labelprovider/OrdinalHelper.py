@@ -66,7 +66,7 @@ class OrdinalHelper:
             2: "DllCanUnloadNow",
             3: "DllRegisterServer",
             4: "DllUnregisterServer",
-        }
+        },
     }
 
     @staticmethod
