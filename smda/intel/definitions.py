@@ -138,11 +138,18 @@ GAP_SEQUENCES = {
     ],
     2: [
         b"\x66\x90",  # NOP2_OVERRIDE_NOP - AMD / nop - INTEL
-        b"\x8b\xc0",
+        b"\x8b\xc0",  # mov eax, eax
+        b"\x89\xc0",  # mov eax, eax
         b"\x8b\xff",  # mov edi, edi
+        b"\x89\xff",  # mov edi, edi
         b"\x8d\x00",  # lea eax, dword ptr [eax]
         b"\x86\xc0",  # xchg al, al
         b"\x66\x2e",  # NOP2_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\xeb\x00",  # jmp $+2
+        b"\x8b\xc9",  # mov ecx, ecx
+        b"\x8b\xd2",  # mov edx, edx
+        b"\x8b\xdb",  # mov ebx, ebx
+        b"\x8b\xf6",  # mov esi, esi
     ],
     3: [
         b"\x0f\x1f\x00",  # NOP3_OVERRIDE_NOP - AMD / nop - INTEL
@@ -152,15 +159,23 @@ GAP_SEQUENCES = {
         b"\x8d\x64\x24",  # lea esp, dword ptr [esp]
         b"\x8d\x76\x00",
         b"\x66\x66\x90",
+        b"\x48\x8b\xc0",  # mov rax, rax
+        b"\x48\x89\xc0",  # mov rax, rax
+        b"\x48\x8d\x00",  # lea rax, [rax]
     ],
     4: [
         b"\x0f\x1f\x40\x00",  # NOP4_OVERRIDE_NOP - AMD / nop - INTEL
         b"\x8d\x74\x26\x00",
         b"\x66\x66\x66\x90",
+        b"\x8d\x64\x24\x00",  # lea esp, [esp+0]
+        b"\x48\x8d\x40\x00",  # lea rax, [rax+0]
     ],
     5: [
         b"\x0f\x1f\x44\x00\x00",  # NOP5_OVERRIDE_NOP - AMD / nop - INTEL
         b"\x90\x8d\x74\x26\x00",
+        b"\x66\x0f\x1f\x40\x00",
+        b"\x48\x0f\x1f\x40\x00",
+        b"\x48\x8d\x64\x24\x00",  # lea rsp, [rsp+0]
     ],
     6: [
         b"\x66\x0f\x1f\x44\x00\x00",  # NOP6_OVERRIDE_NOP - AMD / nop - INTEL
