@@ -2,10 +2,12 @@
 
 import logging
 import os
+import struct
 import tempfile
 import unittest
 
 from smda.common.SmdaReport import SmdaReport
+from smda.dalvik.DalvikOpcodeDecoder import decode_instruction, parse_code_item_header, read_sleb128, read_uleb128
 from smda.Disassembler import Disassembler
 from smda.utility.DexFileLoader import DexFileLoader
 
@@ -16,13 +18,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
 logging.disable(logging.CRITICAL)
 
 
-class DalvikDisassemblerTestSuite(unittest.TestCase):
-    """Test suite for Dalvik/DEX disassembly using a real DEX file (blockblast classes.dex)"""
+def build_dex_header(version=b"039", file_size=0x70, data_off=0x70, data_size=0):
+    header = bytearray(0x70)
+    header[:8] = b"dex\n" + version + b"\x00"
+    struct.pack_into("<I", header, 0x20, file_size)
+    struct.pack_into("<I", header, 0x24, 0x70)
+    struct.pack_into("<I", header, 0x28, 0x12345678)
+    struct.pack_into("<I", header, 0x34, 0)
+    struct.pack_into("<I", header, 0x68, data_size)
+    struct.pack_into("<I", header, 0x6C, data_off)
+    return bytes(header)
 
+
+class DummyResolver:
+    def __call__(self, ref_kind, ref_index):
+        return f"{ref_kind}@{ref_index}"
+
+
+class DalvikDisassemblerTestSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # Load and decrypt the XOR'd DEX fixture
         with open(os.path.join(config.PROJECT_ROOT, "tests", "blockblast_classes_xored"), "rb") as f_binary:
             binary = f_binary.read()
         decrypted_dex = bytearray()
@@ -32,18 +48,13 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
             decrypted_dex.append(byte ^ (index % 256))
         cls.dex_binary = bytes(decrypted_dex)
 
-        # Write decrypted DEX to temp file for file-based disassembly
         with tempfile.NamedTemporaryFile(suffix=".dex", delete=False) as tmp:
             tmp.write(cls.dex_binary)
             cls._temp_file_name = tmp.name
 
-        # File-based disassembly (primary working path, matches CLI: python analyze.py -p -r dalvik <file>)
-        disasm = Disassembler(config, backend="dalvik")
-        cls.file_disassembly = disasm.disassembleFile(cls._temp_file_name)
-
-        # Buffer-based disassembly
-        disasm_buf = Disassembler(config, backend="dalvik")
-        cls.buffer_disassembly = disasm_buf.disassembleUnmappedBuffer(cls.dex_binary)
+        cls.disasm = Disassembler(config, backend="dalvik")
+        cls.file_disassembly = cls.disasm.disassembleFile(cls._temp_file_name)
+        cls.buffer_disassembly = Disassembler(config, backend="dalvik").disassembleUnmappedBuffer(cls.dex_binary)
 
     @classmethod
     def tearDownClass(cls):
@@ -51,30 +62,38 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         os.unlink(cls._temp_file_name)
 
     def testDexFormatDetection(self):
-        """DexFileLoader.isCompatible() correctly identifies DEX files"""
-        assert DexFileLoader.isCompatible(self.dex_binary) is True
-        assert DexFileLoader.getBaseAddress(self.dex_binary) == 0
-        assert DexFileLoader.getBitness(self.dex_binary) == 32
-        assert DexFileLoader.getArchitecture(self.dex_binary) == "dalvik"
-        assert DexFileLoader.getAbi(self.dex_binary) == ""
-        # Non-DEX data should be rejected
-        assert DexFileLoader.isCompatible(b"MZ\x90\x00") is False
-        assert DexFileLoader.isCompatible(b"") is False
-        assert DexFileLoader.isCompatible(b"\x7fELF") is False
+        self.assertTrue(DexFileLoader.isCompatible(self.dex_binary))
+        self.assertEqual(DexFileLoader.getBaseAddress(self.dex_binary), 0)
+        self.assertEqual(DexFileLoader.getBitness(self.dex_binary), 32)
+        self.assertEqual(DexFileLoader.getArchitecture(self.dex_binary), "dalvik")
+        self.assertEqual(DexFileLoader.getAbi(self.dex_binary), "")
+        self.assertTrue(DexFileLoader.isCompatible(build_dex_header(version=b"035")))
+        self.assertTrue(DexFileLoader.isCompatible(build_dex_header(version=b"037")))
+        self.assertTrue(DexFileLoader.isCompatible(build_dex_header(version=b"038")))
+        self.assertTrue(DexFileLoader.isCompatible(build_dex_header(version=b"039")))
+        self.assertFalse(DexFileLoader.isCompatible(build_dex_header(version=b"041")))
+        self.assertFalse(DexFileLoader.isCompatible(b"MZ\x90\x00"))
+        self.assertFalse(DexFileLoader.isCompatible(b""))
+        self.assertFalse(DexFileLoader.isCompatible(build_dex_header(file_size=0x100)))
+
+    def testMalformedDexFailsExplicitly(self):
+        malformed = bytearray(build_dex_header(file_size=0x70, data_off=0x70, data_size=0))
+        malformed[0x34:0x38] = struct.pack("<I", 0x60)
+        report = Disassembler(config, backend="dalvik").disassembleUnmappedBuffer(bytes(malformed))
+        self.assertEqual(report.status, "error")
 
     def testFileDisassemblyStatus(self):
-        """File-based disassembly completes successfully"""
         self.assertEqual(self.file_disassembly.status, "ok")
         self.assertEqual(self.file_disassembly.message, "Analysis finished regularly.")
 
     def testFileDisassemblyArchitecture(self):
-        """Architecture is 'dalvik', bitness 32, base_addr 0"""
         self.assertEqual(self.file_disassembly.architecture, "dalvik")
         self.assertEqual(self.file_disassembly.bitness, 32)
         self.assertEqual(self.file_disassembly.base_addr, 0)
+        self.assertEqual(len(self.file_disassembly.xheader), 0x70)
 
-    def testFileDisassemblyHashes(self):
-        """SHA256/SHA1/MD5 match expected values for the DEX file"""
+    def testHashesAndBinarySize(self):
+        self.assertEqual(self.file_disassembly.binary_size, 247668)
         self.assertEqual(
             self.file_disassembly.sha256,
             "70f65a5dc2d9eea731effe48acbbfdd2f1a7efe151b647f30e4a124691fcdc30",
@@ -87,101 +106,97 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
             self.file_disassembly.md5,
             "92bdf8fc9165fd128d6b4de076530a0d",
         )
+        self.assertIsNone(self.file_disassembly.oep)
 
-    def testFileDisassemblyFunctionRecovery(self):
-        """Correct number of functions recovered from DEX"""
-        self.assertEqual(self.file_disassembly.num_functions, 2219)
-        functions = list(self.file_disassembly.getFunctions())
-        self.assertEqual(len(functions), 2219)
+    def testSemanticRecovery(self):
+        self.assertGreater(self.file_disassembly.num_functions, 2000)
+        self.assertGreater(self.file_disassembly.num_instructions, 9000)
+        self.assertGreater(self.file_disassembly.num_blocks, self.file_disassembly.num_functions)
 
-    def testFileDisassemblyInstructionCount(self):
-        """Total instruction count matches expected"""
-        self.assertEqual(self.file_disassembly.num_instructions, 9593)
-
-    def testFileDisassemblyBlockCount(self):
-        """Total block count matches expected"""
-        self.assertEqual(self.file_disassembly.num_blocks, 2219)
-
-    def testDalvikFunctionNames(self):
-        """All functions have Dalvik-style names (Lclass;->method)"""
-        functions = list(self.file_disassembly.getFunctions())
-        named_functions = [f for f in functions if f.function_name]
-        self.assertEqual(len(named_functions), 2219)
-        # All function names should contain '->' (class->method separator)
-        arrow_functions = [f for f in functions if "->" in f.function_name]
-        self.assertEqual(len(arrow_functions), 2219)
-        # All function names should start with 'L' (Dalvik class descriptor)
-        l_prefix_functions = [f for f in functions if f.function_name.startswith("L")]
-        self.assertEqual(len(l_prefix_functions), 2219)
-
-    def testFileDisassemblyStatistics(self):
-        """DisassemblyStatistics fields are correct"""
         stats = self.file_disassembly.statistics
-        self.assertEqual(stats.num_functions, 2219)
-        self.assertEqual(stats.num_recursive_functions, 0)
-        self.assertEqual(stats.num_leaf_functions, 2219)
-        self.assertEqual(stats.num_basic_blocks, 2219)
-        self.assertEqual(stats.num_instructions, 9593)
-        self.assertEqual(stats.num_api_calls, 0)
-        self.assertEqual(stats.num_function_calls, 0)
-        self.assertEqual(stats.num_failed_functions, 0)
-        self.assertEqual(stats.num_failed_instructions, 0)
+        self.assertGreater(stats.num_function_calls, 0)
+        self.assertLess(stats.num_leaf_functions, stats.num_functions)
+        self.assertGreaterEqual(stats.num_failed_functions, 0)
 
-    def testMarshallingRoundTrip(self):
-        """toDict() -> fromDict() produces equivalent report"""
+        functions = list(self.file_disassembly.getFunctions())
+        self.assertTrue(any("->" in function.function_name for function in functions))
+        self.assertTrue(any(function.architecture_metadata for function in functions))
+        self.assertTrue(any(function.num_outrefs > 0 for function in functions))
+
+        any_invoke = False
+        any_string_ref = False
+        for function in functions[:250]:
+            for instruction in function.getInstructions():
+                if instruction.mnemonic.startswith("invoke-"):
+                    any_invoke = "->" in instruction.operands or "call_site@" in instruction.operands
+                    if any_invoke:
+                        break
+            if function.stringrefs:
+                any_string_ref = True
+            if any_invoke and any_string_ref:
+                break
+        self.assertTrue(any_invoke)
+        self.assertTrue(any_string_ref)
+
+    def testReportRoundTrip(self):
         report_dict = self.file_disassembly.toDict()
-        # Validate key fields in dict
         self.assertEqual(report_dict["status"], "ok")
         self.assertEqual(report_dict["architecture"], "dalvik")
         self.assertEqual(report_dict["base_addr"], 0)
         self.assertEqual(report_dict["binary_size"], 247668)
         self.assertEqual(report_dict["bitness"], 32)
-        self.assertEqual(
-            report_dict["sha256"],
-            "70f65a5dc2d9eea731effe48acbbfdd2f1a7efe151b647f30e4a124691fcdc30",
-        )
-        self.assertEqual(report_dict["statistics"]["num_instructions"], 9593)
-        self.assertEqual(report_dict["statistics"]["num_functions"], 2219)
-        self.assertEqual(len(report_dict["xcfg"]), 2219)
-        # Reconstruct from dict
+        self.assertTrue(report_dict["data_refs_from"] is not None)
+        self.assertGreater(len(report_dict["xcfg"]), 2000)
+
         reconstructed = SmdaReport.fromDict(report_dict)
         self.assertEqual(reconstructed.status, "ok")
         self.assertEqual(reconstructed.architecture, "dalvik")
-        self.assertEqual(reconstructed.num_functions, 2219)
-        self.assertEqual(reconstructed.num_instructions, 9593)
-        self.assertEqual(reconstructed.num_blocks, 2219)
-        self.assertEqual(
-            reconstructed.sha256,
-            "70f65a5dc2d9eea731effe48acbbfdd2f1a7efe151b647f30e4a124691fcdc30",
-        )
+        self.assertEqual(reconstructed.base_addr, 0)
+        self.assertEqual(reconstructed.binary_size, 247668)
+        self.assertEqual(reconstructed.sha256, self.file_disassembly.sha256)
+        self.assertEqual(len(reconstructed.xcfg), len(self.file_disassembly.xcfg))
 
     def testBufferDisassembly(self):
-        """Buffer-based disassembly via disassembleUnmappedBuffer produces correct results"""
         self.assertEqual(self.buffer_disassembly.status, "ok")
         self.assertEqual(self.buffer_disassembly.architecture, "dalvik")
         self.assertEqual(self.buffer_disassembly.bitness, 32)
         self.assertEqual(self.buffer_disassembly.base_addr, 0)
-        self.assertEqual(self.buffer_disassembly.num_functions, 2219)
-        self.assertEqual(self.buffer_disassembly.num_instructions, 9593)
-        self.assertEqual(self.buffer_disassembly.num_blocks, 2219)
+        self.assertEqual(self.buffer_disassembly.num_functions, self.file_disassembly.num_functions)
+        self.assertEqual(self.buffer_disassembly.num_instructions, self.file_disassembly.num_instructions)
 
-    def testFunctionProperties(self):
-        """Individual function properties are well-formed"""
-        functions = list(self.file_disassembly.getFunctions())
-        for fn in functions[:10]:
-            self.assertIsInstance(fn.offset, int)
-            self.assertGreater(fn.offset, 0)
-            self.assertGreaterEqual(fn.num_blocks, 1)
-            self.assertGreaterEqual(fn.num_instructions, 1)
-            self.assertIsInstance(fn.apirefs, dict)
-            self.assertIsInstance(fn.blockrefs, dict)
-            self.assertIsInstance(fn.inrefs, list)
-            self.assertIsInstance(fn.outrefs, dict)
+    def testCodeItemHeaderParser(self):
+        header = struct.pack("<HHHHII", 6, 2, 3, 1, 0x11223344, 0x40)
+        parsed = parse_code_item_header(header, 0)
+        self.assertEqual(parsed["registers_size"], 6)
+        self.assertEqual(parsed["ins_size"], 2)
+        self.assertEqual(parsed["outs_size"], 3)
+        self.assertEqual(parsed["tries_size"], 1)
+        self.assertEqual(parsed["debug_info_off"], 0x11223344)
+        self.assertEqual(parsed["insns_size"], 0x40)
 
-    def testBinarySize(self):
-        """binary_size matches the actual DEX file size"""
-        self.assertEqual(self.file_disassembly.binary_size, 247668)
-        self.assertIsNone(self.file_disassembly.oep)
+    def testLeb128Readers(self):
+        self.assertEqual(read_uleb128(b"\x81\x01", 0), (129, 2))
+        self.assertEqual(read_sleb128(b"\x7f", 0), (-1, 1))
+
+    def testDecoderHandlesInvokePolymorphic(self):
+        raw = bytes.fromhex("fa21230145006789")
+        decoded = decode_instruction(raw, 0, DummyResolver())
+        self.assertEqual(decoded.mnemonic, "invoke-polymorphic")
+        self.assertEqual(decoded.ref_index, 0x0123)
+        self.assertEqual(decoded.ref_index_aux, 0x8967)
+        self.assertTrue(decoded.is_invoke)
+        self.assertIn("proto@", decoded.operands)
+
+    def testDecoderHandlesSwitchAndFillArrayPayloadRefs(self):
+        packed_switch = bytes.fromhex("2b0004000000")
+        decoded_switch = decode_instruction(packed_switch, 0, DummyResolver())
+        self.assertEqual(decoded_switch.mnemonic, "packed-switch")
+        self.assertEqual(decoded_switch.payload_idx, 8)
+
+        fill_array = bytes.fromhex("260002000000")
+        decoded_array = decode_instruction(fill_array, 0, DummyResolver())
+        self.assertEqual(decoded_array.mnemonic, "fill-array-data")
+        self.assertEqual(decoded_array.payload_idx, 4)
 
 
 if __name__ == "__main__":

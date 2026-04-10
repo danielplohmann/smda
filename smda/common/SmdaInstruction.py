@@ -25,6 +25,15 @@ class SmdaInstruction:
             self.operands = ins_list[3]
 
     def getDataRefs(self):
+        explicit_refs = set()
+        smda_report = self.smda_function.smda_report
+        if hasattr(smda_report, "data_refs_from") and self.offset in smda_report.data_refs_from:
+            explicit_refs.update(smda_report.data_refs_from[self.offset])
+        yield from sorted(explicit_refs)
+        if explicit_refs:
+            return
+        if smda_report.architecture != "intel":
+            return
         if self.getMnemonicGroup(IntelInstructionEscaper) != "C":
             detailed = self.getDetailed()
             if len(detailed.operands) > 0:

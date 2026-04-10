@@ -24,6 +24,7 @@ class DisassemblyResult:
         self.exported_functions = set()
         self.failed_analysis_addr = []
         self.function_borders = {}
+        self.function_metadata = {}
         # stored as key: int(i.address) = (i.size, i.mnemonic, i.op_str)
         self.instructions = {}
         self.ins2fn = {}

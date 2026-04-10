@@ -15,6 +15,10 @@ CALL_INS = [
     "invoke-direct/range",
     "invoke-static/range",
     "invoke-interface/range",
+    "invoke-polymorphic",
+    "invoke-polymorphic/range",
+    "invoke-custom",
+    "invoke-custom/range",
 ]
 # Any return-* or throw is an end instruction
 END_INS = ["return-void", "return", "return-wide", "return-object", "throw"]
@@ -33,6 +37,7 @@ class DalvikFunctionAnalysisState:
         self.processed_blocks = set()
         self.processed_bytes = set()
         self.jump_targets = set()
+        self.block_starts = {start_addr}
         self.call_register_ins = []
         self.block_start = 0xFFFFFFFF
         self.data_bytes = set()
@@ -41,7 +46,6 @@ class DalvikFunctionAnalysisState:
         self.code_refs_from = {}
         self.code_refs_to = {}
         self.suspicious_ins_count = 0
-        self.is_jmp = False
         self.is_next_instruction_reachable = True
         self.is_block_ending_instruction = False
         self.is_sanely_ending = False
@@ -52,6 +56,7 @@ class DalvikFunctionAnalysisState:
         self.is_recursive = False
         self.is_thunk_call = False
         self.label = ""
+        self.metadata = {}
 
     def chooseNextBlock(self):
         self.is_block_ending_instruction = False
@@ -60,8 +65,12 @@ class DalvikFunctionAnalysisState:
         return self.block_start
 
     def addBlockToQueue(self, block_start):
+        self.block_starts.add(block_start)
         if block_start not in self.processed_blocks:
             self.block_queue.append(block_start)
+
+    def addBlockStart(self, block_start):
+        self.block_starts.add(block_start)
 
     def endBlock(self):
         if self.current_block:
@@ -76,8 +85,7 @@ class DalvikFunctionAnalysisState:
         for byte in range(i_size):
             self.processed_bytes.add(i_address + byte)
         if self.is_next_instruction_reachable:
-            self.addCodeRef(i_address, i_address + i_size, self.is_jmp)
-        self.is_jmp = False
+            self.addCodeRef(i_address, i_address + i_size)
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.update([(addr_from, addr_to)])
@@ -88,7 +96,6 @@ class DalvikFunctionAnalysisState:
         refs_to.update([addr_from])
         self.code_refs_to[addr_to] = refs_to
         if by_jump:
-            self.is_jmp = True
             self.jump_targets.update([addr_to])
 
     def removeCodeRef(self, addr_from, addr_to):
@@ -120,6 +127,7 @@ class DalvikFunctionAnalysisState:
 
         self.disassembly.function_symbols[self.start_addr] = self.label
         self.disassembly.function_borders[self.start_addr] = (fn_min, fn_max)
+        self.disassembly.function_metadata[self.start_addr] = self.metadata
         for ins in self.instructions:
             self.disassembly.instructions[ins[0]] = (ins[2], ins[1])
             for offset in range(ins[1]):
@@ -183,6 +191,7 @@ class DalvikFunctionAnalysisState:
         ins = {i[0]: ind for ind, i in enumerate(self.instructions)}
         potential_starts = {self.start_addr}
         potential_starts.update(list(self.jump_targets))
+        potential_starts.update(self.block_starts)
         blocks = []
         for start in sorted(potential_starts):
             if start not in ins:

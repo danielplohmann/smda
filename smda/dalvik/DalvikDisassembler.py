@@ -6,530 +6,587 @@ import struct
 import lief
 
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
+from smda.dalvik.DalvikOpcodeDecoder import (
+    decode_instruction,
+    parse_code_item_header,
+    read_sleb128,
+    read_uleb128,
+)
 from smda.DisassemblyResult import DisassemblyResult
+from smda.utility.DexFileLoader import DexFileLoader
 
 LOGGER = logging.getLogger(__name__)
 
-# Complete lookup table for Dalvik opcodes per the Android Dalvik bytecode specification.
-# Each entry maps opcode -> (mnemonic, size_in_16bit_code_units).
-# Reference: https://source.android.com/docs/core/runtime/dalvik-bytecode
-DALVIK_OPCODES = {
-    # Moves and misc (0x00-0x0D)
-    0x00: ("nop", 1),
-    0x01: ("move", 1),
-    0x02: ("move/from16", 2),
-    0x03: ("move/16", 3),
-    0x04: ("move-wide", 1),
-    0x05: ("move-wide/from16", 2),
-    0x06: ("move-wide/16", 3),
-    0x07: ("move-object", 1),
-    0x08: ("move-object/from16", 2),
-    0x09: ("move-object/16", 3),
-    0x0A: ("move-result", 1),
-    0x0B: ("move-result-wide", 1),
-    0x0C: ("move-result-object", 1),
-    0x0D: ("move-exception", 1),
-    # Returns (0x0E-0x11)
-    0x0E: ("return-void", 1),
-    0x0F: ("return", 1),
-    0x10: ("return-wide", 1),
-    0x11: ("return-object", 1),
-    # Constants (0x12-0x1C)
-    0x12: ("const/4", 1),
-    0x13: ("const/16", 2),
-    0x14: ("const", 3),
-    0x15: ("const/high16", 2),
-    0x16: ("const-wide/16", 2),
-    0x17: ("const-wide/32", 3),
-    0x18: ("const-wide", 5),
-    0x19: ("const-wide/high16", 2),
-    0x1A: ("const-string", 2),
-    0x1B: ("const-string/jumbo", 3),
-    0x1C: ("const-class", 2),
-    # Monitor and type checks (0x1D-0x23)
-    0x1D: ("monitor-enter", 1),
-    0x1E: ("monitor-exit", 1),
-    0x1F: ("check-cast", 2),
-    0x20: ("instance-of", 2),
-    0x21: ("array-length", 1),
-    0x22: ("new-instance", 2),
-    0x23: ("new-array", 2),
-    # Filled arrays (0x24-0x26)
-    0x24: ("filled-new-array", 3),
-    0x25: ("filled-new-array/range", 3),
-    0x26: ("fill-array-data", 3),
-    # Throw (0x27)
-    0x27: ("throw", 1),
-    # Gotos (0x28-0x2A)
-    0x28: ("goto", 1),
-    0x29: ("goto/16", 2),
-    0x2A: ("goto/32", 3),
-    # Switches (0x2B-0x2C)
-    0x2B: ("packed-switch", 3),
-    0x2C: ("sparse-switch", 3),
-    # Comparisons (0x2D-0x31)
-    0x2D: ("cmpl-float", 2),
-    0x2E: ("cmpg-float", 2),
-    0x2F: ("cmpl-double", 2),
-    0x30: ("cmpg-double", 2),
-    0x31: ("cmp-long", 2),
-    # If-test two registers (0x32-0x37)
-    0x32: ("if-eq", 2),
-    0x33: ("if-ne", 2),
-    0x34: ("if-lt", 2),
-    0x35: ("if-ge", 2),
-    0x36: ("if-gt", 2),
-    0x37: ("if-le", 2),
-    # If-testz single register (0x38-0x3D)
-    0x38: ("if-eqz", 2),
-    0x39: ("if-nez", 2),
-    0x3A: ("if-ltz", 2),
-    0x3B: ("if-gez", 2),
-    0x3C: ("if-gtz", 2),
-    0x3D: ("if-lez", 2),
-    # (0x3E-0x43 are unused)
-    # Array operations (0x44-0x51) - format 23x, 2 code units
-    0x44: ("aget", 2),
-    0x45: ("aget-wide", 2),
-    0x46: ("aget-object", 2),
-    0x47: ("aget-boolean", 2),
-    0x48: ("aget-byte", 2),
-    0x49: ("aget-char", 2),
-    0x4A: ("aget-short", 2),
-    0x4B: ("aput", 2),
-    0x4C: ("aput-wide", 2),
-    0x4D: ("aput-object", 2),
-    0x4E: ("aput-boolean", 2),
-    0x4F: ("aput-byte", 2),
-    0x50: ("aput-char", 2),
-    0x51: ("aput-short", 2),
-    # Instance field operations (0x52-0x5F) - format 22c, 2 code units
-    0x52: ("iget", 2),
-    0x53: ("iget-wide", 2),
-    0x54: ("iget-object", 2),
-    0x55: ("iget-boolean", 2),
-    0x56: ("iget-byte", 2),
-    0x57: ("iget-char", 2),
-    0x58: ("iget-short", 2),
-    0x59: ("iput", 2),
-    0x5A: ("iput-wide", 2),
-    0x5B: ("iput-object", 2),
-    0x5C: ("iput-boolean", 2),
-    0x5D: ("iput-byte", 2),
-    0x5E: ("iput-char", 2),
-    0x5F: ("iput-short", 2),
-    # Static field operations (0x60-0x6D) - format 21c, 2 code units
-    0x60: ("sget", 2),
-    0x61: ("sget-wide", 2),
-    0x62: ("sget-object", 2),
-    0x63: ("sget-boolean", 2),
-    0x64: ("sget-byte", 2),
-    0x65: ("sget-char", 2),
-    0x66: ("sget-short", 2),
-    0x67: ("sput", 2),
-    0x68: ("sput-wide", 2),
-    0x69: ("sput-object", 2),
-    0x6A: ("sput-boolean", 2),
-    0x6B: ("sput-byte", 2),
-    0x6C: ("sput-char", 2),
-    0x6D: ("sput-short", 2),
-    # Invoke operations (0x6E-0x72) - format 35c, 3 code units
-    0x6E: ("invoke-virtual", 3),
-    0x6F: ("invoke-super", 3),
-    0x70: ("invoke-direct", 3),
-    0x71: ("invoke-static", 3),
-    0x72: ("invoke-interface", 3),
-    # (0x73 is unused)
-    # Invoke range operations (0x74-0x78) - format 3rc, 3 code units
-    0x74: ("invoke-virtual/range", 3),
-    0x75: ("invoke-super/range", 3),
-    0x76: ("invoke-direct/range", 3),
-    0x77: ("invoke-static/range", 3),
-    0x78: ("invoke-interface/range", 3),
-    # (0x79-0x7A are unused)
-    # Unary operations (0x7B-0x8F) - format 12x, 1 code unit
-    0x7B: ("neg-int", 1),
-    0x7C: ("not-int", 1),
-    0x7D: ("neg-long", 1),
-    0x7E: ("not-long", 1),
-    0x7F: ("neg-float", 1),
-    0x80: ("neg-double", 1),
-    0x81: ("int-to-long", 1),
-    0x82: ("int-to-float", 1),
-    0x83: ("int-to-double", 1),
-    0x84: ("long-to-int", 1),
-    0x85: ("long-to-float", 1),
-    0x86: ("long-to-double", 1),
-    0x87: ("float-to-int", 1),
-    0x88: ("float-to-long", 1),
-    0x89: ("float-to-double", 1),
-    0x8A: ("double-to-int", 1),
-    0x8B: ("double-to-long", 1),
-    0x8C: ("double-to-float", 1),
-    0x8D: ("int-to-byte", 1),
-    0x8E: ("int-to-char", 1),
-    0x8F: ("int-to-short", 1),
-    # Binary operations (0x90-0xAF) - format 23x, 2 code units
-    0x90: ("add-int", 2),
-    0x91: ("sub-int", 2),
-    0x92: ("mul-int", 2),
-    0x93: ("div-int", 2),
-    0x94: ("rem-int", 2),
-    0x95: ("and-int", 2),
-    0x96: ("or-int", 2),
-    0x97: ("xor-int", 2),
-    0x98: ("shl-int", 2),
-    0x99: ("shr-int", 2),
-    0x9A: ("ushr-int", 2),
-    0x9B: ("add-long", 2),
-    0x9C: ("sub-long", 2),
-    0x9D: ("mul-long", 2),
-    0x9E: ("div-long", 2),
-    0x9F: ("rem-long", 2),
-    0xA0: ("and-long", 2),
-    0xA1: ("or-long", 2),
-    0xA2: ("xor-long", 2),
-    0xA3: ("shl-long", 2),
-    0xA4: ("shr-long", 2),
-    0xA5: ("ushr-long", 2),
-    0xA6: ("add-float", 2),
-    0xA7: ("sub-float", 2),
-    0xA8: ("mul-float", 2),
-    0xA9: ("div-float", 2),
-    0xAA: ("rem-float", 2),
-    0xAB: ("add-double", 2),
-    0xAC: ("sub-double", 2),
-    0xAD: ("mul-double", 2),
-    0xAE: ("div-double", 2),
-    0xAF: ("rem-double", 2),
-    # Binary operations 2addr (0xB0-0xCF) - format 12x, 1 code unit
-    0xB0: ("add-int/2addr", 1),
-    0xB1: ("sub-int/2addr", 1),
-    0xB2: ("mul-int/2addr", 1),
-    0xB3: ("div-int/2addr", 1),
-    0xB4: ("rem-int/2addr", 1),
-    0xB5: ("and-int/2addr", 1),
-    0xB6: ("or-int/2addr", 1),
-    0xB7: ("xor-int/2addr", 1),
-    0xB8: ("shl-int/2addr", 1),
-    0xB9: ("shr-int/2addr", 1),
-    0xBA: ("ushr-int/2addr", 1),
-    0xBB: ("add-long/2addr", 1),
-    0xBC: ("sub-long/2addr", 1),
-    0xBD: ("mul-long/2addr", 1),
-    0xBE: ("div-long/2addr", 1),
-    0xBF: ("rem-long/2addr", 1),
-    0xC0: ("and-long/2addr", 1),
-    0xC1: ("or-long/2addr", 1),
-    0xC2: ("xor-long/2addr", 1),
-    0xC3: ("shl-long/2addr", 1),
-    0xC4: ("shr-long/2addr", 1),
-    0xC5: ("ushr-long/2addr", 1),
-    0xC6: ("add-float/2addr", 1),
-    0xC7: ("sub-float/2addr", 1),
-    0xC8: ("mul-float/2addr", 1),
-    0xC9: ("div-float/2addr", 1),
-    0xCA: ("rem-float/2addr", 1),
-    0xCB: ("add-double/2addr", 1),
-    0xCC: ("sub-double/2addr", 1),
-    0xCD: ("mul-double/2addr", 1),
-    0xCE: ("div-double/2addr", 1),
-    0xCF: ("rem-double/2addr", 1),
-    # Binary operations lit16 (0xD0-0xD7) - format 22s, 2 code units
-    0xD0: ("add-int/lit16", 2),
-    0xD1: ("rsub-int", 2),
-    0xD2: ("mul-int/lit16", 2),
-    0xD3: ("div-int/lit16", 2),
-    0xD4: ("rem-int/lit16", 2),
-    0xD5: ("and-int/lit16", 2),
-    0xD6: ("or-int/lit16", 2),
-    0xD7: ("xor-int/lit16", 2),
-    # Binary operations lit8 (0xD8-0xE2) - format 22b, 2 code units
-    0xD8: ("add-int/lit8", 2),
-    0xD9: ("rsub-int/lit8", 2),
-    0xDA: ("mul-int/lit8", 2),
-    0xDB: ("div-int/lit8", 2),
-    0xDC: ("rem-int/lit8", 2),
-    0xDD: ("and-int/lit8", 2),
-    0xDE: ("or-int/lit8", 2),
-    0xDF: ("xor-int/lit8", 2),
-    0xE0: ("shl-int/lit8", 2),
-    0xE1: ("shr-int/lit8", 2),
-    0xE2: ("ushr-int/lit8", 2),
-    # (0xE3-0xF9 are unused)
-    # Invoke-polymorphic (0xFA-0xFB) - format 45cc/4rcc, 4 code units
-    0xFA: ("invoke-polymorphic", 4),
-    0xFB: ("invoke-polymorphic/range", 4),
-    # Invoke-custom (0xFC-0xFD) - format 35c/3rc, 3 code units
-    0xFC: ("invoke-custom", 3),
-    0xFD: ("invoke-custom/range", 3),
-    # Const method handle/type (0xFE-0xFF) - format 21c, 2 code units
-    0xFE: ("const-method-handle", 2),
-    0xFF: ("const-method-type", 2),
-}
 
-# The size is in 16-bit code units.
+class DexReferenceResolver:
+    PRIMITIVE_TYPES = {
+        "VOID_T": "V",
+        "BOOLEAN": "Z",
+        "BYTE": "B",
+        "SHORT": "S",
+        "CHAR": "C",
+        "INT": "I",
+        "LONG": "J",
+        "FLOAT": "F",
+        "DOUBLE": "D",
+    }
+    ACCESS_FLAG_NAMES = [
+        (0x0001, "public"),
+        (0x0002, "private"),
+        (0x0004, "protected"),
+        (0x0008, "static"),
+        (0x0010, "final"),
+        (0x0020, "synchronized"),
+        (0x0040, "bridge"),
+        (0x0080, "varargs"),
+        (0x0100, "native"),
+        (0x0200, "interface"),
+        (0x0400, "abstract"),
+        (0x0800, "strict"),
+        (0x1000, "synthetic"),
+        (0x2000, "annotation"),
+        (0x4000, "enum"),
+        (0x8000, "unused"),
+        (0x10000, "constructor"),
+        (0x20000, "declared-synchronized"),
+    ]
+
+    def __init__(self, dex_file):
+        self.dex_file = dex_file
+        self.strings = list(getattr(dex_file, "strings", []))
+        self.methods = self._index_items(getattr(dex_file, "methods", []))
+        self.fields = self._index_items(getattr(dex_file, "fields", []))
+        self.types = self._index_items(getattr(dex_file, "types", []))
+        self.prototypes = self._index_items(getattr(dex_file, "prototypes", []))
+        self.classes = self._index_items(getattr(dex_file, "classes", []))
+
+    def _index_items(self, items):
+        indexed = {}
+        for index, item in enumerate(items):
+            indexed[getattr(item, "index", index)] = item
+        return indexed
+
+    def _safe_get(self, collection, index):
+        if index in collection:
+            return collection[index]
+        return None
+
+    def _safe_attr(self, obj, attr, default=None):
+        try:
+            return getattr(obj, attr)
+        except Exception:
+            return default
+
+    def _format_type(self, type_obj):
+        if type_obj is None:
+            return "<?>"
+        if isinstance(type_obj, str):
+            return type_obj
+        with contextlib.suppress(Exception):
+            type_as_string = str(type_obj)
+            if type_as_string and not type_as_string.startswith("<lief."):
+                return type_as_string
+        fullname = self._safe_attr(type_obj, "fullname", None)
+        if fullname:
+            return fullname
+        name = self._safe_attr(type_obj, "name", None)
+        if name:
+            return name
+        value = self._safe_attr(type_obj, "value", None)
+        if value is not None:
+            fullname = self._safe_attr(value, "fullname", None)
+            if fullname:
+                return fullname
+            primitive_name = self.PRIMITIVE_TYPES.get(self._safe_attr(value, "name", ""), None)
+            if primitive_name:
+                return primitive_name
+            name = self._safe_attr(value, "name", None)
+            if name:
+                return name
+            with contextlib.suppress(Exception):
+                return str(value)
+        with contextlib.suppress(Exception):
+            return repr(type_obj)
+        return "<?>"
+
+    def _format_proto(self, prototype):
+        if prototype is None:
+            return "()<?>"
+        params = []
+        for param in getattr(prototype, "parameters_type", []):
+            params.append(self._format_type(param))
+        return_type = self._format_type(getattr(prototype, "return_type", None))
+        return f"({''.join(params)}){return_type}"
+
+    def format_method(self, method):
+        if method is None:
+            return "method@<?>"
+        class_name = self._format_type(getattr(method, "cls", None))
+        method_name = getattr(method, "name", "<?>")
+        prototype = self._format_proto(getattr(method, "prototype", None))
+        return f"{class_name}->{method_name}{prototype}"
+
+    def format_field(self, field):
+        if field is None:
+            return "field@<?>"
+        class_name = self._format_type(getattr(field, "cls", None))
+        field_name = getattr(field, "name", "<?>")
+        field_type = self._format_type(getattr(field, "type", None))
+        return f"{class_name}->{field_name}:{field_type}"
+
+    def format_proto(self, index):
+        prototype = self._safe_get(self.prototypes, index)
+        if prototype is None:
+            return f"proto@{index}"
+        return self._format_proto(prototype)
+
+    def format_type_by_index(self, index):
+        type_obj = self._safe_get(self.types, index)
+        if type_obj is None:
+            return f"type@{index}"
+        return self._format_type(type_obj)
+
+    def format_ref(self, ref_kind, index):
+        if ref_kind == "string":
+            if 0 <= index < len(self.strings):
+                return '"' + self.strings[index].replace('"', '\\"') + '"'
+            return f"string@{index}"
+        if ref_kind == "type":
+            return self.format_type_by_index(index)
+        if ref_kind == "field":
+            return self.format_field(self._safe_get(self.fields, index))
+        if ref_kind == "method":
+            return self.format_method(self._safe_get(self.methods, index))
+        if ref_kind == "proto":
+            return self.format_proto(index)
+        if ref_kind == "method_handle":
+            return f"method_handle@{index}"
+        if ref_kind == "call_site":
+            return f"call_site@{index}"
+        return f"{ref_kind}@{index}" if ref_kind else f"item@{index}"
+
+    def get_method(self, method_index):
+        return self._safe_get(self.methods, method_index)
+
+    def get_method_target(self, method_index):
+        method = self.get_method(method_index)
+        if method is None:
+            return None, None
+        code_offset = getattr(method, "code_offset", 0)
+        code_info = getattr(method, "code_info", None)
+        if code_offset and code_info:
+            return code_offset, self.format_method(method)
+        return None, self.format_method(method)
+
+    def get_string_value(self, string_index):
+        if 0 <= string_index < len(self.strings):
+            return self.strings[string_index]
+        return None
+
+    def get_method_metadata(self, method):
+        access_flags = getattr(method, "access_flags", 0)
+        access_flags = getattr(access_flags, "value", access_flags)
+        if isinstance(access_flags, (list, tuple, set)):
+            normalized_flags = 0
+            for flag in access_flags:
+                normalized_flags |= getattr(flag, "value", 0)
+            access_flags = normalized_flags
+        access_flag_names = [name for mask, name in self.ACCESS_FLAG_NAMES if access_flags & mask]
+        method_name = self.format_method(method)
+        return {
+            "method_name": method_name,
+            "class_name": self._format_type(getattr(method, "cls", None)),
+            "prototype": self._format_proto(getattr(method, "prototype", None)),
+            "access_flags": access_flags,
+            "access_flags_decoded": access_flag_names,
+        }
 
 
 class DalvikDisassembler:
+    MAX_SWITCH_TARGETS_FOR_HEURISTIC = 32
+
     def __init__(self, config):
         self.config = config
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
 
     def addPdbFile(self, binary_info, pdb_path):
-        pass
+        return
 
     def _getPayloadSize(self, bytecode, idx):
-        """Calculate the size (in bytes) of a data payload at the given index.
-
-        Dalvik embeds data payloads (packed-switch, sparse-switch, fill-array-data)
-        inline in the instruction stream. The first 16-bit code unit is a pseudo-opcode
-        identifying the payload type, and the remaining data follows a defined layout.
-        Returns the total size in bytes, or 0 if not a recognized payload.
-        """
-        if idx + 2 > len(bytecode):
+        if idx < 0 or idx + 2 > len(bytecode):
             return 0
         ident = struct.unpack_from("<H", bytecode, idx)[0]
         if ident == 0x0100:
-            # packed-switch-payload: ident(2) + size(2) + first_key(4) + targets(size*4)
-            if idx + 4 > len(bytecode):
+            if idx + 8 > len(bytecode):
                 return 0
             size = struct.unpack_from("<H", bytecode, idx + 2)[0]
-            return 2 + 2 + 4 + size * 4
+            return 8 + size * 4
         if ident == 0x0200:
-            # sparse-switch-payload: ident(2) + size(2) + keys(size*4) + targets(size*4)
             if idx + 4 > len(bytecode):
                 return 0
             size = struct.unpack_from("<H", bytecode, idx + 2)[0]
-            return 2 + 2 + size * 4 + size * 4
+            return 4 + size * 8
         if ident == 0x0300:
-            # fill-array-data-payload: ident(2) + element_width(2) + size(4) + data(size*width)
             if idx + 8 > len(bytecode):
                 return 0
             element_width = struct.unpack_from("<H", bytecode, idx + 2)[0]
             size = struct.unpack_from("<I", bytecode, idx + 4)[0]
             data_size = size * element_width
-            # Pad to 2-byte boundary
             if data_size % 2:
                 data_size += 1
-            return 2 + 2 + 4 + data_size
+            return 8 + data_size
         return 0
 
     def _resolveSwitchTargets(self, bytecode, switch_insn_idx, payload_idx):
-        """Resolve branch targets from a packed-switch or sparse-switch payload.
-
-        Args:
-            bytecode: The raw bytecode buffer.
-            switch_insn_idx: The byte offset of the switch instruction within bytecode.
-            payload_idx: The byte offset of the payload within bytecode.
-
-        Returns:
-            A list of absolute byte offsets (relative to bytecode start) for each target.
-        """
-        if payload_idx < 0 or payload_idx + 2 > len(bytecode):
+        if payload_idx < 0 or payload_idx + 4 > len(bytecode):
             return []
         ident = struct.unpack_from("<H", bytecode, payload_idx)[0]
-        if payload_idx + 4 > len(bytecode):
-            return []
         size = struct.unpack_from("<H", bytecode, payload_idx + 2)[0]
-
         targets = []
         if ident == 0x0100:
-            # packed-switch: targets start at payload + 8 (after ident + size + first_key)
             targets_start = payload_idx + 8
-            for i in range(size):
-                off = targets_start + i * 4
+            for index in range(size):
+                off = targets_start + index * 4
                 if off + 4 > len(bytecode):
                     break
                 rel_offset = struct.unpack_from("<i", bytecode, off)[0]
-                # Offset is in code units (16-bit) relative to the switch instruction
                 targets.append(switch_insn_idx + rel_offset * 2)
         elif ident == 0x0200:
-            # sparse-switch: targets start at payload + 4 + size*4 (after ident + size + keys)
             targets_start = payload_idx + 4 + size * 4
-            for i in range(size):
-                off = targets_start + i * 4
+            for index in range(size):
+                off = targets_start + index * 4
                 if off + 4 > len(bytecode):
                     break
                 rel_offset = struct.unpack_from("<i", bytecode, off)[0]
                 targets.append(switch_insn_idx + rel_offset * 2)
         return targets
 
-    def analyzeFunction(self, dex_file, method_info):
-        start_addr = method_info["offset"]
+    def _resolveReference(self, resolver, ref_kind, ref_index):
+        return resolver.format_ref(ref_kind, ref_index)
 
-        raw_data = method_info["raw_data"]
+    def _parseTryBlocks(self, raw_data, resolver, bytecode_offset, insns_size_units, tries_size):
+        if tries_size == 0:
+            return []
+        tries_offset = bytecode_offset + insns_size_units * 2
+        if insns_size_units % 2:
+            tries_offset += 2
+        if tries_offset + tries_size * 8 > len(raw_data):
+            raise ValueError("Invalid try_item table")
+        handlers_offset = tries_offset + tries_size * 8
+        encoded_handler_count, cursor = read_uleb128(raw_data, handlers_offset)
+        handlers_by_offset = {}
+        for _ in range(encoded_handler_count):
+            handler_relative = cursor - handlers_offset
+            encoded_size, cursor = read_sleb128(raw_data, cursor)
+            catch_all_addr = None
+            handlers = []
+            for _ in range(abs(encoded_size)):
+                type_idx, cursor = read_uleb128(raw_data, cursor)
+                addr, cursor = read_uleb128(raw_data, cursor)
+                handlers.append({"type_idx": type_idx, "addr_units": addr})
+            if encoded_size <= 0:
+                catch_all_addr, cursor = read_uleb128(raw_data, cursor)
+            handlers_by_offset[handler_relative] = {
+                "handlers": handlers,
+                "catch_all_addr": catch_all_addr,
+            }
 
-        # In LIEF, method.code_offset (which is passed as start_addr) points directly to the
-        # Dalvik bytecode instructions, NOT the start of the 16-byte code_item header.
+        try_items = []
+        for index in range(tries_size):
+            start_addr_units, insn_count_units, handler_off = struct.unpack_from(
+                "<IHH",
+                raw_data,
+                tries_offset + index * 8,
+            )
+            resolved = handlers_by_offset.get(handler_off, {"handlers": [], "catch_all_addr": None})
+            try_items.append(
+                {
+                    "start_addr": bytecode_offset + start_addr_units * 2,
+                    "end_addr": bytecode_offset + (start_addr_units + insn_count_units) * 2,
+                    "handlers": [
+                        {
+                            "type_idx": handler["type_idx"],
+                            "type_name": resolver.format_type_by_index(handler["type_idx"]),
+                            "target_addr": bytecode_offset + handler["addr_units"] * 2,
+                        }
+                        for handler in resolved["handlers"]
+                    ],
+                    "catch_all_addr": (
+                        bytecode_offset + resolved["catch_all_addr"] * 2
+                        if resolved["catch_all_addr"] is not None
+                        else None
+                    ),
+                }
+            )
+        return try_items
+
+    def _instructionCanThrow(self, decoded):
+        if decoded.can_throw:
+            return True
+        return decoded.mnemonic.startswith("invoke-")
+
+    def _updateApiInformation(self, from_addr, api_name):
+        self.disassembly.addr_to_api[from_addr] = api_name
+
+    def _applyExceptionEdges(self, state, instruction_addr, decoded, try_blocks):
+        for try_block in try_blocks:
+            if not (try_block["start_addr"] <= instruction_addr < try_block["end_addr"]):
+                continue
+            for handler in try_block["handlers"]:
+                target_addr = handler["target_addr"]
+                state.addCodeRef(instruction_addr, target_addr)
+                state.addBlockStart(target_addr)
+                state.addBlockToQueue(target_addr)
+            if try_block["catch_all_addr"] is not None:
+                state.addCodeRef(instruction_addr, try_block["catch_all_addr"])
+                state.addBlockStart(try_block["catch_all_addr"])
+                state.addBlockToQueue(try_block["catch_all_addr"])
+
+    def _buildFunctionMetadata(self, resolver, method, code_item_header, try_blocks):
+        metadata = resolver.get_method_metadata(method)
+        metadata.update(
+            {
+                "registers_size": code_item_header["registers_size"],
+                "ins_size": code_item_header["ins_size"],
+                "outs_size": code_item_header["outs_size"],
+                "tries_size": code_item_header["tries_size"],
+                "debug_info_off": code_item_header["debug_info_off"],
+                "insns_size_units": code_item_header["insns_size"],
+                "exception_handlers": len(try_blocks),
+                "heuristics": [],
+                "reference_counts": {
+                    "string": 0,
+                    "type": 0,
+                    "field": 0,
+                    "method": 0,
+                    "proto": 0,
+                    "call_site": 0,
+                    "method_handle": 0,
+                },
+            }
+        )
+        return metadata
+
+    def _updateHeuristics(self, metadata, decoded, payload_size):
+        heuristics = metadata["heuristics"]
+        if metadata["tries_size"] > 0 and "exception-obfuscation-surface" not in heuristics:
+            heuristics.append("exception-obfuscation-surface")
+        if (
+            decoded.mnemonic
+            in {
+                "invoke-custom",
+                "invoke-custom/range",
+                "invoke-polymorphic",
+                "invoke-polymorphic/range",
+            }
+            and "advanced-dispatch" not in heuristics
+        ):
+            heuristics.append("advanced-dispatch")
+        if (
+            decoded.payload_kind in {"packed-switch", "sparse-switch"}
+            and payload_size > self.MAX_SWITCH_TARGETS_FOR_HEURISTIC * 4
+            and "large-switch-payload" not in heuristics
+        ):
+            heuristics.append("large-switch-payload")
+        if decoded.ref_kind == "method":
+            operand = decoded.operands
+            if (
+                any(indicator in operand for indicator in ("Ljava/lang/reflect/", "Ljava/lang/Class;->forName"))
+                and "reflection-hotspot" not in heuristics
+            ):
+                heuristics.append("reflection-hotspot")
+            if (
+                any(
+                    indicator in operand
+                    for indicator in ("loadLibrary", "load(", "DexClassLoader", "InMemoryDexClassLoader")
+                )
+                and "native-or-dynamic-loading" not in heuristics
+            ):
+                heuristics.append("native-or-dynamic-loading")
+        if (
+            decoded.mnemonic == "const-string"
+            and metadata["reference_counts"]["string"] >= 3
+            and "string-staging" not in heuristics
+        ):
+            heuristics.append("string-staging")
+
+    def analyzeFunction(self, dex_file, resolver, method):
+        start_addr = getattr(method, "code_offset", 0)
+        raw_data = self.disassembly.binary_info.raw_data
         bytecode_offset = start_addr
         header_offset = start_addr - 16
-
-        if header_offset < 0 or header_offset + 16 > len(raw_data):
-            return None
-
-        # The LIEF Python API for CodeInfo does not expose insns_size. We manually parse
-        # it from the code_item header. It's a 4-byte integer at offset 12.
-        insns_size_units = struct.unpack_from("<I", raw_data, header_offset + 12)[0]
-        insns_size_bytes = insns_size_units * 2
-
+        code_item_header = parse_code_item_header(raw_data, header_offset)
+        insns_size_bytes = code_item_header["insns_size"] * 2
         if bytecode_offset + insns_size_bytes > len(raw_data):
-            LOGGER.warning(
-                "Bytecode range [0x%x:0x%x] exceeds raw data size (0x%x), skipping method.",
-                bytecode_offset,
-                bytecode_offset + insns_size_bytes,
-                len(raw_data),
-            )
-            return None
+            raise ValueError("Invalid Dalvik bytecode range")
 
         bytecode = raw_data[bytecode_offset : bytecode_offset + insns_size_bytes]
+        try_blocks = self._parseTryBlocks(
+            raw_data,
+            resolver,
+            bytecode_offset,
+            code_item_header["insns_size"],
+            code_item_header["tries_size"],
+        )
 
-        # Addresses are relative to bytecode_offset (where instructions actually start),
-        # not start_addr (which points to the code_item header).
         state = DalvikFunctionAnalysisState(bytecode_offset, self.disassembly)
+        metadata = self._buildFunctionMetadata(resolver, method, code_item_header, try_blocks)
+        state.metadata = metadata
+        for try_block in try_blocks:
+            for handler in try_block["handlers"]:
+                state.addBlockToQueue(handler["target_addr"])
+            if try_block["catch_all_addr"] is not None:
+                state.addBlockToQueue(try_block["catch_all_addr"])
 
-        # Use block_queue for recursive traversal instead of linear sweep.
-        # This avoids misinterpreting data payloads (packed-switch-payload,
-        # sparse-switch-payload, fill-array-data-payload) as instructions.
         visited_offsets = set()
+        payload_ranges = []
 
         while state.hasUnprocessedBlocks():
             block_start_addr = state.chooseNextBlock()
             idx = block_start_addr - bytecode_offset
-
             while 0 <= idx < len(bytecode):
+                if any(start <= idx < end for start, end in payload_ranges):
+                    break
                 if idx in visited_offsets:
                     break
                 visited_offsets.add(idx)
 
-                op = bytecode[idx]
-
-                if op not in DALVIK_OPCODES:
-                    LOGGER.warning(
-                        "Unknown Dalvik opcode 0x%02x at offset 0x%x, aborting block disassembly.",
-                        op,
-                        bytecode_offset + idx,
+                try:
+                    decoded = decode_instruction(
+                        bytecode,
+                        idx,
+                        lambda ref_kind, ref_index: self._resolveReference(resolver, ref_kind, ref_index),
                     )
+                except ValueError as exc:
+                    self.disassembly.errors[bytecode_offset + idx] = {
+                        "type": "dalvik_decode_error",
+                        "instruction_bytes": bytecode[idx : idx + 2].hex(),
+                        "message": str(exc),
+                    }
+                    LOGGER.warning("Failed to decode Dalvik instruction at 0x%x: %s", bytecode_offset + idx, exc)
                     break
-                mnemonic, length_units = DALVIK_OPCODES[op]
-                length_bytes = length_units * 2
 
-                if idx + length_bytes > len(bytecode):
-                    break
-
-                i_bytes = bytes(bytecode[idx : idx + length_bytes])
                 i_address = bytecode_offset + idx
-                i_size = length_bytes
-                i_mnemonic = mnemonic
-                i_op_str = ""
+                i_size = decoded.size_bytes
+                i_mnemonic = decoded.mnemonic
+                i_op_str = decoded.operands
 
-                state.setNextInstructionReachable(True)
+                if decoded.ref_kind in metadata["reference_counts"]:
+                    metadata["reference_counts"][decoded.ref_kind] += 1
 
-                # CFG handling
-                if i_mnemonic in ["return-void", "return", "return-wide", "return-object", "throw"]:
-                    state.setNextInstructionReachable(False)
-                elif i_mnemonic.startswith("goto"):
-                    target_offset = 0
-                    if i_mnemonic == "goto":
-                        target_offset = int.from_bytes(i_bytes[1:2], byteorder="little", signed=True) * 2
-                    elif i_mnemonic == "goto/16":
-                        target_offset = int.from_bytes(i_bytes[2:4], byteorder="little", signed=True) * 2
-                    elif i_mnemonic == "goto/32":
-                        target_offset = int.from_bytes(i_bytes[2:6], byteorder="little", signed=True) * 2
-                    target_address = i_address + target_offset
-                    state.addCodeRef(i_address, target_address, by_jump=True)
-                    state.addBlockToQueue(target_address)
-                    i_op_str = hex(target_address)
-                    state.setNextInstructionReachable(False)
-                elif i_mnemonic.startswith("if-"):
-                    target_offset = int.from_bytes(i_bytes[2:4], byteorder="little", signed=True) * 2
-                    target_address = i_address + target_offset
-                    state.addCodeRef(i_address, target_address, by_jump=True)
-                    state.addBlockToQueue(target_address)
-                    # Fall-through is also a valid path
-                    fall_through = i_address + i_size
-                    state.addBlockToQueue(fall_through)
-                    i_op_str = hex(target_address)
-                elif i_mnemonic in ("packed-switch", "sparse-switch"):
-                    # The operand is a relative offset (in code units) to the payload
-                    payload_rel_offset = int.from_bytes(i_bytes[2:6], byteorder="little", signed=True) * 2
-                    payload_byte_idx = idx + payload_rel_offset
-                    switch_targets = self._resolveSwitchTargets(bytecode, idx, payload_byte_idx)
-                    for target_byte_idx in switch_targets:
-                        target_addr = bytecode_offset + target_byte_idx
-                        state.addCodeRef(i_address, target_addr, by_jump=True)
-                        state.addBlockToQueue(target_addr)
-                    # Fall-through after switch is also possible (default case)
-                    fall_through = i_address + i_size
-                    state.addBlockToQueue(fall_through)
-                    i_op_str = f"payload@{hex(bytecode_offset + payload_byte_idx)}"
-                elif i_mnemonic.startswith("invoke-"):
-                    method_idx = int.from_bytes(i_bytes[2:4], byteorder="little")
-                    try:
-                        target_method = dex_file.methods[method_idx]
-                        # Include class name for context (e.g. "Ljava/lang/Object;-><init>")
-                        i_op_str = f"{target_method.cls.fullname}->{target_method.name}"
-                    except Exception:
-                        i_op_str = f"method_idx_{method_idx}"
+                state.setNextInstructionReachable(not decoded.is_terminator)
 
-                state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
-                idx += length_bytes
+                if decoded.ref_kind == "string" and decoded.ref_index is not None:
+                    string_value = resolver.get_string_value(decoded.ref_index)
+                    if string_value is not None:
+                        self.disassembly.addStringRef(state.start_addr, i_address, string_value)
+                if decoded.payload_idx is not None:
+                    payload_size = self._getPayloadSize(bytecode, decoded.payload_idx)
+                    if payload_size:
+                        payload_ranges.append((decoded.payload_idx, decoded.payload_idx + payload_size))
+                        payload_addr = bytecode_offset + decoded.payload_idx
+                        state.addDataRef(i_address, payload_addr, size=payload_size)
+                        if decoded.payload_kind in ("packed-switch", "sparse-switch"):
+                            switch_targets = self._resolveSwitchTargets(bytecode, idx, decoded.payload_idx)
+                            for target_idx in switch_targets:
+                                target_addr = bytecode_offset + target_idx
+                                state.addCodeRef(i_address, target_addr, by_jump=True)
+                                state.addBlockStart(target_addr)
+                                state.addBlockToQueue(target_addr)
+                            fallthrough = i_address + i_size
+                            state.addBlockStart(fallthrough)
+                            state.addBlockToQueue(fallthrough)
+                    self._updateHeuristics(metadata, decoded, payload_size)
+                else:
+                    self._updateHeuristics(metadata, decoded, 0)
 
-                # If this instruction ends the block (return, throw, goto), stop
+                if i_mnemonic.startswith("goto"):
+                    target_addr = bytecode_offset + decoded.branch_target_idx
+                    state.addCodeRef(i_address, target_addr, by_jump=True)
+                    state.addBlockStart(target_addr)
+                    state.addBlockToQueue(target_addr)
+                elif decoded.is_conditional and decoded.branch_target_idx is not None:
+                    target_addr = bytecode_offset + decoded.branch_target_idx
+                    state.addCodeRef(i_address, target_addr, by_jump=True)
+                    state.addBlockStart(target_addr)
+                    state.addBlockToQueue(target_addr)
+                    fallthrough = i_address + i_size
+                    state.addBlockStart(fallthrough)
+                    state.addBlockToQueue(fallthrough)
+                elif decoded.is_invoke:
+                    state.setLeaf(False)
+                    call_target = None
+                    call_name = None
+                    if decoded.ref_kind == "method" and decoded.ref_index is not None:
+                        call_target, call_name = resolver.get_method_target(decoded.ref_index)
+                    elif decoded.ref_index is not None:
+                        call_name = resolver.format_ref(decoded.ref_kind, decoded.ref_index)
+                    if call_target is not None:
+                        state.addCodeRef(i_address, call_target)
+                        if call_target == state.start_addr:
+                            state.setRecursion(True)
+                    elif call_name:
+                        self._updateApiInformation(i_address, call_name)
+
+                if self._instructionCanThrow(decoded) and try_blocks:
+                    self._applyExceptionEdges(state, i_address, decoded, try_blocks)
+
+                state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, decoded.bytes_)
+                idx += i_size
                 if not state.is_next_instruction_reachable:
                     break
-
             state.endBlock()
 
-        state.label = method_info["name"]
+        state.label = resolver.format_method(method)
         state.finalizeAnalysis()
         return state
 
     def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
-        LOGGER.debug(
-            "Analyzing buffer with %d bytes @0x%08x",
-            binary_info.binary_size,
-            binary_info.base_addr,
-        )
+        LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "dalvik"
+        self.disassembly.binary_info.version = ""
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "dalvik"
 
-        # Try raw bytes first, then fallback to list() conversion
-        # LIEF's Python bindings for parse() interpret bytes() as a filename string!
-        # Parsing a massive binary blob via list() is extremely slow in Python (taking minutes).
-        # We must prioritize loading the file natively using C++ fstream if a file path is provided.
+        if not DexFileLoader.isCompatible(binary_info.raw_data):
+            raise ValueError("Buffer is not a valid DEX file")
+
         dex_file = None
         if getattr(binary_info, "file_path", "") and not getattr(binary_info, "is_buffer", False):
             with contextlib.suppress(Exception):
                 dex_file = lief.DEX.parse(binary_info.file_path)
-
-        if not dex_file:
-            # Always use list() for in-memory parsing — lief.DEX.parse(bytes) silently
-            # treats bytes as a filename string and returns None without raising TypeError.
+        if dex_file is None:
             dex_file = lief.DEX.parse(list(binary_info.raw_data))
+        if dex_file is None:
+            raise ValueError("Failed to parse DEX file")
 
-        if dex_file:
-            for method in dex_file.methods:
-                if not method.has_class:
-                    continue
-                code_info = method.code_info
-                if not code_info:
-                    continue
+        self.disassembly.binary_info.version = getattr(dex_file, "version", "")
+        resolver = DexReferenceResolver(dex_file)
 
-                method_info = {
-                    "offset": method.code_offset,
-                    "name": f"{method.cls.fullname}->{method.name}",
-                    "code_item": code_info,
-                    "raw_data": binary_info.raw_data,
+        for method in dex_file.methods:
+            if cbAnalysisTimeout and cbAnalysisTimeout():
+                break
+            if not getattr(method, "has_class", False):
+                continue
+            if not getattr(method, "code_info", None):
+                continue
+            if getattr(method, "code_offset", 0) < 16:
+                continue
+            try:
+                self.analyzeFunction(dex_file, resolver, method)
+            except Exception as exc:
+                LOGGER.warning("Failed to analyze Dalvik method %s: %s", getattr(method, "name", "<?>"), exc)
+                method_offset = getattr(method, "code_offset", 0)
+                self.disassembly.failed_analysis_addr.append(method_offset)
+                self.disassembly.errors[method_offset] = {
+                    "type": "dalvik_function_error",
+                    "instruction_bytes": "",
+                    "message": str(exc),
                 }
-                if cbAnalysisTimeout and cbAnalysisTimeout():
-                    break
-                self.analyzeFunction(dex_file, method_info)
 
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout and cbAnalysisTimeout():

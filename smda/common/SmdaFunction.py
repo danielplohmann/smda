@@ -24,6 +24,7 @@ class SmdaFunction:
     code_inrefs = None
     code_outrefs = None
     is_exported = None
+    architecture_metadata = None
     # metadata
     binweight = 0
     characteristics = ""
@@ -45,6 +46,7 @@ class SmdaFunction:
             self.inrefs = disassembly.getInRefs(function_offset)
             self.outrefs = disassembly.getOutRefs(function_offset)
             self.is_exported = self.offset in disassembly.exported_functions
+            self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
             # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             self.characteristics = (
@@ -62,7 +64,14 @@ class SmdaFunction:
                 if function_offset in disassembly.candidates
                 else None
             )
-            if config and config.WITH_STRINGS:
+            if (
+                config
+                and config.WITH_STRINGS
+                or (
+                    disassembly.binary_info.architecture == "dalvik"
+                    and disassembly.getStringRefsForFunction(function_offset)
+                )
+            ):
                 self.stringrefs = disassembly.getStringRefsForFunction(function_offset)
             if config and config.CALCULATE_HASHING:
                 self.pic_hash = self.getPicHash(disassembly.binary_info)
@@ -93,10 +102,16 @@ class SmdaFunction:
 
     @property
     def num_calls(self):
+        architecture = self.smda_report.architecture if self.smda_report else ""
+        if architecture == "dalvik":
+            return sum([1 for ins in self.getInstructions() if ins.mnemonic.startswith("invoke-")])
         return sum([1 for ins in self.getInstructions() if ins.mnemonic == "call"])
 
     @property
     def num_returns(self):
+        architecture = self.smda_report.architecture if self.smda_report else ""
+        if architecture == "dalvik":
+            return sum([1 for ins in self.getInstructions() if ins.mnemonic.startswith("return")])
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
 
     def isApiThunk(self):
@@ -229,6 +244,7 @@ class SmdaFunction:
         smda_function.outrefs = {int(k): v for k, v in function_dict["outrefs"].items()}
         # provide some legacy support by assuming functions are not exported for SMDA reports < 1.7.0
         smda_function.is_exported = function_dict.get("is_exported", False)
+        smda_function.architecture_metadata = function_dict.get("architecture_metadata", {})
         smda_function.binweight = function_dict["metadata"]["binweight"]
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]
@@ -278,6 +294,7 @@ class SmdaFunction:
             "inrefs": self.inrefs,
             "outrefs": self.outrefs,
             "is_exported": self.is_exported,
+            "architecture_metadata": self.architecture_metadata if self.architecture_metadata is not None else {},
             "metadata": {
                 "binweight": self.binweight,
                 "characteristics": self.characteristics,

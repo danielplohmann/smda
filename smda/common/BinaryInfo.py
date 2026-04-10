@@ -139,4 +139,6 @@ class BinaryInfo:
                 return self.raw_data[:0x400]
             elif isinstance(lief_result, lief.ELF.Binary):
                 return self.raw_data[:0x40]
+            elif self.architecture == "dalvik" or self.raw_data[:4] == b"dex\n":
+                return self.raw_data[:0x70]
         return None
