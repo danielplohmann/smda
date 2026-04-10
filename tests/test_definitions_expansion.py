@@ -1,6 +1,8 @@
 import unittest
-from smda.intel.definitions import GAP_SEQUENCES, COMMON_API_CALLS
+
 from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
+from smda.intel.definitions import COMMON_API_CALLS, GAP_SEQUENCES
+
 
 class TestDefinitionsExpansion(unittest.TestCase):
 
