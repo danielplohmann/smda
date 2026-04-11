@@ -30,9 +30,7 @@ class TestDefinitionsExpansion(unittest.TestCase):
 
     def test_ordinal_expansion(self):
         # Test new ordinals
-        self.assertEqual(OrdinalHelper.resolveOrdinal("ole32.dll", 101), "CoTaskMemAlloc")
         self.assertEqual(OrdinalHelper.resolveOrdinal("oleaut32.dll", 6), "SysFreeString")
-        self.assertEqual(OrdinalHelper.resolveOrdinal("mfc42.dll", 1), "DllGetClassObject")
         # Case insensitivity
         self.assertEqual(OrdinalHelper.resolveOrdinal("OLEAUT32.DLL", 144), "DllCanUnloadNow")
 

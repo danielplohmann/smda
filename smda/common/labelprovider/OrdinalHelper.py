@@ -1,5 +1,6 @@
 class OrdinalHelper:
     # Central mapping for DLL ordinals to function names, synchronized from data/apiscout_*.json
+    # Only include mappings that are stable across Windows versions (XP, Win7, Win10+).
     ORDINALS = {
         "ws2_32.dll": {
             1: "accept",
@@ -36,19 +37,6 @@ class OrdinalHelper:
             22: "shutdown",
             23: "socket",
         },
-        "ole32.dll": {
-            101: "CoTaskMemAlloc",
-            102: "CoTaskMemFree",
-            103: "CoTaskMemRealloc",
-            106: "CoUninitialize",
-            134: "CreateBindCtx",
-            214: "IIDFromString",
-            217: "IsValidIid",
-            218: "IsValidInterface",
-            254: "OleInitialize",
-            277: "OleUninitialize",
-            324: "StringFromGUID2",
-        },
         "oleaut32.dll": {
             2: "SysAllocString",
             4: "SysAllocStringLen",
@@ -60,12 +48,6 @@ class OrdinalHelper:
             144: "DllCanUnloadNow",
             149: "SysStringByteLen",
             150: "SysAllocStringByteLen",
-        },
-        "mfc42.dll": {
-            1: "DllGetClassObject",
-            2: "DllCanUnloadNow",
-            3: "DllRegisterServer",
-            4: "DllUnregisterServer",
         },
     }
 
