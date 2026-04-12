@@ -1,5 +1,5 @@
 class OrdinalHelper:
-    # Central mapping for DLL ordinals to function names, synchronized from data/apiscout_*.json
+    # Central mapping for DLL ordinals to function names.
     # Only include mappings that are stable across Windows versions (XP, Win7, Win10+).
     ORDINALS = {
         "ws2_32.dll": {
