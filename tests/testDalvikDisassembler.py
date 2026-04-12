@@ -3,12 +3,16 @@
 import logging
 import os
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 
+from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaReport import SmdaReport
 from smda.dalvik.DalvikOpcodeDecoder import decode_instruction, parse_code_item_header, read_sleb128, read_uleb128
 from smda.Disassembler import Disassembler
+from smda.DisassemblyResult import DisassemblyResult
 from smda.utility.DexFileLoader import DexFileLoader
 
 from .context import config
@@ -137,6 +141,116 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
                 break
         self.assertTrue(any_invoke)
         self.assertTrue(any_string_ref)
+        normalized_invokes = [
+            instruction.operands
+            for function in functions[:250]
+            for instruction in function.getInstructions()
+            if instruction.mnemonic.startswith("invoke-") and "->" in instruction.operands
+        ]
+        self.assertTrue(normalized_invokes)
+        self.assertTrue(all(" - " not in operand for operand in normalized_invokes[:50]))
+
+    def testNormalizedBlockRefsPreserveLeafBlocksAndExceptionEdges(self):
+        func_addr = 0x1000
+        disassembly = DisassemblyResult()
+        disassembly.functions[func_addr] = [
+            [
+                (0x1000, 2, "invoke-static", "", b"\x6e\x00"),
+                (0x1002, 2, "move-result-object", "", b"\x0c\x00"),
+                (0x1004, 2, "return-object", "", b"\x11\x00"),
+            ],
+            [
+                (0x1010, 2, "move-exception", "", b"\x0d\x00"),
+                (0x1012, 2, "return-object", "", b"\x11\x00"),
+            ],
+            [
+                (0x1020, 2, "move-exception", "", b"\x0d\x00"),
+                (0x1022, 2, "return-object", "", b"\x11\x00"),
+            ],
+            [(0x1030, 2, "return-void", "", b"\x0e\x00")],
+        ]
+        disassembly.function_metadata[func_addr] = {
+            "try_ranges": [
+                {
+                    "start_addr": 0x1000,
+                    "end_addr": 0x1004,
+                    "handlers": [{"type_idx": 1, "type_name": "Ljava/lang/Exception;", "target_addr": 0x1010}],
+                    "catch_all_addr": 0x1020,
+                }
+            ]
+        }
+        blockrefs = disassembly.getBlockRefs(func_addr)
+        self.assertEqual(blockrefs[0x1000], [0x1010, 0x1020])
+        self.assertEqual(blockrefs[0x1010], [])
+        self.assertEqual(blockrefs[0x1020], [])
+        self.assertEqual(blockrefs[0x1030], [])
+
+    def testSmdaFunctionNormalizesSerializedDalvikCfg(self):
+        function_dict = {
+            "offset": 0x1000,
+            "blocks": {
+                0x1000: [
+                    [0x1000, "6e00", "invoke-static", ""],
+                    [0x1002, "0c00", "move-result-object", ""],
+                    [0x1004, "1100", "return-object", ""],
+                ],
+                0x1010: [[0x1010, "0d00", "move-exception", ""], [0x1012, "1100", "return-object", ""]],
+                0x1020: [[0x1020, "0d00", "move-exception", ""], [0x1022, "1100", "return-object", ""]],
+            },
+            "apirefs": {},
+            "stringrefs": {},
+            "blockrefs": {},
+            "inrefs": [],
+            "outrefs": {},
+            "is_exported": False,
+            "architecture_metadata": {
+                "debug_info_off": 0,
+                "try_ranges": [
+                    {
+                        "start_addr": 0x1000,
+                        "end_addr": 0x1004,
+                        "handlers": [{"type_idx": 1, "type_name": "Ljava/lang/Exception;", "target_addr": 0x1010}],
+                        "catch_all_addr": 0x1020,
+                    }
+                ],
+                "exception_handlers": [
+                    {
+                        "type_idx": 1,
+                        "type_name": "Ljava/lang/Exception;",
+                        "target_addr": 0x1010,
+                        "protected_range_start": 0x1000,
+                        "protected_range_end": 0x1004,
+                    }
+                ],
+            },
+            "metadata": {
+                "binweight": 0,
+                "characteristics": "",
+                "confidence": 0.0,
+                "function_name": "LFoo;->bar()Ljava/lang/Object;",
+                "pic_hash": None,
+                "nesting_depth": 0,
+                "strongly_connected_components": [],
+                "tfidf": None,
+            },
+        }
+        smda_function = SmdaFunction.fromDict(function_dict)
+        self.assertIn(0x1000, smda_function.blockrefs)
+        self.assertEqual(smda_function.blockrefs[0x1000], [0x1010, 0x1020])
+        self.assertGreater(smda_function.nesting_depth, 0)
+
+    def testDalvikExceptionMetadataAndNormalizedCfg(self):
+        functions_with_tries = [
+            function
+            for function in self.file_disassembly.getFunctions()
+            if function.architecture_metadata.get("try_ranges")
+        ]
+        self.assertTrue(functions_with_tries)
+        function = functions_with_tries[0]
+        self.assertIn("debug_info_off", function.architecture_metadata)
+        self.assertIsInstance(function.architecture_metadata["exception_handlers"], list)
+        self.assertGreaterEqual(function.architecture_metadata["exception_handler_count"], 1)
+        self.assertIn(function.offset, function.blockrefs)
 
     def testReportRoundTrip(self):
         report_dict = self.file_disassembly.toDict()
@@ -163,6 +277,23 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(self.buffer_disassembly.base_addr, 0)
         self.assertEqual(self.buffer_disassembly.num_functions, self.file_disassembly.num_functions)
         self.assertEqual(self.buffer_disassembly.num_instructions, self.file_disassembly.num_instructions)
+
+    def testAnalyzeScriptVerboseOutputAvoidsCfgNoise(self):
+        result = subprocess.run(
+            [sys.executable, os.path.join(config.PROJECT_ROOT, "analyze.py"), "-p", "-v", self._temp_file_name],
+            cwd=config.PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        combined_output = result.stdout + result.stderr
+        self.assertIn("architecture: dalvik.32bit", combined_output)
+        self.assertIn("DEX summary:", combined_output)
+        self.assertIn("Analyzed Dalvik method", combined_output)
+        self.assertIn("Dalvik analysis summary:", combined_output)
+        self.assertNotIn("Current analysis callback time", combined_output)
+        self.assertNotIn("r not in G", combined_output)
 
     def testCodeItemHeaderParser(self):
         header = struct.pack("<HHHHII", 6, 2, 3, 1, 0x11223344, 0x40)

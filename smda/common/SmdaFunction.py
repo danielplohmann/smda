@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import logging
 import re
 import struct
 from typing import Iterator
@@ -10,6 +11,8 @@ from smda.common.Tarjan import Tarjan
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 from .SmdaInstruction import SmdaInstruction
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SmdaFunction:
@@ -47,6 +50,7 @@ class SmdaFunction:
             self.outrefs = disassembly.getOutRefs(function_offset)
             self.is_exported = self.offset in disassembly.exported_functions
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
+            self.blockrefs = self.getNormalizedBlockRefs()
             # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             self.characteristics = (
@@ -157,17 +161,19 @@ class SmdaFunction:
         yield from self.code_outrefs
 
     def _calculateSccs(self):
-        tarjan = Tarjan(self.blockrefs)
+        tarjan = Tarjan(self.getNormalizedBlockRefs())
         tarjan.calculateScc()
         return tarjan.getResult()
 
     def _calculateNestingDepth(self):
         nesting_depth = 0
         try:
-            if self.blockrefs:
-                tree = build_dominator_tree(self.blockrefs, self.offset)
+            normalized_blockrefs = self.getNormalizedBlockRefs()
+            root = self._getCfgRoot(normalized_blockrefs)
+            if normalized_blockrefs and root is not None:
+                tree = build_dominator_tree(normalized_blockrefs, root)
                 if tree:
-                    nesting_depth = get_nesting_depth(self.blockrefs, tree, self.offset)
+                    nesting_depth = get_nesting_depth(normalized_blockrefs, tree, root)
         except Exception:
             pass
         return nesting_depth
@@ -205,6 +211,67 @@ class SmdaFunction:
             instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
             self.blocks[int(offset)] = instructions
             self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
+
+    def _getContainingBlockStart(self, instruction_addr):
+        for block_start, block in self.blocks.items():
+            if not block:
+                continue
+            block_end = block[-1].offset + (len(block[-1].bytes) // 2)
+            if block_start <= instruction_addr < block_end:
+                return block_start
+        return None
+
+    def _getCfgRoot(self, normalized_blockrefs):
+        if self.offset in normalized_blockrefs:
+            return self.offset
+        block_start = self._getContainingBlockStart(self.offset)
+        if block_start is not None:
+            return block_start
+        if normalized_blockrefs:
+            fallback_root = min(normalized_blockrefs)
+            LOGGER.warning(
+                "Normalized CFG for %s (0x%x) has no entry block 0x%x, falling back to 0x%x.",
+                self.function_name or "<unnamed>",
+                self.offset,
+                self.offset,
+                fallback_root,
+            )
+            return fallback_root
+        LOGGER.warning("Normalized CFG for %s (0x%x) is empty.", self.function_name or "<unnamed>", self.offset)
+        return None
+
+    def getNormalizedBlockRefs(self):
+        current_blockrefs = self.blockrefs or {}
+        normalized_blockrefs = {
+            block_start: sorted(current_blockrefs.get(block_start, [])) for block_start in self.blocks
+        }
+        try_ranges = self.architecture_metadata.get("try_ranges", []) if self.architecture_metadata else []
+        for try_range in try_ranges:
+            raw_targets = []
+            for handler in try_range.get("handlers", []):
+                target_addr = handler.get("target_addr") if isinstance(handler, dict) else None
+                if target_addr is not None:
+                    raw_targets.append(target_addr)
+            if try_range.get("catch_all_addr") is not None:
+                raw_targets.append(try_range["catch_all_addr"])
+            if not raw_targets:
+                continue
+            normalized_targets = set()
+            for target_addr in raw_targets:
+                block_start = self._getContainingBlockStart(target_addr)
+                if block_start is None:
+                    block_start = target_addr
+                normalized_targets.add(block_start)
+                normalized_blockrefs.setdefault(block_start, [])
+            for block_start, block in self.blocks.items():
+                if not block:
+                    continue
+                block_end = block[-1].offset + (len(block[-1].bytes) // 2)
+                if try_range["start_addr"] < block_end and block_start < try_range["end_addr"]:
+                    successors = set(normalized_blockrefs.get(block_start, []))
+                    successors.update(normalized_targets)
+                    normalized_blockrefs[block_start] = sorted(successors)
+        return {block_start: normalized_blockrefs[block_start] for block_start in sorted(normalized_blockrefs)}
 
     def toDotGraph(self, with_api=False):
         dot_graph = f'digraph "CFG for 0x{self.offset:x}" {{\n'
@@ -245,6 +312,7 @@ class SmdaFunction:
         # provide some legacy support by assuming functions are not exported for SMDA reports < 1.7.0
         smda_function.is_exported = function_dict.get("is_exported", False)
         smda_function.architecture_metadata = function_dict.get("architecture_metadata", {})
+        smda_function.blockrefs = smda_function.getNormalizedBlockRefs()
         smda_function.binweight = function_dict["metadata"]["binweight"]
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]

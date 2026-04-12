@@ -21,6 +21,7 @@ LOGGER = logging.getLogger(__name__)
 class DexReferenceResolver:
     PRIMITIVE_TYPES = {
         "VOID_T": "V",
+        "VOID": "V",
         "BOOLEAN": "Z",
         "BYTE": "B",
         "SHORT": "S",
@@ -29,6 +30,17 @@ class DexReferenceResolver:
         "LONG": "J",
         "FLOAT": "F",
         "DOUBLE": "D",
+    }
+    STRING_PRIMITIVE_TYPES = {
+        "void": "V",
+        "boolean": "Z",
+        "byte": "B",
+        "short": "S",
+        "char": "C",
+        "int": "I",
+        "long": "J",
+        "float": "F",
+        "double": "D",
     }
     ACCESS_FLAG_NAMES = [
         (0x0001, "public"),
@@ -77,34 +89,50 @@ class DexReferenceResolver:
         except Exception:
             return default
 
+    def _normalize_type_string(self, type_name):
+        if not type_name:
+            return None
+        if type_name in {"V", "Z", "B", "S", "C", "I", "J", "F", "D"}:
+            return type_name
+        if type_name.startswith("[") or (type_name.startswith("L") and type_name.endswith(";")):
+            return type_name
+        lowered = type_name.lower()
+        if lowered in self.STRING_PRIMITIVE_TYPES:
+            return self.STRING_PRIMITIVE_TYPES[lowered]
+        if "." in type_name and "/" not in type_name:
+            return f"L{type_name.replace('.', '/')};"
+        return type_name
+
     def _format_type(self, type_obj):
         if type_obj is None:
             return "<?>"
         if isinstance(type_obj, str):
-            return type_obj
-        with contextlib.suppress(Exception):
-            type_as_string = str(type_obj)
-            if type_as_string and not type_as_string.startswith("<lief."):
-                return type_as_string
+            return self._normalize_type_string(type_obj)
         fullname = self._safe_attr(type_obj, "fullname", None)
         if fullname:
-            return fullname
-        name = self._safe_attr(type_obj, "name", None)
-        if name:
-            return name
+            return self._normalize_type_string(fullname)
         value = self._safe_attr(type_obj, "value", None)
         if value is not None:
             fullname = self._safe_attr(value, "fullname", None)
             if fullname:
-                return fullname
+                return self._normalize_type_string(fullname)
             primitive_name = self.PRIMITIVE_TYPES.get(self._safe_attr(value, "name", ""), None)
             if primitive_name:
                 return primitive_name
             name = self._safe_attr(value, "name", None)
             if name:
-                return name
+                return self._normalize_type_string(name)
             with contextlib.suppress(Exception):
-                return str(value)
+                normalized = self._normalize_type_string(str(value))
+                if normalized and not normalized.startswith("<lief."):
+                    return normalized
+        name = self._safe_attr(type_obj, "name", None)
+        if name:
+            return self._normalize_type_string(name)
+        with contextlib.suppress(Exception):
+            type_as_string = self._normalize_type_string(str(type_obj))
+            if type_as_string and not type_as_string.startswith("<lief.") and " - " not in type_as_string:
+                return type_as_string
         with contextlib.suppress(Exception):
             return repr(type_obj)
         return "<?>"
@@ -212,6 +240,63 @@ class DalvikDisassembler:
 
     def addPdbFile(self, binary_info, pdb_path):
         return
+
+    def _formatReferenceCounts(self, reference_counts):
+        active_counts = [f"{ref_kind}={count}" for ref_kind, count in reference_counts.items() if count]
+        return ", ".join(active_counts) if active_counts else "none"
+
+    def _summarizeHeuristics(self):
+        heuristic_counts = {}
+        for metadata in self.disassembly.function_metadata.values():
+            for heuristic in metadata.get("heuristics", []):
+                heuristic_counts[heuristic] = heuristic_counts.get(heuristic, 0) + 1
+        if not heuristic_counts:
+            return "none"
+        return ", ".join(f"{name}={heuristic_counts[name]}" for name in sorted(heuristic_counts))
+
+    def _logMethodDiagnostics(self, state):
+        metadata = state.metadata
+        outref_count = len(self.disassembly.getOutRefs(state.start_addr))
+        string_ref_count = len(self.disassembly.getStringRefsForFunction(state.start_addr))
+        heuristics = ", ".join(metadata["heuristics"]) if metadata["heuristics"] else "none"
+        LOGGER.debug(
+            "Analyzed Dalvik method 0x%08x %s: ins=%d blocks=%d outrefs=%d handlers=%d strings=%d refs=[%s] heuristics=[%s]",
+            state.start_addr,
+            state.label,
+            len(state.instructions),
+            len(self.disassembly.functions.get(state.start_addr, [])),
+            outref_count,
+            metadata.get("exception_handler_count", 0),
+            string_ref_count,
+            self._formatReferenceCounts(metadata["reference_counts"]),
+            heuristics,
+        )
+
+    def _logAnalysisSummary(self, version, method_counts, analyzed_count):
+        total_blocks = sum(len(blocks) for blocks in self.disassembly.functions.values())
+        total_strings = sum(len(stringrefs) for stringrefs in self.disassembly.stringrefs.values())
+        try_functions = sum(
+            1 for metadata in self.disassembly.function_metadata.values() if metadata.get("exception_handler_count", 0)
+        )
+        LOGGER.debug(
+            "Dalvik analysis summary: version=%s analyzed=%d/%d functions=%d blocks=%d instructions=%d "
+            "api_refs=%d string_refs=%d try_functions=%d failed=%d skipped(no_class=%d,no_code=%d,invalid_offset=%d) "
+            "heuristics=[%s]",
+            version,
+            analyzed_count,
+            method_counts["total"],
+            len(self.disassembly.functions),
+            total_blocks,
+            len(self.disassembly.instructions),
+            len(self.disassembly.addr_to_api),
+            total_strings,
+            try_functions,
+            len(self.disassembly.failed_analysis_addr),
+            method_counts["skipped_no_class"],
+            method_counts["skipped_no_code"],
+            method_counts["skipped_invalid_offset"],
+            self._summarizeHeuristics(),
+        )
 
     def _getPayloadSize(self, bytecode, idx):
         if idx < 0 or idx + 2 > len(bytecode):
@@ -345,6 +430,42 @@ class DalvikDisassembler:
 
     def _buildFunctionMetadata(self, resolver, method, code_item_header, try_blocks):
         metadata = resolver.get_method_metadata(method)
+        exception_handlers = []
+        try_ranges = []
+        for try_block in try_blocks:
+            handlers = [dict(handler) for handler in try_block["handlers"]]
+            handler_targets = [handler["target_addr"] for handler in handlers]
+            for handler in handlers:
+                exception_handlers.append(
+                    {
+                        "type_idx": handler["type_idx"],
+                        "type_name": handler["type_name"],
+                        "target_addr": handler["target_addr"],
+                        "protected_range_start": try_block["start_addr"],
+                        "protected_range_end": try_block["end_addr"],
+                    }
+                )
+            catch_all_addr = try_block["catch_all_addr"]
+            if catch_all_addr is not None:
+                handler_targets.append(catch_all_addr)
+                exception_handlers.append(
+                    {
+                        "type_idx": None,
+                        "type_name": "<catch-all>",
+                        "target_addr": catch_all_addr,
+                        "protected_range_start": try_block["start_addr"],
+                        "protected_range_end": try_block["end_addr"],
+                    }
+                )
+            try_ranges.append(
+                {
+                    "start_addr": try_block["start_addr"],
+                    "end_addr": try_block["end_addr"],
+                    "handlers": handlers,
+                    "handler_targets": handler_targets,
+                    "catch_all_addr": catch_all_addr,
+                }
+            )
         metadata.update(
             {
                 "registers_size": code_item_header["registers_size"],
@@ -353,7 +474,9 @@ class DalvikDisassembler:
                 "tries_size": code_item_header["tries_size"],
                 "debug_info_off": code_item_header["debug_info_off"],
                 "insns_size_units": code_item_header["insns_size"],
-                "exception_handlers": len(try_blocks),
+                "exception_handler_count": len(exception_handlers),
+                "exception_handlers": exception_handlers,
+                "try_ranges": try_ranges,
                 "heuristics": [],
                 "reference_counts": {
                     "string": 0,
@@ -540,6 +663,8 @@ class DalvikDisassembler:
 
         state.label = resolver.format_method(method)
         state.finalizeAnalysis()
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            self._logMethodDiagnostics(state)
         return state
 
     def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
@@ -566,20 +691,47 @@ class DalvikDisassembler:
 
         self.disassembly.binary_info.version = getattr(dex_file, "version", "")
         resolver = DexReferenceResolver(dex_file)
+        methods = list(dex_file.methods)
+        method_counts = {
+            "total": len(methods),
+            "skipped_no_class": 0,
+            "skipped_no_code": 0,
+            "skipped_invalid_offset": 0,
+        }
+        LOGGER.debug(
+            "DEX summary: version=%s classes=%d methods=%d strings=%d types=%d fields=%d protos=%d",
+            self.disassembly.binary_info.version,
+            len(list(getattr(dex_file, "classes", []))),
+            len(methods),
+            len(resolver.strings),
+            len(resolver.types),
+            len(resolver.fields),
+            len(resolver.prototypes),
+        )
 
-        for method in dex_file.methods:
+        analyzed_count = 0
+        for method in methods:
             if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
             if not getattr(method, "has_class", False):
+                method_counts["skipped_no_class"] += 1
                 continue
             if not getattr(method, "code_info", None):
+                method_counts["skipped_no_code"] += 1
                 continue
             if getattr(method, "code_offset", 0) < 16:
+                method_counts["skipped_invalid_offset"] += 1
                 continue
             try:
                 self.analyzeFunction(dex_file, resolver, method)
+                analyzed_count += 1
             except Exception as exc:
-                LOGGER.warning("Failed to analyze Dalvik method %s: %s", getattr(method, "name", "<?>"), exc)
+                LOGGER.warning(
+                    "Failed to analyze Dalvik method %s @0x%x: %s",
+                    resolver.format_method(method),
+                    getattr(method, "code_offset", 0),
+                    exc,
+                )
                 method_offset = getattr(method, "code_offset", 0)
                 self.disassembly.failed_analysis_addr.append(method_offset)
                 self.disassembly.errors[method_offset] = {
@@ -591,4 +743,6 @@ class DalvikDisassembler:
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            self._logAnalysisSummary(self.disassembly.binary_info.version, method_counts, analyzed_count)
         return self.disassembly

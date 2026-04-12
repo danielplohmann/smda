@@ -34,6 +34,7 @@ class Disassembler:
             self.disassembler = IdaExporter(self.config)
         self._start_time = None
         self._timeout = 0
+        self._last_timeout_log_second = -1
         # cache the last DisassemblyResult
         self.disassembly = None
 
@@ -54,8 +55,14 @@ class Disassembler:
         if not self._timeout:
             return False
         time_diff = datetime.datetime.now(datetime.timezone.utc) - self._start_time
-        LOGGER.debug("Current analysis callback time %s", (time_diff))
-        return time_diff.seconds >= self._timeout
+        elapsed_seconds = int(time_diff.total_seconds())
+        if elapsed_seconds >= self._timeout:
+            LOGGER.debug("Current analysis callback time %s", time_diff)
+            return True
+        if elapsed_seconds >= 30 and elapsed_seconds % 30 == 0 and elapsed_seconds != self._last_timeout_log_second:
+            self._last_timeout_log_second = elapsed_seconds
+            LOGGER.debug("Current analysis callback time %s", time_diff)
+        return False
 
     def _addStringsToReport(self, smda_report, buffer, mode=None):
         smda_report.buffer = buffer
@@ -193,6 +200,7 @@ class Disassembler:
     def _disassemble(self, binary_info, timeout=0):
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
+        self._last_timeout_log_second = -1
         self._ensureHashes(binary_info)
         if self.disassembler:
             self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)

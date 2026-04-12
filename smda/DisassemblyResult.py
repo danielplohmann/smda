@@ -128,6 +128,49 @@ class DisassemblyResult:
             return self.instructions[instruction_addr][0]
         return ""
 
+    def _getContainingBlockStart(self, blocks, instruction_addr):
+        for block in blocks:
+            if not block:
+                continue
+            block_start = block[0][0]
+            block_end = block[-1][0] + block[-1][1]
+            if block_start <= instruction_addr < block_end:
+                return block_start
+        return None
+
+    def _getExceptionSuccessors(self, func_addr, blocks):
+        metadata = self.function_metadata.get(func_addr, {})
+        try_ranges = metadata.get("try_ranges", [])
+        if not try_ranges:
+            return {}
+        block_successors = {}
+        for try_range in try_ranges:
+            raw_targets = []
+            for handler in try_range.get("handlers", []):
+                target_addr = handler.get("target_addr") if isinstance(handler, dict) else None
+                if target_addr is not None:
+                    raw_targets.append(target_addr)
+            if try_range.get("catch_all_addr") is not None:
+                raw_targets.append(try_range["catch_all_addr"])
+            if not raw_targets:
+                continue
+            normalized_targets = set()
+            for target_addr in raw_targets:
+                block_start = self._getContainingBlockStart(blocks, target_addr)
+                if block_start is None:
+                    block_start = target_addr
+                normalized_targets.add(block_start)
+            for block in blocks:
+                if not block:
+                    continue
+                block_start = block[0][0]
+                block_end = block[-1][0] + block[-1][1]
+                if try_range["start_addr"] < block_end and block_start < try_range["end_addr"]:
+                    successors = block_successors.get(block_start, set())
+                    successors.update(normalized_targets)
+                    block_successors[block_start] = successors
+        return block_successors
+
     def isCode(self, addr):
         return addr in self.code_map
 
@@ -191,20 +234,26 @@ class DisassemblyResult:
         self.data_refs_to[addr_to] = refs_to
 
     def getBlockRefs(self, func_addr):
-        """blocks refs should stay within function context, thus kill all references outside function"""
-        block_refs = {}
-        ins_addrs = set()
-        for block in self.functions[func_addr]:
-            for ins in block:
-                ins_addr = ins[0]
-                ins_addrs.add(ins_addr)
-        for block in self.functions[func_addr]:
+        """Return a normalized intra-function CFG keyed by block start."""
+        if func_addr not in self.functions:
+            return {}
+        blocks = [block for block in self.functions[func_addr] if block]
+        block_starts = {block[0][0] for block in blocks}
+        block_refs = {block_start: [] for block_start in sorted(block_starts)}
+        for block in blocks:
             last_ins_addr = block[-1][0]
-            if last_ins_addr in self.code_refs_from:
-                verified_refs = sorted(ins_addrs.intersection(self.code_refs_from[last_ins_addr]))
-                if verified_refs:
-                    block_refs[block[0][0]] = verified_refs
-        return block_refs
+            if last_ins_addr not in self.code_refs_from:
+                continue
+            verified_refs = sorted(block_starts.intersection(self.code_refs_from[last_ins_addr]))
+            if verified_refs:
+                block_refs[block[0][0]] = verified_refs
+        for block_start, successors in self._getExceptionSuccessors(func_addr, blocks).items():
+            merged_successors = set(block_refs.get(block_start, []))
+            merged_successors.update(successors)
+            block_refs[block_start] = sorted(merged_successors)
+            for successor in successors:
+                block_refs.setdefault(successor, [])
+        return {block_start: block_refs[block_start] for block_start in sorted(block_refs)}
 
     def getInRefs(self, func_addr):
         in_refs = []
