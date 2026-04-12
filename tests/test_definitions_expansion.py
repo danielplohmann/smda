@@ -7,13 +7,13 @@ from smda.intel.definitions import GAP_SEQUENCES
 class TestDefinitionsExpansion(unittest.TestCase):
     def test_gap_sequences(self):
         expected_sequences = [
-            (2, b"\xeb\x00"),        # jmp $+2 (NOP-equivalent padding)
-            (2, b"\x89\xc0"),        # mov eax, eax
-            (2, b"\x8b\xc9"),        # mov ecx, ecx
-            (2, b"\x8b\xd2"),        # mov edx, edx
-            (2, b"\x8b\xdb"),        # mov ebx, ebx
-            (2, b"\x8b\xf6"),        # mov esi, esi
-            (3, b"\x8d\x24\x24"),    # lea esp, [esp] (fixed from incorrect \x8d\x64\x24)
+            (2, b"\xeb\x00"),  # jmp $+2 (NOP-equivalent padding)
+            (2, b"\x89\xc0"),  # mov eax, eax
+            (2, b"\x8b\xc9"),  # mov ecx, ecx
+            (2, b"\x8b\xd2"),  # mov edx, edx
+            (2, b"\x8b\xdb"),  # mov ebx, ebx
+            (2, b"\x8b\xf6"),  # mov esi, esi
+            (3, b"\x8d\x24\x24"),  # lea esp, [esp] (fixed from incorrect \x8d\x64\x24)
             (4, b"\x8d\x64\x24\x00"),  # lea esp, [esp+0]
             (5, b"\x66\x0f\x1f\x40\x00"),  # multi-byte NOP (operand-size prefix)
             (6, b"\x8d\xbf\x00\x00\x00\x00"),  # lea edi, [edi]
