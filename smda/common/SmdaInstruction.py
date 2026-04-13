@@ -27,7 +27,7 @@ class SmdaInstruction:
     def getDataRefs(self):
         explicit_refs = set()
         smda_report = self.smda_function.smda_report
-        if hasattr(smda_report, "data_refs_from") and self.offset in smda_report.data_refs_from:
+        if smda_report.data_refs_from is not None and self.offset in smda_report.data_refs_from:
             explicit_refs.update(smda_report.data_refs_from[self.offset])
         yield from sorted(explicit_refs)
         if explicit_refs:
