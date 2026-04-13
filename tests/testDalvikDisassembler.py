@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaReport import SmdaReport
 from smda.dalvik.DalvikOpcodeDecoder import decode_instruction, parse_code_item_header, read_sleb128, read_uleb128
@@ -39,6 +40,49 @@ class DummyResolver:
         return f"{ref_kind}@{ref_index}"
 
 
+class SyntheticDalvikMethod:
+    def __init__(self, code_offset=0x10):
+        self.code_offset = code_offset
+        self.code_info = object()
+
+
+class SyntheticDalvikResolver:
+    def format_ref(self, ref_kind, ref_index):
+        return f"{ref_kind}@{ref_index}"
+
+    def format_type_by_index(self, index):
+        return f"type@{index}"
+
+    def get_string_value(self, string_index):
+        return None
+
+    def get_method_target(self, method_index):
+        return None, f"method@{method_index}"
+
+    def format_method(self, method):
+        return "LSynthetic;->method()V"
+
+    def get_method_metadata(self, method):
+        return {
+            "method_name": self.format_method(method),
+            "class_name": "LSynthetic;",
+            "prototype": "()V",
+            "access_flags": 0,
+            "access_flags_decoded": [],
+        }
+
+
+def build_code_item(insns, tries=None, handlers_blob=b"", registers_size=1, ins_size=0, outs_size=0, debug_info_off=0):
+    tries = tries or []
+    insns_size_units = len(insns) // 2
+    header = struct.pack("<HHHHII", registers_size, ins_size, outs_size, len(tries), debug_info_off, insns_size_units)
+    padding = b"\x00\x00" if tries and insns_size_units % 2 else b""
+    try_items = b"".join(
+        struct.pack("<IHH", start_addr, insn_count, handler_off) for start_addr, insn_count, handler_off in tries
+    )
+    return header + insns + padding + try_items + handlers_blob
+
+
 class DalvikDisassemblerTestSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -64,6 +108,20 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
         os.unlink(cls._temp_file_name)
+
+    def _analyzeSyntheticMethod(self, code_item_bytes):
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        disassembler = DalvikDisassembler(config)
+        disassembler.disassembly = DisassemblyResult()
+        binary_info = BinaryInfo(code_item_bytes)
+        binary_info.raw_data = code_item_bytes
+        binary_info.architecture = "dalvik"
+        disassembler.disassembly.binary_info = binary_info
+        method = SyntheticDalvikMethod()
+        resolver = SyntheticDalvikResolver()
+        disassembler.analyzeFunction(None, resolver, method)
+        return disassembler.disassembly, method.code_offset
 
     def testDexFormatDetection(self):
         self.assertTrue(DexFileLoader.isCompatible(self.dex_binary))
@@ -445,6 +503,75 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         struct.pack_into("<H", bytecode, 2, 0)
         size = disasm._getPayloadSize(bytecode, 0)
         self.assertEqual(size, 0, "element_width=0 must return 0")
+
+    def testZeroOffsetGotoRecordsStructuralViolation(self):
+        code_item = build_code_item(bytes.fromhex("2800"))
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        metadata = disassembly.function_metadata[func_addr]
+        blockrefs = disassembly.getBlockRefs(func_addr)
+
+        self.assertIn(func_addr, blockrefs)
+        self.assertEqual(blockrefs[func_addr], [])
+        self.assertTrue(
+            any(violation["type"] == "zero_branch_offset" for violation in metadata.get("structural_violations", []))
+        )
+
+    def testZeroOffsetConditionalFallsThroughAndRecordsViolation(self):
+        code_item = build_code_item(bytes.fromhex("320000000e00"))
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        metadata = disassembly.function_metadata[func_addr]
+        blockrefs = disassembly.getBlockRefs(func_addr)
+
+        self.assertEqual(blockrefs[func_addr], [func_addr + 4])
+        self.assertIn(func_addr + 4, blockrefs)
+        self.assertTrue(
+            any(violation["type"] == "zero_branch_offset" for violation in metadata.get("structural_violations", []))
+        )
+
+    def testProtectedFallthroughBecomesSeparateBlock(self):
+        code_item = build_code_item(
+            bytes.fromhex("1d000e000d010e00"),
+            tries=[(0, 2, 1)],
+            handlers_blob=b"\x01\x00\x02",
+        )
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        blockrefs = disassembly.getBlockRefs(func_addr)
+        block_starts = {block[0][0] for block in disassembly.functions[func_addr]}
+
+        self.assertEqual(blockrefs[func_addr], [func_addr + 2, func_addr + 4])
+        self.assertIn(func_addr + 2, block_starts)
+        self.assertIn(func_addr + 4, block_starts)
+
+    def testInvalidHandlerOffsetRecordsStructuralViolation(self):
+        code_item = build_code_item(
+            bytes.fromhex("1d000e00"),
+            tries=[(0, 1, 5)],
+            handlers_blob=b"\x00",
+        )
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        metadata = disassembly.function_metadata[func_addr]
+
+        self.assertEqual(metadata["exception_handler_count"], 0)
+        self.assertTrue(
+            any(
+                violation["type"] == "invalid_handler_offset" for violation in metadata.get("structural_violations", [])
+            )
+        )
+
+    def testDalvikStringRefsSerializeAsStableList(self):
+        function = next(function for function in self.file_disassembly.getFunctions() if function.stringrefs)
+        self.assertIsInstance(function.stringrefs, list)
+        self.assertIsNone(function.stringrefs[0]["data_addr"])
+
+        report_dict = self.file_disassembly.toDict()
+        function_dict = next(function for function in report_dict["xcfg"].values() if function["stringrefs"])
+        self.assertIsInstance(function_dict["stringrefs"], list)
+        self.assertIsNone(function_dict["stringrefs"][0]["data_addr"])
+
+        reconstructed = SmdaReport.fromDict(report_dict)
+        reconstructed_function = next(function for function in reconstructed.getFunctions() if function.stringrefs)
+        self.assertIsInstance(reconstructed_function.stringrefs, list)
+        self.assertIsNone(reconstructed_function.stringrefs[0]["data_addr"])
 
 
 if __name__ == "__main__":

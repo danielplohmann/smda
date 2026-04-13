@@ -73,7 +73,7 @@ class Disassembler:
                         {
                             "string": string_value,
                             "ins_addr": referencing_addr,
-                            "data_addr": referencing_addr,
+                            "data_addr": None,
                             "type": "dex",
                         }
                         for referencing_addr, string_value in sorted(smda_function.stringrefs.items())

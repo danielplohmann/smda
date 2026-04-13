@@ -387,7 +387,7 @@ class DalvikDisassembler:
 
     def _parseTryBlocks(self, raw_data, resolver, bytecode_offset, insns_size_units, tries_size):
         if tries_size == 0:
-            return []
+            return [], []
         tries_offset = bytecode_offset + insns_size_units * 2
         if insns_size_units % 2:
             tries_offset += 2
@@ -396,6 +396,7 @@ class DalvikDisassembler:
         handlers_offset = tries_offset + tries_size * 8
         encoded_handler_count, cursor = read_uleb128(raw_data, handlers_offset)
         handlers_by_offset = {}
+        structural_violations = []
         for _ in range(encoded_handler_count):
             handler_relative = cursor - handlers_offset
             encoded_size, cursor = read_sleb128(raw_data, cursor)
@@ -419,7 +420,16 @@ class DalvikDisassembler:
                 raw_data,
                 tries_offset + index * 8,
             )
-            resolved = handlers_by_offset.get(handler_off, {"handlers": [], "catch_all_addr": None})
+            resolved = handlers_by_offset.get(handler_off)
+            if resolved is None:
+                structural_violations.append(
+                    {
+                        "type": "invalid_handler_offset",
+                        "try_start": hex(bytecode_offset + start_addr_units * 2),
+                        "handler_offset": handler_off,
+                    }
+                )
+                resolved = {"handlers": [], "catch_all_addr": None}
             try_items.append(
                 {
                     "start_addr": bytecode_offset + start_addr_units * 2,
@@ -439,7 +449,7 @@ class DalvikDisassembler:
                     ),
                 }
             )
-        return try_items
+        return try_items, structural_violations
 
     def _instructionCanThrow(self, decoded):
         if decoded.can_throw:
@@ -450,6 +460,7 @@ class DalvikDisassembler:
         self.disassembly.addr_to_api[from_addr] = api_name
 
     def _applyExceptionEdges(self, state, instruction_addr, decoded, try_blocks):
+        applied = False
         for try_block in try_blocks:
             if not (try_block["start_addr"] <= instruction_addr < try_block["end_addr"]):
                 continue
@@ -458,10 +469,13 @@ class DalvikDisassembler:
                 state.addCodeRef(instruction_addr, target_addr)
                 state.addBlockStart(target_addr)
                 state.addBlockToQueue(target_addr)
+                applied = True
             if try_block["catch_all_addr"] is not None:
                 state.addCodeRef(instruction_addr, try_block["catch_all_addr"])
                 state.addBlockStart(try_block["catch_all_addr"])
                 state.addBlockToQueue(try_block["catch_all_addr"])
+                applied = True
+        return applied
 
     def _buildFunctionMetadata(self, resolver, method, code_item_header, try_blocks):
         metadata = resolver.get_method_metadata(method)
@@ -522,6 +536,7 @@ class DalvikDisassembler:
                     "call_site": 0,
                     "method_handle": 0,
                 },
+                "structural_violations": [],
             }
         )
         return metadata
@@ -598,6 +613,69 @@ class DalvikDisassembler:
             idx += decoded.size_bytes
         return valid
 
+    def _addStructuralViolation(self, metadata, violation_type, **fields):
+        violation = {"type": violation_type}
+        violation.update(fields)
+        metadata.setdefault("structural_violations", []).append(violation)
+
+    def _sanitizeTryBlocks(self, try_blocks, bytecode_offset, valid_instruction_starts):
+        sanitized = []
+        structural_violations = []
+        for try_block in try_blocks:
+            sanitized_handlers = []
+            for handler in try_block["handlers"]:
+                target_addr = handler["target_addr"]
+                target_idx = target_addr - bytecode_offset
+                if target_idx in valid_instruction_starts:
+                    sanitized_handlers.append(handler)
+                else:
+                    structural_violations.append(
+                        {
+                            "type": "invalid_handler_target",
+                            "protected_range_start": hex(try_block["start_addr"]),
+                            "target": hex(target_addr),
+                        }
+                    )
+            catch_all_addr = try_block["catch_all_addr"]
+            if catch_all_addr is not None and (catch_all_addr - bytecode_offset) not in valid_instruction_starts:
+                structural_violations.append(
+                    {
+                        "type": "invalid_handler_target",
+                        "protected_range_start": hex(try_block["start_addr"]),
+                        "target": hex(catch_all_addr),
+                    }
+                )
+                catch_all_addr = None
+            sanitized.append(
+                {
+                    "start_addr": try_block["start_addr"],
+                    "end_addr": try_block["end_addr"],
+                    "handlers": sanitized_handlers,
+                    "catch_all_addr": catch_all_addr,
+                }
+            )
+        return sanitized, structural_violations
+
+    def _validateBranchTarget(self, metadata, source_addr, source_idx, target_idx, valid_instruction_starts):
+        target_addr = source_addr + (target_idx - source_idx)
+        if target_idx == source_idx:
+            self._addStructuralViolation(
+                metadata,
+                "zero_branch_offset",
+                from_addr=hex(source_addr),
+                target=hex(target_addr),
+            )
+            return None
+        if target_idx not in valid_instruction_starts:
+            self._addStructuralViolation(
+                metadata,
+                "invalid_branch_target",
+                from_addr=hex(source_addr),
+                target=hex(target_addr),
+            )
+            return None
+        return target_addr
+
     def analyzeFunction(self, dex_file, resolver, method):
         start_addr = getattr(method, "code_offset", 0)
         raw_data = self.disassembly.binary_info.raw_data
@@ -609,7 +687,7 @@ class DalvikDisassembler:
             raise ValueError("Invalid Dalvik bytecode range")
 
         bytecode = raw_data[bytecode_offset : bytecode_offset + insns_size_bytes]
-        try_blocks = self._parseTryBlocks(
+        try_blocks, try_violations = self._parseTryBlocks(
             raw_data,
             resolver,
             bytecode_offset,
@@ -620,30 +698,24 @@ class DalvikDisassembler:
         # Pass 1: build a set of legal instruction-start byte offsets for target validation.
         valid_instruction_starts = self._buildValidInstructionStarts(bytecode)
 
+        try_blocks, target_violations = self._sanitizeTryBlocks(try_blocks, bytecode_offset, valid_instruction_starts)
+
         state = DalvikFunctionAnalysisState(bytecode_offset, self.disassembly)
         metadata = self._buildFunctionMetadata(resolver, method, code_item_header, try_blocks)
         state.metadata = metadata
+        metadata["structural_violations"].extend(try_violations)
+        metadata["structural_violations"].extend(target_violations)
 
         # Queue exception-handler entry points, validating against instruction boundaries.
         for try_block in try_blocks:
             for handler in try_block["handlers"]:
                 target_addr = handler["target_addr"]
-                target_idx = target_addr - bytecode_offset
-                if target_idx in valid_instruction_starts:
-                    state.addBlockToQueue(target_addr)
-                else:
-                    metadata.setdefault("structural_violations", []).append(
-                        {"type": "invalid_handler_target", "target": hex(target_addr)}
-                    )
+                state.addBlockStart(target_addr)
+                state.addBlockToQueue(target_addr)
             if try_block["catch_all_addr"] is not None:
                 ca_addr = try_block["catch_all_addr"]
-                ca_idx = ca_addr - bytecode_offset
-                if ca_idx in valid_instruction_starts:
-                    state.addBlockToQueue(ca_addr)
-                else:
-                    metadata.setdefault("structural_violations", []).append(
-                        {"type": "invalid_handler_target", "target": hex(ca_addr)}
-                    )
+                state.addBlockStart(ca_addr)
+                state.addBlockToQueue(ca_addr)
 
         visited_offsets = set()
         payload_ranges = []
@@ -700,12 +772,11 @@ class DalvikDisassembler:
                             for target_idx in switch_targets:
                                 target_addr = bytecode_offset + target_idx
                                 if target_idx not in valid_instruction_starts:
-                                    metadata.setdefault("structural_violations", []).append(
-                                        {
-                                            "type": "invalid_switch_target",
-                                            "from": hex(i_address),
-                                            "target": hex(target_addr),
-                                        }
+                                    self._addStructuralViolation(
+                                        metadata,
+                                        "invalid_switch_target",
+                                        from_addr=hex(i_address),
+                                        target=hex(target_addr),
                                     )
                                     continue
                                 state.addCodeRef(i_address, target_addr, by_jump=True)
@@ -719,15 +790,21 @@ class DalvikDisassembler:
                     self._updateHeuristics(metadata, decoded, 0)
 
                 if i_mnemonic.startswith("goto"):
-                    target_addr = bytecode_offset + decoded.branch_target_idx
-                    state.addCodeRef(i_address, target_addr, by_jump=True)
-                    state.addBlockStart(target_addr)
-                    state.addBlockToQueue(target_addr)
+                    target_addr = self._validateBranchTarget(
+                        metadata, i_address, idx, decoded.branch_target_idx, valid_instruction_starts
+                    )
+                    if target_addr is not None:
+                        state.addCodeRef(i_address, target_addr, by_jump=True)
+                        state.addBlockStart(target_addr)
+                        state.addBlockToQueue(target_addr)
                 elif decoded.is_conditional and decoded.branch_target_idx is not None:
-                    target_addr = bytecode_offset + decoded.branch_target_idx
-                    state.addCodeRef(i_address, target_addr, by_jump=True)
-                    state.addBlockStart(target_addr)
-                    state.addBlockToQueue(target_addr)
+                    target_addr = self._validateBranchTarget(
+                        metadata, i_address, idx, decoded.branch_target_idx, valid_instruction_starts
+                    )
+                    if target_addr is not None:
+                        state.addCodeRef(i_address, target_addr, by_jump=True)
+                        state.addBlockStart(target_addr)
+                        state.addBlockToQueue(target_addr)
                     fallthrough = i_address + i_size
                     state.addBlockStart(fallthrough)
                     state.addBlockToQueue(fallthrough)
@@ -747,7 +824,13 @@ class DalvikDisassembler:
                         self._updateApiInformation(i_address, call_name)
 
                 if self._instructionCanThrow(decoded) and try_blocks:
-                    self._applyExceptionEdges(state, i_address, decoded, try_blocks)
+                    has_exception_edges = self._applyExceptionEdges(state, i_address, decoded, try_blocks)
+                    if has_exception_edges and state.is_next_instruction_reachable:
+                        fallthrough = i_address + i_size
+                        fallthrough_idx = idx + i_size
+                        if fallthrough_idx in valid_instruction_starts:
+                            state.addBlockStart(fallthrough)
+                            state.addBlockToQueue(fallthrough)
 
                 state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, decoded.bytes_)
                 idx += i_size

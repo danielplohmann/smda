@@ -76,7 +76,11 @@ class SmdaFunction:
                     and disassembly.getStringRefsForFunction(function_offset)
                 )
             ):
-                self.stringrefs = disassembly.getStringRefsForFunction(function_offset)
+                self.stringrefs = (
+                    self._normalizeDalvikStringRefs(disassembly.getStringRefsForFunction(function_offset))
+                    if disassembly.binary_info.architecture == "dalvik"
+                    else disassembly.getStringRefsForFunction(function_offset)
+                )
             if config and config.CALCULATE_HASHING:
                 self.pic_hash = self.getPicHash(disassembly.binary_info)
             if config and config.CALCULATE_SCC:
@@ -212,6 +216,35 @@ class SmdaFunction:
             self.blocks[int(offset)] = instructions
             self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
 
+    @staticmethod
+    def _normalizeDalvikStringRefs(stringrefs):
+        if not stringrefs:
+            return []
+        if isinstance(stringrefs, list):
+            normalized = []
+            for entry in stringrefs:
+                if isinstance(entry, dict):
+                    normalized.append(
+                        {
+                            "string": entry.get("string", ""),
+                            "ins_addr": int(entry.get("ins_addr", 0)),
+                            "data_addr": entry.get("data_addr", None),
+                            "type": entry.get("type", "dex"),
+                        }
+                    )
+            return normalized
+        if isinstance(stringrefs, dict):
+            return [
+                {
+                    "string": string_value,
+                    "ins_addr": int(referencing_addr),
+                    "data_addr": None,
+                    "type": "dex",
+                }
+                for referencing_addr, string_value in sorted(stringrefs.items())
+            ]
+        return stringrefs
+
     def _getContainingBlockStart(self, instruction_addr):
         for block_start, block in self.blocks.items():
             if not block:
@@ -320,7 +353,16 @@ class SmdaFunction:
         smda_function.pic_hash = function_dict["metadata"].get("pic_hash", None)
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
-        smda_function.stringrefs = function_dict.get("stringrefs", {})
+        stringrefs = function_dict.get("stringrefs", {})
+        function_architecture = None
+        if smda_report is not None:
+            function_architecture = smda_report.architecture
+        elif binary_info is not None:
+            function_architecture = binary_info.architecture
+        if function_architecture == "dalvik":
+            smda_function.stringrefs = smda_function._normalizeDalvikStringRefs(stringrefs)
+        else:
+            smda_function.stringrefs = stringrefs
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         else:
