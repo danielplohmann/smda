@@ -12,10 +12,15 @@ class DexFileLoader:
         if len(data) < cls.HEADER_SIZE:
             return None
         magic = data[:8]
-        if not (magic.startswith(b"dex\n") and magic[7] == 0):
-            return None
-        version = magic[4:7]
-        if version not in cls.SUPPORTED_VERSIONS:
+        # Standard DEX (dex\n) or ODEX (dey\n): same structure, same version table
+        if magic.startswith((b"dex\n", b"dey\n")) and magic[7] == 0:
+            version = magic[4:7]
+            if version not in cls.SUPPORTED_VERSIONS:
+                return None
+        # CDEX (ART Compact DEX): cdex<ver>\0 — reduced validation; LIEF handles details
+        elif data[:4] == b"cdex":
+            return {"version": "cdex", "file_size": len(data), "data_off": 0, "data_size": len(data)}
+        else:
             return None
         file_size = struct.unpack_from("<I", data, 0x20)[0]
         header_size = struct.unpack_from("<I", data, 0x24)[0]

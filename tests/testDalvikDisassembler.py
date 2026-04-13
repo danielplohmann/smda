@@ -330,5 +330,118 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(decoded_array.payload_idx, 4)
 
 
+    # ── New tests for consolidated enhancement plan ──────────────────────────
+
+    def testDisassembleBufferDexAutodetect(self):
+        """P1-A: disassembleBuffer() without explicit architecture auto-detects DEX."""
+        # Create a generic Disassembler with no backend override — the default is "intel".
+        # With P1-A the DEX magic bytes should flip the architecture to "dalvik".
+        generic_disasm = Disassembler(config)
+        report = generic_disasm.disassembleBuffer(self.dex_binary, base_addr=0)
+        self.assertEqual(report.architecture, "dalvik")
+        self.assertGreater(report.num_functions, 2000)
+
+    def testGetDetailedRaisesOnDalvik(self):
+        """P1-B: SmdaInstruction.getDetailed() raises NotImplementedError on Dalvik reports."""
+        functions = list(self.file_disassembly.getFunctions())
+        instruction = next(iter(functions[0].getInstructions()))
+        with self.assertRaises(NotImplementedError):
+            instruction.getDetailed()
+
+    def testOdexCdexFormatDetection(self):
+        """P3-C: DexFileLoader.isCompatible() recognises ODEX (dey) and CDEX (cdex) magic."""
+        # Build a minimal valid ODEX header (same structure as DEX, different magic)
+        odex_header = bytearray(build_dex_header(version=b"039"))
+        odex_header[:4] = b"dey\n"
+        self.assertTrue(DexFileLoader.isCompatible(bytes(odex_header)))
+
+        # CDEX: only magic-byte check, no strict structure validation
+        cdex_header = b"cdex001\x00" + b"\x00" * 0x70
+        self.assertTrue(DexFileLoader.isCompatible(cdex_header))
+
+        # Sanity: non-DEX/ODEX/CDEX magic still rejected
+        self.assertFalse(DexFileLoader.isCompatible(b"MZ\x90\x00" + b"\x00" * 0x70))
+        self.assertFalse(DexFileLoader.isCompatible(b"\x7fELF" + b"\x00" * 0x70))
+
+    def testConstHigh16SignedDisplay(self):
+        """P3-A: const/high16 with 0xFFFF immediate produces a negative literal."""
+        # 15 00 FF FF  →  const/high16 v0, #0xFFFF0000  (= -65536 as int32)
+        raw = bytes([0x15, 0x00, 0xFF, 0xFF])
+        decoded = decode_instruction(raw, 0, DummyResolver())
+        self.assertEqual(decoded.mnemonic, "const/high16")
+        self.assertIsNotNone(decoded.literal)
+        self.assertLess(decoded.literal, 0, "literal should be negative for BBBB=0xFFFF")
+        self.assertIn("-", decoded.operands)
+
+    def testStringEscaping(self):
+        """P3-B: DexReferenceResolver._escapeDexString escapes control characters."""
+        from smda.dalvik.DalvikDisassembler import DexReferenceResolver
+        self.assertEqual(DexReferenceResolver._escapeDexString('hello\nworld'), 'hello\\nworld')
+        self.assertEqual(DexReferenceResolver._escapeDexString('\0'), '\\0')
+        self.assertEqual(DexReferenceResolver._escapeDexString('\t'), '\\t')
+        self.assertEqual(DexReferenceResolver._escapeDexString('\r'), '\\r')
+        self.assertEqual(DexReferenceResolver._escapeDexString('"quoted"'), '\\"quoted\\"')
+        self.assertEqual(DexReferenceResolver._escapeDexString('\\back'), '\\\\back')
+        # Non-printable non-mapped character uses \uXXXX
+        self.assertIn('\\u0001', DexReferenceResolver._escapeDexString('\x01'))
+
+    def testPartialDisassemblyFlagPropagation(self):
+        """P2-C: decode_error_count and partial_disassembly are recorded in function_metadata."""
+        from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
+        disassembly = DisassemblyResult()
+        # Populate BinaryInfo stub so setBinaryInfo won't be called but addCodeRefs works
+        class FakeBinaryInfo:
+            base_addr = 0
+            raw_data = b""
+            binary = b""
+            binary_size = 0
+        disassembly.binary_info = FakeBinaryInfo()
+        start_addr = 0x1000
+        state = DalvikFunctionAnalysisState(start_addr, disassembly)
+        # Simulate one decoded instruction and then a decode error
+        state.instructions = [(start_addr, 2, "nop", "", b"\x00\x00")]
+        state.instruction_start_bytes = {start_addr}
+        state.processed_bytes = {start_addr, start_addr + 1}
+        state.metadata = {"heuristics": [], "reference_counts": {}}
+        state.num_blocks_analyzed = 1
+        state.decode_error_count = 2
+        state.is_partial = True
+        state._finalizeRegularAnalysis()
+        meta = disassembly.function_metadata.get(start_addr, {})
+        self.assertTrue(meta.get("partial_disassembly"), "partial_disassembly should be True")
+        self.assertEqual(meta.get("decode_error_count"), 2)
+
+    def testForgedPayloadBoundsCheck(self):
+        """P2-A: _getPayloadSize() never returns more bytes than remain in the bytecode buffer."""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+        disasm = DalvikDisassembler(config)
+        bytecode = bytearray(100)
+
+        # Packed-switch payload with huge size field
+        struct.pack_into("<H", bytecode, 0, 0x0100)      # ident: packed-switch
+        struct.pack_into("<H", bytecode, 2, 0xFFFF)       # size: 65535 entries
+        struct.pack_into("<I", bytecode, 4, 0)            # first_key
+        size = disasm._getPayloadSize(bytecode, 0)
+        self.assertLessEqual(size, len(bytecode), "packed-switch payload size must be capped")
+
+        # Sparse-switch payload with huge size field
+        struct.pack_into("<H", bytecode, 0, 0x0200)
+        struct.pack_into("<H", bytecode, 2, 0xFFFF)
+        size = disasm._getPayloadSize(bytecode, 0)
+        self.assertLessEqual(size, len(bytecode), "sparse-switch payload size must be capped")
+
+        # fill-array-data payload with huge element count
+        struct.pack_into("<H", bytecode, 0, 0x0300)       # ident
+        struct.pack_into("<H", bytecode, 2, 4)             # element_width = 4
+        struct.pack_into("<I", bytecode, 4, 0xFFFFFF)     # size: huge
+        size = disasm._getPayloadSize(bytecode, 0)
+        self.assertLessEqual(size, len(bytecode), "fill-array-data payload size must be capped")
+
+        # fill-array-data with element_width=0 must return 0 (avoid divide-by-zero)
+        struct.pack_into("<H", bytecode, 2, 0)
+        size = disasm._getPayloadSize(bytecode, 0)
+        self.assertEqual(size, 0, "element_width=0 must return 0")
+
+
 if __name__ == "__main__":
     unittest.main()

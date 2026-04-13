@@ -490,11 +490,15 @@ def decode_instruction(bytecode, byte_idx, resolve_ref):
         operands = f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}"
     elif opcode.fmt == "21h":
         reg_a = raw_bytes[1]
-        value = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=False)
+        # The 16-bit immediate is sign-extended per the Dalvik spec before shifting.
+        # Using signed=True ensures negative values like 0xFFFF produce -1 << shift
+        # rather than 0xFFFF << shift, matching baksmali's output.
+        value = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
         shift = 48 if opcode.mnemonic.endswith("wide/high16") else 16
         literal = value << shift
         registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, #{hex(literal)}"
+        sign = "-" if literal < 0 else ""
+        operands = f"{_reg_name(reg_a)}, #{sign}{hex(abs(literal))}"
     elif opcode.fmt == "21s":
         reg_a = raw_bytes[1]
         literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)

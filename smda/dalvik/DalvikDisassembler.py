@@ -174,10 +174,33 @@ class DexReferenceResolver:
             return f"type@{index}"
         return self._format_type(type_obj)
 
+    # Baksmali-style escape map for DEX string literals.
+    _STRING_ESCAPE_MAP = {
+        '"':  '\\"',
+        '\\': '\\\\',
+        '\n': '\\n',
+        '\r': '\\r',
+        '\t': '\\t',
+        '\0': '\\0',
+    }
+
+    @classmethod
+    def _escapeDexString(cls, s):
+        parts = []
+        for ch in s:
+            escaped = cls._STRING_ESCAPE_MAP.get(ch)
+            if escaped:
+                parts.append(escaped)
+            elif ch.isprintable():
+                parts.append(ch)
+            else:
+                parts.append(f"\\u{ord(ch):04x}")
+        return "".join(parts)
+
     def format_ref(self, ref_kind, index):
         if ref_kind == "string":
             if 0 <= index < len(self.strings):
-                return '"' + self.strings[index].replace('"', '\\"') + '"'
+                return '"' + self._escapeDexString(self.strings[index]) + '"'
             return f"string@{index}"
         if ref_kind == "type":
             return self.format_type_by_index(index)
@@ -301,26 +324,38 @@ class DalvikDisassembler:
     def _getPayloadSize(self, bytecode, idx):
         if idx < 0 or idx + 2 > len(bytecode):
             return 0
+        max_possible = len(bytecode) - idx
         ident = struct.unpack_from("<H", bytecode, idx)[0]
         if ident == 0x0100:
+            # packed-switch-payload: ident(2) + size(2) + first_key(4) + targets(size*4)
             if idx + 8 > len(bytecode):
                 return 0
             size = struct.unpack_from("<H", bytecode, idx + 2)[0]
-            return 8 + size * 4
+            raw_size = 8 + size * 4
+            return min(raw_size, max_possible)
         if ident == 0x0200:
+            # sparse-switch-payload: ident(2) + size(2) + keys(size*4) + targets(size*4)
             if idx + 4 > len(bytecode):
                 return 0
             size = struct.unpack_from("<H", bytecode, idx + 2)[0]
-            return 4 + size * 8
+            raw_size = 4 + size * 8
+            return min(raw_size, max_possible)
         if ident == 0x0300:
+            # fill-array-data-payload: ident(2) + element_width(2) + size(4) + data
             if idx + 8 > len(bytecode):
                 return 0
             element_width = struct.unpack_from("<H", bytecode, idx + 2)[0]
+            if element_width == 0:
+                return 0
             size = struct.unpack_from("<I", bytecode, idx + 4)[0]
+            # Cap element count to prevent integer overflow on forged size fields
+            max_elements = (max_possible - 8) // element_width
+            size = min(size, max_elements)
             data_size = size * element_width
             if data_size % 2:
                 data_size += 1
-            return 8 + data_size
+            raw_size = 8 + data_size
+            return min(raw_size, max_possible)
         return 0
 
     def _resolveSwitchTargets(self, bytecode, switch_insn_idx, payload_idx):
@@ -534,6 +569,35 @@ class DalvikDisassembler:
         ):
             heuristics.append("string-staging")
 
+    def _buildValidInstructionStarts(self, bytecode):
+        """Linear sweep (pass 1) that records all legal instruction-start byte offsets.
+
+        This is intentionally cheap: no CFG, no operand resolution, no side effects.
+        The result is used in the recursive CFG pass (pass 2) to reject externally-
+        derived targets (switch tables, exception handlers) that land mid-instruction
+        or outside the method, preventing phantom CFG nodes from adversarial DEX.
+        """
+        valid = set()
+        payload_ranges = []
+        idx = 0
+        null_resolve = lambda ref_kind, ref_index: ""  # noqa: E731
+        while idx < len(bytecode):
+            if any(start <= idx < end for start, end in payload_ranges):
+                idx += 1
+                continue
+            try:
+                decoded = decode_instruction(bytecode, idx, null_resolve)
+            except ValueError:
+                idx += 1
+                continue
+            valid.add(idx)
+            if decoded.payload_idx is not None:
+                payload_size = self._getPayloadSize(bytecode, decoded.payload_idx)
+                if payload_size:
+                    payload_ranges.append((decoded.payload_idx, decoded.payload_idx + payload_size))
+            idx += decoded.size_bytes
+        return valid
+
     def analyzeFunction(self, dex_file, resolver, method):
         start_addr = getattr(method, "code_offset", 0)
         raw_data = self.disassembly.binary_info.raw_data
@@ -553,14 +617,33 @@ class DalvikDisassembler:
             code_item_header["tries_size"],
         )
 
+        # Pass 1: build a set of legal instruction-start byte offsets for target validation.
+        valid_instruction_starts = self._buildValidInstructionStarts(bytecode)
+
         state = DalvikFunctionAnalysisState(bytecode_offset, self.disassembly)
         metadata = self._buildFunctionMetadata(resolver, method, code_item_header, try_blocks)
         state.metadata = metadata
+
+        # Queue exception-handler entry points, validating against instruction boundaries.
         for try_block in try_blocks:
             for handler in try_block["handlers"]:
-                state.addBlockToQueue(handler["target_addr"])
+                target_addr = handler["target_addr"]
+                target_idx = target_addr - bytecode_offset
+                if target_idx in valid_instruction_starts:
+                    state.addBlockToQueue(target_addr)
+                else:
+                    metadata.setdefault("structural_violations", []).append(
+                        {"type": "invalid_handler_target", "target": hex(target_addr)}
+                    )
             if try_block["catch_all_addr"] is not None:
-                state.addBlockToQueue(try_block["catch_all_addr"])
+                ca_addr = try_block["catch_all_addr"]
+                ca_idx = ca_addr - bytecode_offset
+                if ca_idx in valid_instruction_starts:
+                    state.addBlockToQueue(ca_addr)
+                else:
+                    metadata.setdefault("structural_violations", []).append(
+                        {"type": "invalid_handler_target", "target": hex(ca_addr)}
+                    )
 
         visited_offsets = set()
         payload_ranges = []
@@ -588,6 +671,8 @@ class DalvikDisassembler:
                         "message": str(exc),
                     }
                     LOGGER.warning("Failed to decode Dalvik instruction at 0x%x: %s", bytecode_offset + idx, exc)
+                    state.decode_error_count += 1
+                    state.is_partial = True
                     break
 
                 i_address = bytecode_offset + idx
@@ -614,6 +699,11 @@ class DalvikDisassembler:
                             switch_targets = self._resolveSwitchTargets(bytecode, idx, decoded.payload_idx)
                             for target_idx in switch_targets:
                                 target_addr = bytecode_offset + target_idx
+                                if target_idx not in valid_instruction_starts:
+                                    metadata.setdefault("structural_violations", []).append(
+                                        {"type": "invalid_switch_target", "from": hex(i_address), "target": hex(target_addr)}
+                                    )
+                                    continue
                                 state.addCodeRef(i_address, target_addr, by_jump=True)
                                 state.addBlockStart(target_addr)
                                 state.addBlockToQueue(target_addr)

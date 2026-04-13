@@ -57,6 +57,8 @@ class DalvikFunctionAnalysisState:
         self.is_thunk_call = False
         self.label = ""
         self.metadata = {}
+        self.decode_error_count = 0
+        self.is_partial = False
 
     def chooseNextBlock(self):
         self.is_block_ending_instruction = False
@@ -124,6 +126,10 @@ class DalvikFunctionAnalysisState:
     def _finalizeRegularAnalysis(self):
         fn_min = min([ins[0] for ins in self.instructions])
         fn_max = max([ins[0] + ins[1] for ins in self.instructions])
+
+        if self.is_partial:
+            self.metadata["partial_disassembly"] = True
+            self.metadata["decode_error_count"] = self.decode_error_count
 
         self.disassembly.function_symbols[self.start_addr] = self.label
         self.disassembly.function_borders[self.start_addr] = (fn_min, fn_max)

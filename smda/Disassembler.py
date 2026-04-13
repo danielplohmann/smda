@@ -174,6 +174,13 @@ class Disassembler:
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
         """
+        # Auto-detect DEX when the caller did not explicitly override architecture.
+        # disassembleUnmappedBuffer / disassembleFile already use FileLoader for detection;
+        # this path bypasses it, so we check the magic bytes manually here.
+        if architecture == "intel":
+            from smda.utility.DexFileLoader import DexFileLoader
+            if DexFileLoader.isCompatible(file_content):
+                architecture = "dalvik"
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness
