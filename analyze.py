@@ -7,6 +7,7 @@ import sys
 
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.DexFileLoader import DexFileLoader
 
 
 def parseBaseAddrFromArgs(args):
@@ -136,8 +137,13 @@ if __name__ == "__main__":
             SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
         else:
             BUFFER = readFileContent(ARGS.input_path)
-            BASE_ADDR = parseBaseAddrFromArgs(ARGS)
-            OEP = parseOepFromArgs(ARGS)
+            treat_as_dalvik = ARGS.architecture in {"", "dalvik"} and DexFileLoader.isCompatible(BUFFER)
+            if treat_as_dalvik:
+                BASE_ADDR = DexFileLoader.getBaseAddress(BUFFER)
+                OEP = None
+            else:
+                BASE_ADDR = parseBaseAddrFromArgs(ARGS)
+                OEP = parseOepFromArgs(ARGS)
             config.API_COLLECTION_FILES = {
                 "win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])
             }

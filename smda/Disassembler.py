@@ -182,6 +182,8 @@ class Disassembler:
 
             if DexFileLoader.isCompatible(file_content):
                 architecture = "dalvik"
+                if bitness is None:
+                    bitness = DexFileLoader.getBitness(file_content)
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness

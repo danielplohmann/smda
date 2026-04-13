@@ -390,23 +390,39 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
     # ── New tests for consolidated enhancement plan ──────────────────────────
 
     def testDisassembleBufferDexAutodetect(self):
-        """P1-A: disassembleBuffer() without explicit architecture auto-detects DEX."""
-        # Create a generic Disassembler with no backend override — the default is "intel".
-        # With P1-A the DEX magic bytes should flip the architecture to "dalvik".
         generic_disasm = Disassembler(config)
         report = generic_disasm.disassembleBuffer(self.dex_binary, base_addr=0)
         self.assertEqual(report.architecture, "dalvik")
+        self.assertEqual(report.bitness, 32)
         self.assertGreater(report.num_functions, 2000)
 
+    def testAnalyzeScriptRawDexAvoidsBaseAddrAndOepWarnings(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(config.PROJECT_ROOT, "analyze.py"),
+                self._temp_file_name,
+                "-o",
+                tempfile.gettempdir(),
+            ],
+            cwd=config.PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        combined_output = result.stdout + result.stderr
+        self.assertIn("architecture: dalvik.32bit", combined_output)
+        self.assertNotIn("No base address recognized, using 0.", combined_output)
+        self.assertNotIn("No OEP recognized, skipping.", combined_output)
+
     def testGetDetailedRaisesOnDalvik(self):
-        """P1-B: SmdaInstruction.getDetailed() raises NotImplementedError on Dalvik reports."""
         functions = list(self.file_disassembly.getFunctions())
         instruction = next(iter(functions[0].getInstructions()))
         with self.assertRaises(NotImplementedError):
             instruction.getDetailed()
 
     def testOdexCdexFormatDetection(self):
-        """P3-C: DexFileLoader.isCompatible() recognises ODEX (dey) and CDEX (cdex) magic."""
         # Build a minimal valid ODEX header (same structure as DEX, different magic)
         odex_header = bytearray(build_dex_header(version=b"039"))
         odex_header[:4] = b"dey\n"
@@ -421,7 +437,6 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertFalse(DexFileLoader.isCompatible(b"\x7fELF" + b"\x00" * 0x70))
 
     def testConstHigh16SignedDisplay(self):
-        """P3-A: const/high16 with 0xFFFF immediate produces a negative literal."""
         # 15 00 FF FF  →  const/high16 v0, #0xFFFF0000  (= -65536 as int32)
         raw = bytes([0x15, 0x00, 0xFF, 0xFF])
         decoded = decode_instruction(raw, 0, DummyResolver())
@@ -431,7 +446,6 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertIn("-", decoded.operands)
 
     def testStringEscaping(self):
-        """P3-B: DexReferenceResolver._escapeDexString escapes control characters."""
         from smda.dalvik.DalvikDisassembler import DexReferenceResolver
 
         self.assertEqual(DexReferenceResolver._escapeDexString("hello\nworld"), "hello\\nworld")
@@ -444,7 +458,6 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertIn("\\u0001", DexReferenceResolver._escapeDexString("\x01"))
 
     def testPartialDisassemblyFlagPropagation(self):
-        """P2-C: decode_error_count and partial_disassembly are recorded in function_metadata."""
         from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 
         disassembly = DisassemblyResult()
@@ -473,7 +486,6 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(meta.get("decode_error_count"), 2)
 
     def testForgedPayloadBoundsCheck(self):
-        """P2-A: _getPayloadSize() never returns more bytes than remain in the bytecode buffer."""
         from smda.dalvik.DalvikDisassembler import DalvikDisassembler
 
         disasm = DalvikDisassembler(config)
