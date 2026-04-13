@@ -176,12 +176,12 @@ class DexReferenceResolver:
 
     # Baksmali-style escape map for DEX string literals.
     _STRING_ESCAPE_MAP = {
-        '"':  '\\"',
-        '\\': '\\\\',
-        '\n': '\\n',
-        '\r': '\\r',
-        '\t': '\\t',
-        '\0': '\\0',
+        '"': '\\"',
+        "\\": "\\\\",
+        "\n": "\\n",
+        "\r": "\\r",
+        "\t": "\\t",
+        "\0": "\\0",
     }
 
     @classmethod
@@ -701,7 +701,11 @@ class DalvikDisassembler:
                                 target_addr = bytecode_offset + target_idx
                                 if target_idx not in valid_instruction_starts:
                                     metadata.setdefault("structural_violations", []).append(
-                                        {"type": "invalid_switch_target", "from": hex(i_address), "target": hex(target_addr)}
+                                        {
+                                            "type": "invalid_switch_target",
+                                            "from": hex(i_address),
+                                            "target": hex(target_addr),
+                                        }
                                     )
                                     continue
                                 state.addCodeRef(i_address, target_addr, by_jump=True)

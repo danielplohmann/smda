@@ -179,6 +179,7 @@ class Disassembler:
         # this path bypasses it, so we check the magic bytes manually here.
         if architecture == "intel":
             from smda.utility.DexFileLoader import DexFileLoader
+
             if DexFileLoader.isCompatible(file_content):
                 architecture = "dalvik"
         binary_info = BinaryInfo(file_content)

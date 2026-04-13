@@ -329,7 +329,6 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(decoded_array.mnemonic, "fill-array-data")
         self.assertEqual(decoded_array.payload_idx, 4)
 
-
     # ── New tests for consolidated enhancement plan ──────────────────────────
 
     def testDisassembleBufferDexAutodetect(self):
@@ -376,25 +375,29 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
     def testStringEscaping(self):
         """P3-B: DexReferenceResolver._escapeDexString escapes control characters."""
         from smda.dalvik.DalvikDisassembler import DexReferenceResolver
-        self.assertEqual(DexReferenceResolver._escapeDexString('hello\nworld'), 'hello\\nworld')
-        self.assertEqual(DexReferenceResolver._escapeDexString('\0'), '\\0')
-        self.assertEqual(DexReferenceResolver._escapeDexString('\t'), '\\t')
-        self.assertEqual(DexReferenceResolver._escapeDexString('\r'), '\\r')
+
+        self.assertEqual(DexReferenceResolver._escapeDexString("hello\nworld"), "hello\\nworld")
+        self.assertEqual(DexReferenceResolver._escapeDexString("\0"), "\\0")
+        self.assertEqual(DexReferenceResolver._escapeDexString("\t"), "\\t")
+        self.assertEqual(DexReferenceResolver._escapeDexString("\r"), "\\r")
         self.assertEqual(DexReferenceResolver._escapeDexString('"quoted"'), '\\"quoted\\"')
-        self.assertEqual(DexReferenceResolver._escapeDexString('\\back'), '\\\\back')
+        self.assertEqual(DexReferenceResolver._escapeDexString("\\back"), "\\\\back")
         # Non-printable non-mapped character uses \uXXXX
-        self.assertIn('\\u0001', DexReferenceResolver._escapeDexString('\x01'))
+        self.assertIn("\\u0001", DexReferenceResolver._escapeDexString("\x01"))
 
     def testPartialDisassemblyFlagPropagation(self):
         """P2-C: decode_error_count and partial_disassembly are recorded in function_metadata."""
         from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
+
         disassembly = DisassemblyResult()
+
         # Populate BinaryInfo stub so setBinaryInfo won't be called but addCodeRefs works
         class FakeBinaryInfo:
             base_addr = 0
             raw_data = b""
             binary = b""
             binary_size = 0
+
         disassembly.binary_info = FakeBinaryInfo()
         start_addr = 0x1000
         state = DalvikFunctionAnalysisState(start_addr, disassembly)
@@ -414,13 +417,14 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
     def testForgedPayloadBoundsCheck(self):
         """P2-A: _getPayloadSize() never returns more bytes than remain in the bytecode buffer."""
         from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
         disasm = DalvikDisassembler(config)
         bytecode = bytearray(100)
 
         # Packed-switch payload with huge size field
-        struct.pack_into("<H", bytecode, 0, 0x0100)      # ident: packed-switch
-        struct.pack_into("<H", bytecode, 2, 0xFFFF)       # size: 65535 entries
-        struct.pack_into("<I", bytecode, 4, 0)            # first_key
+        struct.pack_into("<H", bytecode, 0, 0x0100)  # ident: packed-switch
+        struct.pack_into("<H", bytecode, 2, 0xFFFF)  # size: 65535 entries
+        struct.pack_into("<I", bytecode, 4, 0)  # first_key
         size = disasm._getPayloadSize(bytecode, 0)
         self.assertLessEqual(size, len(bytecode), "packed-switch payload size must be capped")
 
@@ -431,9 +435,9 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertLessEqual(size, len(bytecode), "sparse-switch payload size must be capped")
 
         # fill-array-data payload with huge element count
-        struct.pack_into("<H", bytecode, 0, 0x0300)       # ident
-        struct.pack_into("<H", bytecode, 2, 4)             # element_width = 4
-        struct.pack_into("<I", bytecode, 4, 0xFFFFFF)     # size: huge
+        struct.pack_into("<H", bytecode, 0, 0x0300)  # ident
+        struct.pack_into("<H", bytecode, 2, 4)  # element_width = 4
+        struct.pack_into("<I", bytecode, 4, 0xFFFFFF)  # size: huge
         size = disasm._getPayloadSize(bytecode, 0)
         self.assertLessEqual(size, len(bytecode), "fill-array-data payload size must be capped")
 
