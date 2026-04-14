@@ -346,10 +346,10 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         combined_output = result.stdout + result.stderr
-        self.assertIn("architecture: dalvik.32bit", combined_output)
-        self.assertIn("DEX summary:", combined_output)
-        self.assertIn("Analyzed Dalvik method", combined_output)
-        self.assertIn("Dalvik analysis summary:", combined_output)
+        self.assertIn("dalvik.32bit", combined_output)
+        self.assertIn("DEX v", combined_output)
+        self.assertIn("heuristics=[", combined_output)
+        self.assertIn("api_refs=", combined_output)
         self.assertNotIn("Current analysis callback time", combined_output)
         self.assertNotIn("r not in G", combined_output)
 
@@ -387,8 +387,6 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(decoded_array.mnemonic, "fill-array-data")
         self.assertEqual(decoded_array.payload_idx, 4)
 
-    # ── New tests for consolidated enhancement plan ──────────────────────────
-
     def testDisassembleBufferDexAutodetect(self):
         generic_disasm = Disassembler(config)
         report = generic_disasm.disassembleBuffer(self.dex_binary, base_addr=0)
@@ -412,7 +410,7 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         combined_output = result.stdout + result.stderr
-        self.assertIn("architecture: dalvik.32bit", combined_output)
+        self.assertIn("dalvik.32bit", combined_output)
         self.assertNotIn("No base address recognized, using 0.", combined_output)
         self.assertNotIn("No OEP recognized, skipping.", combined_output)
 

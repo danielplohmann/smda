@@ -340,4 +340,5 @@ class SmdaReport:
     def __str__(self):
         if self.status == "error":
             return f"{self.execution_time:>6.3f}s -> {self.message}"
-        return f"{self.execution_time:>6.3f}s -> (architecture: {self.architecture}.{self.bitness}bit, base_addr: 0x{self.base_addr:08x}): {len(self.xcfg)} functions"
+        arch_str = f"{self.architecture}.{self.bitness}bit" if self.bitness else self.architecture
+        return f"{self.execution_time:>6.3f}s -> (architecture: {arch_str}, base_addr: 0x{self.base_addr:08x}): {len(self.xcfg)} functions"

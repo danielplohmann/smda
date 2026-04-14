@@ -260,6 +260,7 @@ class DalvikDisassembler:
         self.config = config
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
+        self._diag_stubs_suppressed = 0
 
     def addPdbFile(self, binary_info, pdb_path):
         return
@@ -279,21 +280,36 @@ class DalvikDisassembler:
 
     def _logMethodDiagnostics(self, state):
         metadata = state.metadata
+        heuristics = metadata["heuristics"]
+        n_ins = len(state.instructions)
+        n_blocks = len(self.disassembly.functions.get(state.start_addr, []))
+        n_handlers = metadata.get("exception_handler_count", 0)
+
+        # Suppress trivial single-block stubs with no heuristics — typically generated
+        # string-obfuscation shims.  Count them for the summary instead.
+        if n_ins <= 8 and n_blocks <= 1 and n_handlers == 0 and not heuristics:
+            self._diag_stubs_suppressed += 1
+            return
+
+        heuristic_str = ", ".join(heuristics) if heuristics else "none"
         outref_count = len(self.disassembly.getOutRefs(state.start_addr))
         string_ref_count = len(self.disassembly.getStringRefsForFunction(state.start_addr))
-        heuristics = ", ".join(metadata["heuristics"]) if metadata["heuristics"] else "none"
-        LOGGER.debug(
-            "Analyzed Dalvik method 0x%08x %s: ins=%d blocks=%d outrefs=%d handlers=%d strings=%d refs=[%s] heuristics=[%s]",
+        fmt = "0x%08x %s: ins=%d blocks=%d outrefs=%d handlers=%d strings=%d refs=[%s] heuristics=[%s]"
+        args = (
             state.start_addr,
             state.label,
-            len(state.instructions),
-            len(self.disassembly.functions.get(state.start_addr, [])),
+            n_ins,
+            n_blocks,
             outref_count,
-            metadata.get("exception_handler_count", 0),
+            n_handlers,
             string_ref_count,
             self._formatReferenceCounts(metadata["reference_counts"]),
-            heuristics,
+            heuristic_str,
         )
+        # Both tiers logged at DEBUG — per-method detail belongs in verbose mode only.
+        # Heuristic summary is surfaced via the INFO-level analysis banner instead.
+        prefix = "[!] " if heuristics else ""
+        LOGGER.debug(prefix + fmt, *args)
 
     def _logAnalysisSummary(self, version, method_counts, analyzed_count):
         total_blocks = sum(len(blocks) for blocks in self.disassembly.functions.values())
@@ -301,25 +317,40 @@ class DalvikDisassembler:
         try_functions = sum(
             1 for metadata in self.disassembly.function_metadata.values() if metadata.get("exception_handler_count", 0)
         )
-        LOGGER.debug(
-            "Dalvik analysis summary: version=%s analyzed=%d/%d functions=%d blocks=%d instructions=%d "
-            "api_refs=%d string_refs=%d try_functions=%d failed=%d skipped(no_class=%d,no_code=%d,invalid_offset=%d) "
-            "heuristics=[%s]",
+        heuristics_str = self._summarizeHeuristics()
+        sep = "-" * 68
+        LOGGER.info(sep)
+        LOGGER.info(
+            "DEX v%s  |  analyzed %d/%d  |  functions=%d  blocks=%d  instructions=%d",
             version,
             analyzed_count,
             method_counts["total"],
             len(self.disassembly.functions),
             total_blocks,
             len(self.disassembly.instructions),
+        )
+        LOGGER.info(
+            "         api_refs=%d  string_refs=%d  try_blocks=%d  failed=%d",
             len(self.disassembly.addr_to_api),
             total_strings,
             try_functions,
             len(self.disassembly.failed_analysis_addr),
-            method_counts["skipped_no_class"],
-            method_counts["skipped_no_code"],
-            method_counts["skipped_invalid_offset"],
-            self._summarizeHeuristics(),
         )
+        skip_nc = method_counts["skipped_no_class"]
+        skip_nc2 = method_counts["skipped_no_code"]
+        skip_inv = method_counts["skipped_invalid_offset"]
+        if skip_nc + skip_nc2 + skip_inv:
+            LOGGER.info(
+                "         skipped: no_class=%d  no_code=%d  invalid_offset=%d",
+                skip_nc,
+                skip_nc2,
+                skip_inv,
+            )
+        if self._diag_stubs_suppressed:
+            LOGGER.info("         (%d trivial stubs suppressed from per-method log)", self._diag_stubs_suppressed)
+        if heuristics_str:
+            LOGGER.info("[!]      heuristics: %s", heuristics_str)
+        LOGGER.info(sep)
 
     def _getPayloadSize(self, bytecode, idx):
         if idx < 0 or idx + 2 > len(bytecode):
@@ -840,16 +871,17 @@ class DalvikDisassembler:
 
         state.label = resolver.format_method(method)
         state.finalizeAnalysis()
-        if LOGGER.isEnabledFor(logging.DEBUG):
-            self._logMethodDiagnostics(state)
+        self._logMethodDiagnostics(state)
         return state
 
     def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
-        LOGGER.debug("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
+        self._diag_stubs_suppressed = 0
+        LOGGER.info("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "dalvik"
+        self.disassembly.binary_info.bitness = 32  # Dalvik VM is always 32-bit
         self.disassembly.binary_info.version = ""
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "dalvik"
@@ -875,8 +907,10 @@ class DalvikDisassembler:
             "skipped_no_code": 0,
             "skipped_invalid_offset": 0,
         }
-        LOGGER.debug(
-            "DEX summary: version=%s classes=%d methods=%d strings=%d types=%d fields=%d protos=%d",
+        sep = "-" * 68
+        LOGGER.info(sep)
+        LOGGER.info(
+            "DEX v%s  |  classes=%d  methods=%d  strings=%d  types=%d  fields=%d  protos=%d",
             self.disassembly.binary_info.version,
             len(list(getattr(dex_file, "classes", []))),
             len(methods),
@@ -885,6 +919,7 @@ class DalvikDisassembler:
             len(resolver.fields),
             len(resolver.prototypes),
         )
+        LOGGER.info(sep)
 
         analyzed_count = 0
         for method in methods:
@@ -920,6 +955,5 @@ class DalvikDisassembler:
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
-        if LOGGER.isEnabledFor(logging.DEBUG):
-            self._logAnalysisSummary(self.disassembly.binary_info.version, method_counts, analyzed_count)
+        self._logAnalysisSummary(self.disassembly.binary_info.version, method_counts, analyzed_count)
         return self.disassembly
