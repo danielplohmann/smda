@@ -178,10 +178,9 @@ class Disassembler:
         # Auto-detect DEX when the caller did not explicitly override architecture.
         # disassembleUnmappedBuffer / disassembleFile already use FileLoader for detection;
         # this path bypasses it, so we check the magic bytes manually here.
-        if architecture == "intel":
-            if DexFileLoader.isCompatible(file_content):
-                architecture = "dalvik"
-                if bitness is None:
+        if architecture == "intel" and DexFileLoader.isCompatible(file_content):
+            architecture = "dalvik"
+            if bitness is None:
                     bitness = DexFileLoader.getBitness(file_content)
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
