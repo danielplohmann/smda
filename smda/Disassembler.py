@@ -11,6 +11,7 @@ from smda.dalvik.DalvikDisassembler import DalvikDisassembler
 from smda.ida.IdaExporter import IdaExporter
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.FileLoader import FileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
 from smda.utility.StringExtractor import extract_strings
@@ -178,8 +179,6 @@ class Disassembler:
         # disassembleUnmappedBuffer / disassembleFile already use FileLoader for detection;
         # this path bypasses it, so we check the magic bytes manually here.
         if architecture == "intel":
-            from smda.utility.DexFileLoader import DexFileLoader
-
             if DexFileLoader.isCompatible(file_content):
                 architecture = "dalvik"
                 if bitness is None:

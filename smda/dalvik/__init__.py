@@ -1,2 +1,2 @@
-from .DalvikDisassembler import DalvikDisassembler as DalvikDisassembler
-from .DalvikFunctionAnalysisState import DalvikFunctionAnalysisState as DalvikFunctionAnalysisState
+from .DalvikDisassembler import DalvikDisassembler
+from .DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
