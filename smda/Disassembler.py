@@ -68,8 +68,8 @@ class Disassembler:
     def _addStringsToReport(self, smda_report, buffer, mode=None):
         smda_report.buffer = buffer
         for smda_function in smda_report.getFunctions():
-            if smda_report.architecture == "dalvik" and smda_function.stringrefs:
-                if isinstance(smda_function.stringrefs, dict):
+            if smda_report.architecture == "dalvik":
+                if smda_function.stringrefs and isinstance(smda_function.stringrefs, dict):
                     smda_function.stringrefs = [
                         {
                             "string": string_value,
