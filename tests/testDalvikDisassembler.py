@@ -47,24 +47,24 @@ class SyntheticDalvikMethod:
 
 
 class SyntheticDalvikResolver:
-    def format_ref(self, ref_kind, ref_index):
+    def formatRef(self, ref_kind, ref_index):
         return f"{ref_kind}@{ref_index}"
 
-    def format_type_by_index(self, index):
+    def formatTypeByIndex(self, index):
         return f"type@{index}"
 
-    def get_string_value(self, string_index):
+    def getStringValue(self, string_index):
         return None
 
-    def get_method_target(self, method_index):
+    def getMethodTarget(self, method_index):
         return None, f"method@{method_index}"
 
-    def format_method(self, method):
+    def formatMethod(self, method):
         return "LSynthetic;->method()V"
 
-    def get_method_metadata(self, method):
+    def getMethodMetadata(self, method):
         return {
-            "method_name": self.format_method(method),
+            "method_name": self.formatMethod(method),
             "class_name": "LSynthetic;",
             "prototype": "()V",
             "access_flags": 0,
@@ -390,6 +390,17 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
     def testDisassembleBufferDexAutodetect(self):
         generic_disasm = Disassembler(config)
         report = generic_disasm.disassembleBuffer(self.dex_binary, base_addr=0)
+        self.assertEqual(report.architecture, "dalvik")
+        self.assertEqual(report.bitness, 32)
+        self.assertGreater(report.num_functions, 2000)
+
+    def testDisassembleBufferIntelOnDexAutodetectsDalvik(self):
+        # Pinning the contract: an explicit architecture="intel" on DEX bytes
+        # is overridden by magic-byte autodetection rather than producing
+        # garbage Intel disassembly. If the autodetect ever becomes opt-in,
+        # this test must be updated to assert error/empty Intel output instead.
+        intel_disasm = Disassembler(config, backend="intel")
+        report = intel_disasm.disassembleBuffer(self.dex_binary, base_addr=0, architecture="intel")
         self.assertEqual(report.architecture, "dalvik")
         self.assertEqual(report.bitness, 32)
         self.assertGreater(report.num_functions, 2000)

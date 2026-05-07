@@ -66,30 +66,30 @@ class DexReferenceResolver:
     def __init__(self, dex_file):
         self.dex_file = dex_file
         self.strings = list(getattr(dex_file, "strings", []))
-        self.methods = self._index_items(getattr(dex_file, "methods", []))
-        self.fields = self._index_items(getattr(dex_file, "fields", []))
-        self.types = self._index_items(getattr(dex_file, "types", []))
-        self.prototypes = self._index_items(getattr(dex_file, "prototypes", []))
-        self.classes = self._index_items(getattr(dex_file, "classes", []))
+        self.methods = self._indexItems(getattr(dex_file, "methods", []))
+        self.fields = self._indexItems(getattr(dex_file, "fields", []))
+        self.types = self._indexItems(getattr(dex_file, "types", []))
+        self.prototypes = self._indexItems(getattr(dex_file, "prototypes", []))
+        self.classes = self._indexItems(getattr(dex_file, "classes", []))
 
-    def _index_items(self, items):
+    def _indexItems(self, items):
         indexed = {}
         for index, item in enumerate(items):
             indexed[getattr(item, "index", index)] = item
         return indexed
 
-    def _safe_get(self, collection, index):
+    def _safeGet(self, collection, index):
         if index in collection:
             return collection[index]
         return None
 
-    def _safe_attr(self, obj, attr, default=None):
+    def _safeAttr(self, obj, attr, default=None):
         try:
             return getattr(obj, attr)
         except Exception:
             return default
 
-    def _normalize_type_string(self, type_name):
+    def _normalizeTypeString(self, type_name):
         if not type_name:
             return None
         if type_name in {"V", "Z", "B", "S", "C", "I", "J", "F", "D"}:
@@ -103,76 +103,76 @@ class DexReferenceResolver:
             return f"L{type_name.replace('.', '/')};"
         return type_name
 
-    def _format_type(self, type_obj):
+    def _formatType(self, type_obj):
         if type_obj is None:
             return "<?>"
         if isinstance(type_obj, str):
-            return self._normalize_type_string(type_obj)
-        fullname = self._safe_attr(type_obj, "fullname", None)
+            return self._normalizeTypeString(type_obj)
+        fullname = self._safeAttr(type_obj, "fullname", None)
         if fullname:
-            return self._normalize_type_string(fullname)
-        value = self._safe_attr(type_obj, "value", None)
+            return self._normalizeTypeString(fullname)
+        value = self._safeAttr(type_obj, "value", None)
         if value is not None:
-            fullname = self._safe_attr(value, "fullname", None)
+            fullname = self._safeAttr(value, "fullname", None)
             if fullname:
-                return self._normalize_type_string(fullname)
-            primitive_name = self.PRIMITIVE_TYPES.get(self._safe_attr(value, "name", ""), None)
+                return self._normalizeTypeString(fullname)
+            primitive_name = self.PRIMITIVE_TYPES.get(self._safeAttr(value, "name", ""), None)
             if primitive_name:
                 return primitive_name
-            name = self._safe_attr(value, "name", None)
+            name = self._safeAttr(value, "name", None)
             if name:
-                return self._normalize_type_string(name)
+                return self._normalizeTypeString(name)
             with contextlib.suppress(Exception):
-                normalized = self._normalize_type_string(str(value))
+                normalized = self._normalizeTypeString(str(value))
                 if normalized and not normalized.startswith("<lief."):
                     return normalized
-        name = self._safe_attr(type_obj, "name", None)
+        name = self._safeAttr(type_obj, "name", None)
         if name:
-            return self._normalize_type_string(name)
+            return self._normalizeTypeString(name)
         with contextlib.suppress(Exception):
-            type_as_string = self._normalize_type_string(str(type_obj))
+            type_as_string = self._normalizeTypeString(str(type_obj))
             if type_as_string and not type_as_string.startswith("<lief.") and " - " not in type_as_string:
                 return type_as_string
         with contextlib.suppress(Exception):
             return repr(type_obj)
         return "<?>"
 
-    def _format_proto(self, prototype):
+    def _formatProto(self, prototype):
         if prototype is None:
             return "()<?>"
         params = []
         for param in getattr(prototype, "parameters_type", []):
-            params.append(self._format_type(param))
-        return_type = self._format_type(getattr(prototype, "return_type", None))
+            params.append(self._formatType(param))
+        return_type = self._formatType(getattr(prototype, "return_type", None))
         return f"({''.join(params)}){return_type}"
 
-    def format_method(self, method):
+    def formatMethod(self, method):
         if method is None:
             return "method@<?>"
-        class_name = self._format_type(getattr(method, "cls", None))
+        class_name = self._formatType(getattr(method, "cls", None))
         method_name = getattr(method, "name", "<?>")
-        prototype = self._format_proto(getattr(method, "prototype", None))
+        prototype = self._formatProto(getattr(method, "prototype", None))
         return f"{class_name}->{method_name}{prototype}"
 
-    def format_field(self, field):
+    def formatField(self, field):
         if field is None:
             return "field@<?>"
-        class_name = self._format_type(getattr(field, "cls", None))
+        class_name = self._formatType(getattr(field, "cls", None))
         field_name = getattr(field, "name", "<?>")
-        field_type = self._format_type(getattr(field, "type", None))
+        field_type = self._formatType(getattr(field, "type", None))
         return f"{class_name}->{field_name}:{field_type}"
 
-    def format_proto(self, index):
-        prototype = self._safe_get(self.prototypes, index)
+    def formatProto(self, index):
+        prototype = self._safeGet(self.prototypes, index)
         if prototype is None:
             return f"proto@{index}"
-        return self._format_proto(prototype)
+        return self._formatProto(prototype)
 
-    def format_type_by_index(self, index):
-        type_obj = self._safe_get(self.types, index)
+    def formatTypeByIndex(self, index):
+        type_obj = self._safeGet(self.types, index)
         if type_obj is None:
             return f"type@{index}"
-        return self._format_type(type_obj)
+        return self._formatType(type_obj)
 
     # Baksmali-style escape map for DEX string literals.
     _STRING_ESCAPE_MAP = {
@@ -197,44 +197,44 @@ class DexReferenceResolver:
                 parts.append(f"\\u{ord(ch):04x}")
         return "".join(parts)
 
-    def format_ref(self, ref_kind, index):
+    def formatRef(self, ref_kind, index):
         if ref_kind == "string":
             if 0 <= index < len(self.strings):
                 return '"' + self._escapeDexString(self.strings[index]) + '"'
             return f"string@{index}"
         if ref_kind == "type":
-            return self.format_type_by_index(index)
+            return self.formatTypeByIndex(index)
         if ref_kind == "field":
-            return self.format_field(self._safe_get(self.fields, index))
+            return self.formatField(self._safeGet(self.fields, index))
         if ref_kind == "method":
-            return self.format_method(self._safe_get(self.methods, index))
+            return self.formatMethod(self._safeGet(self.methods, index))
         if ref_kind == "proto":
-            return self.format_proto(index)
+            return self.formatProto(index)
         if ref_kind == "method_handle":
             return f"method_handle@{index}"
         if ref_kind == "call_site":
             return f"call_site@{index}"
         return f"{ref_kind}@{index}" if ref_kind else f"item@{index}"
 
-    def get_method(self, method_index):
-        return self._safe_get(self.methods, method_index)
+    def getMethod(self, method_index):
+        return self._safeGet(self.methods, method_index)
 
-    def get_method_target(self, method_index):
-        method = self.get_method(method_index)
+    def getMethodTarget(self, method_index):
+        method = self.getMethod(method_index)
         if method is None:
             return None, None
         code_offset = getattr(method, "code_offset", 0)
         code_info = getattr(method, "code_info", None)
         if code_offset and code_info:
-            return code_offset, self.format_method(method)
-        return None, self.format_method(method)
+            return code_offset, self.formatMethod(method)
+        return None, self.formatMethod(method)
 
-    def get_string_value(self, string_index):
+    def getStringValue(self, string_index):
         if 0 <= string_index < len(self.strings):
             return self.strings[string_index]
         return None
 
-    def get_method_metadata(self, method):
+    def getMethodMetadata(self, method):
         access_flags = getattr(method, "access_flags", 0)
         access_flags = getattr(access_flags, "value", access_flags)
         if isinstance(access_flags, (list, tuple, set)):
@@ -243,11 +243,11 @@ class DexReferenceResolver:
                 normalized_flags |= getattr(flag, "value", 0)
             access_flags = normalized_flags
         access_flag_names = [name for mask, name in self.ACCESS_FLAG_NAMES if access_flags & mask]
-        method_name = self.format_method(method)
+        method_name = self.formatMethod(method)
         return {
             "method_name": method_name,
-            "class_name": self._format_type(getattr(method, "cls", None)),
-            "prototype": self._format_proto(getattr(method, "prototype", None)),
+            "class_name": self._formatType(getattr(method, "cls", None)),
+            "prototype": self._formatProto(getattr(method, "prototype", None)),
             "access_flags": access_flags,
             "access_flags_decoded": access_flag_names,
         }
@@ -414,7 +414,7 @@ class DalvikDisassembler:
         return targets
 
     def _resolveReference(self, resolver, ref_kind, ref_index):
-        return resolver.format_ref(ref_kind, ref_index)
+        return resolver.formatRef(ref_kind, ref_index)
 
     def _parseTryBlocks(self, raw_data, resolver, bytecode_offset, insns_size_units, tries_size):
         if tries_size == 0:
@@ -468,7 +468,7 @@ class DalvikDisassembler:
                     "handlers": [
                         {
                             "type_idx": handler["type_idx"],
-                            "type_name": resolver.format_type_by_index(handler["type_idx"]),
+                            "type_name": resolver.formatTypeByIndex(handler["type_idx"]),
                             "target_addr": bytecode_offset + handler["addr_units"] * 2,
                         }
                         for handler in resolved["handlers"]
@@ -509,7 +509,7 @@ class DalvikDisassembler:
         return applied
 
     def _buildFunctionMetadata(self, resolver, method, code_item_header, try_blocks):
-        metadata = resolver.get_method_metadata(method)
+        metadata = resolver.getMethodMetadata(method)
         exception_handlers = []
         try_ranges = []
         for try_block in try_blocks:
@@ -792,7 +792,7 @@ class DalvikDisassembler:
                 state.setNextInstructionReachable(not decoded.is_terminator)
 
                 if decoded.ref_kind == "string" and decoded.ref_index is not None:
-                    string_value = resolver.get_string_value(decoded.ref_index)
+                    string_value = resolver.getStringValue(decoded.ref_index)
                     if string_value is not None:
                         self.disassembly.addStringRef(state.start_addr, i_address, string_value)
                 if decoded.payload_idx is not None:
@@ -847,9 +847,9 @@ class DalvikDisassembler:
                     call_target = None
                     call_name = None
                     if decoded.ref_kind == "method" and decoded.ref_index is not None:
-                        call_target, call_name = resolver.get_method_target(decoded.ref_index)
+                        call_target, call_name = resolver.getMethodTarget(decoded.ref_index)
                     elif decoded.ref_index is not None:
-                        call_name = resolver.format_ref(decoded.ref_kind, decoded.ref_index)
+                        call_name = resolver.formatRef(decoded.ref_kind, decoded.ref_index)
                     if call_target is not None:
                         state.addCodeRef(i_address, call_target)
                         if call_target == state.start_addr:
@@ -872,7 +872,7 @@ class DalvikDisassembler:
                     break
             state.endBlock()
 
-        state.label = resolver.format_method(method)
+        state.label = resolver.formatMethod(method)
         state.finalizeAnalysis()
         self._logMethodDiagnostics(state)
         return state
@@ -954,7 +954,7 @@ class DalvikDisassembler:
             except Exception as exc:
                 LOGGER.warning(
                     "Failed to analyze Dalvik method %s @0x%x: %s",
-                    resolver.format_method(method),
+                    resolver.formatMethod(method),
                     getattr(method, "code_offset", 0),
                     exc,
                 )

@@ -185,6 +185,9 @@ class Disassembler:
             architecture = "dalvik"
             if bitness is None:
                 bitness = DexFileLoader.getBitness(file_content)
+            # initDisassembler caches by self.disassembler-is-None, so a backend
+            # picked at construction time would otherwise win against autodetect.
+            self.disassembler = None
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness
