@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+import textwrap
 
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
@@ -62,18 +63,9 @@ def _printDalvikSummary(report, output_path, input_filename):
     print(f"[*] Refs:       api={stats.num_api_calls:,}   strings={string_ref_total:,}")
 
     if heuristic_counts:
-        # Sort by count descending, wrap at ~52 chars per continuation line
         tags = sorted(heuristic_counts.items(), key=lambda kv: -kv[1])
-        tag_strs = [f"{k}={v}" for k, v in tags]
-        lines, current = [], ""
-        for ts in tag_strs:
-            if current and len(current) + 2 + len(ts) > 52:
-                lines.append(current)
-                current = ts
-            else:
-                current = (current + "  " + ts).lstrip()
-        if current:
-            lines.append(current)
+        joined = "  ".join(f"{k}={v}" for k, v in tags)
+        lines = textwrap.wrap(joined, width=52, break_long_words=False, break_on_hyphens=False) or [""]
         print(f"[!] Heuristics: {lines[0]}")
         for line in lines[1:]:
             print(f"                {line}")

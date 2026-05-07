@@ -25,13 +25,12 @@ class SmdaInstruction:
             self.operands = ins_list[3]
 
     def getDataRefs(self):
-        explicit_refs = set()
+        emitted = set()
         smda_report = self.smda_function.smda_report
         if smda_report.data_refs_from is not None and self.offset in smda_report.data_refs_from:
-            explicit_refs.update(smda_report.data_refs_from[self.offset])
-        yield from sorted(explicit_refs)
-        if explicit_refs:
-            return
+            for value in sorted(smda_report.data_refs_from[self.offset]):
+                emitted.add(value)
+                yield value
         if smda_report.architecture != "intel":
             return
         if self.getMnemonicGroup(IntelInstructionEscaper) != "C":
@@ -46,7 +45,12 @@ class SmdaInstruction:
                         if detailed.reg_name(i.mem.base) == "rip":
                             # add RIP value
                             value += detailed.address + detailed.size
-                    if value is not None and self.smda_function.smda_report.isAddrWithinMemoryImage(value):
+                    if (
+                        value is not None
+                        and value not in emitted
+                        and self.smda_function.smda_report.isAddrWithinMemoryImage(value)
+                    ):
+                        emitted.add(value)
                         yield value
 
     def getDetailed(self):

@@ -68,6 +68,9 @@ class SmdaFunction:
                 if function_offset in disassembly.candidates
                 else None
             )
+            # DEX strings are part of the parsed file structure, so they're always
+            # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
+            # cost. For other architectures, honor WITH_STRINGS as usual.
             if (
                 config
                 and config.WITH_STRINGS
@@ -261,15 +264,14 @@ class SmdaFunction:
         if block_start is not None:
             return block_start
         if normalized_blockrefs:
-            fallback_root = min(normalized_blockrefs)
+            # No entry block found for self.offset — refuse to fabricate a root,
+            # since dominator/nesting derived from a wrong root is silently misleading.
             LOGGER.warning(
-                "Normalized CFG for %s (0x%x) has no entry block 0x%x, falling back to 0x%x.",
+                "Normalized CFG for %s (0x%x) has no entry block; skipping root-dependent analysis.",
                 self.function_name or "<unnamed>",
                 self.offset,
-                self.offset,
-                fallback_root,
             )
-            return fallback_root
+            return None
         LOGGER.warning("Normalized CFG for %s (0x%x) is empty.", self.function_name or "<unnamed>", self.offset)
         return None
 

@@ -627,14 +627,17 @@ class DalvikDisassembler:
         payload_ranges = []
         idx = 0
         null_resolve = lambda ref_kind, ref_index: ""  # noqa: E731
+        # Dalvik instructions are 16-bit aligned (one "code unit"), so always
+        # advance by 2 on resync — stepping by 1 wastes a decode attempt at every
+        # odd offset on adversarial input.
         while idx < len(bytecode):
             if any(start <= idx < end for start, end in payload_ranges):
-                idx += 1
+                idx += 2
                 continue
             try:
                 decoded = decode_instruction(bytecode, idx, null_resolve)
             except ValueError:
-                idx += 1
+                idx += 2
                 continue
             valid.add(idx)
             if decoded.payload_idx is not None:
@@ -894,7 +897,18 @@ class DalvikDisassembler:
             with contextlib.suppress(Exception):
                 dex_file = lief.DEX.parse(binary_info.file_path)
         if dex_file is None:
-            dex_file = lief.DEX.parse(list(binary_info.raw_data))
+            # Prefer bytes/memoryview: list(raw_data) allocates a PyLong per byte
+            # (~30x memory blowup on large DEX). Older LIEF builds only accept
+            # List[int] and either raise TypeError or return None — fall back then.
+            raw_data = binary_info.raw_data
+            if not isinstance(raw_data, (bytes, bytearray)):
+                raw_data = bytes(raw_data)
+            try:
+                dex_file = lief.DEX.parse(raw_data)
+            except TypeError:
+                dex_file = None
+            if dex_file is None:
+                dex_file = lief.DEX.parse(list(raw_data))
         if dex_file is None:
             raise ValueError("Failed to parse DEX file")
 

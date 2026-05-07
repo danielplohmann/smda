@@ -60,8 +60,11 @@ class Disassembler:
         if elapsed_seconds >= self._timeout:
             LOGGER.debug("Current analysis callback time %s", time_diff)
             return True
-        if elapsed_seconds >= 30 and elapsed_seconds % 30 == 0 and elapsed_seconds != self._last_timeout_log_second:
-            self._last_timeout_log_second = elapsed_seconds
+        # Log on 30s bucket transitions (not exact-second boundaries) so the message
+        # still fires when callback timing skips past 30/60/... whole seconds.
+        current_bucket = elapsed_seconds // 30
+        if current_bucket >= 1 and current_bucket != self._last_timeout_log_second:
+            self._last_timeout_log_second = current_bucket
             LOGGER.debug("Current analysis callback time %s", time_diff)
         return False
 
