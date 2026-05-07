@@ -2156,13 +2156,11 @@ class IntelInstructionEscaper:
     @staticmethod
     def escapeToOpcodeOnly(ins):
         ins_bytes = ins.bytes
-        prefix_len = 0
-        for i in range(0, len(ins_bytes), 2):
-            if ins_bytes[i : i + 2] not in IntelInstructionEscaper._PREFIXES:
-                prefix_len = i
-                break
-        else:
-            prefix_len = len(ins_bytes)
+        prefixes = IntelInstructionEscaper._PREFIXES
+        prefix_len = next(
+            (i for i in range(0, len(ins_bytes), 2) if ins_bytes[i : i + 2] not in prefixes),
+            len(ins_bytes),
+        )
 
         escaped_sequence = ins_bytes[:prefix_len]
         cleaned = ins_bytes[prefix_len:]
@@ -2324,7 +2322,9 @@ class IntelInstructionEscaper:
     @staticmethod
     def getByteWithoutPrefixes(ins):
         ins_bytes = ins.bytes
-        for i in range(0, len(ins_bytes), 2):
-            if ins_bytes[i : i + 2] not in IntelInstructionEscaper._PREFIXES:
-                return ins_bytes[i:]
-        return ""
+        prefixes = IntelInstructionEscaper._PREFIXES
+        prefix_len = next(
+            (i for i in range(0, len(ins_bytes), 2) if ins_bytes[i : i + 2] not in prefixes),
+            len(ins_bytes),
+        )
+        return ins_bytes[prefix_len:]
