@@ -2153,9 +2153,9 @@ class IntelInstructionEscaper:
             )
         return ", ".join(escaped_fields)
 
-    @staticmethod
-    def _getPrefixLen(ins_bytes):
-        prefixes = IntelInstructionEscaper._PREFIXES
+    @classmethod
+    def _getPrefixLen(cls, ins_bytes):
+        prefixes = cls._PREFIXES
         return next(
             (i for i in range(0, len(ins_bytes), 2) if ins_bytes[i : i + 2] not in prefixes),
             len(ins_bytes),
