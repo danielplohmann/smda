@@ -2326,4 +2326,4 @@ class IntelInstructionEscaper:
     @staticmethod
     def getByteWithoutPrefixes(ins):
         ins_bytes = ins.bytes
-        return ins_bytes[IntelInstructionEscaper._getPrefixLen(ins_bytes):]
+        return ins_bytes[IntelInstructionEscaper._getPrefixLen(ins_bytes) :]
