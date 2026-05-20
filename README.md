@@ -103,7 +103,8 @@ make test
 ```
 
 ## Version History
- * 2026-05-20: v3.0.0 - Support for Android Dalvik Disassembly (THX: @r0ny123)
+ * 2026-05-20: v3.0.1 - Improved performance for string extraction by reducing type casts (THX: @r0ny123)
+ * 2026-05-20: v3.0.0 - Support for Android Dalvik disassembly (THX: @r0ny123)
  * 2026-05-20: v2.6.0 - Use Pythia as drop-in replacement for current Delphi VMT parser (THX: @r0ny123)
  * 2026-05-20: v2.5.4 - Improve performance by precompiling regexes, doing additional prefix extraction and covering more GAP sequence NOPs (THX: @r0ny123)
  * 2026-03-23: v2.5.3 - Added ELF ABI to SmdaReport info, upgraded DelphiReSym to handle Delphi 13, slight performance improvements by removing redundant label extraction. (THX: @r0ny123)
