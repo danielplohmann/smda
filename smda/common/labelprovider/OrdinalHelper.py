@@ -1,5 +1,6 @@
 class OrdinalHelper:
-    # TODO POC implementation, extend list. ole32.dll and mfc42.dll are candidates here
+    # Central mapping for DLL ordinals to function names.
+    # Only include mappings that are stable across Windows versions (XP, Win7, Win10+).
     ORDINALS = {
         "ws2_32.dll": {
             1: "accept",
@@ -35,7 +36,19 @@ class OrdinalHelper:
             21: "setsockopt",
             22: "shutdown",
             23: "socket",
-        }
+        },
+        "oleaut32.dll": {
+            2: "SysAllocString",
+            4: "SysAllocStringLen",
+            6: "SysFreeString",
+            7: "SysStringLen",
+            8: "VariantInit",
+            9: "VariantClear",
+            10: "VariantCopy",
+            144: "DllCanUnloadNow",
+            149: "SysStringByteLen",
+            150: "SysAllocStringByteLen",
+        },
     }
 
     @staticmethod
