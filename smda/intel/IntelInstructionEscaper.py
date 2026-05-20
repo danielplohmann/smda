@@ -2014,6 +2014,8 @@ class IntelInstructionEscaper:
         "tr7",
     ]
 
+    _PREFIXES = {"26", "2e", "36", "3e", "64", "65", "66", "67", "f2", "f3"}
+
     @staticmethod
     def escapeMnemonic(mnemonic):
         mnemonic = mnemonic.split(" ")[-1]
@@ -2151,29 +2153,21 @@ class IntelInstructionEscaper:
             )
         return ", ".join(escaped_fields)
 
+    @classmethod
+    def _getPrefixLen(cls, ins_bytes):
+        prefixes = cls._PREFIXES
+        return next(
+            (i for i in range(0, len(ins_bytes), 2) if ins_bytes[i : i + 2] not in prefixes),
+            len(ins_bytes),
+        )
+
     @staticmethod
     def escapeToOpcodeOnly(ins):
-        escaped_sequence = ""
         ins_bytes = ins.bytes
-        cleaned = ""
-        is_cleaning = True
-        for target_byte in [ins_bytes[i : i + 2] for i in range(0, len(ins_bytes), 2)]:
-            if is_cleaning and target_byte in [
-                "26",
-                "2e",
-                "36",
-                "3e",
-                "64",
-                "65",
-                "66",
-                "67",
-                "f2",
-                "f3",
-            ]:
-                escaped_sequence += target_byte
-            else:
-                is_cleaning = False
-                cleaned += target_byte
+        prefix_len = IntelInstructionEscaper._getPrefixLen(ins_bytes)
+
+        escaped_sequence = ins_bytes[:prefix_len]
+        cleaned = ins_bytes[prefix_len:]
         cap_ins = ins.getDetailed()
         opcode_length = 0
         if cap_ins.rex:
@@ -2332,23 +2326,4 @@ class IntelInstructionEscaper:
     @staticmethod
     def getByteWithoutPrefixes(ins):
         ins_bytes = ins.bytes
-        cleaned = ""
-        is_cleaning = True
-        for prefix_byte in [ins_bytes[i : i + 2] for i in range(0, len(ins_bytes), 2)]:
-            if is_cleaning and prefix_byte in [
-                "26",
-                "2e",
-                "36",
-                "3e",
-                "64",
-                "65",
-                "66",
-                "67",
-                "f2",
-                "f3",
-            ]:
-                continue
-            else:
-                is_cleaning = False
-                cleaned += prefix_byte
-        return cleaned
+        return ins_bytes[IntelInstructionEscaper._getPrefixLen(ins_bytes) :]
