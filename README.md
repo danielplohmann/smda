@@ -103,12 +103,15 @@ make test
 ```
 
 ## Version History
- * 2025-03-23: v2.5.3 - Added ELF ABI to SmdaReport info, upgraded DelphiReSym to handle Delphi 13, slight performance improvements by removing redundant label extraction. (THX: @r0ny123)
- * 2025-01-16: v2.5.2 - Fixed bug in IdaInterface where binary data was unproperly extracted.
- * 2025-01-16: v2.5.1 - Reducing calls to lief by caching the object. (THX: @r0ny123)
- * 2025-01-16: v2.5.0 - Introduced Rust symbol extraction and demangling. (THX: @r0ny123)
- * 2025-01-16: v2.4.7 - Improved reliability of exception handler candidate extraction. (THX: @r0ny123)
- * 2025-01-07: v2.4.6 - Fixed version check for IDA compatibility decision
+ * 2026-05-20: v3.0.0 - Support for Android Dalvik Disassembly (THX: @r0ny123)
+ * 2026-05-20: v2.6.0 - Use Pythia as drop-in replacement for current Delphi VMT parser (THX: @r0ny123)
+ * 2026-05-20: v2.5.4 - Improve performance by precompiling regexes, doing additional prefix extraction and covering more GAP sequence NOPs (THX: @r0ny123)
+ * 2026-03-23: v2.5.3 - Added ELF ABI to SmdaReport info, upgraded DelphiReSym to handle Delphi 13, slight performance improvements by removing redundant label extraction. (THX: @r0ny123)
+ * 2026-01-16: v2.5.2 - Fixed bug in IdaInterface where binary data was unproperly extracted.
+ * 2026-01-16: v2.5.1 - Reducing calls to lief by caching the object. (THX: @r0ny123)
+ * 2026-01-16: v2.5.0 - Introduced Rust symbol extraction and demangling. (THX: @r0ny123)
+ * 2026-01-16: v2.4.7 - Improved reliability of exception handler candidate extraction. (THX: @r0ny123)
+ * 2026-01-07: v2.4.6 - Fixed version check for IDA compatibility decision
  * 2025-12-17: v2.4.5 - Improved security and reliability in various spots. (THX: @r0ny123)
  * 2025-12-15: v2.4.4 - Extended set of default prologues for additional 64bit GCC-style byte combinations. Added exit syscall check to improve function end recognition. (THX: @N0fix)
  * 2025-12-10: v2.4.3 - Compatibility issue for IDA export, API changes happened already in 8.5, so adjusted the version check.
@@ -149,6 +152,6 @@ Thanks to Jonathan Crussell for helping me to beef up SMDA enough to make it a d
 Thanks to Willi Ballenthin for improving the handling of ELF files, including properly handling API usage!
 Thanks to Daniel Enders for his contributions to the parsing of the Golang function registry and label information!
 The project uses the implementation of Tarjan's Algorithm by Bas Westerbaan and the implementation of Lengauer-Tarjan's Algorithm for the DominatorTree by Armin Rigo.
-Thanks to r0ny123 for his major code quality improvements added via ruff to this project!
+Thanks to r0ny123 for his major code quality improvements via ruff and various contributions for several aspects of this project!
 
 Pull requests welcome! :)
