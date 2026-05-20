@@ -266,8 +266,8 @@ class SmdaReport:
         smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
         smda_report.status = report_dict["status"]
         smda_report.timestamp = datetime.datetime.strptime(report_dict["timestamp"], "%Y-%m-%dT%H-%M-%S")
-        smda_report.data_refs_from = {int(k): v for k, v in report_dict.get("data_refs_from", {}).items()}
-        smda_report.data_refs_to = {int(k): v for k, v in report_dict.get("data_refs_to", {}).items()}
+        smda_report.data_refs_from = {int(k): v for k, v in report_dict.get("xdata_refs_from", {}).items()}
+        smda_report.data_refs_to = {int(k): v for k, v in report_dict.get("xdata_refs_to", {}).items()}
         binary_info = BinaryInfo(b"")
         binary_info.architecture = smda_report.architecture
         binary_info.abi = smda_report.abi
@@ -326,9 +326,9 @@ class SmdaReport:
             "status": self.status,
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
+            "xdata_refs_from": self.data_refs_from if self.data_refs_from is not None else {},
+            "xdata_refs_to": self.data_refs_to if self.data_refs_to is not None else {},
             "xheader": self.xheader.hex() if self.xheader else "",
-            "data_refs_from": self.data_refs_from if self.data_refs_from is not None else {},
-            "data_refs_to": self.data_refs_to if self.data_refs_to is not None else {},
             "xmetadata": self.xmetadata,
         }
 
