@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import logging
 import re
 import struct
 from typing import Iterator
@@ -10,6 +11,8 @@ from smda.common.Tarjan import Tarjan
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 from .SmdaInstruction import SmdaInstruction
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SmdaFunction:
@@ -24,6 +27,7 @@ class SmdaFunction:
     code_inrefs = None
     code_outrefs = None
     is_exported = None
+    architecture_metadata = None
     # metadata
     binweight = 0
     characteristics = ""
@@ -45,6 +49,8 @@ class SmdaFunction:
             self.inrefs = disassembly.getInRefs(function_offset)
             self.outrefs = disassembly.getOutRefs(function_offset)
             self.is_exported = self.offset in disassembly.exported_functions
+            self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
+            self.blockrefs = self.getNormalizedBlockRefs()
             # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             self.characteristics = (
@@ -62,8 +68,22 @@ class SmdaFunction:
                 if function_offset in disassembly.candidates
                 else None
             )
-            if config and config.WITH_STRINGS:
-                self.stringrefs = disassembly.getStringRefsForFunction(function_offset)
+            # DEX strings are part of the parsed file structure, so they're always
+            # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
+            # cost. For other architectures, honor WITH_STRINGS as usual.
+            if (
+                config
+                and config.WITH_STRINGS
+                or (
+                    disassembly.binary_info.architecture == "dalvik"
+                    and disassembly.getStringRefsForFunction(function_offset)
+                )
+            ):
+                self.stringrefs = (
+                    self._normalizeDalvikStringRefs(disassembly.getStringRefsForFunction(function_offset))
+                    if disassembly.binary_info.architecture == "dalvik"
+                    else disassembly.getStringRefsForFunction(function_offset)
+                )
             if config and config.CALCULATE_HASHING:
                 self.pic_hash = self.getPicHash(disassembly.binary_info)
             if config and config.CALCULATE_SCC:
@@ -93,10 +113,16 @@ class SmdaFunction:
 
     @property
     def num_calls(self):
+        architecture = self.smda_report.architecture if self.smda_report else ""
+        if architecture == "dalvik":
+            return sum([1 for ins in self.getInstructions() if ins.mnemonic.startswith("invoke-")])
         return sum([1 for ins in self.getInstructions() if ins.mnemonic == "call"])
 
     @property
     def num_returns(self):
+        architecture = self.smda_report.architecture if self.smda_report else ""
+        if architecture == "dalvik":
+            return sum([1 for ins in self.getInstructions() if ins.mnemonic.startswith("return")])
         return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
 
     def isApiThunk(self):
@@ -142,17 +168,19 @@ class SmdaFunction:
         yield from self.code_outrefs
 
     def _calculateSccs(self):
-        tarjan = Tarjan(self.blockrefs)
+        tarjan = Tarjan(self.getNormalizedBlockRefs())
         tarjan.calculateScc()
         return tarjan.getResult()
 
     def _calculateNestingDepth(self):
         nesting_depth = 0
         try:
-            if self.blockrefs:
-                tree = build_dominator_tree(self.blockrefs, self.offset)
+            normalized_blockrefs = self.getNormalizedBlockRefs()
+            root = self._getCfgRoot(normalized_blockrefs)
+            if normalized_blockrefs and root is not None:
+                tree = build_dominator_tree(normalized_blockrefs, root)
                 if tree:
-                    nesting_depth = get_nesting_depth(self.blockrefs, tree, self.offset)
+                    nesting_depth = get_nesting_depth(normalized_blockrefs, tree, root)
         except Exception:
             pass
         return nesting_depth
@@ -190,6 +218,95 @@ class SmdaFunction:
             instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
             self.blocks[int(offset)] = instructions
             self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
+
+    @staticmethod
+    def _normalizeDalvikStringRefs(stringrefs):
+        if not stringrefs:
+            return []
+        if isinstance(stringrefs, list):
+            normalized = []
+            for entry in stringrefs:
+                if isinstance(entry, dict):
+                    normalized.append(
+                        {
+                            "string": entry.get("string", ""),
+                            "ins_addr": int(entry.get("ins_addr", 0)),
+                            "data_addr": entry.get("data_addr", None),
+                            "type": entry.get("type", "dex"),
+                        }
+                    )
+            return normalized
+        if isinstance(stringrefs, dict):
+            return [
+                {
+                    "string": string_value,
+                    "ins_addr": int(referencing_addr),
+                    "data_addr": None,
+                    "type": "dex",
+                }
+                for referencing_addr, string_value in sorted(stringrefs.items())
+            ]
+        return stringrefs
+
+    def _getContainingBlockStart(self, instruction_addr):
+        for block_start, block in self.blocks.items():
+            if not block:
+                continue
+            block_end = block[-1].offset + (len(block[-1].bytes) // 2)
+            if block_start <= instruction_addr < block_end:
+                return block_start
+        return None
+
+    def _getCfgRoot(self, normalized_blockrefs):
+        if self.offset in normalized_blockrefs:
+            return self.offset
+        block_start = self._getContainingBlockStart(self.offset)
+        if block_start is not None:
+            return block_start
+        if normalized_blockrefs:
+            # No entry block found for self.offset — refuse to fabricate a root,
+            # since dominator/nesting derived from a wrong root is silently misleading.
+            LOGGER.warning(
+                "Normalized CFG for %s (0x%x) has no entry block; skipping root-dependent analysis.",
+                self.function_name or "<unnamed>",
+                self.offset,
+            )
+            return None
+        LOGGER.warning("Normalized CFG for %s (0x%x) is empty.", self.function_name or "<unnamed>", self.offset)
+        return None
+
+    def getNormalizedBlockRefs(self):
+        current_blockrefs = self.blockrefs or {}
+        normalized_blockrefs = {
+            block_start: sorted(current_blockrefs.get(block_start, [])) for block_start in self.blocks
+        }
+        try_ranges = self.architecture_metadata.get("try_ranges", []) if self.architecture_metadata else []
+        for try_range in try_ranges:
+            raw_targets = []
+            for handler in try_range.get("handlers", []):
+                target_addr = handler.get("target_addr") if isinstance(handler, dict) else None
+                if target_addr is not None:
+                    raw_targets.append(target_addr)
+            if try_range.get("catch_all_addr") is not None:
+                raw_targets.append(try_range["catch_all_addr"])
+            if not raw_targets:
+                continue
+            normalized_targets = set()
+            for target_addr in raw_targets:
+                block_start = self._getContainingBlockStart(target_addr)
+                if block_start is None:
+                    block_start = target_addr
+                normalized_targets.add(block_start)
+                normalized_blockrefs.setdefault(block_start, [])
+            for block_start, block in self.blocks.items():
+                if not block:
+                    continue
+                block_end = block[-1].offset + (len(block[-1].bytes) // 2)
+                if try_range["start_addr"] < block_end and block_start < try_range["end_addr"]:
+                    successors = set(normalized_blockrefs.get(block_start, []))
+                    successors.update(normalized_targets)
+                    normalized_blockrefs[block_start] = sorted(successors)
+        return {block_start: normalized_blockrefs[block_start] for block_start in sorted(normalized_blockrefs)}
 
     def toDotGraph(self, with_api=False):
         dot_graph = f'digraph "CFG for 0x{self.offset:x}" {{\n'
@@ -229,6 +346,8 @@ class SmdaFunction:
         smda_function.outrefs = {int(k): v for k, v in function_dict["outrefs"].items()}
         # provide some legacy support by assuming functions are not exported for SMDA reports < 1.7.0
         smda_function.is_exported = function_dict.get("is_exported", False)
+        smda_function.architecture_metadata = function_dict.get("architecture_metadata", {})
+        smda_function.blockrefs = smda_function.getNormalizedBlockRefs()
         smda_function.binweight = function_dict["metadata"]["binweight"]
         smda_function.characteristics = function_dict["metadata"]["characteristics"]
         smda_function.confidence = function_dict["metadata"]["confidence"]
@@ -236,7 +355,16 @@ class SmdaFunction:
         smda_function.pic_hash = function_dict["metadata"].get("pic_hash", None)
         smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
         smda_function.tfidf = function_dict["metadata"]["tfidf"]
-        smda_function.stringrefs = function_dict.get("stringrefs", {})
+        stringrefs = function_dict.get("stringrefs", {})
+        function_architecture = None
+        if smda_report is not None:
+            function_architecture = smda_report.architecture
+        elif binary_info is not None:
+            function_architecture = binary_info.architecture
+        if function_architecture == "dalvik":
+            smda_function.stringrefs = smda_function._normalizeDalvikStringRefs(stringrefs)
+        else:
+            smda_function.stringrefs = stringrefs
         if binary_info and binary_info.architecture:
             smda_function._escaper = IntelInstructionEscaper if binary_info.architecture in ["intel"] else None
         else:
@@ -278,6 +406,7 @@ class SmdaFunction:
             "inrefs": self.inrefs,
             "outrefs": self.outrefs,
             "is_exported": self.is_exported,
+            "architecture_metadata": self.architecture_metadata if self.architecture_metadata is not None else {},
             "metadata": {
                 "binweight": self.binweight,
                 "characteristics": self.characteristics,
