@@ -317,7 +317,7 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(report_dict["base_addr"], 0)
         self.assertEqual(report_dict["binary_size"], 247668)
         self.assertEqual(report_dict["bitness"], 32)
-        self.assertTrue(report_dict["data_refs_from"] is not None)
+        self.assertTrue(report_dict["xdata_refs_from"] is not None)
         self.assertGreater(len(report_dict["xcfg"]), 2000)
 
         reconstructed = SmdaReport.fromDict(report_dict)
