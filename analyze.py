@@ -4,12 +4,14 @@ import logging
 import os
 import re
 import sys
+import textwrap
 
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.DexFileLoader import DexFileLoader
 
 
-def parseBaseAddrFromArgs(args):
+def parseBaseAddrFromArgs(args, silent=False):
     if args.base_addr:
         parsed_base_addr = int(args.base_addr, 16) if args.base_addr.startswith("0x") else int(args.base_addr)
         logging.info("using provided base address: 0x%08x", parsed_base_addr)
@@ -18,22 +20,64 @@ def parseBaseAddrFromArgs(args):
     baddr_match = re.search(re.compile("_0x(?P<base_addr>[0-9a-fA-F]{8,16})"), args.input_path)
     if baddr_match:
         parsed_base_addr = int(baddr_match.group("base_addr"), 16)
-        logging.info(
-            "Parsed base address from file name: 0x%08x",
-            parsed_base_addr,
-        )
+        logging.info("Parsed base address from file name: 0x%08x", parsed_base_addr)
         return parsed_base_addr
-    logging.warning("No base address recognized, using 0.")
+    if not silent:
+        logging.warning("No base address recognized, using 0.")
     return 0
 
 
-def parseOepFromArgs(args):
+def parseOepFromArgs(args, silent=False):
     if args.oep and args.oep != "":
         parsed_oep = int(args.oep, 16) if args.oep.startswith("0x") else int(args.oep)
         logging.info("using provided OEP(RVA): 0x%08x", parsed_oep)
         return parsed_oep
-    logging.warning("No OEP recognized, skipping.")
+    if not silent:
+        logging.warning("No OEP recognized, skipping.")
     return None
+
+
+def _printDalvikSummary(report, output_path, input_filename):
+    """Structured one-screen summary printed to stdout after Dalvik/DEX analysis."""
+    size_bytes = report.binary_size or 0
+    size_str = f"{size_bytes / 1024 / 1024:.1f} MB" if size_bytes >= 1024 * 1024 else f"{size_bytes / 1024:.1f} KB"
+
+    dex_version = report.version if report.version else "?"
+    bitness_str = f".{report.bitness}bit" if report.bitness else ""
+    stats = report.statistics
+
+    # Aggregate heuristic tags and string-ref count across all functions
+    heuristic_counts = {}
+    string_ref_total = 0
+    for fn in report.getFunctions():
+        for tag in (fn.architecture_metadata or {}).get("heuristics", []):
+            heuristic_counts[tag] = heuristic_counts.get(tag, 0) + 1
+        string_ref_total += len(fn.stringrefs or {})
+
+    print(f"[*] File:       {input_filename}  ({size_str})")
+    print(f"[*] Architecture: {report.architecture}{bitness_str}")
+    print(f"[*] Format:     Dalvik DEX v{dex_version}")
+    print(f"[*] Time:       {report.execution_time:.3f}s")
+    print(f"[*] Functions:  {stats.num_functions:,}")
+    print(f"[*] CFG:        {stats.num_basic_blocks:,} blocks  /  {stats.num_instructions:,} instructions")
+    print(f"[*] Refs:       api={stats.num_api_calls:,}   strings={string_ref_total:,}")
+
+    if heuristic_counts:
+        tags = sorted(heuristic_counts.items(), key=lambda kv: -kv[1])
+        joined = "  ".join(f"{k}={v}" for k, v in tags)
+        lines = textwrap.wrap(joined, width=52, break_long_words=False, break_on_hyphens=False) or [""]
+        print(f"[!] Heuristics: {lines[0]}")
+        for line in lines[1:]:
+            print(f"                {line}")
+
+    if output_path and os.path.isdir(output_path):
+        print(f"[+] Saved:      {os.path.join(output_path, input_filename + '.smda')}")
+
+
+def _getInteractiveStream(stream):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(errors="backslashreplace")
+    return stream
 
 
 def readFileContent(file_path):
@@ -66,7 +110,7 @@ if __name__ == "__main__":
         "--architecture",
         type=str,
         default="",
-        help="Use the disassembler for the following architecture if available (default:auto, options: [intel, cil]).",
+        help="Use the disassembler for the following architecture if available (default:auto, options: [intel, cil, dalvik]).",
     )
     PARSER.add_argument(
         "-a",
@@ -120,11 +164,18 @@ if __name__ == "__main__":
 
     # optionally create and set up a config, e.g. when using ApiScout profiles for WinAPI import usage discovery
     config = SmdaConfig()
-    if ARGS.verbose:
-        config.LOG_LEVEL = logging.DEBUG
     if ARGS.strings:
         config.WITH_STRINGS = True
-    logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
+    if ARGS.verbose:
+        config.LOG_LEVEL = logging.DEBUG
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s.%(msecs)03d %(levelname).1s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+            stream=_getInteractiveStream(sys.stdout),
+        )
+    else:
+        logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
     SMDA_REPORT = None
     INPUT_FILENAME = ""
     BITNESS = ARGS.bitness if (ARGS.bitness in [32, 64]) else None
@@ -136,15 +187,24 @@ if __name__ == "__main__":
             SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
         else:
             BUFFER = readFileContent(ARGS.input_path)
-            BASE_ADDR = parseBaseAddrFromArgs(ARGS)
-            OEP = parseOepFromArgs(ARGS)
+            treat_as_dalvik = ARGS.architecture in {"", "dalvik"} and DexFileLoader.isCompatible(BUFFER)
+            if treat_as_dalvik:
+                BASE_ADDR = DexFileLoader.getBaseAddress(BUFFER)
+                OEP = None
+            else:
+                BASE_ADDR = parseBaseAddrFromArgs(ARGS)
+                OEP = parseOepFromArgs(ARGS)
             config.API_COLLECTION_FILES = {
                 "win_7": os.sep.join([config.PROJECT_ROOT, "data", "apiscout_win7_prof-n_sp1.json"])
             }
             DISASSEMBLER = Disassembler(config, backend=ARGS.architecture)
             SMDA_REPORT = DISASSEMBLER.disassembleBuffer(BUFFER, BASE_ADDR, BITNESS, oep=OEP)
             SMDA_REPORT.filename = os.path.basename(ARGS.input_path)
-        print(SMDA_REPORT)
-    if SMDA_REPORT and os.path.isdir(ARGS.output_path):
-        with open(ARGS.output_path + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
+        if SMDA_REPORT.architecture == "dalvik":
+            _printDalvikSummary(SMDA_REPORT, ARGS.output_path, INPUT_FILENAME)
+        else:
+            print(SMDA_REPORT)
+    if SMDA_REPORT and ARGS.output_path and os.path.isdir(ARGS.output_path):
+        output_file = os.path.join(ARGS.output_path, INPUT_FILENAME + ".smda")
+        with open(output_file, "w") as fout:
             json.dump(SMDA_REPORT.toDict(), fout, indent=1, sort_keys=True)

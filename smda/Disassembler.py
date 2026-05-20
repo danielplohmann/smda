@@ -7,9 +7,11 @@ from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
+from smda.dalvik.DalvikDisassembler import DalvikDisassembler
 from smda.ida.IdaExporter import IdaExporter
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.FileLoader import FileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
 from smda.utility.StringExtractor import extract_strings
@@ -27,10 +29,13 @@ class Disassembler:
             self.disassembler = IntelDisassembler(self.config)
         elif backend == "cil":
             self.disassembler = CilDisassembler(self.config)
+        elif backend == "dalvik":
+            self.disassembler = DalvikDisassembler(self.config)
         elif backend == "IDA":
             self.disassembler = IdaExporter(self.config)
         self._start_time = None
         self._timeout = 0
+        self._last_timeout_log_second = -1
         # cache the last DisassemblyResult
         self.disassembly = None
 
@@ -41,6 +46,8 @@ class Disassembler:
                 self.disassembler = IntelDisassembler(self.config)
             elif architecture == "cil":
                 self.disassembler = CilDisassembler(self.config)
+            elif architecture == "dalvik":
+                self.disassembler = DalvikDisassembler(self.config)
 
     def _getDurationInSeconds(self, start_ts, end_ts):
         return (end_ts - start_ts).seconds + ((end_ts - start_ts).microseconds / 1000000.0)
@@ -49,12 +56,33 @@ class Disassembler:
         if not self._timeout:
             return False
         time_diff = datetime.datetime.now(datetime.timezone.utc) - self._start_time
-        LOGGER.debug("Current analysis callback time %s", (time_diff))
-        return time_diff.seconds >= self._timeout
+        elapsed_seconds = int(time_diff.total_seconds())
+        if elapsed_seconds >= self._timeout:
+            LOGGER.debug("Current analysis callback time %s", time_diff)
+            return True
+        # Log on 30s bucket transitions (not exact-second boundaries) so the message
+        # still fires when callback timing skips past 30/60/... whole seconds.
+        current_bucket = elapsed_seconds // 30
+        if current_bucket >= 1 and current_bucket != self._last_timeout_log_second:
+            self._last_timeout_log_second = current_bucket
+            LOGGER.debug("Current analysis callback time %s", time_diff)
+        return False
 
     def _addStringsToReport(self, smda_report, buffer, mode=None):
         smda_report.buffer = buffer
         for smda_function in smda_report.getFunctions():
+            if smda_report.architecture == "dalvik":
+                if smda_function.stringrefs and isinstance(smda_function.stringrefs, dict):
+                    smda_function.stringrefs = [
+                        {
+                            "string": string_value,
+                            "ins_addr": referencing_addr,
+                            "data_addr": None,
+                            "type": "dex",
+                        }
+                        for referencing_addr, string_value in sorted(smda_function.stringrefs.items())
+                    ]
+                continue
             function_strings = []
             for string_result in extract_strings(smda_function, mode=mode):
                 string, referencing_addr, string_addr, string_type = string_result
@@ -150,6 +178,16 @@ class Disassembler:
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
         """
+        # Auto-detect DEX when the caller did not explicitly override architecture.
+        # disassembleUnmappedBuffer / disassembleFile already use FileLoader for detection;
+        # this path bypasses it, so we check the magic bytes manually here.
+        if architecture == "intel" and DexFileLoader.isCompatible(file_content):
+            architecture = "dalvik"
+            if bitness is None:
+                bitness = DexFileLoader.getBitness(file_content)
+            # initDisassembler caches by self.disassembler-is-None, so a backend
+            # picked at construction time would otherwise win against autodetect.
+            self.disassembler = None
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness
@@ -176,6 +214,7 @@ class Disassembler:
     def _disassemble(self, binary_info, timeout=0):
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
+        self._last_timeout_log_second = -1
         self._ensureHashes(binary_info)
         if self.disassembler:
             self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)

@@ -50,6 +50,8 @@ class SmdaReport:
     version = None
     xcfg = None
     xheader = None
+    data_refs_from = None
+    data_refs_to = None
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False
@@ -92,6 +94,8 @@ class SmdaReport:
             self.version = disassembly.binary_info.version
             self.xcfg = self._convertCfg(disassembly, config=config)
             self.xheader = disassembly.binary_info.getHeaderBytes()
+            self.data_refs_from = {src: sorted(dst) for src, dst in disassembly.data_refs_from.items()}
+            self.data_refs_to = {dst: sorted(src) for dst, src in disassembly.data_refs_to.items()}
             self.xmetadata = {
                 "exported_functions": disassembly.binary_info.getExportedFunctions(),
                 "imported_functions": disassembly.binary_info.getImportedFunctions(),
@@ -262,6 +266,8 @@ class SmdaReport:
         smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
         smda_report.status = report_dict["status"]
         smda_report.timestamp = datetime.datetime.strptime(report_dict["timestamp"], "%Y-%m-%dT%H-%M-%S")
+        smda_report.data_refs_from = {int(k): v for k, v in report_dict.get("xdata_refs_from", {}).items()}
+        smda_report.data_refs_to = {int(k): v for k, v in report_dict.get("xdata_refs_to", {}).items()}
         binary_info = BinaryInfo(b"")
         binary_info.architecture = smda_report.architecture
         binary_info.abi = smda_report.abi
@@ -320,6 +326,8 @@ class SmdaReport:
             "status": self.status,
             "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
+            "xdata_refs_from": self.data_refs_from if self.data_refs_from is not None else {},
+            "xdata_refs_to": self.data_refs_to if self.data_refs_to is not None else {},
             "xheader": self.xheader.hex() if self.xheader else "",
             "xmetadata": self.xmetadata,
         }
@@ -332,4 +340,5 @@ class SmdaReport:
     def __str__(self):
         if self.status == "error":
             return f"{self.execution_time:>6.3f}s -> {self.message}"
-        return f"{self.execution_time:>6.3f}s -> (architecture: {self.architecture}.{self.bitness}bit, base_addr: 0x{self.base_addr:08x}): {len(self.xcfg)} functions"
+        arch_str = f"{self.architecture}.{self.bitness}bit" if self.bitness else self.architecture
+        return f"{self.execution_time:>6.3f}s -> (architecture: {arch_str}, base_addr: 0x{self.base_addr:08x}): {len(self.xcfg)} functions"
