@@ -4,6 +4,8 @@ from typing import Iterator, Tuple
 
 from smda.common import SmdaFunction
 
+_IS_PRINTABLE_CHAR_CODE = tuple(chr(char) in string.printable for char in range(256))
+
 # ported back from our PR to capa v4.0.0
 # https://github.com/mandiant/capa/blob/v4.0.0/capa/features/extractors/smda/insn.py
 
@@ -63,10 +65,7 @@ def detect_ascii_len(smda_report, offset, maxlen=None):
         return 0
     char = smda_report.buffer[rva]
     while (
-        char < 127
-        and chr(char) in string.printable
-        and (maxlen is None or ascii_len < maxlen)
-        and rva + 1 < len(smda_report.buffer)
+        _IS_PRINTABLE_CHAR_CODE[char] and (maxlen is None or ascii_len < maxlen) and rva + 1 < len(smda_report.buffer)
     ):
         ascii_len += 1
         rva += 1
@@ -86,8 +85,7 @@ def detect_unicode_len(smda_report, offset, maxlen=None):
     char = smda_report.buffer[rva]
     second_char = smda_report.buffer[rva + 1]
     while (
-        char < 127
-        and chr(char) in string.printable
+        _IS_PRINTABLE_CHAR_CODE[char]
         and second_char == 0
         and (maxlen is None or unicode_len < 2 * maxlen)
         and rva + 3 < len(smda_report.buffer)
