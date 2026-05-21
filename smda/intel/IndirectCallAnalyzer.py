@@ -31,6 +31,12 @@ class IndirectCallAnalyzer:
             return None
         return struct.unpack("I", self.disassembly.getBytes(addr, 4))[0]
 
+    def _resolveDwordPointerValue(self, addr):
+        dll, api = self.disassembler.resolveApi(addr, addr)
+        if dll or api:
+            return addr, dll, api
+        return self.getDword(addr), dll, api
+
     def processBlock(self, analysis_state, block, registers, register_name, processed, depth):
         if not block:
             return False
@@ -65,28 +71,27 @@ class IndirectCallAnalyzer:
                 # mov <reg>, dword ptr [<addr>]
                 match3 = self.RE_REG_DWORD_PTR_ADDR.match(ins[3])
                 if match3:
-                    # HACK: test to see if the address points to a import and
-                    # use that instead of the actual memory value
+                    # Import resolvers may key APIs by the pointer slot address,
+                    # so preserve known import slots instead of dereferencing them.
                     addr = int(match3.group("addr"), 16)
-                    dll, api = self.disassembler.resolveApi(addr, addr)
+                    pointer_value, dll, api = self._resolveDwordPointerValue(addr)
                     if dll or api:
-                        registers[match3.group("reg")] = addr
+                        registers[match3.group("reg")] = pointer_value
                         LOGGER.debug(
                             "**moved API ref (%s:%s) @0x%08x to register %s",
                             dll,
                             api,
-                            addr,
+                            pointer_value,
                             match3.group("reg"),
                         )
                         if match3.group("reg") == register_name:
                             abs_value_found = True
                     else:
-                        dword = self.getDword(addr)
-                        if dword:
-                            registers[match3.group("reg")] = dword
+                        if pointer_value:
+                            registers[match3.group("reg")] = pointer_value
                             LOGGER.debug(
                                 "**moved value 0x%08x to register %s",
-                                dword,
+                                pointer_value,
                                 match3.group("reg"),
                             )
                             if match3.group("reg") == register_name:
