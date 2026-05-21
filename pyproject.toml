@@ -6,7 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "smda"
 description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
 readme = "README.md"
+<<<<<<< HEAD
 requires-python = ">=3.10"
+=======
+requires-python = ">=3.8"
+>>>>>>> ee86cc5 (refactor(build): modernize package layout)
 license = {text = "BSD 2-Clause"}
 authors = [
     {name = "Daniel Plohmann", email = "daniel.plohmann@mailbox.org"}
@@ -16,11 +20,19 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+<<<<<<< HEAD
+=======
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+>>>>>>> ee86cc5 (refactor(build): modernize package layout)
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+<<<<<<< HEAD
     "Programming Language :: Python :: 3.14",
+=======
+>>>>>>> ee86cc5 (refactor(build): modernize package layout)
     "Topic :: Security",
     "Topic :: Software Development :: Disassemblers",
 ]
