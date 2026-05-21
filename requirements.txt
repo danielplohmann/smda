@@ -1,7 +1,10 @@
 pytest
+pytest-cov
 capstone
 dncil
 dnfile
 lief>=0.16.0
 ruff
 pre-commit
+build
+twine
