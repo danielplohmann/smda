@@ -13,22 +13,22 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        
+
     - name: Install ruff
       run: |
         python -m pip install --upgrade pip
-        python -m pip install ruff
-        
+        python -m pip install -e ".[dev]"
+
     - name: Run ruff linting
-      run: ruff check .
-      
+      run: python -m ruff check .
+
     - name: Run ruff formatting check
-      run: ruff format --check .
+      run: python -m ruff format --check .
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
@@ -40,17 +40,17 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        
+        cache: 'pip'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
-        pip install -e .
-        
+        python -m pip install -e ".[dev]"
+
     - name: Run tests
       run: python -m pytest tests/test*

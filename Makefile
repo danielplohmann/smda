@@ -1,25 +1,28 @@
+PYTHON ?= python3
+
 init:
-	pip install -r requirements.txt
-	pre-commit install
+	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<75.4.0" wheel
+	$(PYTHON) -m pip install -e ".[dev]"
+	$(PYTHON) -m pre_commit install
 package:
 	rm -rf dist/*
-	python -m build
+	$(PYTHON) -m build --no-isolation
 publish:
-	python -m twine upload dist/* -u __token__
+	$(PYTHON) -m twine upload dist/* -u __token__
 pylint:
-	python -m pylint --rcfile=.pylintrc smda
+	$(PYTHON) -m pylint --rcfile=.pylintrc src/smda
 ruff-check:
-	ruff check .
+	$(PYTHON) -m ruff check .
 ruff-format:
-	ruff format .
+	$(PYTHON) -m ruff format .
 ruff-fix:
-	ruff check . --fix
+	$(PYTHON) -m ruff check . --fix
 lint: ruff-check
 format: ruff-format
 test:
-	pytest tests/test*
+	$(PYTHON) -m pytest tests/test*
 test-coverage:
-	python -m nose --with-coverage --cover-erase --cover-html-dir=./coverage-html --cover-html --cover-package=smda
+	$(PYTHON) -m pytest --cov=smda --cov-report=html:coverage-html tests/
 clean:
 	find . | grep -E "(__pycache__|\.pyc|\.pyo$\)" | xargs rm -rf
 	rm -rf .coverage

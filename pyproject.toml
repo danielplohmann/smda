@@ -1,11 +1,88 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=64.0.0,<75.4.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "smda"
+description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "BSD 2-Clause"}
+authors = [
+    {name = "Daniel Plohmann", email = "daniel.plohmann@mailbox.org"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Disassemblers",
+]
+dynamic = ["version"]
+dependencies = [
+    "capstone",
+    "dncil",
+    "dnfile",
+    "lief>=0.16.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/danielplohmann/smda"
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "twine",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "smda.__version__"}
 
 [tool.pytest.ini_options]
 python_files = ["test*.py"]
 testpaths = ["tests"]
 addopts = ["-p", "no:cacheprovider"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["smda"]
+omit = [
+    "*lib*",
+    "capstone/*",
+    "*distutils/*",
+    "ctypes/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self\\.debug",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "def main\\(argv\\):",
+]
+ignore_errors = true
+
+[tool.coverage.html]
+directory = "coverage-html"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.

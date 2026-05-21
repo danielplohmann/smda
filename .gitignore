@@ -67,3 +67,8 @@ figures
 reports
 analyze_*.py
 coverage-html
+
+# Tool & library caches
+.ruff_cache/
+.pytest_cache/
+.uv/
