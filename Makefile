@@ -9,8 +9,6 @@ package:
 	$(PYTHON) -m build --no-isolation
 publish:
 	$(PYTHON) -m twine upload dist/* -u __token__
-pylint:
-	$(PYTHON) -m pylint --rcfile=.pylintrc src/smda
 ruff-check:
 	$(PYTHON) -m ruff check .
 ruff-format:
