@@ -61,28 +61,7 @@ class ElfFileLoader:
         return base_addr
 
     @staticmethod
-    def mapBinary(binary):
-        """
-        map the ELF file sections and segments into a contiguous bytearray
-        as if into virtual memory with the given base address.
-        """
-        # ELFFile needs a file-like object...
-        # Attention: for Python 2.x use the cStringIO package for StringIO
-        elffile = lief.parse(binary)
-        if not elffile:
-            return b""
-        base_addr = ElfFileLoader.getBaseAddress(binary, elffile=elffile)
-
-        LOGGER.debug("ELF: base address: 0x%x", base_addr)
-
-        # a segment may contain 0 or more sections.
-        # ref: https://stackoverflow.com/a/14382477/87207
-        #
-        # i'm not sure if a section may be found outside of a segment.
-        # therefore, lets load segments first, and then load sections over them.
-        # we expect the section data to overwrite the segment data; however,
-        # it should be exactly the same data.
-
+    def _calculate_boundaries(elffile):
         # find min and max virtual addresses.
         max_virtual_address = 0
         min_virtual_address = 0xFFFFFFFFFFFFFFFF
@@ -112,24 +91,10 @@ class ElfFileLoader:
             min_virtual_address = min(min_virtual_address, segment.virtual_address)
             min_raw_offset = min(min_raw_offset, segment.file_offset)
 
-        if (max_virtual_address - base_addr) > sys.maxsize:
-            LOGGER.warn("ELF: found possibly bogus segment information, trying to parse segments.")
+        return max_virtual_address, min_virtual_address, min_raw_offset
 
-        if not max_virtual_address:
-            LOGGER.debug("ELF: no section or segment data")
-            return b""
-
-        # create mapped region.
-        # offset 0x0 corresponds to the ELF base address
-        virtual_size = max_virtual_address - base_addr
-        if virtual_size > SmdaConfig.MAX_IMAGE_SIZE:
-            raise ValueError("ELF file larger than MAX_IMAGE_SIZE")
-        LOGGER.debug("ELF: max virtual section offset: 0x%x", max_virtual_address)
-        LOGGER.debug("ELF: min virtual section offset: 0x%x", min_virtual_address)
-        LOGGER.debug("ELF: mapped size: 0x%x", virtual_size)
-        LOGGER.debug("ELF: min raw offset: 0x%x", min_raw_offset)
-        mapped_binary = bytearray(align(virtual_size, 0x1000))
-
+    @staticmethod
+    def _map_segments(elffile, mapped_binary, base_addr):
         # map segments.
         # segments may contains 0 or more sections,
         # so we do segments first.
@@ -164,6 +129,8 @@ class ElfFileLoader:
             else:
                 mapped_binary[rva : rva + segment.physical_size] = segment.content
 
+    @staticmethod
+    def _map_sections(elffile, mapped_binary, base_addr):
         # map sections.
         # may overwrite some segment data, but we expect the content to be identical.
         if not has_bogus_sections(elffile, base_addr):
@@ -184,6 +151,52 @@ class ElfFileLoader:
                 if len(section.content) < section.size:
                     content_to_be_mapped += b"\x00" * (section.size - len(section.content))
                 mapped_binary[rva : rva + section.size] = content_to_be_mapped
+
+    @staticmethod
+    def mapBinary(binary):
+        """
+        map the ELF file sections and segments into a contiguous bytearray
+        as if into virtual memory with the given base address.
+        """
+        # ELFFile needs a file-like object...
+        # Attention: for Python 2.x use the cStringIO package for StringIO
+        elffile = lief.parse(binary)
+        if not elffile:
+            return b""
+        base_addr = ElfFileLoader.getBaseAddress(binary, elffile=elffile)
+
+        LOGGER.debug("ELF: base address: 0x%x", base_addr)
+
+        # a segment may contain 0 or more sections.
+        # ref: https://stackoverflow.com/a/14382477/87207
+        #
+        # i'm not sure if a section may be found outside of a segment.
+        # therefore, lets load segments first, and then load sections over them.
+        # we expect the section data to overwrite the segment data; however,
+        # it should be exactly the same data.
+
+        max_virtual_address, min_virtual_address, min_raw_offset = ElfFileLoader._calculate_boundaries(elffile)
+
+        if (max_virtual_address - base_addr) > sys.maxsize:
+            LOGGER.warn("ELF: found possibly bogus segment information, trying to parse segments.")
+
+        if not max_virtual_address:
+            LOGGER.debug("ELF: no section or segment data")
+            return b""
+
+        # create mapped region.
+        # offset 0x0 corresponds to the ELF base address
+        virtual_size = max_virtual_address - base_addr
+        if virtual_size > SmdaConfig.MAX_IMAGE_SIZE:
+            raise ValueError("ELF file larger than MAX_IMAGE_SIZE")
+        LOGGER.debug("ELF: max virtual section offset: 0x%x", max_virtual_address)
+        LOGGER.debug("ELF: min virtual section offset: 0x%x", min_virtual_address)
+        LOGGER.debug("ELF: mapped size: 0x%x", virtual_size)
+        LOGGER.debug("ELF: min raw offset: 0x%x", min_raw_offset)
+        mapped_binary = bytearray(align(virtual_size, 0x1000))
+
+        ElfFileLoader._map_segments(elffile, mapped_binary, base_addr)
+        ElfFileLoader._map_sections(elffile, mapped_binary, base_addr)
 
         # map header.
         # we consider the headers to be any data found before the first section/segment
