@@ -2278,16 +2278,22 @@ class IntelInstructionEscaper:
             offset = int(addr_match.group("dword_offset"), 16)
             if "rip -" in ins.operands:
                 offset = 0x100000000 - offset
-            # TODO we need to check if this is actually a 64bit absolute offset (e.g. used by movabs)
+            pack_format = "<I"
             try:
-                packed_hex = str(codecs.encode(struct.pack("I", offset), "hex").decode("ascii"))
+                if ins.getDetailed().disp_size == 8:
+                    pack_format = "<Q"
+            except (AttributeError, AssertionError, NotImplementedError):
+                pass
+            try:
+                packed_hex = str(codecs.encode(struct.pack(pack_format, offset), "hex").decode("ascii"))
             except struct.error:
-                packed_hex = str(codecs.encode(struct.pack("Q", offset), "hex").decode("ascii"))
+                packed_hex = str(codecs.encode(struct.pack("<Q", offset), "hex").decode("ascii"))
+            wildcard = "?" * len(packed_hex)
             num_occurrences = occurrences(ins.bytes, packed_hex)
             if num_occurrences == 1:
-                escaped_sequence = ins.bytes.replace(packed_hex, "????????")
+                escaped_sequence = ins.bytes.replace(packed_hex, wildcard)
             elif num_occurrences == 2:
-                escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
+                escaped_sequence = wildcard.join(escaped_sequence.rsplit(packed_hex, 1))
                 LOGGER.warning(
                     "IntelInstructionEscaper.escapeBinaryPtrRef: 2 occurrences for %s in %s (%s %s), escaping only the second one",
                     packed_hex,
