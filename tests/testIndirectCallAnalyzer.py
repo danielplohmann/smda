@@ -69,6 +69,68 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         # eax should have 0x402000
         self.assertEqual(registers.get("eax"), 0x402000, f"Expected eax to be 0x402000, but got {registers.get('eax')}")
 
+    def test_processBlock_preserves_known_import_slot(self):
+        import_slot = 0x403000
+        memory_value = 0x500000
+        disassembler = MagicMock()
+        disassembler.disassembly.apis = {}
+        disassembler.resolveApi.return_value = ("kernel32.dll", "CreateFileA")
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.getDword = MagicMock(return_value=memory_value)
+
+        analysis_state = MagicMock()
+        analyzer.state = analysis_state
+        analyzer.current_calling_addr = 0x401006
+        registers = {}
+
+        result = analyzer.processBlock(
+            analysis_state,
+            [[0x401000, 6, "mov", "eax, dword ptr [0x403000]"]],
+            registers,
+            "eax",
+            [],
+            1,
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(registers["eax"], import_slot)
+        analyzer.getDword.assert_not_called()
+        self.assertEqual(
+            disassembler.disassembly.apis[import_slot],
+            {
+                "referencing_addr": [0x401006],
+                "dll_name": "kernel32.dll",
+                "api_name": "CreateFileA",
+            },
+        )
+
+    def test_processBlock_uses_dword_when_pointer_is_not_import_slot(self):
+        disassembler = MagicMock()
+        disassembler.disassembly.apis = {}
+        disassembler.disassembly.isAddrWithinMemoryImage.return_value = True
+        disassembler.resolveApi.return_value = (None, None)
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.getDword = MagicMock(return_value=0x401234)
+
+        analysis_state = MagicMock()
+        analyzer.state = analysis_state
+        analyzer.current_calling_addr = 0x401006
+        registers = {}
+
+        result = analyzer.processBlock(
+            analysis_state,
+            [[0x401000, 6, "mov", "eax, dword ptr [0x403000]"]],
+            registers,
+            "eax",
+            [],
+            1,
+        )
+
+        self.assertTrue(result)
+        self.assertEqual(registers["eax"], 0x401234)
+        analyzer.getDword.assert_called_once_with(0x403000)
+        disassembler.fc_manager.addCandidate.assert_called_once_with(0x401234, reference_source=0x401006)
+
 
 if __name__ == "__main__":
     unittest.main()
