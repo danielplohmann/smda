@@ -163,7 +163,7 @@ class LanguageAnalyzer:
         result["delphi"] = self.getDelphiScore()
         if self.checkDelphi():
             t_objects = self.getDelphiObjects()
-            functions = sum([len(t_objects[t_string]) for t_string in t_objects])
+            functions = sum(len(t_string) for t_string in t_objects.values())
             # result["_delphi_objects"] = t_objects.keys()
             result["_count_delphi_objects"] = len(t_objects)
             if len(t_objects) > 5 and functions > 10:
