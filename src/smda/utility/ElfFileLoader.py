@@ -61,14 +61,14 @@ class ElfFileLoader:
         return base_addr
 
     @staticmethod
-    def _calculate_boundaries(elffile):
+    def _calculate_boundaries(elffile, base_addr=0):
         # find min and max virtual addresses.
         max_virtual_address = 0
         min_virtual_address = 0xFFFFFFFFFFFFFFFF
         min_raw_offset = 0xFFFFFFFFFFFFFFFF
 
         # find begin of the first section/segment and end of the last section/segment.
-        if not has_bogus_sections(elffile):
+        if not has_bogus_sections(elffile, base_addr):
             for section in sorted(elffile.sections, key=lambda section: section.size, reverse=True):
                 if not section.virtual_address:
                     continue
@@ -158,8 +158,6 @@ class ElfFileLoader:
         map the ELF file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
-        # ELFFile needs a file-like object...
-        # Attention: for Python 2.x use the cStringIO package for StringIO
         elffile = lief.parse(binary)
         if not elffile:
             return b""
@@ -175,10 +173,9 @@ class ElfFileLoader:
         # we expect the section data to overwrite the segment data; however,
         # it should be exactly the same data.
 
-        max_virtual_address, min_virtual_address, min_raw_offset = ElfFileLoader._calculate_boundaries(elffile)
-
-        if (max_virtual_address - base_addr) > sys.maxsize:
-            LOGGER.warn("ELF: found possibly bogus segment information, trying to parse segments.")
+        max_virtual_address, min_virtual_address, min_raw_offset = ElfFileLoader._calculate_boundaries(
+            elffile, base_addr
+        )
 
         if not max_virtual_address:
             LOGGER.debug("ELF: no section or segment data")
