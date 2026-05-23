@@ -2,6 +2,7 @@
 
 import logging
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.utility.PeFileLoader import PeFileLoader
 
 from .AbstractLabelProvider import AbstractLabelProvider
@@ -54,6 +55,7 @@ class PdbSymbolProvider(AbstractLabelProvider):
             pdb = pdbparse.parse(binary_info.file_path)
             self._parseSymbols(pdb)
         except Exception as exc:
+            reraise_non_operational_exception(exc)
             LOGGER.error(
                 'Failed parsing "%s" with exception type: %s',
                 binary_info.file_path,

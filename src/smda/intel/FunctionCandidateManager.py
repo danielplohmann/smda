@@ -4,6 +4,7 @@ import struct
 
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.utility.BracketQueue import BracketQueue
 from smda.utility.PriorityQueue import PriorityQueue
 
@@ -133,7 +134,8 @@ class FunctionCandidateManager:
             candidates_0 = len([c.getScore() for c in self.candidates.values() if c.getScore() == 0])
             LOGGER.debug("  Max: %f, Min: %f", maxc, minc)
             LOGGER.debug("  2: %d, 1: %d, 0: %d", candidates_2, candidates_1, candidates_0)
-        except Exception:
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
             LOGGER.debug("  No candidates found.")
 
     def getFunctionStartCandidates(self):
@@ -239,7 +241,8 @@ class FunctionCandidateManager:
             # compatibility with python2/3...
             try:
                 byte = self.disassembly.getRawByte(gap_offset)
-            except Exception:
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
                 LOGGER.warn("could not fetch raw byte for gap pointer.")
                 # print("0x%08x" % self.disassembly.binary_info.base_addr, "0x%08x" % self.disassembly.binary_info.binary_size, "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             # try to find padding symbols and skip them

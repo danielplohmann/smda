@@ -6,6 +6,8 @@ from collections import OrderedDict
 
 import lief
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
+
 from .AbstractLabelProvider import AbstractLabelProvider
 
 lief.logging.disable()
@@ -31,8 +33,8 @@ class GoSymbolProvider(AbstractLabelProvider):
             elif lief_binary.format == lief.EXE_FORMATS.PE:
                 rdata_offset = lief_binary.get_section(".rdata").offset
                 pclntab_offset = rdata_offset + lief_binary.get_symbol("runtime.pclntab").value
-        except Exception:
-            pass
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
         if pclntab_offset is None:
             # scan for offset of structure
             pclntab_regex = re.compile(b".\xff\xff\xff\x00\x00\x01(\x04|\x08)")
@@ -50,7 +52,8 @@ class GoSymbolProvider(AbstractLabelProvider):
                 result = self._parse_pclntab(pclntab_offset, binary)
                 if result:
                     self._func_symbols = result
-            except Exception:
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
                 return
 
     def isSymbolProvider(self):

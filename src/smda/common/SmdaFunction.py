@@ -6,6 +6,7 @@ import struct
 from typing import Iterator
 
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.Tarjan import Tarjan
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
@@ -181,8 +182,8 @@ class SmdaFunction:
                 tree = build_dominator_tree(normalized_blockrefs, root)
                 if tree:
                     nesting_depth = get_nesting_depth(normalized_blockrefs, tree, root)
-        except Exception:
-            pass
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
         return nesting_depth
 
     def getPicHash(self, binary_info):
