@@ -451,7 +451,6 @@ def _decode_fmt_10x(raw_bytes, byte_idx, opcode, resolve_ref):
     ref_index_aux = None
     branch_target_idx = None
     payload_idx = None
-    operands = ""
     return {
         "registers": registers,
         "operands": operands,
@@ -499,8 +498,8 @@ def _decode_fmt_11n(raw_bytes, byte_idx, opcode, resolve_ref):
     ref_index_aux = None
     branch_target_idx = None
     payload_idx = None
-    reg_a = raw_bytes[1] & 15
-    literal = _signed(raw_bytes[1] >> 4 & 15, 4)
+    reg_a = raw_bytes[1] & 0x0F
+    literal = _signed((raw_bytes[1] >> 4) & 0x0F, 4)
     registers = [reg_a]
     operands = f"{_reg_name(reg_a)}, #{literal:+d}"
     return {
@@ -550,8 +549,8 @@ def _decode_fmt_12x(raw_bytes, byte_idx, opcode, resolve_ref):
     ref_index_aux = None
     branch_target_idx = None
     payload_idx = None
-    reg_a = raw_bytes[1] & 15
-    reg_b = raw_bytes[1] >> 4 & 15
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
     registers = [reg_a, reg_b]
     operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
     return {
@@ -628,6 +627,9 @@ def _decode_fmt_21h(raw_bytes, byte_idx, opcode, resolve_ref):
     branch_target_idx = None
     payload_idx = None
     reg_a = raw_bytes[1]
+    # The 16-bit immediate is sign-extended per the Dalvik spec before shifting.
+    # Using signed=True ensures negative values like 0xFFFF produce -1 << shift
+    # rather than 0xFFFF << shift, matching baksmali's output.
     value = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
     shift = 48 if opcode.mnemonic.endswith("wide/high16") else 16
     literal = value << shift
@@ -736,8 +738,8 @@ def _decode_fmt_22c(raw_bytes, byte_idx, opcode, resolve_ref):
     ref_index_aux = None
     branch_target_idx = None
     payload_idx = None
-    reg_a = raw_bytes[1] & 15
-    reg_b = raw_bytes[1] >> 4 & 15
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
     registers = [reg_a, reg_b]
     operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {resolve_ref(opcode.ref_kind, ref_index)}"
@@ -763,8 +765,8 @@ def _decode_fmt_22s(raw_bytes, byte_idx, opcode, resolve_ref):
     ref_index_aux = None
     branch_target_idx = None
     payload_idx = None
-    reg_a = raw_bytes[1] & 15
-    reg_b = raw_bytes[1] >> 4 & 15
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
     literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
     registers = [reg_a, reg_b]
     operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}"
@@ -790,8 +792,8 @@ def _decode_fmt_22t(raw_bytes, byte_idx, opcode, resolve_ref):
     ref_index_aux = None
     branch_target_idx = None
     payload_idx = None
-    reg_a = raw_bytes[1] & 15
-    reg_b = raw_bytes[1] >> 4 & 15
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
     branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
     branch_target_idx = byte_idx + branch_delta
     registers = [reg_a, reg_b]
@@ -1056,8 +1058,10 @@ def _decode_fmt_45cc(raw_bytes, byte_idx, opcode, resolve_ref):
     _, registers = _decode_register_list_35c(raw_bytes[:6])
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
     ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
-    operands = "{{{}}}, {}, {}".format(
-        _format_registers(registers), resolve_ref(opcode.ref_kind, ref_index), resolve_ref("proto", ref_index_aux)
+    operands = (
+        f"{{{_format_registers(registers)}}}, "
+        f"{resolve_ref(opcode.ref_kind, ref_index)}, "
+        f"{resolve_ref('proto', ref_index_aux)}"
     )
     return {
         "registers": registers,
@@ -1086,8 +1090,10 @@ def _decode_fmt_4rcc(raw_bytes, byte_idx, opcode, resolve_ref):
     first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
     ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
     registers = _decode_register_range(count, first_reg)
-    operands = "{{{}}}, {}, {}".format(
-        _format_registers(registers), resolve_ref(opcode.ref_kind, ref_index), resolve_ref("proto", ref_index_aux)
+    operands = (
+        f"{{{_format_registers(registers)}}}, "
+        f"{resolve_ref(opcode.ref_kind, ref_index)}, "
+        f"{resolve_ref('proto', ref_index_aux)}"
     )
     return {
         "registers": registers,
@@ -1140,27 +1146,12 @@ def decode_instruction(bytecode, byte_idx, resolve_ref):
         raise ValueError("Truncated Dalvik instruction")
 
     raw_bytes = bytes(bytecode[byte_idx : byte_idx + size_bytes])
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
 
-    if opcode.fmt not in FORMAT_DECODERS:
+    decoder = FORMAT_DECODERS.get(opcode.fmt)
+    if decoder is None:
         raise ValueError(f"Unsupported Dalvik format {opcode.fmt}")
 
-    decoder = FORMAT_DECODERS[opcode.fmt]
     result = decoder(raw_bytes, byte_idx, opcode, resolve_ref)
-
-    registers = result["registers"]
-    operands = result["operands"]
-    literal = result["literal"]
-    ref_index = result["ref_index"]
-    ref_index_aux = result["ref_index_aux"]
-    branch_target_idx = result["branch_target_idx"]
-    payload_idx = result["payload_idx"]
 
     return DecodedDalvikInstruction(
         opcode=opcode_value,
@@ -1169,14 +1160,14 @@ def decode_instruction(bytecode, byte_idx, resolve_ref):
         size_units=opcode.size_units,
         size_bytes=size_bytes,
         bytes_=raw_bytes,
-        operands=operands,
-        registers=registers,
-        literal=literal,
+        operands=result["operands"],
+        registers=result["registers"],
+        literal=result["literal"],
         ref_kind=opcode.ref_kind,
-        ref_index=ref_index,
-        ref_index_aux=ref_index_aux,
-        branch_target_idx=branch_target_idx,
-        payload_idx=payload_idx,
+        ref_index=result["ref_index"],
+        ref_index_aux=result["ref_index_aux"],
+        branch_target_idx=result["branch_target_idx"],
+        payload_idx=result["payload_idx"],
         is_invoke=opcode.is_invoke,
         is_terminator=opcode.is_terminator,
         is_conditional=opcode.is_conditional,
