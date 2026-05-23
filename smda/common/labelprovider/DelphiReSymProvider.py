@@ -16,6 +16,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
+
 from .AbstractLabelProvider import AbstractLabelProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -279,6 +281,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
             else:
                 LOGGER.debug("No Delphi symbols extracted")
         except Exception as e:
+            reraise_non_operational_exception(e)
             LOGGER.warning(f"Error during DelphiReSym parsing: {e}")
 
     def _is_compatible(self):
@@ -475,6 +478,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
             return object_name
 
         except Exception as e:
+            reraise_non_operational_exception(e)
             LOGGER.debug(f"Error traversing RTTI object at 0x{rtti_offset:x}: {e}")
             return None
 
@@ -508,6 +512,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
             return self._traverse_rtti_object(rtti_offset, validate_pointers=False)
 
         except Exception as e:
+            reraise_non_operational_exception(e)
             LOGGER.debug(f"Error resolving type from double ptr at 0x{ptr_field_offset:x}: {e}")
             return None
 
@@ -557,6 +562,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
             return method_info
 
         except Exception as e:
+            reraise_non_operational_exception(e)
             LOGGER.debug(f"Error extracting method info at 0x{method_entry_offset:x}: {e}")
             return None
 

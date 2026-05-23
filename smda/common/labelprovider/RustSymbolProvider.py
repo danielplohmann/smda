@@ -4,6 +4,8 @@ import logging
 
 import lief
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
+
 from .AbstractLabelProvider import AbstractLabelProvider
 from .rust_demangler import demangle
 from .rust_demangler.rust import TypeNotFoundError
@@ -40,6 +42,7 @@ class RustSymbolProvider(AbstractLabelProvider):
         try:
             lief_binary = binary_info.getLiefBinary()
         except Exception as exc:
+            reraise_non_operational_exception(exc)
             LOGGER.debug("Failed to parse binary with LIEF: %s", type(exc).__name__)
             return
 

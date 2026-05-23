@@ -3,6 +3,7 @@ import struct
 from typing import Iterator, Tuple
 
 from smda.common import SmdaFunction
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 
 _IS_PRINTABLE_CHAR_CODE = tuple(chr(char) in string.printable for char in range(256))
 
@@ -162,8 +163,8 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:
                                         data_ref,
                                         string_type,
                                     )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            reraise_non_operational_exception(exc)
                 if not found_string:
                     string_result = read_go_string(f.smda_report, data_ref)
                     if string_result:
