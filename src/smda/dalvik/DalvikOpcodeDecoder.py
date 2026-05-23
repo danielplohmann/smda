@@ -444,46 +444,18 @@ FORMAT_DECODERS = {}
 
 
 def _decode_fmt_10x(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
-    return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
-    }
+    return {}
 
 
 FORMAT_DECODERS["10x"] = _decode_fmt_10x
 
 
 def _decode_fmt_10t(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     branch_delta = int.from_bytes(raw_bytes[1:2], byteorder="little", signed=True) * 2
     branch_target_idx = byte_idx + branch_delta
-    operands = f"{hex(branch_target_idx)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
+        "operands": f"{hex(branch_target_idx)}",
         "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
     }
 
 
@@ -491,25 +463,12 @@ FORMAT_DECODERS["10t"] = _decode_fmt_10t
 
 
 def _decode_fmt_11n(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1] & 0x0F
     literal = _signed((raw_bytes[1] >> 4) & 0x0F, 4)
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, #{literal:+d}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, #{literal:+d}",
     }
 
 
@@ -517,24 +476,10 @@ FORMAT_DECODERS["11n"] = _decode_fmt_11n
 
 
 def _decode_fmt_11x(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
-    registers = [reg_a]
-    operands = _reg_name(reg_a)
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "registers": [reg_a],
+        "operands": _reg_name(reg_a),
     }
 
 
@@ -542,25 +487,11 @@ FORMAT_DECODERS["11x"] = _decode_fmt_11x
 
 
 def _decode_fmt_12x(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1] & 0x0F
     reg_b = (raw_bytes[1] >> 4) & 0x0F
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "registers": [reg_a, reg_b],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}",
     }
 
 
@@ -568,24 +499,11 @@ FORMAT_DECODERS["12x"] = _decode_fmt_12x
 
 
 def _decode_fmt_20t(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
     branch_target_idx = byte_idx + branch_delta
-    operands = f"{hex(branch_target_idx)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
+        "operands": f"{hex(branch_target_idx)}",
         "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
     }
 
 
@@ -593,25 +511,12 @@ FORMAT_DECODERS["20t"] = _decode_fmt_20t
 
 
 def _decode_fmt_21c(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
+        "registers": [reg_a],
         "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}",
     }
 
 
@@ -619,13 +524,6 @@ FORMAT_DECODERS["21c"] = _decode_fmt_21c
 
 
 def _decode_fmt_21h(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     # The 16-bit immediate is sign-extended per the Dalvik spec before shifting.
     # Using signed=True ensures negative values like 0xFFFF produce -1 << shift
@@ -633,17 +531,10 @@ def _decode_fmt_21h(raw_bytes, byte_idx, opcode, resolve_ref):
     value = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
     shift = 48 if opcode.mnemonic.endswith("wide/high16") else 16
     literal = value << shift
-    registers = [reg_a]
-    sign = "-" if literal < 0 else ""
-    operands = f"{_reg_name(reg_a)}, #{sign}{hex(abs(literal))}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, #{hex(literal)}",
     }
 
 
@@ -651,25 +542,12 @@ FORMAT_DECODERS["21h"] = _decode_fmt_21h
 
 
 def _decode_fmt_21s(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, #{literal:+d}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, #{literal:+d}",
     }
 
 
@@ -677,26 +555,13 @@ FORMAT_DECODERS["21s"] = _decode_fmt_21s
 
 
 def _decode_fmt_21t(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
     branch_target_idx = byte_idx + branch_delta
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, {hex(branch_target_idx)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
+        "registers": [reg_a],
         "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {hex(branch_target_idx)}",
     }
 
 
@@ -704,26 +569,13 @@ FORMAT_DECODERS["21t"] = _decode_fmt_21t
 
 
 def _decode_fmt_22b(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     reg_b = raw_bytes[2]
     literal = int.from_bytes(raw_bytes[3:4], byteorder="little", signed=True)
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a, reg_b],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}",
     }
 
 
@@ -731,26 +583,13 @@ FORMAT_DECODERS["22b"] = _decode_fmt_22b
 
 
 def _decode_fmt_22c(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1] & 0x0F
     reg_b = (raw_bytes[1] >> 4) & 0x0F
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {resolve_ref(opcode.ref_kind, ref_index)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
+        "registers": [reg_a, reg_b],
         "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {resolve_ref(opcode.ref_kind, ref_index)}",
     }
 
 
@@ -758,26 +597,13 @@ FORMAT_DECODERS["22c"] = _decode_fmt_22c
 
 
 def _decode_fmt_22s(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1] & 0x0F
     reg_b = (raw_bytes[1] >> 4) & 0x0F
     literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a, reg_b],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}",
     }
 
 
@@ -785,27 +611,14 @@ FORMAT_DECODERS["22s"] = _decode_fmt_22s
 
 
 def _decode_fmt_22t(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1] & 0x0F
     reg_b = (raw_bytes[1] >> 4) & 0x0F
     branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
     branch_target_idx = byte_idx + branch_delta
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {hex(branch_target_idx)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
+        "registers": [reg_a, reg_b],
         "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {hex(branch_target_idx)}",
     }
 
 
@@ -813,25 +626,11 @@ FORMAT_DECODERS["22t"] = _decode_fmt_22t
 
 
 def _decode_fmt_22x(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     reg_b = int.from_bytes(raw_bytes[2:4], byteorder="little")
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "registers": [reg_a, reg_b],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}",
     }
 
 
@@ -839,26 +638,12 @@ FORMAT_DECODERS["22x"] = _decode_fmt_22x
 
 
 def _decode_fmt_23x(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     reg_b = raw_bytes[2]
     reg_c = raw_bytes[3]
-    registers = [reg_a, reg_b, reg_c]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {_reg_name(reg_c)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "registers": [reg_a, reg_b, reg_c],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {_reg_name(reg_c)}",
     }
 
 
@@ -866,24 +651,11 @@ FORMAT_DECODERS["23x"] = _decode_fmt_23x
 
 
 def _decode_fmt_30t(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     branch_delta = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True) * 2
     branch_target_idx = byte_idx + branch_delta
-    operands = f"{hex(branch_target_idx)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
+        "operands": f"{hex(branch_target_idx)}",
         "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
     }
 
 
@@ -891,25 +663,12 @@ FORMAT_DECODERS["30t"] = _decode_fmt_30t
 
 
 def _decode_fmt_31c(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     ref_index = int.from_bytes(raw_bytes[2:6], byteorder="little")
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
+        "registers": [reg_a],
         "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}",
     }
 
 
@@ -917,25 +676,12 @@ FORMAT_DECODERS["31c"] = _decode_fmt_31c
 
 
 def _decode_fmt_31i(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     literal = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True)
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, #{literal:+d}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, #{literal:+d}",
     }
 
 
@@ -943,26 +689,13 @@ FORMAT_DECODERS["31i"] = _decode_fmt_31i
 
 
 def _decode_fmt_31t(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     branch_delta = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True) * 2
     payload_idx = byte_idx + branch_delta
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, payload@{hex(payload_idx)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
+        "registers": [reg_a],
         "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, payload@{hex(payload_idx)}",
     }
 
 
@@ -970,25 +703,11 @@ FORMAT_DECODERS["31t"] = _decode_fmt_31t
 
 
 def _decode_fmt_32x(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = int.from_bytes(raw_bytes[2:4], byteorder="little")
     reg_b = int.from_bytes(raw_bytes[4:6], byteorder="little")
-    registers = [reg_a, reg_b]
-    operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
     return {
-        "registers": registers,
-        "operands": operands,
-        "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "registers": [reg_a, reg_b],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}",
     }
 
 
@@ -996,24 +715,12 @@ FORMAT_DECODERS["32x"] = _decode_fmt_32x
 
 
 def _decode_fmt_35c(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     _, registers = _decode_register_list_35c(raw_bytes)
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-    operands = f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}"
     return {
         "registers": registers,
-        "operands": operands,
-        "literal": literal,
         "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}",
     }
 
 
@@ -1021,26 +728,14 @@ FORMAT_DECODERS["35c"] = _decode_fmt_35c
 
 
 def _decode_fmt_3rc(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     count = raw_bytes[1]
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
     first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
     registers = _decode_register_range(count, first_reg)
-    operands = f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}"
     return {
         "registers": registers,
-        "operands": operands,
-        "literal": literal,
         "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}",
     }
 
 
@@ -1048,29 +743,18 @@ FORMAT_DECODERS["3rc"] = _decode_fmt_3rc
 
 
 def _decode_fmt_45cc(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     _, registers = _decode_register_list_35c(raw_bytes[:6])
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
     ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
-    operands = (
-        f"{{{_format_registers(registers)}}}, "
-        f"{resolve_ref(opcode.ref_kind, ref_index)}, "
-        f"{resolve_ref('proto', ref_index_aux)}"
-    )
     return {
         "registers": registers,
-        "operands": operands,
-        "literal": literal,
         "ref_index": ref_index,
         "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": (
+            f"{{{_format_registers(registers)}}}, "
+            f"{resolve_ref(opcode.ref_kind, ref_index)}, "
+            f"{resolve_ref('proto', ref_index_aux)}"
+        ),
     }
 
 
@@ -1078,31 +762,20 @@ FORMAT_DECODERS["45cc"] = _decode_fmt_45cc
 
 
 def _decode_fmt_4rcc(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     count = raw_bytes[1]
     ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
     first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
     ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
     registers = _decode_register_range(count, first_reg)
-    operands = (
-        f"{{{_format_registers(registers)}}}, "
-        f"{resolve_ref(opcode.ref_kind, ref_index)}, "
-        f"{resolve_ref('proto', ref_index_aux)}"
-    )
     return {
         "registers": registers,
-        "operands": operands,
-        "literal": literal,
         "ref_index": ref_index,
         "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": (
+            f"{{{_format_registers(registers)}}}, "
+            f"{resolve_ref(opcode.ref_kind, ref_index)}, "
+            f"{resolve_ref('proto', ref_index_aux)}"
+        ),
     }
 
 
@@ -1110,25 +783,12 @@ FORMAT_DECODERS["4rcc"] = _decode_fmt_4rcc
 
 
 def _decode_fmt_51l(raw_bytes, byte_idx, opcode, resolve_ref):
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
     reg_a = raw_bytes[1]
     literal = int.from_bytes(raw_bytes[2:10], byteorder="little", signed=True)
-    registers = [reg_a]
-    operands = f"{_reg_name(reg_a)}, #{hex(literal)}"
     return {
-        "registers": registers,
-        "operands": operands,
+        "registers": [reg_a],
         "literal": literal,
-        "ref_index": ref_index,
-        "ref_index_aux": ref_index_aux,
-        "branch_target_idx": branch_target_idx,
-        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, #{hex(literal)}",
     }
 
 
@@ -1160,14 +820,14 @@ def decode_instruction(bytecode, byte_idx, resolve_ref):
         size_units=opcode.size_units,
         size_bytes=size_bytes,
         bytes_=raw_bytes,
-        operands=result["operands"],
-        registers=result["registers"],
-        literal=result["literal"],
+        operands=result.get("operands", ""),
+        registers=result.get("registers", []),
+        literal=result.get("literal"),
         ref_kind=opcode.ref_kind,
-        ref_index=result["ref_index"],
-        ref_index_aux=result["ref_index_aux"],
-        branch_target_idx=result["branch_target_idx"],
-        payload_idx=result["payload_idx"],
+        ref_index=result.get("ref_index"),
+        ref_index_aux=result.get("ref_index_aux"),
+        branch_target_idx=result.get("branch_target_idx"),
+        payload_idx=result.get("payload_idx"),
         is_invoke=opcode.is_invoke,
         is_terminator=opcode.is_terminator,
         is_conditional=opcode.is_conditional,
