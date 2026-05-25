@@ -109,21 +109,21 @@ class SmdaFunction:
 
     @property
     def num_instructions(self):
-        return sum(1 for _ in self.getInstructions())
+        return sum(len(block) for block in self.blocks.values())
 
     @property
     def num_calls(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
-            return sum(1 for ins in self.getInstructions() if ins.mnemonic.startswith("invoke-"))
-        return sum(1 for ins in self.getInstructions() if ins.mnemonic == "call")
+            return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("invoke-"))
+        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic == "call")
 
     @property
     def num_returns(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
-            return sum(1 for ins in self.getInstructions() if ins.mnemonic.startswith("return"))
-        return sum(1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"])
+            return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("return"))
+        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic in ("ret", "retn"))
 
     def isApiThunk(self):
         if self.num_instructions != 1:
