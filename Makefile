@@ -1,5 +1,7 @@
 PYTHON ?= python3
 
+.PHONY: init package publish ruff-check ruff-format ruff-fix lint format test test-coverage clean
+
 init:
 	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<75.4.0" wheel
 	$(PYTHON) -m pip install -e ".[dev]"
