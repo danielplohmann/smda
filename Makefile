@@ -1,7 +1,7 @@
 PYTHON ?= python3
 
 init:
-	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<75.4.0" wheel
+	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<82.1.0" "wheel>=0.47.0,<0.48.0"
 	$(PYTHON) -m pip install -e ".[dev]"
 	$(PYTHON) -m pre_commit install
 package:
