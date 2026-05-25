@@ -108,11 +108,21 @@ def _register_range(start, names, fmt, size_units, **kwargs):
 
 
 def _mark_can_throw(*mnemonics):
-    remaining = set(mnemonics)
-    for opcode, spec in list(OPCODES.items()):
-        if spec.mnemonic in remaining:
+    """
+    Mark all opcodes matching the given mnemonics as can_throw=True.
+
+    Args:
+        *mnemonics: Variable length list of mnemonics to mark as throwable.
+    Raises:
+        ValueError: If any mnemonic is not found in OPCODES.
+    """
+    to_mark = set(mnemonics)
+    matched = set()
+    for opcode, spec in OPCODES.items():
+        if spec.mnemonic in to_mark:
             OPCODES[opcode] = replace(spec, can_throw=True)
-            remaining.remove(spec.mnemonic)
+            matched.add(spec.mnemonic)
+    remaining = to_mark - matched
     if remaining:
         raise ValueError(f"Unknown Dalvik throwable opcodes: {', '.join(sorted(remaining))}")
 
