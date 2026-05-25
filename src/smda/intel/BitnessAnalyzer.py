@@ -1,7 +1,6 @@
 import logging
 import re
 import struct
-from collections import Counter
 
 from .definitions import COMMON_START_BYTES
 
@@ -21,7 +20,7 @@ class BitnessAnalyzer:
         return self.determineBitness(binary=disassembly.binary_info.binary)
 
     def determineBitness(self, binary):
-        candidate_first_bytes = Counter()
+        candidate_first_bytes = set()
         # check for potential call instructions and collect their first bytes
         for call_match in re.finditer(b"\xe8", binary):
             if len(binary) - call_match.start() > 5:
@@ -30,17 +29,13 @@ class BitnessAnalyzer:
                 call_destination = rel_call_offset + call_match.start() + 5  # & bitmask
                 if call_destination > 0 and call_destination < len(binary):
                     first_byte = binary[call_destination]
-                    candidate_first_bytes[first_byte] += 1
+                    candidate_first_bytes.add(f"{first_byte:02x}")
         score = {"32": 0, "64": 0}
         for bitness in ["32", "64"]:
             for candidate_sequence in candidate_first_bytes:
-                if isinstance(candidate_sequence, int):
-                    candidate_sequence = f"{candidate_sequence:02x}"
-                elif isinstance(candidate_sequence, str):
-                    candidate_sequence = candidate_sequence.encode("hex")
-                for common_sequence, sequence_score in COMMON_START_BYTES[bitness].items():
-                    if candidate_sequence == str(common_sequence):
-                        score[bitness] += sequence_score * 1.0
+                sequence_score = COMMON_START_BYTES[bitness].get(candidate_sequence)
+                if sequence_score is not None:
+                    score[bitness] += sequence_score * 1.0
         total_score = max(score["32"] + score["64"], 1)
         score["32"] /= total_score
         score["64"] /= total_score
