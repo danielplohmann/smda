@@ -65,7 +65,7 @@ This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code form
 
 ```bash
 # Install development dependencies
-python3 -m pip install --upgrade pip "setuptools>=64.0.0,<75.4.0" wheel
+python3 -m pip install --upgrade pip "setuptools>=64.0.0,<82.1.0" "wheel>=0.47.0"
 python3 -m pip install -e ".[dev]"
 
 # Install pre-commit hooks (optional but recommended)
