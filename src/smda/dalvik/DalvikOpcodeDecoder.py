@@ -1,5 +1,5 @@
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional
 
 
@@ -105,6 +105,16 @@ def _register(opcode, mnemonic, fmt, size_units, **kwargs):
 def _register_range(start, names, fmt, size_units, **kwargs):
     for index, mnemonic in enumerate(names):
         _register(start + index, mnemonic, fmt, size_units, **kwargs)
+
+
+def _mark_can_throw(*mnemonics):
+    remaining = set(mnemonics)
+    for opcode, spec in list(OPCODES.items()):
+        if spec.mnemonic in remaining:
+            OPCODES[opcode] = replace(spec, can_throw=True)
+            remaining.remove(spec.mnemonic)
+    if remaining:
+        raise ValueError(f"Unknown Dalvik throwable opcodes: {', '.join(sorted(remaining))}")
 
 
 _register(0x00, "nop", "10x", 1)
@@ -239,6 +249,7 @@ _register_range(
     "21c",
     2,
     ref_kind="field",
+    can_throw=True,
 )
 _register_range(
     0x6E,
@@ -402,6 +413,20 @@ _register_range(
     ],
     "22b",
     2,
+)
+_mark_can_throw(
+    "div-int",
+    "rem-int",
+    "div-long",
+    "rem-long",
+    "div-int/2addr",
+    "rem-int/2addr",
+    "div-long/2addr",
+    "rem-long/2addr",
+    "div-int/lit16",
+    "rem-int/lit16",
+    "div-int/lit8",
+    "rem-int/lit8",
 )
 _register(0xFA, "invoke-polymorphic", "45cc", 4, ref_kind="method", can_throw=True, is_invoke=True)
 _register(0xFB, "invoke-polymorphic/range", "4rcc", 4, ref_kind="method", can_throw=True, is_invoke=True)
