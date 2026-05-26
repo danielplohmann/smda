@@ -16,7 +16,16 @@ class PeFileLoader:
         return data[:2] == b"MZ"
 
     @staticmethod
-    def mapBinary(binary):
+    def parseBinary(binary):
+        # Single lief.parse entry point so FileLoader can share one parse
+        # across all accessors instead of each accessor re-parsing.
+        return lief.parse(binary)
+
+    @staticmethod
+    def mapBinary(binary, parsed=None):
+        # parsed accepted for API uniformity with ELF/MachO; PE mapping is
+        # done via struct.unpack on the raw bytes and never needs lief.
+        del parsed
         # This is a pretty rough implementation but does the job for now
         mapped_binary = bytearray([])
         pe_offset = PeFileLoader.getPeOffset(binary)
@@ -88,7 +97,10 @@ class PeFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
-    def getBitness(binary):
+    def getBitness(binary, parsed=None):
+        # parsed accepted for API uniformity; PE bitness is read from the
+        # COFF header via struct.unpack.
+        del parsed
         bitness_id = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 0x6:
@@ -96,7 +108,10 @@ class PeFileLoader:
         return PeFileLoader.BITNESS_MAP.get(bitness_id, 0)
 
     @staticmethod
-    def getBaseAddress(binary):
+    def getBaseAddress(binary, parsed=None):
+        # parsed accepted for API uniformity; PE base address comes from the
+        # optional header via struct.unpack.
+        del parsed
         base_addr = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 0x38:
@@ -128,13 +143,14 @@ class PeFileLoader:
         return oep_rva
 
     @staticmethod
-    def getAbi(binary):
+    def getAbi(binary, parsed=None):
+        del binary, parsed
         return ""
 
     @staticmethod
-    def getArchitecture(binary):
+    def getArchitecture(binary, parsed=None):
         architecture = "intel"
-        pefile = lief.parse(binary)
+        pefile = parsed if parsed is not None else lief.parse(binary)
         if pefile:
             for d in pefile.data_directories:
                 if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER and d.size > 0:
@@ -150,8 +166,8 @@ class PeFileLoader:
         return False
 
     @staticmethod
-    def getCodeAreas(binary):
-        pefile = lief.parse(binary)
+    def getCodeAreas(binary, parsed=None):
+        pefile = parsed if parsed is not None else lief.parse(binary)
         code_areas = []
         base_address = PeFileLoader.getBaseAddress(binary)
         if pefile and pefile.sections:

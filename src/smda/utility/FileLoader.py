@@ -38,12 +38,18 @@ class FileLoader:
         if self._map_file:
             for loader in self.file_loaders:
                 if loader.isCompatible(self._raw_data):
-                    self._data = loader.mapBinary(self._raw_data)
-                    self._base_addr = loader.getBaseAddress(self._raw_data)
-                    self._bitness = loader.getBitness(self._raw_data)
-                    self._code_areas = loader.getCodeAreas(self._raw_data)
-                    self._architecture = loader.getArchitecture(self._raw_data)
-                    self._abi = loader.getAbi(self._raw_data)
+                    # PE/ELF/MachO loaders expose parseBinary() so we can
+                    # share a single lief.parse(...) across every accessor
+                    # and skip multiple redundant re-parses per binary
+                    # load. Delphi/Dex loaders don't need lief, so kw
+                    # stays empty for them.
+                    kw = {"parsed": loader.parseBinary(self._raw_data)} if hasattr(loader, "parseBinary") else {}
+                    self._data = loader.mapBinary(self._raw_data, **kw)
+                    self._base_addr = loader.getBaseAddress(self._raw_data, **kw)
+                    self._bitness = loader.getBitness(self._raw_data, **kw)
+                    self._code_areas = loader.getCodeAreas(self._raw_data, **kw)
+                    self._architecture = loader.getArchitecture(self._raw_data, **kw)
+                    self._abi = loader.getAbi(self._raw_data, **kw)
                     break
         else:
             self._data = self._raw_data
