@@ -18,6 +18,11 @@ LOGGER = logging.getLogger(__name__)
 class WinApiResolver(AbstractLabelProvider):
     """Minimal WinAPI reference resolver, extracted from ApiScout"""
 
+    # Class-level cache: db_filepath -> (api_map, has_64bit).
+    # API collection files are static on disk; parsing them once per process
+    # is sufficient even when multiple WinApiResolver instances are created.
+    _db_cache: dict = {}
+
     def __init__(self, config):
         self._config = config
         self._has_64bit = False
@@ -54,6 +59,12 @@ class WinApiResolver(AbstractLabelProvider):
         self._os_name = os_name
 
     def _loadDbFile(self, os_name, db_filepath):
+        if db_filepath in WinApiResolver._db_cache:
+            api_map, has_64bit = WinApiResolver._db_cache[db_filepath]
+            self._api_map[os_name] = api_map
+            self._has_64bit |= has_64bit
+            LOGGER.debug("loaded %d exports from cache (%s).", len(api_map), os_name)
+            return
         api_db = {}
         if os.path.isfile(db_filepath):
             with open(db_filepath) as f_json:
@@ -65,6 +76,7 @@ class WinApiResolver(AbstractLabelProvider):
             )
             return
         num_apis_loaded = 0
+        has_64bit = False
         api_map = {}
         for dll_entry in api_db["dlls"]:
             LOGGER.debug("  building address map for: %s", dll_entry)
@@ -75,7 +87,7 @@ class WinApiResolver(AbstractLabelProvider):
                     api_name = "None<{}>".format(export["ordinal"])
                 dll_name = "_".join(dll_entry.split("_")[2:])
                 bitness = api_db["dlls"][dll_entry]["bitness"]
-                self._has_64bit |= bitness == 64
+                has_64bit |= bitness == 64
                 base_address = api_db["dlls"][dll_entry]["base_address"]
                 virtual_address = base_address + export["address"]
                 api_map[virtual_address] = (dll_name, api_name)
@@ -85,7 +97,9 @@ class WinApiResolver(AbstractLabelProvider):
             len(api_db["dlls"]),
             api_db["os_name"],
         )
+        WinApiResolver._db_cache[db_filepath] = (api_map, has_64bit)
         self._api_map[os_name] = api_map
+        self._has_64bit |= has_64bit
 
     def isApiProvider(self):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
