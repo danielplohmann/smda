@@ -79,12 +79,15 @@ class SmdaBasicBlock:
             return "".join(escaped_binary_seqs).encode("ascii")
 
     def getPredecessors(self):
-        predecessors = []
-        if self.smda_function is not None:
-            for frm, to in self.smda_function.blockrefs.items():
-                if self.offset in to:
-                    predecessors.append(frm)
-        return predecessors
+        if self.smda_function is None:
+            return []
+        if self.smda_function._blockrefs_reverse is None:
+            rev: dict = {}
+            for frm, tos in self.smda_function.blockrefs.items():
+                for to in tos:
+                    rev.setdefault(to, []).append(frm)
+            self.smda_function._blockrefs_reverse = rev
+        return list(self.smda_function._blockrefs_reverse.get(self.offset, []))
 
     def getSuccessors(self):
         successors = []
