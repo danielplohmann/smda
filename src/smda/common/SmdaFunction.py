@@ -144,7 +144,7 @@ class SmdaFunction:
         return self.pic_hash
 
     def getPicHashAsHex(self):
-        return struct.pack("Q", self.pic_hash).hex()
+        return struct.pack("<Q", self.pic_hash).hex()
 
     def getInstructions(self):
         for block in self.getBlocks():
@@ -186,7 +186,7 @@ class SmdaFunction:
         return nesting_depth
 
     def getPicHash(self, binary_info):
-        return struct.unpack("Q", hashlib.sha256(self.getPicHashSequence(binary_info)).digest()[:8])[0]
+        return struct.unpack("<Q", hashlib.sha256(self.getPicHashSequence(binary_info)).digest()[:8])[0]
 
     def getPicHashSequence(self, binary_info):
         escaped_binary_seqs = []
@@ -203,7 +203,7 @@ class SmdaFunction:
         return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
 
     def getOpcHash(self):
-        return struct.unpack("Q", hashlib.sha256(self.getOpcHashSequence()).digest()[:8])[0]
+        return struct.unpack("<Q", hashlib.sha256(self.getOpcHashSequence()).digest()[:8])[0]
 
     def getOpcHashSequence(self):
         escaped_binary_seqs = []

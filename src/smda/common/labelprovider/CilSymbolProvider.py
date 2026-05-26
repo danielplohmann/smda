@@ -34,6 +34,8 @@ class CilSymbolProvider(AbstractLabelProvider):
         return value.encode("utf-8").decode("utf-8")
 
     def update(self, binary_info):
+        self._addr_to_func_symbols = {}
+        self._func_symbol_to_addr = {}
         try:
             pe = dnfile.dnPE(data=binary_info.raw_data)
         except Exception as exc:

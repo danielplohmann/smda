@@ -35,7 +35,7 @@ class SmdaBasicBlock:
             return self.picblockhash
         picblockhash_sequence = self.getPicBlockHashSequence()
         if picblockhash_sequence is not None:
-            self.picblockhash = struct.unpack("Q", hashlib.sha256(picblockhash_sequence).digest()[:8])[0]
+            self.picblockhash = struct.unpack("<Q", hashlib.sha256(picblockhash_sequence).digest()[:8])[0]
         return self.picblockhash
 
     def getPicBlockHashSequence(self):
@@ -66,7 +66,7 @@ class SmdaBasicBlock:
             return self.opcblockhash
         opcblockhash_sequence = self.getOpcBlockHashSequence()
         if opcblockhash_sequence is not None:
-            self.opcblockhash = struct.unpack("Q", hashlib.sha256(opcblockhash_sequence).digest()[:8])[0]
+            self.opcblockhash = struct.unpack("<Q", hashlib.sha256(opcblockhash_sequence).digest()[:8])[0]
         return self.opcblockhash
 
     def getOpcBlockHashSequence(self):
@@ -105,4 +105,6 @@ class SmdaBasicBlock:
         return self.offset
 
     def __str__(self):
+        if self.offset is None:
+            return f"0x????????: ({self.length:>4})"
         return f"0x{self.offset:08x}: ({self.length:>4})"

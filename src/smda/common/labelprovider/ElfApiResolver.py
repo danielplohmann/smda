@@ -66,5 +66,7 @@ class ElfApiResolver(AbstractLabelProvider):
         May return None for the `dll` if it cannot be determined.
         When it can be determined for ELF files, the `dll` field should be interpreted as the API version rather than shared library name.
         For example: "GLIBC_2.2.5".
+        `absolute_addr` is part of the label-provider API but intentionally unused here:
+        ELF lookups are keyed by relocation slot address (`to_addr`) in `_api_map["lief"]`.
         """
         return self._api_map["lief"].get(to_addr, (None, None))
