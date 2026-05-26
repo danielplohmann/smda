@@ -198,11 +198,8 @@ class IndirectCallAnalyzer:
                 return True
         # process previous blocks
         if depth >= 0:
-            refs_in = [
-                fr
-                for (fr, to) in analysis_state.code_refs
-                if to == block[0][0] and fr not in [ins[0] for block in processed for ins in block]
-            ]
+            processed_addrs = frozenset(ins[0] for blk in processed for ins in blk)
+            refs_in = [fr for (fr, to) in analysis_state.code_refs if to == block[0][0] and fr not in processed_addrs]
             LOGGER.debug(
                 "start processing previous blocks, searching in %d in_refs with remaining depth: %d",
                 len(refs_in),
