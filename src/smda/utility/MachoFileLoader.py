@@ -30,9 +30,14 @@ class MachoFileLoader:
         return data[:4] == b"\xce\xfa\xed\xfe" or data[:4] == b"\xcf\xfa\xed\xfe"
 
     @staticmethod
-    def getBaseAddress(binary, macho_file=None):
-        if macho_file is None:
-            macho_file = lief.parse(binary)
+    def parseBinary(binary):
+        # Single lief.parse entry point so FileLoader can share one parse
+        # across all accessors instead of each accessor re-parsing.
+        return lief.parse(binary)
+
+    @staticmethod
+    def getBaseAddress(binary, parsed=None):
+        macho_file = parsed if parsed is not None else lief.parse(binary)
         # Determine base address of binary
         #
         base_addr = 0
@@ -47,17 +52,17 @@ class MachoFileLoader:
         return base_addr
 
     @staticmethod
-    def mapBinary(binary):
+    def mapBinary(binary, parsed=None):
         """
         map the MachO file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
         # MachO needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
-        macho_file = lief.parse(binary)
+        macho_file = parsed if parsed is not None else lief.parse(binary)
         if not macho_file:
             return b""
-        base_addr = MachoFileLoader.getBaseAddress(binary, macho_file=macho_file)
+        base_addr = MachoFileLoader.getBaseAddress(binary, parsed=macho_file)
 
         LOGGER.debug("MachO: base address: 0x%x", base_addr)
 
@@ -162,13 +167,14 @@ class MachoFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
-    def getAbi(binary):
+    def getAbi(binary, parsed=None):
+        del binary, parsed
         return ""
 
     @staticmethod
-    def getArchitecture(binary):
+    def getArchitecture(binary, parsed=None):
         # TODO add machine types whenever we add more architectures
-        macho_file = lief.parse(binary)
+        macho_file = parsed if parsed is not None else lief.parse(binary)
         if not macho_file:
             return ""
         machine_type = macho_file.header.cpu_type
@@ -185,9 +191,9 @@ class MachoFileLoader:
         raise NotImplementedError("SMDA does not support this architecture yet.")
 
     @staticmethod
-    def getBitness(binary):
+    def getBitness(binary, parsed=None):
         # TODO add machine types whenever we add more architectures
-        macho_file = lief.parse(binary)
+        macho_file = parsed if parsed is not None else lief.parse(binary)
         if not macho_file:
             return 0
         machine_type = macho_file.header.cpu_type
@@ -217,9 +223,9 @@ class MachoFileLoader:
         return merged_code_areas
 
     @staticmethod
-    def getCodeAreas(binary):
+    def getCodeAreas(binary, parsed=None):
         # TODO add machine types whenever we add more architectures
-        macho_file = lief.parse(binary)
+        macho_file = parsed if parsed is not None else lief.parse(binary)
         if not macho_file:
             return []
         ins_flags = (

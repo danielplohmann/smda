@@ -32,9 +32,14 @@ class ElfFileLoader:
         return data[:4] == b"\x7fELF"
 
     @staticmethod
-    def getBaseAddress(binary, elffile=None):
-        if elffile is None:
-            elffile = lief.parse(binary)
+    def parseBinary(binary):
+        # Single lief.parse entry point so FileLoader can share one parse
+        # across all accessors instead of each accessor re-parsing.
+        return lief.parse(binary)
+
+    @staticmethod
+    def getBaseAddress(binary, parsed=None):
+        elffile = parsed if parsed is not None else lief.parse(binary)
         # Determine base address of binary
         #
         base_addr = 0
@@ -152,15 +157,15 @@ class ElfFileLoader:
                 mapped_binary[rva : rva + section.size] = content_to_be_mapped
 
     @staticmethod
-    def mapBinary(binary):
+    def mapBinary(binary, parsed=None):
         """
         map the ELF file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
-        elffile = lief.parse(binary)
+        elffile = parsed if parsed is not None else lief.parse(binary)
         if not elffile:
             return b""
-        base_addr = ElfFileLoader.getBaseAddress(binary, elffile=elffile)
+        base_addr = ElfFileLoader.getBaseAddress(binary, parsed=elffile)
 
         LOGGER.debug("ELF: base address: 0x%x", base_addr)
 
@@ -208,10 +213,10 @@ class ElfFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
-    def getAbi(binary):
+    def getAbi(binary, parsed=None):
         abi = ""
         try:
-            elffile = lief.parse(binary)
+            elffile = parsed if parsed is not None else lief.parse(binary)
             if elffile:
                 abi = elffile.header.identity_os_abi.name
         except lief.bad_file as exc:
@@ -219,14 +224,14 @@ class ElfFileLoader:
         return abi
 
     @staticmethod
-    def getArchitecture(binary):
-        architecture = "intel"
-        return architecture
+    def getArchitecture(binary, parsed=None):
+        del binary, parsed
+        return "intel"
 
     @staticmethod
-    def getBitness(binary):
+    def getBitness(binary, parsed=None):
         # TODO add machine types whenever we add more architectures
-        elffile = lief.parse(binary)
+        elffile = parsed if parsed is not None else lief.parse(binary)
         if not elffile:
             return 0
         machine_type = elffile.header.machine_type
@@ -254,9 +259,9 @@ class ElfFileLoader:
         return merged_code_areas
 
     @staticmethod
-    def getCodeAreas(binary):
+    def getCodeAreas(binary, parsed=None):
         # TODO add machine types whenever we add more architectures
-        elffile = lief.parse(binary)
+        elffile = parsed if parsed is not None else lief.parse(binary)
         if elffile is None:
             return []
         code_areas = []
