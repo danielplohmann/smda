@@ -86,8 +86,7 @@ class FunctionCandidate:
         self._score = None
 
     def removeCallRefs(self, source_addrs):
-        for addr in source_addrs:
-            self.call_ref_sources.discard(addr)
+        self.call_ref_sources.difference_update(source_addrs)
         self._score = None
 
     def setIsTailcallCandidate(self, is_tailcall):
