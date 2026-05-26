@@ -80,7 +80,6 @@ class BinaryInfo:
         if self.imported_functions is None:
             lief_result = self.getLiefBinary()
             if isinstance(lief_result, lief.PE.Binary):
-                PeSymbolProvider(None).parseSymbols(lief_result)
                 self.imported_functions = PeSymbolProvider(None).parseImports(lief_result)
             elif isinstance(lief_result, lief.ELF.Binary):
                 self.imported_functions = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
