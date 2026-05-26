@@ -163,7 +163,7 @@ class LanguageAnalyzer:
         result["delphi"] = self.getDelphiScore()
         if self.checkDelphi():
             t_objects = self.getDelphiObjects()
-            functions = sum([len(t_objects[t_string]) for t_string in t_objects])
+            functions = sum(len(t_string) for t_string in t_objects.values())
             # result["_delphi_objects"] = t_objects.keys()
             result["_count_delphi_objects"] = len(t_objects)
             if len(t_objects) > 5 and functions > 10:
@@ -183,15 +183,12 @@ class LanguageAnalyzer:
         patterns.append(b"\x8b\x4d[\\S\\s]\xe8[\\S\\s]{3}(\x00|\xff)")
         # mov ecx, <reg>; call XYZ
         patterns.append(b"\x8b[\xc8-\xcf]\xe8[\\S\\s]{3}(\x00|\xff)")
+        thiscall_count = sum(len(re.findall(pattern, self.disassembly.binary_info.binary)) for pattern in patterns)
         result["c++"] = min(
             1,
-            6.0
-            * sum([len(re.findall(pattern, self.disassembly.binary_info.binary)) for pattern in patterns])
-            / max(1, len(self.disassembly.functions)),
+            6.0 * thiscall_count / max(1, len(self.disassembly.functions)),
         )
-        result["_count_thiscalls"] = sum(
-            [len(re.findall(pattern, self.disassembly.binary_info.binary)) for pattern in patterns]
-        )
+        result["_count_thiscalls"] = thiscall_count
 
         # guess the programming language and
         # return dict with probabilities for the use of certain programming languages

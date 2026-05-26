@@ -418,22 +418,16 @@ class FunctionCandidateManager:
     def _identifyAlignment(self):
         identified_alignment = 0
         if self.config.USE_ALIGNMENT:
-            num_candidates = sum(
-                [1 for addr, candidate in self.candidates.items() if len(candidate.call_ref_sources) > 1]
-            )
+            num_candidates = sum(1 for candidate in self.candidates.values() if len(candidate.call_ref_sources) > 1)
             num_aligned_16_candidates = sum(
-                [
-                    1
-                    for addr, candidate in self.candidates.items()
-                    if len(candidate.call_ref_sources) > 1 and candidate.alignment == 16
-                ]
+                1
+                for candidate in self.candidates.values()
+                if len(candidate.call_ref_sources) > 1 and candidate.alignment == 16
             )
             num_aligned_4_candidates = sum(
-                [
-                    1
-                    for addr, candidate in self.candidates.items()
-                    if len(candidate.call_ref_sources) > 1 and candidate.alignment >= 4
-                ]
+                1
+                for candidate in self.candidates.values()
+                if len(candidate.call_ref_sources) > 1 and candidate.alignment >= 4
             )
             if num_candidates:
                 alignment_16_ratio = 1.0 * num_aligned_16_candidates / num_candidates

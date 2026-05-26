@@ -93,7 +93,7 @@ class SmdaFunction:
 
     @property
     def num_edges(self):
-        return sum([len(value) for key, value in self.blockrefs.items()])
+        return sum(len(value) for value in self.blockrefs.values())
 
     @property
     def num_inrefs(self):
@@ -101,7 +101,7 @@ class SmdaFunction:
 
     @property
     def num_outrefs(self):
-        return sum([len(dsts) for src, dsts in self.outrefs.items()])
+        return sum(len(dsts) for dsts in self.outrefs.values())
 
     @property
     def num_blocks(self):
@@ -109,21 +109,21 @@ class SmdaFunction:
 
     @property
     def num_instructions(self):
-        return sum([1 for ins in self.getInstructions()])
+        return sum(len(block) for block in self.blocks.values())
 
     @property
     def num_calls(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
-            return sum([1 for ins in self.getInstructions() if ins.mnemonic.startswith("invoke-")])
-        return sum([1 for ins in self.getInstructions() if ins.mnemonic == "call"])
+            return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("invoke-"))
+        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic == "call")
 
     @property
     def num_returns(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
-            return sum([1 for ins in self.getInstructions() if ins.mnemonic.startswith("return")])
-        return sum([1 for ins in self.getInstructions() if ins.mnemonic in ["ret", "retn"]])
+            return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("return"))
+        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic in ("ret", "retn"))
 
     def isApiThunk(self):
         if self.num_instructions != 1:
@@ -217,7 +217,7 @@ class SmdaFunction:
         for offset, block in block_dict.items():
             instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
             self.blocks[int(offset)] = instructions
-            self.binweight += sum([len(ins.bytes) / 2 for ins in instructions])
+            self.binweight += sum(len(ins.bytes) / 2 for ins in instructions)
 
     @staticmethod
     def _normalizeDalvikStringRefs(stringrefs):
