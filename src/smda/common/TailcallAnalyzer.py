@@ -3,6 +3,8 @@ import json
 from collections import defaultdict
 from operator import itemgetter
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
+
 
 class TailcallAnalyzer:
     def __init__(self):
@@ -117,8 +119,8 @@ class TailcallAnalyzer:
                     disassembler.analyzeFunction(tailcall["destination_function"])
                     function = self.__getFunctionByStartAddr(tailcall["destination_function"])
                     function.is_tailcall_function = True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    reraise_non_operational_exception(exc)
                     # print ("0x{:x} -> 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
             elif verbose:
                 print(

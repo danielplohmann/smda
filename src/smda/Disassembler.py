@@ -5,6 +5,7 @@ import traceback
 
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
 from smda.dalvik.DalvikDisassembler import DalvikDisassembler
@@ -142,7 +143,11 @@ class Disassembler:
                 smda_report.buffer = binary_info.binary
         except Exception as exc:
             LOGGER.error("An error occurred while disassembling file.")
-            # print("-> an error occured (", str(exc), ").")
+            smda_report = self._handleDisassemblyException(
+                start,
+                exc,
+                "An error occurred while disassembling file.",
+            )
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
@@ -161,7 +166,11 @@ class Disassembler:
                 smda_report.buffer = file_content
         except Exception as exc:
             LOGGER.error("An error occurred while disassembling unmapped buffer.")
-            # print("-> an error occured (", str(exc), ").")
+            smda_report = self._handleDisassemblyException(
+                start,
+                exc,
+                "An error occurred while disassembling unmapped buffer.",
+            )
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
@@ -207,7 +216,11 @@ class Disassembler:
                 smda_report.buffer = file_content
         except Exception as exc:
             LOGGER.error("An error occurred while disassembling buffer.")
-            # print("-> an error occured (", str(exc), ").")
+            smda_report = self._handleDisassemblyException(
+                start,
+                exc,
+                "An error occurred while disassembling buffer.",
+            )
             smda_report = self._createErrorReport(start, exc)
         return smda_report
 
@@ -228,3 +241,8 @@ class Disassembler:
         report.execution_time = self._getDurationInSeconds(start, datetime.datetime.now(datetime.timezone.utc))
         report.message = traceback.format_exc()
         return report
+
+    def _handleDisassemblyException(self, start, exception, log_message):
+        reraise_non_operational_exception(exception)
+        LOGGER.error(log_message)
+        return self._createErrorReport(start, exception)

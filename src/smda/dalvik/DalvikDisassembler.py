@@ -5,6 +5,7 @@ import struct
 
 import lief
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 from smda.dalvik.DalvikOpcodeDecoder import (
     decode_instruction,
@@ -86,7 +87,8 @@ class DexReferenceResolver:
     def _safeAttr(self, obj, attr, default=None):
         try:
             return getattr(obj, attr)
-        except Exception:
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
             return default
 
     def _normalizeTypeString(self, type_name):
@@ -952,6 +954,7 @@ class DalvikDisassembler:
                 self.analyzeFunction(dex_file, resolver, method)
                 analyzed_count += 1
             except Exception as exc:
+                reraise_non_operational_exception(exc)
                 LOGGER.warning(
                     "Failed to analyze Dalvik method %s @0x%x: %s",
                     resolver.formatMethod(method),
