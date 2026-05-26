@@ -20,6 +20,7 @@ class SmdaFunction:
     smda_report = None
     offset = None
     blocks = None
+    _sorted_block_keys = None
     apirefs = None
     stringrefs = None
     blockrefs = None
@@ -138,8 +139,8 @@ class SmdaFunction:
         return self.is_exported
 
     def getBlocks(self) -> Iterator["SmdaBasicBlock"]:
-        for _, block in sorted(self.blocks.items()):
-            yield SmdaBasicBlock(block, smda_function=self)
+        for key in self._sorted_block_keys:
+            yield SmdaBasicBlock(self.blocks[key], smda_function=self)
 
     def getPicHashAsLong(self):
         return self.pic_hash
@@ -191,8 +192,8 @@ class SmdaFunction:
 
     def getPicHashSequence(self, binary_info):
         escaped_binary_seqs = []
-        for _, block in sorted(self.blocks.items()):
-            for instruction in block:
+        for key in self._sorted_block_keys:
+            for instruction in self.blocks[key]:
                 escaped_binary_seqs.append(
                     instruction.getEscapedBinary(
                         self._escaper,
@@ -208,8 +209,8 @@ class SmdaFunction:
 
     def getOpcHashSequence(self):
         escaped_binary_seqs = []
-        for _, block in sorted(self.blocks.items()):
-            for instruction in block:
+        for key in self._sorted_block_keys:
+            for instruction in self.blocks[key]:
                 escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self._escaper))
         return "".join(escaped_binary_seqs).encode("ascii")
 
@@ -219,6 +220,7 @@ class SmdaFunction:
             instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
             self.blocks[int(offset)] = instructions
             self.binweight += sum(len(ins.bytes) / 2 for ins in instructions)
+        self._sorted_block_keys = sorted(self.blocks.keys())
 
     @staticmethod
     def _normalizeDalvikStringRefs(stringrefs):
@@ -368,6 +370,7 @@ class SmdaFunction:
         smda_function.blocks = {}
         for addr, block in function_dict["blocks"].items():
             smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins, smda_function) for ins in block]
+        smda_function._sorted_block_keys = sorted(smda_function.blocks.keys())
         smda_function.apirefs = {int(k): v for k, v in function_dict["apirefs"].items()}
         smda_function.blockrefs = {int(k): v for k, v in function_dict["blockrefs"].items()}
         smda_function.inrefs = function_dict["inrefs"]
