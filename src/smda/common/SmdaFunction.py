@@ -23,6 +23,7 @@ class SmdaFunction:
     apirefs = None
     stringrefs = None
     blockrefs = None
+    _blockrefs_reverse = None
     inrefs = None
     outrefs = None
     code_inrefs = None
