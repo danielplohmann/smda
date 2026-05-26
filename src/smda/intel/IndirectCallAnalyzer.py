@@ -19,11 +19,33 @@ class IndirectCallAnalyzer:
         self.disassembly = self.disassembler.disassembly
         self.current_calling_addr = 0
         self.state = None
+        # Lazy {instruction_addr: containing_block} index, populated for the
+        # lifetime of a single resolveRegisterCalls() call. Cleared afterwards
+        # so a reused analyzer instance never serves a stale index.
+        self._block_index = None
+
+    @staticmethod
+    def _buildBlockIndex(analysis_state):
+        # Preserve "first matching block wins" — overlapping potential_starts
+        # in FunctionAnalysisState.getBlocks() can place the same instruction
+        # in more than one block; the legacy linear scan returned the first.
+        index = {}
+        for block in analysis_state.getBlocks():
+            for ins in block:
+                addr = ins[0]
+                if addr not in index:
+                    index[addr] = block
+        return index
 
     def searchBlock(self, analysis_state, address):
+        if self._block_index is not None:
+            return self._block_index.get(address, [])
+        # Fallback for direct callers (e.g. unit tests) that bypass
+        # resolveRegisterCalls and never seed the index.
         for block in analysis_state.getBlocks():
-            if address in [i[0] for i in block]:
-                return block
+            for ins in block:
+                if ins[0] == address:
+                    return block
         return []
 
     def getDword(self, addr):
@@ -209,38 +231,47 @@ class IndirectCallAnalyzer:
                 len(analysis_state.call_register_ins),
                 analysis_state.start_addr,
             )
-        max_calls_per_block = 10
-        calls_per_block = {}
-        for calling_addr in analysis_state.call_register_ins:
-            LOGGER.debug("#" * 20)
-            self.current_calling_addr = calling_addr
-            self.state = analysis_state
-            start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
-            if not start_block:
-                return
-            # we only process at most 10 register-calls per block to avoid extreme cases
-            # found one Go sample with 130k register calls.
-            if start_block[0] not in calls_per_block:
-                calls_per_block[start_block[0]] = 0
-            calls_per_block[start_block[0]] += 1
-            # if we have an old config, default to 50
-            max_calls = (
-                self.disassembler.config.MAX_INDIRECT_CALLS_PER_BASIC_BLOCK
-                if hasattr(self.disassembler.config, "MAX_INDIRECT_CALLS_PER_BASIC_BLOCK")
-                else 50
-            )
-            if calls_per_block[start_block[0]] > max_calls:
-                break
-            LOGGER.debug(
-                "For this block, we can still analyze %d indirect calls.",
-                max_calls_per_block - calls_per_block[start_block[0]],
-            )
-            if start_block:
-                self.processBlock(
-                    analysis_state,
-                    start_block,
-                    {},
-                    start_block[-1][3],
-                    [],
-                    block_depth,
+        # Build the instruction->block index once per function. The previous
+        # implementation scanned every block linearly inside searchBlock for
+        # every calling address AND recursively for every incoming ref up to
+        # block_depth — O(N**2) on call-heavy functions (e.g. Go binaries with
+        # many register calls). With the index, each lookup is O(1).
+        self._block_index = self._buildBlockIndex(analysis_state)
+        try:
+            max_calls_per_block = 10
+            calls_per_block = {}
+            for calling_addr in analysis_state.call_register_ins:
+                LOGGER.debug("#" * 20)
+                self.current_calling_addr = calling_addr
+                self.state = analysis_state
+                start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
+                if not start_block:
+                    return
+                # we only process at most 10 register-calls per block to avoid extreme cases
+                # found one Go sample with 130k register calls.
+                if start_block[0] not in calls_per_block:
+                    calls_per_block[start_block[0]] = 0
+                calls_per_block[start_block[0]] += 1
+                # if we have an old config, default to 50
+                max_calls = (
+                    self.disassembler.config.MAX_INDIRECT_CALLS_PER_BASIC_BLOCK
+                    if hasattr(self.disassembler.config, "MAX_INDIRECT_CALLS_PER_BASIC_BLOCK")
+                    else 50
                 )
+                if calls_per_block[start_block[0]] > max_calls:
+                    break
+                LOGGER.debug(
+                    "For this block, we can still analyze %d indirect calls.",
+                    max_calls_per_block - calls_per_block[start_block[0]],
+                )
+                if start_block:
+                    self.processBlock(
+                        analysis_state,
+                        start_block,
+                        {},
+                        start_block[-1][3],
+                        [],
+                        block_depth,
+                    )
+        finally:
+            self._block_index = None
