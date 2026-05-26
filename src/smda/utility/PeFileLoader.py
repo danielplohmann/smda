@@ -28,8 +28,6 @@ class PeFileLoader:
 
     @staticmethod
     def mapBinary(binary, parsed=_NOT_PROVIDED):
-        # parsed accepted for API uniformity with ELF/MachO; PE mapping is
-        # done via struct.unpack on the raw bytes and never needs lief.
         del parsed
         # This is a pretty rough implementation but does the job for now
         mapped_binary = bytearray([])
@@ -103,8 +101,6 @@ class PeFileLoader:
 
     @staticmethod
     def getBitness(binary, parsed=_NOT_PROVIDED):
-        # parsed accepted for API uniformity; PE bitness is read from the
-        # COFF header via struct.unpack.
         del parsed
         bitness_id = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
@@ -114,8 +110,6 @@ class PeFileLoader:
 
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):
-        # parsed accepted for API uniformity; PE base address comes from the
-        # optional header via struct.unpack.
         del parsed
         base_addr = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
