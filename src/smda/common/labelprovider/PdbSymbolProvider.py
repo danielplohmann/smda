@@ -35,6 +35,12 @@ class PdbSymbolProvider(AbstractLabelProvider):
     def isSymbolProvider(self):
         return True
 
+    def isApiProvider(self):
+        return False
+
+    def getApi(self, to_addr, absolute_addr=None):
+        return ("", "")
+
     def _parseOep(self, data):
         oep_rva = PeFileLoader.getOEP(data)
         if oep_rva:

@@ -6,6 +6,8 @@ from collections import OrderedDict
 
 import lief
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
+
 from .AbstractLabelProvider import AbstractLabelProvider
 
 lief.logging.disable()
@@ -24,28 +26,35 @@ class GoSymbolProvider(AbstractLabelProvider):
         pclntab_offset = None
         try:
             lief_binary = lief.parse(binary)
-            if lief_binary.format == lief.EXE_FORMATS.ELF:
-                pclntab_offset = lief_binary.get_section(".gopclntab").offset
-            elif lief_binary.format == lief.EXE_FORMATS.MACHO:
-                pclntab_offset = lief_binary.get_section("__gopclntab").offset
-            elif lief_binary.format == lief.EXE_FORMATS.PE:
-                rdata_offset = lief_binary.get_section(".rdata").offset
-                pclntab_offset = rdata_offset + lief_binary.get_symbol("runtime.pclntab").value
-        except Exception:
-            pass
+            if lief_binary is not None:
+                if lief_binary.format == lief.EXE_FORMATS.ELF:
+                    section = lief_binary.get_section(".gopclntab")
+                    if section is not None:
+                        pclntab_offset = section.offset
+                elif lief_binary.format == lief.EXE_FORMATS.MACHO:
+                    section = lief_binary.get_section("__gopclntab")
+                    if section is not None:
+                        pclntab_offset = section.offset
+                elif lief_binary.format == lief.EXE_FORMATS.PE:
+                    section = lief_binary.get_section(".rdata")
+                    symbol = lief_binary.get_symbol("runtime.pclntab")
+                    if section is not None and symbol is not None:
+                        pclntab_offset = section.offset + symbol.value
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
         if pclntab_offset is None:
             # scan for offset of structure
             pclntab_regex = re.compile(b".\xff\xff\xff\x00\x00\x01(\x04|\x08)")
             hits = [match.start() for match in re.finditer(pclntab_regex, binary)]
             if len(hits) == 1:
                 pclntab_offset = hits[0]
-        return pclntab_offset is not None
+        return pclntab_offset
 
     def update(self, binary_info):
         binary = binary_info.binary
         pclntab_offset = self.getPcLntabOffset(binary)
         # if we found a valid offset, do the pclntab parsing
-        if pclntab_offset:
+        if pclntab_offset is not None:
             try:
                 result = self._parse_pclntab(pclntab_offset, binary)
                 if result:
@@ -55,6 +64,12 @@ class GoSymbolProvider(AbstractLabelProvider):
 
     def isSymbolProvider(self):
         return True
+
+    def isApiProvider(self):
+        return False
+
+    def getApi(self, to_addr, absolute_addr=None):
+        return ("", "")
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
@@ -108,7 +123,6 @@ class GoSymbolProvider(AbstractLabelProvider):
             parsed_pclntab_fields = struct.unpack(7 * field_indicator, pclntab_buffer[8 : 8 + 7 * field_size])
             number_of_functions = parsed_pclntab_fields[0]
             function_name_offset = pclntab_offset + parsed_pclntab_fields[2]
-            pclntab_offset + parsed_pclntab_fields[3]
             weird_table_offset = pclntab_offset + parsed_pclntab_fields[6]
             start_text = 0
         elif version == "1.18" or version == "1.20":
@@ -116,7 +130,6 @@ class GoSymbolProvider(AbstractLabelProvider):
             number_of_functions = parsed_pclntab_fields[0]
             start_text = parsed_pclntab_fields[2]
             function_name_offset = pclntab_offset + parsed_pclntab_fields[3]
-            pclntab_offset + parsed_pclntab_fields[5]
             weird_table_offset = pclntab_offset + parsed_pclntab_fields[7]
 
         # first parse function offsets

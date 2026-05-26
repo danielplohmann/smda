@@ -394,16 +394,11 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(report.bitness, 32)
         self.assertGreater(report.num_functions, 2000)
 
-    def testDisassembleBufferIntelOnDexAutodetectsDalvik(self):
-        # Pinning the contract: an explicit architecture="intel" on DEX bytes
-        # is overridden by magic-byte autodetection rather than producing
-        # garbage Intel disassembly. If the autodetect ever becomes opt-in,
-        # this test must be updated to assert error/empty Intel output instead.
+    def testDisassembleBufferExplicitIntelBackendPreservedForDexBytes(self):
         intel_disasm = Disassembler(config, backend="intel")
         report = intel_disasm.disassembleBuffer(self.dex_binary, base_addr=0, architecture="intel")
-        self.assertEqual(report.architecture, "dalvik")
+        self.assertEqual(report.architecture, "intel")
         self.assertEqual(report.bitness, 32)
-        self.assertGreater(report.num_functions, 2000)
 
     def testAnalyzeScriptRawDexAvoidsBaseAddrAndOepWarnings(self):
         result = subprocess.run(

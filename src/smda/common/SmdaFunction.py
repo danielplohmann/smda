@@ -35,11 +35,13 @@ class SmdaFunction:
     function_name = ""
     pic_hash = None
     opc_hash = None
+    nesting_depth = 0
     strongly_connected_components = None
     tfidf = None
 
     def __init__(self, disassembly=None, function_offset=None, config=None, smda_report=None):
         self.smda_report = smda_report
+        self.nesting_depth = 0
         if disassembly is not None and function_offset is not None:
             self._escaper = IntelInstructionEscaper if disassembly.binary_info.architecture in ["intel"] else None
             self.offset = function_offset
@@ -71,14 +73,11 @@ class SmdaFunction:
             # DEX strings are part of the parsed file structure, so they're always
             # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
             # cost. For other architectures, honor WITH_STRINGS as usual.
-            if (
-                config
-                and config.WITH_STRINGS
-                or (
-                    disassembly.binary_info.architecture == "dalvik"
-                    and disassembly.getStringRefsForFunction(function_offset)
-                )
-            ):
+            is_dalvik_with_strings = (
+                disassembly.binary_info.architecture == "dalvik"
+                and disassembly.getStringRefsForFunction(function_offset)
+            )
+            if (config and config.WITH_STRINGS) or is_dalvik_with_strings:
                 self.stringrefs = (
                     self._normalizeDalvikStringRefs(disassembly.getStringRefsForFunction(function_offset))
                     if disassembly.binary_info.architecture == "dalvik"
@@ -144,7 +143,7 @@ class SmdaFunction:
         return self.pic_hash
 
     def getPicHashAsHex(self):
-        return struct.pack("l", self.pic_hash).hex()
+        return struct.pack("Q", self.pic_hash).hex()
 
     def getInstructions(self):
         for block in self.getBlocks():

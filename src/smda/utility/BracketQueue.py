@@ -1,6 +1,6 @@
 class BracketQueue:
     """
-    This queue is tailored based on our research rsults regarding function entry point identification
+    This queue is tailored based on our research results regarding function entry point identification
     """
 
     def __init__(self, candidates=None, initial_brackets=None):

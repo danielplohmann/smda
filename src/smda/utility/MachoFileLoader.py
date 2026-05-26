@@ -124,7 +124,10 @@ class MachoFileLoader:
                 rva + segment.file_size,
                 segment.virtual_address,
             )
-            assert len(segment.content) == segment.file_size
+            if len(segment.content) != segment.file_size:
+                raise ValueError(
+                    f"Segment content size mismatch: expected {segment.file_size}, got {len(segment.content)}"
+                )
             mapped_binary[rva : rva + segment.file_size] = segment.content
 
         # map sections.

@@ -156,21 +156,6 @@ class CilDisassembler:
             i_size = len(i_bytes)
             i_mnemonic = str(insn.opcode)
             i_op_str = format_operand(pe, insn.operand)
-            # debug output for all instructions
-            if False:
-                from smda.cil.CilInstructionEscaper import CilInstructionEscaper
-                from smda.common.SmdaInstruction import SmdaInstruction
-
-                smda_ins = SmdaInstruction([i_address, i_bytes.hex(), i_mnemonic, i_op_str])
-                escaped = CilInstructionEscaper.escapeBinary(smda_ins)
-                print(
-                    f"{escaped:<20}"
-                    + f"{insn.offset:04X}"
-                    + "    "
-                    + f"{' '.join(f'{b:02x}' for b in insn.get_bytes()): <20}"
-                    + f"{str(insn.opcode): <15}"
-                    + format_operand(pe, insn.operand)
-                )
             # https://en.wikipedia.org/wiki/List_of_CIL_instructions
             if i_mnemonic in ["ret"]:
                 state.setNextInstructionReachable(False)
@@ -211,12 +196,13 @@ class CilDisassembler:
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
             if i_mnemonic in ["jmp"]:
-                raise Exception(
-                    "Found unhandled CIL jmp instruction, report back its structure and have Daniel fix it."
-                )
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
                 state.setNextInstructionReachable(False)
+                LOGGER.error(
+                    "Found unhandled CIL jmp instruction at 0x%x, report back its structure and have Daniel fix it.",
+                    i_address,
+                )
             if i_mnemonic in ["ldstr"]:
                 # we possibly want to extract and collect these and put them in the stringref part of SmdaFunction
                 self.disassembly.addStringRef(start_addr, i_address, i_op_str[1:-1])
@@ -276,6 +262,6 @@ class CilDisassembler:
             self.analyzeFunction(pe, method_body.offset, method_body)
         # package up and finish
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
-        if cbAnalysisTimeout():
+        if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
         return self.disassembly

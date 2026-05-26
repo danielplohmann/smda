@@ -75,7 +75,7 @@ class SmdaInstruction:
             # WAIT instruction before the wait version and the NOP instruction
             # before the no-wait version.
             if len(with_details) > 1:
-                LOGGER.warn(
+                LOGGER.warning(
                     f"Sequence {self.bytes} disassembles to {len(with_details)} instructions but expected one - taking the last instruction only!"
                 )
                 self.detailed = with_details[-1]

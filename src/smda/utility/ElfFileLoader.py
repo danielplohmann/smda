@@ -22,8 +22,7 @@ def has_bogus_sections(elffile, base_addr=0):
     for section in elffile.sections:
         if section.virtual_address:
             max_virtual_address = max(max_virtual_address, section.size + section.virtual_address)
-    if (max_virtual_address - base_addr) > sys.maxsize:
-        return True
+    return (max_virtual_address - base_addr) > sys.maxsize
 
 
 class ElfFileLoader:
@@ -100,7 +99,7 @@ class ElfFileLoader:
                 min_virtual_address = min(min_virtual_address, section.virtual_address)
                 min_raw_offset = min(min_raw_offset, section.file_offset)
         else:
-            LOGGER.warn("ELF: found possibly bogus section information, trying to parse segments.")
+            LOGGER.warning("ELF: found possibly bogus section information, trying to parse segments.")
         # parse segments regardless
         for segment in elffile.segments:
             if not segment.virtual_address:
@@ -151,15 +150,15 @@ class ElfFileLoader:
                 segment.virtual_address,
             )
             if len(segment.content) != segment.physical_size:
-                LOGGER.warn("ELF: Mismatch in segment content vs. header-specified physical size!")
+                LOGGER.warning("ELF: Mismatch in segment content vs. header-specified physical size!")
                 if len(segment.content) < segment.physical_size:
-                    LOGGER.warn("ELF: Padding to physical size with zeroes!")
+                    LOGGER.warning("ELF: Padding to physical size with zeroes!")
                     mapped_binary[rva : rva + len(segment.content)] = segment.content
                     mapped_binary[rva + len(segment.content) : rva + segment.physical_size] = b"\x00" * (
                         segment.physical_size - len(segment.content)
                     )
                 else:
-                    LOGGER.warn("ELF: More content than physical size!? Aborting, please report this case. :)")
+                    LOGGER.warning("ELF: More content than physical size!? Aborting, please report this case. :)")
                     raise AssertionError("Received more content than physical size, which should never be possible?")
             else:
                 mapped_binary[rva : rva + segment.physical_size] = segment.content
@@ -248,6 +247,8 @@ class ElfFileLoader:
     def getCodeAreas(binary):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary)
+        if elffile is None:
+            return []
         code_areas = []
         for section in elffile.sections:
             section_flags = 0

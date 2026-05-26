@@ -50,7 +50,16 @@ class ElfApiResolver(AbstractLabelProvider):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
         return True
 
-    def getApi(self, to_addr, absolute_addr):
+    def isSymbolProvider(self):
+        return False
+
+    def getSymbol(self, address):
+        return ""
+
+    def getFunctionSymbols(self):
+        return {}
+
+    def getApi(self, to_addr, absolute_addr=None):
         """
         If the LabelProvider has any information about a used API for the given address, return (dll, api), else return (None, None).
 

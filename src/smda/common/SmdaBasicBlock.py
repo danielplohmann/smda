@@ -16,14 +16,18 @@ class SmdaBasicBlock:
     def __init__(self, instructions, smda_function=None):
         assert isinstance(instructions, list)
         self.smda_function = smda_function
+        self.instructions = instructions
+        self.offset = instructions[0].offset if instructions else None
+        self.length = len(instructions)
+        self.picblockhash = None
+        self.opcblockhash = None
         if instructions:
-            self.instructions = instructions
-            self.offset = instructions[0].offset
-            self.length = len(instructions)
             self.picblockhash = self.getPicBlockHash()
             self.opcblockhash = self.getOpcBlockHash()
 
     def getInstructions(self) -> Iterator["SmdaInstruction"]:
+        if self.instructions is None:
+            return
         yield from self.instructions
 
     def getPicBlockHash(self):
@@ -90,12 +94,11 @@ class SmdaBasicBlock:
 
     @classmethod
     def fromDict(cls, block_dict, smda_function=None) -> "SmdaBasicBlock":
-        smda_block = cls(None)
-        smda_block.smda_function = smda_function
-        smda_block.instructions = [SmdaInstruction.fromDict(d, smda_function=smda_function) for d in block_dict]
-        return smda_block
+        return cls([SmdaInstruction.fromDict(d, smda_function=smda_function) for d in block_dict], smda_function)
 
     def toDict(self) -> dict:
+        if self.instructions is None:
+            return []
         return [smda_ins.toDict() for smda_ins in self.instructions]
 
     def __int__(self):

@@ -4,6 +4,7 @@ import struct
 
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.utility.BracketQueue import BracketQueue
 from smda.utility.PriorityQueue import PriorityQueue
 
@@ -239,8 +240,9 @@ class FunctionCandidateManager:
             # compatibility with python2/3...
             try:
                 byte = self.disassembly.getRawByte(gap_offset)
-            except Exception:
-                LOGGER.warn("could not fetch raw byte for gap pointer.")
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
+                LOGGER.warning("could not fetch raw byte for gap pointer.")
                 # print("0x%08x" % self.disassembly.binary_info.base_addr, "0x%08x" % self.disassembly.binary_info.binary_size, "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             # try to find padding symbols and skip them
             if isinstance(byte, int):
@@ -406,9 +408,9 @@ class FunctionCandidateManager:
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
             function_pointer = struct.unpack("i", addr_block)[0]
             # we need to calculate RIP + offset + 7 (48 ff 25 ** ** ** **)
-            if self.disassembly.getRawBytes(offset, 2) == "\xff\x25":
+            if self.disassembly.getRawBytes(offset, 2) == b"\xff\x25":
                 function_pointer += offset + 7
-            elif self.disassembly.getRawBytes(offset, 2) == "\xff\x15":
+            elif self.disassembly.getRawBytes(offset, 2) == b"\xff\x15":
                 function_pointer += offset + 6
             else:
                 raise Exception("resolvePointerReference: should only be used on call/jmp * ptr")
