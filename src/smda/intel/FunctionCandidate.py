@@ -16,10 +16,10 @@ class FunctionCandidate:
         self.is_gap_candidate = False
         self.is_tailcall = False
         self.alignment = 0
-        if addr % 4 == 0:
-            self.alignment = 4
-        elif addr % 16 == 0:
+        if addr % 16 == 0:
             self.alignment = 16
+        elif addr % 4 == 0:
+            self.alignment = 4
         self.analysis_aborted = False
         self.abortion_reason = ""
         self._score = None
@@ -34,6 +34,8 @@ class FunctionCandidate:
         self._tfidf_score = tfidf_score
 
     def getTfIdf(self):
+        if self._tfidf_score is None:
+            return None
         return round(self._tfidf_score, 3)
 
     def getConfidence(self):

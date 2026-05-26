@@ -303,7 +303,6 @@ class CilInstructionEscaper:
                 mnemonic,
             )
             return "U"
-        return mnemonic
 
     @staticmethod
     def escapeField(op_field, escape_registers=True, escape_pointers=True, escape_constants=True):
@@ -451,6 +450,7 @@ class CilInstructionEscaper:
                 "brtrue",
                 "brtrue.s",
                 "brzero",
+                "brzero.s",
                 "switch",
             ]:
                 escaped_sequence = CilInstructionEscaper.escapeToOpcodeOnly(ins)

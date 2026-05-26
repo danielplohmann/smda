@@ -8,6 +8,17 @@ class DisassemblyStatistics:
     num_function_calls = None
     num_failed_functions = None
     num_failed_instructions = None
+    _fields = (
+        "num_functions",
+        "num_recursive_functions",
+        "num_leaf_functions",
+        "num_basic_blocks",
+        "num_instructions",
+        "num_api_calls",
+        "num_function_calls",
+        "num_failed_functions",
+        "num_failed_instructions",
+    )
 
     def __init__(self, disassembly_result=None):
         if disassembly_result is not None:
@@ -74,13 +85,14 @@ class DisassemblyStatistics:
     def __add__(self, other):
         if not isinstance(other, DisassemblyStatistics):
             raise ValueError("Needs another DisassemblyStatistics to perform addition of values")
-        self.num_functions += other.num_functions
-        self.num_recursive_functions += other.num_recursive_functions
-        self.num_leaf_functions += other.num_leaf_functions
-        self.num_basic_blocks += other.num_basic_blocks
-        self.num_instructions += other.num_instructions
-        self.num_api_calls += other.num_api_calls
-        self.num_function_calls += other.num_function_calls
-        self.num_failed_functions += other.num_failed_functions
-        self.num_failed_instructions += other.num_failed_instructions
+        result = DisassemblyStatistics()
+        for field in self._fields:
+            setattr(result, field, (getattr(self, field) or 0) + (getattr(other, field) or 0))
+        return result
+
+    def __iadd__(self, other):
+        if not isinstance(other, DisassemblyStatistics):
+            raise ValueError("Needs another DisassemblyStatistics to perform addition of values")
+        for field in self._fields:
+            setattr(self, field, (getattr(self, field) or 0) + (getattr(other, field) or 0))
         return self

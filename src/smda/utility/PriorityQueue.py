@@ -1,11 +1,19 @@
 import heapq
 
 
+class _MaxHeapItem:
+    def __init__(self, element):
+        self.element = element
+
+    def __lt__(self, other):
+        return other.element < self.element
+
+
 class PriorityQueue:
     def __init__(self, content=None):
         if content is None:
             content = []
-        self.heap = content
+        self.heap = [_MaxHeapItem(element) for element in content]
         if self.heap:
             self.update()
 
@@ -18,21 +26,13 @@ class PriorityQueue:
     def next(self):
         if not self.heap:
             raise StopIteration
-        if len(self.heap) == 1:
-            return self.heap.pop()
-        last_item = self.heap.pop()
-        result = self.heap[0]
-        self.heap[0] = last_item
-        heapq._siftup_max(self.heap, 0)
-        return result
+        return heapq.heappop(self.heap).element
 
     def add(self, element):
-        self.heap.append(element)
-        heapq._siftdown_max(self.heap, 0, len(self.heap) - 1)
+        heapq.heappush(self.heap, _MaxHeapItem(element))
 
     def update(self, target_candidate=None):
-        if target_candidate is None:
-            heapq._heapify_max(self.heap)
+        heapq.heapify(self.heap)
 
     def __str__(self):
-        return str(self.heap)
+        return str([item.element for item in self.heap])

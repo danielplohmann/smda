@@ -17,7 +17,10 @@ class LegacyDemangler:
     def demangle(self, inpstr: str) -> str:
         self.elements = 0
 
+        original_inpstr = inpstr
         disp = ""
+        if "N" not in inpstr:
+            raise UnableToLegacyDemangle(original_inpstr)
         inpstr = inpstr[inpstr.index("N") + 1 :]
         self.sanity_check(inpstr)
 
@@ -26,7 +29,7 @@ class LegacyDemangler:
             candidate = inpstr[length + 6 :]
             for i in candidate:
                 if i not in string.hexdigits + "@":
-                    raise UnableToLegacyDemangle(inpstr)
+                    raise UnableToLegacyDemangle(original_inpstr)
             inpstr = inpstr[:length]
 
         inn = inpstr
@@ -69,25 +72,34 @@ class LegacyDemangler:
 
                 elif rest.startswith("$"):
                     end = rest[1:].find("$")
+                    if end == -1:
+                        raise UnableToLegacyDemangle(original_inpstr)
                     escape = rest[1 : end + 1]
                     after_escape = rest[end + 2 :]
+                    if not escape:
+                        raise UnableToLegacyDemangle(original_inpstr)
 
                     if escape.startswith("u"):
                         digits = escape[1:]
+                        if not digits:
+                            raise UnableToLegacyDemangle(original_inpstr)
 
                         for i in digits:
                             if i not in string.hexdigits:
-                                raise UnableToLegacyDemangle(inpstr)
+                                raise UnableToLegacyDemangle(original_inpstr)
 
-                        c = int(digits, 16)
-                        disp += chr(c)
+                        try:
+                            c = int(digits, 16)
+                            disp += chr(c)
+                        except (OverflowError, ValueError):
+                            raise UnableToLegacyDemangle(original_inpstr) from None
 
                         rest = after_escape
                         continue
 
                     else:
                         if escape not in self._UNESCAPED:
-                            raise UnableToLegacyDemangle(inpstr)
+                            raise UnableToLegacyDemangle(original_inpstr)
                         disp += self._UNESCAPED[escape]
                         rest = after_escape
                         continue
@@ -95,11 +107,6 @@ class LegacyDemangler:
                 elif ("$") in rest:
                     dollar = rest.find("$")
                     dot = rest.find(".")
-
-                    if dollar == -1:
-                        disp += rest[:dot]
-                        rest = rest[dot:]
-                        continue
 
                     if dot == -1:
                         disp += rest[:dollar]

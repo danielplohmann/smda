@@ -622,6 +622,6 @@ class IntelDisassembler:
                 candidate.getConfidence()
             self.disassembly.candidates[addr] = candidate
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
-        if cbAnalysisTimeout():
+        if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
         return self.disassembly

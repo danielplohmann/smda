@@ -21,13 +21,12 @@ class LanguageAnalyzer:
         self.strings = None
 
     def validPEHeader(self):
-        is_pe = True
-        is_pe |= self.disassembly.binary_info.binary[0:2] == "\x4d\x5a"
+        is_pe = self.disassembly.binary_info.binary[0:2] == b"\x4d\x5a"
         if len(self.disassembly.binary_info.binary) > 0x40:
             pe_offset = struct.unpack("I", self.disassembly.binary_info.binary[0x3C:0x40])[0]
-            is_pe |= (
+            is_pe = is_pe and (
                 len(self.disassembly.binary_info.binary) > pe_offset
-                and self.disassembly.binary_info.binary[pe_offset : pe_offset + 2] == "\x50\x45"
+                and self.disassembly.binary_info.binary[pe_offset : pe_offset + 2] == b"\x50\x45"
             )
         else:
             is_pe = False
@@ -54,14 +53,14 @@ class LanguageAnalyzer:
     def getVisualBasicScore(self):
         # check for the typical import of msvbvm60.dll
         vb_score = 0.0
-        if "MSVBVM60.DLL" in self.getStrings():
+        if b"MSVBVM60.DLL" in self.getStrings():
             vb_score = 0.5
         return vb_score
 
     def getDotNetScore(self):
         dot_net_score = 0.0
         # check for the typical import of mscorelib.dll and mscoree.dll
-        if "mscorelib.dll" in self.getStrings() or "mscoree.dll" in self.getStrings():
+        if b"mscorelib.dll" in self.getStrings() or b"mscoree.dll" in self.getStrings():
             dot_net_score = 0.35
         # check for a functioning PE-Header and typical meta-data
         if self.validPEHeader():
@@ -73,7 +72,7 @@ class LanguageAnalyzer:
                 start_addr = struct.unpack("<I", match.group("start"))[0]
                 if start_addr == 0x2000:
                     dot_net_score = max(dot_net_score, 0.8)
-                if self.disassembly.getRawBytes(start_addr, 4) == "\xdb\x4d\x00\x79":
+                if self.disassembly.getRawBytes(start_addr, 4) == b"\xdb\x4d\x00\x79":
                     dot_net_score = max(dot_net_score, 0.9)
         return dot_net_score
 
@@ -83,7 +82,7 @@ class LanguageAnalyzer:
     def getDelphiScore(self):
         delphi_score = 0.0
         # Check if Delphi-Locales are present in strings
-        if "Borland\\locales" in self.getStrings():
+        if b"Borland\\locales" in self.getStrings():
             delphi_score = max(delphi_score, 0.5)
         if self._getPETimestamp() == 0x2A425E19:
             delphi_score = 0.5

@@ -32,14 +32,15 @@ class IdaInterface:
 
     def __init__(self):
         if not IdaInterface.instance:
-            if idaapi.IDA_SDK_VERSION < 740:
+            sdk_version = idaapi.IDA_SDK_VERSION
+            if not isinstance(sdk_version, int):
+                raise ValueError("Unsupported IDA SDK version")
+            if sdk_version < 740:
                 IdaInterface.instance = Ida73Interface()
-            elif idaapi.IDA_SDK_VERSION >= 740 and idaapi.IDA_SDK_VERSION < 850:
+            elif sdk_version < 850:
                 IdaInterface.instance = Ida74Interface()
-            elif idaapi.IDA_SDK_VERSION >= 850:
-                IdaInterface.instance = Ida85Interface()
             else:
-                raise ValueError("Unsupported IDA version")
+                IdaInterface.instance = Ida85Interface()
 
     def __getattr__(self, name):
         return getattr(self.instance, name)
@@ -122,7 +123,7 @@ class Ida74Interface(BackendInterface):
         if segment_starts:
             first_segment_start = segment_starts[0]
             # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
-            first_segment_start = (first_segment_start / 0x10000) * 0x10000
+            first_segment_start = (first_segment_start // 0x10000) * 0x10000
             base_addr = int(first_segment_start)
         return base_addr
 
@@ -233,9 +234,11 @@ class Ida73Interface(BackendInterface):
 
     def getBaseAddr(self):
         segment_starts = list(idautils.Segments())
+        if not segment_starts:
+            return 0
         first_segment_start = segment_starts[0]
         # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
-        first_segment_start = (first_segment_start / 0x10000) * 0x10000
+        first_segment_start = (first_segment_start // 0x10000) * 0x10000
         return int(first_segment_start)
 
     def getBinary(self):
@@ -350,7 +353,7 @@ class Ida85Interface(BackendInterface):
         if segment_starts:
             first_segment_start = segment_starts[0]
             # re-align by 0x10000 to reflect typically allocation behaviour for IDA-mapped binaries
-            first_segment_start = (first_segment_start / 0x10000) * 0x10000
+            first_segment_start = (first_segment_start // 0x10000) * 0x10000
             base_addr = int(first_segment_start)
         return base_addr
 

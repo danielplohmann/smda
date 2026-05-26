@@ -1,9 +1,12 @@
 import bisect
 import json
+import logging
 from collections import defaultdict
 from operator import itemgetter
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TailcallAnalyzer:
@@ -87,15 +90,15 @@ class TailcallAnalyzer:
         # return
         if len(intervals) < 25:
             for one, two in intervals:
-                print(f"  0x{one:x} -> 0x{two:x}")
+                LOGGER.debug("  0x%x -> 0x%x", one, two)
         else:
-            print("Function has too many intervals to display")
+            LOGGER.debug("Function has too many intervals to display")
 
     def resolveTailcalls(self, disassembler, verbose=False):
         newly_created_functions = set()
         for tailcall in self.getTailcalls():
             if verbose:
-                print(f"Processing tailcall:\n{json.dumps(tailcall, indent=2, sort_keys=True)}")
+                LOGGER.debug("Processing tailcall:\n%s", json.dumps(tailcall, indent=2, sort_keys=True))
             # remove the information from the function-analysis state of the disassembly
             function = self.__getFunctionByStartAddr(tailcall["destination_function"])
             if not function or function.is_tailcall_function:
@@ -105,7 +108,7 @@ class TailcallAnalyzer:
             self.__functions.remove(function)
             if function:
                 if verbose:
-                    print("Old function:")
+                    LOGGER.debug("Old function:")
                     self.__printIntervals(self.__getFunctionIntervals(function))
                 function.revertAnalysis()
 
@@ -123,7 +126,7 @@ class TailcallAnalyzer:
                     reraise_non_operational_exception(exc)
                     # print ("0x{:x} -> 0x{:x}".format(tailcall["destination_function"], tailcall["destination_addr"]))
             elif verbose:
-                print(
+                LOGGER.debug(
                     "**** 0x{:x} IS NOW PART OF 0x{:x}".format(
                         tailcall["destination_function"], tailcall["destination_addr"]
                     )
@@ -132,10 +135,10 @@ class TailcallAnalyzer:
             if verbose:
                 function = self.__getFunctionByStartAddr(tailcall["destination_function"])
                 new_function = self.__getFunctionByStartAddr(tailcall["destination_addr"])
-                print("New function:")
+                LOGGER.debug("New function:")
                 if new_function:
                     self.__printIntervals(self.__getFunctionIntervals(new_function))
-                print("Re-disassembled old function:")
+                LOGGER.debug("Re-disassembled old function:")
                 if function:
                     self.__printIntervals(self.__getFunctionIntervals(function))
         return sorted(newly_created_functions)

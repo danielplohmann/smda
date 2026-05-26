@@ -155,6 +155,9 @@ class JumpTableAnalyzer:
                         "Q",
                         self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
                     )[0]
+                else:
+                    LOGGER.warning("Unsupported bitness for jump table analysis: %s", bitness)
+                    break
                 if not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
                 state.addDataRef(

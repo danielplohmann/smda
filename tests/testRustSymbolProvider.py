@@ -1,14 +1,17 @@
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.rust_demangler import demangle
 from smda.common.labelprovider.rust_demangler.rust import TypeNotFoundError
+from smda.common.labelprovider.rust_demangler.rust_legacy import LegacyDemangler, UnableToLegacyDemangle
 from smda.common.labelprovider.rust_demangler.rust_v0 import (
     Printer,
     UnableTov0Demangle,
+    V0Demangler,
 )
 from smda.common.labelprovider.rust_demangler.utils import remove_bad_spaces
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
@@ -150,6 +153,38 @@ class TestRustDemangler(unittest.TestCase):
             results = list(executor.map(demangle, symbols * 5))
 
         self.assertEqual(results, expected * 5)
+
+    def test_malformed_inputs_raise_demangle_errors(self):
+        """Malformed Rust symbols should use demangler error types."""
+
+        with self.assertRaises(UnableToLegacyDemangle):
+            LegacyDemangler().demangle("_Z3fooE")
+        with self.assertRaises(UnableToLegacyDemangle):
+            LegacyDemangler().demangle("_ZN3$u$E")
+        with self.assertRaises(UnableTov0Demangle):
+            V0Demangler().demangle("_NvC3foo")
+        with self.assertRaises(UnableTov0Demangle):
+            V0Demangler().demangle("_RNvC3fooKc110000")
+
+    def test_v0_backref_path_updates_parent_printer_output(self):
+        """Backref path printers should copy string output back to the caller."""
+
+        class FakeParser:
+            def eat(self, token):
+                return token == "B"
+
+        class FakeBackrefPrinter:
+            out = "prefix::Backref"
+
+            def print_path_maybe_open_generics(self):
+                return True
+
+        printer = Printer(FakeParser(), "prefix::", bound=0)
+
+        with mock.patch.object(printer, "backref_printer", return_value=FakeBackrefPrinter()):
+            self.assertTrue(printer.print_path_maybe_open_generics())
+
+        self.assertEqual(printer.out, "prefix::Backref")
 
 
 class TestRustSymbolProvider(unittest.TestCase):

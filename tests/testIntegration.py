@@ -5,9 +5,11 @@ import os
 import unittest
 
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
+from smda.DisassemblyStatistics import DisassemblyStatistics
 from smda.utility.FileLoader import FileLoader
 
 from .context import config
@@ -145,6 +147,48 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         found_block = self.asprox_disassembly.findBlockByContainedAddress(0xFFFFFF00)
         assert found_function is None
         assert found_block is None
+
+    def test_smda_basic_block_from_dict_initializes_fields(self):
+        block = SmdaBasicBlock.fromDict([[0x401000, "90", "nop", ""]])
+
+        self.assertEqual(block.offset, 0x401000)
+        self.assertEqual(block.length, 1)
+        self.assertEqual(block.toDict(), [[0x401000, "90", "nop", ""]])
+        self.assertEqual(list(SmdaBasicBlock([]).getInstructions()), [])
+
+    def test_statistics_add_is_pure_and_iadd_mutates(self):
+        left = DisassemblyStatistics.fromDict(
+            {
+                "num_functions": 1,
+                "num_recursive_functions": 2,
+                "num_leaf_functions": 3,
+                "num_basic_blocks": 4,
+                "num_instructions": 5,
+                "num_api_calls": 6,
+                "num_function_calls": 7,
+                "num_failed_functions": 8,
+                "num_failed_instructions": 9,
+            }
+        )
+        right = DisassemblyStatistics.fromDict(
+            {
+                "num_functions": 10,
+                "num_recursive_functions": 20,
+                "num_leaf_functions": 30,
+                "num_basic_blocks": 40,
+                "num_instructions": 50,
+                "num_api_calls": 60,
+                "num_function_calls": 70,
+                "num_failed_functions": 80,
+                "num_failed_instructions": 90,
+            }
+        )
+
+        total = left + right
+        self.assertEqual(left.num_functions, 1)
+        self.assertEqual(total.num_functions, 11)
+        left += right
+        self.assertEqual(left.num_failed_instructions, 99)
 
 
 if __name__ == "__main__":

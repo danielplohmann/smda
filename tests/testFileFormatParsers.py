@@ -3,11 +3,19 @@
 import logging
 import os
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import lief
 
+from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.Disassembler import Disassembler
+from smda.DisassemblyResult import DisassemblyResult
+from smda.SmdaConfig import SmdaConfig
 from smda.utility.FileLoader import FileLoader
 
 from .context import config
@@ -136,6 +144,65 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         disasm._disassemble(binary_info)
         komplex_unmapped_disassembly = disasm.disassembleUnmappedBuffer(komplex_binary)
         self.assertEqual(komplex_unmapped_disassembly.num_functions, 211)
+
+    def test_binary_info_and_file_loader_do_not_share_code_areas(self):
+        first_binary = BinaryInfo(b"a")
+        second_binary = BinaryInfo(b"b")
+        first_binary.code_areas.append([1, 2])
+
+        first_loader = FileLoader("/", load_file=False)
+        second_loader = FileLoader("/", load_file=False)
+        first_loader.getCodeAreas().append([3, 4])
+
+        self.assertEqual(second_binary.code_areas, [])
+        self.assertEqual(second_loader.getCodeAreas(), [])
+
+    def test_pe_symbol_provider_returns_empty_mapping_without_code_section(self):
+        symbol_provider = PeSymbolProvider(None)
+        lief_binary = SimpleNamespace(sections=[], symbols=[])
+
+        self.assertEqual(symbol_provider.parseSymbols(lief_binary), {})
+
+    def test_go_pclntab_offset_returns_numeric_zero(self):
+        provider = GoSymbolProvider(None)
+        pclntab = b"\x00\xff\xff\xff\x00\x00\x01\x04"
+
+        self.assertEqual(provider.getPcLntabOffset(pclntab), 0)
+
+    def test_cil_disassembler_accepts_missing_timeout_callback(self):
+        binary_info = BinaryInfo(b"MZ")
+        fake_pe = SimpleNamespace(net=SimpleNamespace(mdtables=SimpleNamespace(MethodDef=[])))
+
+        with mock.patch("smda.cil.CilDisassembler.dnfile.dnPE", return_value=fake_pe):
+            result = CilDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertFalse(result.analysis_timeout)
+
+    def test_cil_jmp_records_edge_without_aborting_function_analysis(self):
+        class FakeInstruction:
+            offset = 0x1000
+            opcode = "jmp"
+            operand = object()
+
+            def get_bytes(self):
+                return b"\x27\x00"
+
+        disassembler = CilDisassembler(SmdaConfig())
+        disassembler.disassembly = DisassemblyResult()
+        method_body = SimpleNamespace(offset=0x1000, instructions=[FakeInstruction()])
+
+        with mock.patch("smda.cil.CilDisassembler.format_operand", return_value="0x2000"):
+            state = disassembler.analyzeFunction(None, method_body.offset, method_body)
+
+        self.assertEqual(state.code_refs_from[0x1000], {0x2000})
+        self.assertIn(0x1000, disassembler.disassembly.functions)
+
+    def test_elf_api_resolver_uses_relocation_slot_address(self):
+        resolver = ElfApiResolver(None)
+        resolver._api_map["lief"][0x4018] = ("GLIBC_2.2.5", "puts")
+
+        self.assertEqual(resolver.getApi(0x4018, absolute_addr=0x1000), ("GLIBC_2.2.5", "puts"))
+        self.assertEqual(resolver.getApi(0x1000, absolute_addr=0x4018), (None, None))
 
 
 if __name__ == "__main__":

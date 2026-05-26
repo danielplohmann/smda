@@ -21,6 +21,12 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def isSymbolProvider(self):
         return True
 
+    def isApiProvider(self):
+        return False
+
+    def getApi(self, to_addr, absolute_addr=None):
+        return ("", "")
+
     def _parseOep(self, lief_result):
         if lief_result:
             self._func_symbols[lief_result.header.entrypoint] = "original_entry_point"

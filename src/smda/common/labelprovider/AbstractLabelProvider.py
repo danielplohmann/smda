@@ -1,14 +1,14 @@
 #!/usr/bin/python
 
 import logging
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AbstractLabelProvider:
+class AbstractLabelProvider(ABC):
     def __init__(self, config):
-        raise NotImplementedError
+        self._config = config
 
     @abstractmethod
     def update(self, binary_info):
@@ -16,7 +16,7 @@ class AbstractLabelProvider:
         raise NotImplementedError
 
     @abstractmethod
-    def getApi(self, absolute_addr):
+    def getApi(self, to_addr, absolute_addr=None):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return None"""
         raise NotImplementedError
 
