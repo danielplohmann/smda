@@ -42,8 +42,14 @@ class FileLoader:
                     # share a single lief.parse(...) across every accessor
                     # and skip multiple redundant re-parses per binary
                     # load. Delphi/Dex loaders don't need lief, so kw
-                    # stays empty for them.
-                    kw = {"parsed": loader.parseBinary(self._raw_data)} if hasattr(loader, "parseBinary") else {}
+                    # stays empty for them. When the LIEF parse itself
+                    # fails (returns None), drop the kwarg so accessors
+                    # don't pointlessly re-try the parse on each call.
+                    kw = {}
+                    if hasattr(loader, "parseBinary"):
+                        parsed = loader.parseBinary(self._raw_data)
+                        if parsed is not None:
+                            kw["parsed"] = parsed
                     self._data = loader.mapBinary(self._raw_data, **kw)
                     self._base_addr = loader.getBaseAddress(self._raw_data, **kw)
                     self._bitness = loader.getBitness(self._raw_data, **kw)
