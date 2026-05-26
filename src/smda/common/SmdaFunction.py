@@ -281,13 +281,22 @@ class SmdaFunction:
         # invoke this method, producing the same dict every time because
         # self.blocks / self.blockrefs / self.architecture_metadata are
         # immutable after construction. Caching avoids 2-3 redundant
-        # normalization passes per function. The cache key is the identity
-        # of those inputs; if any of them is reassigned externally, callers
-        # must clear self._normalized_blockrefs_cache to force a rebuild.
+        # normalization passes per function.
+        #
+        # Subtlety: __init__ does `self.blockrefs = self.getNormalizedBlockRefs()`
+        # right after the first call, so on the next call self.blockrefs is
+        # the previously cached *result*, not the original input. We accept
+        # a cache hit either when self.blockrefs still has the input id or
+        # when it has been reassigned to the cached value itself. Any other
+        # reassignment is treated as a cache miss and recomputes.
         cached = getattr(self, "_normalized_blockrefs_cache", None)
         if cached is not None:
             cache_key, cache_value = cached
-            if cache_key == (id(self.blocks), id(self.blockrefs), id(self.architecture_metadata)):
+            if (
+                cache_key[0] == id(self.blocks)
+                and cache_key[2] == id(self.architecture_metadata)
+                and (cache_key[1] == id(self.blockrefs) or id(cache_value) == id(self.blockrefs))
+            ):
                 return cache_value
         current_blockrefs = self.blockrefs or {}
         normalized_blockrefs = {
