@@ -1,69 +1,23 @@
-# Byte-compiled / optimized / DLL files
+# Python bytecode
 __pycache__/
 *.py[cod]
-*$py.class
 
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
-
-
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.coverage
-.coverage.*
-.cache
-.noseids
-nosetests.xml
-coverage.xml
-*,cover
-.hypothesis/
-
-
-# pyenv
-.python-version
-
-# dotenv
-.env
-
-# virtualenv
+# Virtual environments and local settings
 .venv/
 venv/
-ENV/
+.env
 
-# Spyder project settings
-.spyderproject
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
 
-# Rope project settings
-.ropeproject
+# Test and coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+coverage-html/
+.pytest_cache/
 
-# more IDE settings
-.idea
-.vscode
-
-
-# project files
-config.ini
-figures
-reports
-analyze_*.py
-coverage-html
+# Tool caches
+.ruff_cache/

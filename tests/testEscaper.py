@@ -168,6 +168,34 @@ class DisassemblyTestSuite(unittest.TestCase):
                 "bitness": 64,
                 "expected_opc": "66666666480f00??????????",
             },
+            # movabs with a 64-bit absolute memory offset should wildcard all 8 offset bytes
+            {
+                "ins": (
+                    0,
+                    "48a10000000000004000",
+                    "movabs",
+                    "rax, qword ptr [0x40000000000000]",
+                ),
+                "lower": None,
+                "upper": None,
+                "expected_bin": "48a1????????????????",
+                "bitness": 64,
+                "expected_opc": "48a1????????????????",
+            },
+            # same 64-bit absolute memory offset behavior for the store form
+            {
+                "ins": (
+                    0,
+                    "48a30000000000004000",
+                    "movabs",
+                    "qword ptr [0x40000000000000], rax",
+                ),
+                "lower": None,
+                "upper": None,
+                "expected_bin": "48a3????????????????",
+                "bitness": 64,
+                "expected_opc": "48a3????????????????",
+            },
         ]
         for data in test_data:
             smda_report = SmdaReport()

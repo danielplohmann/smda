@@ -24,52 +24,19 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-    def testPeParsingWithCutwail(self):
-        disasm = Disassembler(config, backend="intel")
-        # load encrypted malicious win.cutwail
-        with open(os.path.join(config.PROJECT_ROOT, "tests", "cutwail_xored"), "rb") as f_binary:
+    def _load_xored_fixture(self, fixture_name):
+        with open(os.path.join(config.PROJECT_ROOT, "tests", fixture_name), "rb") as f_binary:
             binary = f_binary.read()
-        decrypted_cutwail = bytearray()
+        decrypted_binary = bytearray()
         for index, byte in enumerate(binary):
             if isinstance(byte, str):
                 byte = ord(byte)
-            decrypted_cutwail.append(byte ^ (index % 256))
-        cutwail_binary = bytes(decrypted_cutwail)
-        # run FileLoader and disassemble as file
-        loader = FileLoader("/", map_file=True)
-        loader._loadFile(cutwail_binary)
-        file_content = loader.getData()
-        binary_info = BinaryInfo(file_content)
-        binary_info.raw_data = loader.getRawData()
-        binary_info.file_path = ""
-        binary_info.base_addr = loader.getBaseAddress()
-        binary_info.bitness = loader.getBitness()
-        binary_info.code_areas = loader.getCodeAreas()
-        binary_info.oep = binary_info.getOep()
-        # parse bytes of 0x400 truncated PE header
-        pe_header = lief.parse(binary_info.getHeaderBytes())
-        assert pe_header.dos_header.magic == 0x5A4D
-        assert pe_header.header.machine == 0x14C
-        controlled_disassembly = disasm._disassemble(binary_info)
-        assert controlled_disassembly.num_functions == 33
-        cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cutwail_binary)
-        assert cutwail_unmapped_disassembly.num_functions == 33
-        # TODO test label extraction for PE, add another binary for testing
+            decrypted_binary.append(byte ^ (index % 256))
+        return bytes(decrypted_binary)
 
-    def testElfParsingWithBashlite(self):
-        disasm = Disassembler(config, backend="intel")
-        # load encrypted benign /bin/cat
-        with open(os.path.join(config.PROJECT_ROOT, "tests", "bashlite_xored"), "rb") as f_binary:
-            binary = f_binary.read()
-        decrypted_bashlite = bytearray()
-        for index, byte in enumerate(binary):
-            if isinstance(byte, str):
-                byte = ord(byte)
-            decrypted_bashlite.append(byte ^ (index % 256))
-        bashlite_binary = bytes(decrypted_bashlite)
-        # run FileLoader and disassemble as file
+    def _create_binary_info(self, binary):
         loader = FileLoader("/", map_file=True)
-        loader._loadFile(bashlite_binary)
+        loader._loadFile(binary)
         file_content = loader.getData()
         binary_info = BinaryInfo(file_content)
         binary_info.raw_data = loader.getRawData()
@@ -79,6 +46,44 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.oep = binary_info.getOep()
+        return binary_info
+
+    def testPeParsingWithCutwail(self):
+        disasm = Disassembler(config, backend="intel")
+        cutwail_binary = self._load_xored_fixture("cutwail_xored")
+        # run FileLoader and disassemble as file
+        binary_info = self._create_binary_info(cutwail_binary)
+        # parse bytes of 0x400 truncated PE header
+        pe_header = lief.parse(binary_info.getHeaderBytes())
+        assert pe_header.dos_header.magic == 0x5A4D
+        assert pe_header.header.machine == 0x14C
+        controlled_disassembly = disasm._disassemble(binary_info)
+        assert controlled_disassembly.num_functions == 33
+        cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cutwail_binary)
+        assert cutwail_unmapped_disassembly.num_functions == 33
+        assert cutwail_unmapped_disassembly.getFunction(0x4001730).function_name == "original_entry_point"
+
+    def testPeExportLabelExtraction(self):
+        disasm = Disassembler(config, backend="intel")
+        pe_export_binary = self._load_xored_fixture("pe_export_label_test_xored")
+        binary_info = self._create_binary_info(pe_export_binary)
+
+        assert binary_info.getExportedFunctions() == {0x401000: "exported_test_function"}
+
+        controlled_disassembly = disasm._disassemble(binary_info)
+        assert controlled_disassembly.num_functions == 1
+        assert controlled_disassembly.getFunction(0x401000).function_name == "exported_test_function"
+
+        unmapped_disassembly = disasm.disassembleUnmappedBuffer(pe_export_binary)
+        assert unmapped_disassembly.num_functions == 1
+        assert unmapped_disassembly.getFunction(0x401000).function_name == "exported_test_function"
+
+    def testElfParsingWithBashlite(self):
+        disasm = Disassembler(config, backend="intel")
+        # load encrypted benign /bin/cat
+        bashlite_binary = self._load_xored_fixture("bashlite_xored")
+        # run FileLoader and disassemble as file
+        binary_info = self._create_binary_info(bashlite_binary)
         controlled_disassembly = disasm._disassemble(binary_info)
         assert controlled_disassembly.num_functions == 177
         bashlite_unmapped_disassembly = disasm.disassembleUnmappedBuffer(bashlite_binary)
