@@ -10,6 +10,7 @@ import lief
 
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.labelprovider.CilSymbolProvider import CilSymbolProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
@@ -203,6 +204,18 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
         self.assertEqual(resolver.getApi(0x4018, absolute_addr=0x1000), ("GLIBC_2.2.5", "puts"))
         self.assertEqual(resolver.getApi(0x1000, absolute_addr=0x4018), (None, None))
+
+    def test_cil_symbol_provider_clears_symbols_before_parse(self):
+        provider = CilSymbolProvider(None)
+        provider._addr_to_func_symbols[0x1000] = "stale"
+        provider._func_symbol_to_addr["stale"] = 0x1000
+        binary_info = BinaryInfo(b"not a dotnet file")
+
+        with mock.patch("smda.common.labelprovider.CilSymbolProvider.dnfile.dnPE", side_effect=ValueError("bad pe")):
+            provider.update(binary_info)
+
+        self.assertEqual(provider.getFunctionSymbols(), {})
+        self.assertIsNone(provider.getAddress("stale"))
 
 
 if __name__ == "__main__":
