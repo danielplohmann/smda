@@ -2,6 +2,10 @@ from binascii import hexlify
 
 from .definitions import COMMON_PROLOGUES
 
+# Hoisted: prologue lengths are checked longest-first on every candidate scoring call.
+# Pre-sort once at import time instead of re-sorting per call (hot path during CFG recovery).
+_COMMON_PROLOGUE_LENGTHS = sorted((int(k) for k in COMMON_PROLOGUES), reverse=True)
+
 
 class FunctionCandidate:
     def __init__(self, binary_info, addr):
@@ -10,7 +14,9 @@ class FunctionCandidate:
         rel_start_addr = addr - binary_info.base_addr
         self.bytes = binary_info.binary[rel_start_addr : rel_start_addr + 5]
         self.lang_spec = None
-        self.call_ref_sources = []
+        # set, not list: addCallRef / removeCallRefs do membership tests in the inner
+        # CFG-recovery loop. Order is never read externally (only len + truthiness).
+        self.call_ref_sources = set()
         self.finished = False
         self.is_symbol = False
         self.is_gap_candidate = False
@@ -59,7 +65,7 @@ class FunctionCandidate:
         return self._confidence
 
     def hasCommonFunctionStart(self):
-        for length in sorted([int(length_str) for length_str in COMMON_PROLOGUES], reverse=True):
+        for length in _COMMON_PROLOGUE_LENGTHS:
             byte_sequence = self.bytes[:length]
             if byte_sequence in COMMON_PROLOGUES[f"{length}"][self.bitness]:
                 return True
@@ -67,7 +73,7 @@ class FunctionCandidate:
 
     def getFunctionStartScore(self):
         if self.function_start_score is None:
-            for length in sorted([int(length_str) for length_str in COMMON_PROLOGUES], reverse=True):
+            for length in _COMMON_PROLOGUE_LENGTHS:
                 byte_sequence = self.bytes[:length]
                 if byte_sequence in COMMON_PROLOGUES[f"{length}"][self.bitness]:
                     self.function_start_score = COMMON_PROLOGUES[f"{length}"][self.bitness][byte_sequence]
@@ -76,14 +82,12 @@ class FunctionCandidate:
         return self.function_start_score
 
     def addCallRef(self, source_addr):
-        if source_addr not in self.call_ref_sources:
-            self.call_ref_sources.append(source_addr)
+        self.call_ref_sources.add(source_addr)
         self._score = None
 
     def removeCallRefs(self, source_addrs):
         for addr in source_addrs:
-            if addr in self.call_ref_sources:
-                self.call_ref_sources.remove(addr)
+            self.call_ref_sources.discard(addr)
         self._score = None
 
     def setIsTailcallCandidate(self, is_tailcall):
@@ -177,11 +181,10 @@ class FunctionCandidate:
     def __str__(self):
         characteristics = self.getCharacteristics()
         prologue_score = f"{self.getFunctionStartScore()}"
-        ref_summary = (
-            f"{len(self.call_ref_sources)}"
-            if len(self.call_ref_sources) != 1
-            else f"{len(self.call_ref_sources)}: 0x{self.call_ref_sources[0]:x}"
-        )
+        if len(self.call_ref_sources) == 1:
+            ref_summary = f"1: 0x{next(iter(self.call_ref_sources)):x}"
+        else:
+            ref_summary = f"{len(self.call_ref_sources)}"
         return f"0x{self.addr:x}: {hexlify(self.bytes)} -> {prologue_score} (total score: {self.getScore()}), inref: {ref_summary} | {characteristics}"
 
     def toJson(self):
