@@ -276,6 +276,19 @@ class SmdaFunction:
         return None
 
     def getNormalizedBlockRefs(self):
+        # Cache: SmdaFunction construction (__init__ and fromDict) and the
+        # subsequent _calculateSccs / _calculateNestingDepth helpers each
+        # invoke this method, producing the same dict every time because
+        # self.blocks / self.blockrefs / self.architecture_metadata are
+        # immutable after construction. Caching avoids 2-3 redundant
+        # normalization passes per function. The cache key is the identity
+        # of those inputs; if any of them is reassigned externally, callers
+        # must clear self._normalized_blockrefs_cache to force a rebuild.
+        cached = getattr(self, "_normalized_blockrefs_cache", None)
+        if cached is not None:
+            cache_key, cache_value = cached
+            if cache_key == (id(self.blocks), id(self.blockrefs), id(self.architecture_metadata)):
+                return cache_value
         current_blockrefs = self.blockrefs or {}
         normalized_blockrefs = {
             block_start: sorted(current_blockrefs.get(block_start, [])) for block_start in self.blocks
@@ -306,7 +319,12 @@ class SmdaFunction:
                     successors = set(normalized_blockrefs.get(block_start, []))
                     successors.update(normalized_targets)
                     normalized_blockrefs[block_start] = sorted(successors)
-        return {block_start: normalized_blockrefs[block_start] for block_start in sorted(normalized_blockrefs)}
+        result = {block_start: normalized_blockrefs[block_start] for block_start in sorted(normalized_blockrefs)}
+        self._normalized_blockrefs_cache = (
+            (id(self.blocks), id(self.blockrefs), id(self.architecture_metadata)),
+            result,
+        )
+        return result
 
     def toDotGraph(self, with_api=False):
         dot_graph = f'digraph "CFG for 0x{self.offset:x}" {{\n'
