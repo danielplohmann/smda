@@ -8,6 +8,11 @@ from smda.SmdaConfig import SmdaConfig
 
 LOGGER = logging.getLogger(__name__)
 
+# Sentinel: distinguishes "caller did not supply parsed" (legacy direct
+# call, do your own lief.parse) from "caller already tried to parse and
+# got None" (e.g. FileLoader saw lief.parse fail; do NOT retry).
+_NOT_PROVIDED = object()
+
 
 def align(v, alignment):
     remainder = v % alignment
@@ -38,8 +43,8 @@ class ElfFileLoader:
         return lief.parse(binary)
 
     @staticmethod
-    def getBaseAddress(binary, parsed=None):
-        elffile = parsed if parsed is not None else lief.parse(binary)
+    def getBaseAddress(binary, parsed=_NOT_PROVIDED):
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         # Determine base address of binary
         #
         base_addr = 0
@@ -157,12 +162,12 @@ class ElfFileLoader:
                 mapped_binary[rva : rva + section.size] = content_to_be_mapped
 
     @staticmethod
-    def mapBinary(binary, parsed=None):
+    def mapBinary(binary, parsed=_NOT_PROVIDED):
         """
         map the ELF file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
-        elffile = parsed if parsed is not None else lief.parse(binary)
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not elffile:
             return b""
         base_addr = ElfFileLoader.getBaseAddress(binary, parsed=elffile)
@@ -213,10 +218,10 @@ class ElfFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
-    def getAbi(binary, parsed=None):
+    def getAbi(binary, parsed=_NOT_PROVIDED):
         abi = ""
         try:
-            elffile = parsed if parsed is not None else lief.parse(binary)
+            elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
             if elffile:
                 abi = elffile.header.identity_os_abi.name
         except lief.bad_file as exc:
@@ -224,14 +229,14 @@ class ElfFileLoader:
         return abi
 
     @staticmethod
-    def getArchitecture(binary, parsed=None):
+    def getArchitecture(binary, parsed=_NOT_PROVIDED):
         del binary, parsed
         return "intel"
 
     @staticmethod
-    def getBitness(binary, parsed=None):
+    def getBitness(binary, parsed=_NOT_PROVIDED):
         # TODO add machine types whenever we add more architectures
-        elffile = parsed if parsed is not None else lief.parse(binary)
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not elffile:
             return 0
         machine_type = elffile.header.machine_type
@@ -259,9 +264,9 @@ class ElfFileLoader:
         return merged_code_areas
 
     @staticmethod
-    def getCodeAreas(binary, parsed=None):
+    def getCodeAreas(binary, parsed=_NOT_PROVIDED):
         # TODO add machine types whenever we add more architectures
-        elffile = parsed if parsed is not None else lief.parse(binary)
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if elffile is None:
             return []
         code_areas = []

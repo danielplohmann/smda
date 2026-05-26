@@ -7,6 +7,11 @@ from smda.SmdaConfig import SmdaConfig
 
 LOGGER = logging.getLogger(__name__)
 
+# Sentinel: distinguishes "caller did not supply parsed" (legacy direct
+# call, do your own lief.parse) from "caller already tried to parse and got
+# None" (e.g. FileLoader saw lief.parse fail; do NOT retry).
+_NOT_PROVIDED = object()
+
 
 class PeFileLoader:
     BITNESS_MAP = {0x14C: 32, 0x8664: 64}
@@ -22,7 +27,7 @@ class PeFileLoader:
         return lief.parse(binary)
 
     @staticmethod
-    def mapBinary(binary, parsed=None):
+    def mapBinary(binary, parsed=_NOT_PROVIDED):
         # parsed accepted for API uniformity with ELF/MachO; PE mapping is
         # done via struct.unpack on the raw bytes and never needs lief.
         del parsed
@@ -97,7 +102,7 @@ class PeFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
-    def getBitness(binary, parsed=None):
+    def getBitness(binary, parsed=_NOT_PROVIDED):
         # parsed accepted for API uniformity; PE bitness is read from the
         # COFF header via struct.unpack.
         del parsed
@@ -108,7 +113,7 @@ class PeFileLoader:
         return PeFileLoader.BITNESS_MAP.get(bitness_id, 0)
 
     @staticmethod
-    def getBaseAddress(binary, parsed=None):
+    def getBaseAddress(binary, parsed=_NOT_PROVIDED):
         # parsed accepted for API uniformity; PE base address comes from the
         # optional header via struct.unpack.
         del parsed
@@ -143,14 +148,14 @@ class PeFileLoader:
         return oep_rva
 
     @staticmethod
-    def getAbi(binary, parsed=None):
+    def getAbi(binary, parsed=_NOT_PROVIDED):
         del binary, parsed
         return ""
 
     @staticmethod
-    def getArchitecture(binary, parsed=None):
+    def getArchitecture(binary, parsed=_NOT_PROVIDED):
         architecture = "intel"
-        pefile = parsed if parsed is not None else lief.parse(binary)
+        pefile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if pefile:
             for d in pefile.data_directories:
                 if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER and d.size > 0:
@@ -166,8 +171,8 @@ class PeFileLoader:
         return False
 
     @staticmethod
-    def getCodeAreas(binary, parsed=None):
-        pefile = parsed if parsed is not None else lief.parse(binary)
+    def getCodeAreas(binary, parsed=_NOT_PROVIDED):
+        pefile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         code_areas = []
         base_address = PeFileLoader.getBaseAddress(binary)
         if pefile and pefile.sections:
