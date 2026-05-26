@@ -1,0 +1,53 @@
+name: Semantic PR Title
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+    branches:
+      - master
+      - main
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-pr-title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Conventional Commit format
+        uses: amannn/action-semantic-pull-request@v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            fix
+            feat
+            perf
+            refactor
+            test
+            docs
+            ci
+            build
+            chore
+            revert
+          scopes: |
+            core
+            intel
+            dalvik
+            cil
+            common
+            utility
+            loaders
+            labels
+            report
+            ida
+            cli
+            tests
+            ci
+            build
+            docs
