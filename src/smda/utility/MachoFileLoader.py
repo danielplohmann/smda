@@ -12,6 +12,11 @@ try:
 except ImportError:
     LOGGER.warning("LIEF not available, will not be able to parse data from MachO files.")
 
+# Sentinel: distinguishes "caller did not supply parsed" (legacy direct
+# call, do your own lief.parse) from "caller already tried to parse and
+# got None" (e.g. FileLoader saw lief.parse fail; do NOT retry).
+_NOT_PROVIDED = object()
+
 
 def align(v, alignment):
     remainder = v % alignment
@@ -36,8 +41,8 @@ class MachoFileLoader:
         return lief.parse(binary)
 
     @staticmethod
-    def getBaseAddress(binary, parsed=None):
-        macho_file = parsed if parsed is not None else lief.parse(binary)
+    def getBaseAddress(binary, parsed=_NOT_PROVIDED):
+        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         # Determine base address of binary
         #
         base_addr = 0
@@ -52,14 +57,14 @@ class MachoFileLoader:
         return base_addr
 
     @staticmethod
-    def mapBinary(binary, parsed=None):
+    def mapBinary(binary, parsed=_NOT_PROVIDED):
         """
         map the MachO file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
         # MachO needs a file-like object...
         # Attention: for Python 2.x use the cStringIO package for StringIO
-        macho_file = parsed if parsed is not None else lief.parse(binary)
+        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not macho_file:
             return b""
         base_addr = MachoFileLoader.getBaseAddress(binary, parsed=macho_file)
@@ -167,14 +172,14 @@ class MachoFileLoader:
         return bytes(mapped_binary)
 
     @staticmethod
-    def getAbi(binary, parsed=None):
+    def getAbi(binary, parsed=_NOT_PROVIDED):
         del binary, parsed
         return ""
 
     @staticmethod
-    def getArchitecture(binary, parsed=None):
+    def getArchitecture(binary, parsed=_NOT_PROVIDED):
         # TODO add machine types whenever we add more architectures
-        macho_file = parsed if parsed is not None else lief.parse(binary)
+        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not macho_file:
             return ""
         machine_type = macho_file.header.cpu_type
@@ -191,9 +196,9 @@ class MachoFileLoader:
         raise NotImplementedError("SMDA does not support this architecture yet.")
 
     @staticmethod
-    def getBitness(binary, parsed=None):
+    def getBitness(binary, parsed=_NOT_PROVIDED):
         # TODO add machine types whenever we add more architectures
-        macho_file = parsed if parsed is not None else lief.parse(binary)
+        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not macho_file:
             return 0
         machine_type = macho_file.header.cpu_type
@@ -223,9 +228,9 @@ class MachoFileLoader:
         return merged_code_areas
 
     @staticmethod
-    def getCodeAreas(binary, parsed=None):
+    def getCodeAreas(binary, parsed=_NOT_PROVIDED):
         # TODO add machine types whenever we add more architectures
-        macho_file = parsed if parsed is not None else lief.parse(binary)
+        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not macho_file:
             return []
         ins_flags = (
