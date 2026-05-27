@@ -53,29 +53,33 @@ class DexFileLoader:
     def isCompatible(cls, data):
         return cls._parseHeader(data) is not None
 
+    @classmethod
+    def parseBinary(cls, data):
+        return cls._parseHeader(data)
+
     @staticmethod
-    def mapBinary(data):
+    def mapBinary(data, parsed=None):
         return data
 
     @staticmethod
-    def getBaseAddress(data):
+    def getBaseAddress(data, parsed=None):
         return 0
 
     @staticmethod
-    def getBitness(data):
+    def getBitness(data, parsed=None):
         return 32
 
     @staticmethod
-    def getArchitecture(data):
+    def getArchitecture(data, parsed=None):
         return "dalvik"
 
     @staticmethod
-    def getAbi(data):
+    def getAbi(data, parsed=None):
         return ""
 
     @classmethod
-    def getCodeAreas(cls, data):
-        header = cls._parseHeader(data)
+    def getCodeAreas(cls, data, parsed=None):
+        header = parsed if parsed is not None else cls._parseHeader(data)
         if not header:
             return []
         if header["data_off"] and header["data_size"]:
