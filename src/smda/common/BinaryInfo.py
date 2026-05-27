@@ -38,7 +38,22 @@ class BinaryInfo:
         self.binary_size = len(binary)
         self.code_areas = []
         self._lief_binary = None
+        self._lief_type = None
+        self._symbol_provider = None
         self.abi = ""
+
+    def _getLiefType(self):
+        if self._lief_type is None:
+            lief_result = self.getLiefBinary()
+            if isinstance(lief_result, lief.PE.Binary):
+                self._lief_type = "PE"
+                self._symbol_provider = PeSymbolProvider(None)
+            elif isinstance(lief_result, lief.ELF.Binary):
+                self._lief_type = "ELF"
+                self._symbol_provider = ElfSymbolProvider(None)
+            else:
+                self._lief_type = "OTHER"
+        return self._lief_type
 
     def getBinaryData(self):
         """Safely retrieves binary data from either raw_data or a file path."""
@@ -61,37 +76,39 @@ class BinaryInfo:
     def getOep(self):
         if self.oep is None:
             lief_result = self.getLiefBinary()
-            if isinstance(lief_result, lief.PE.Binary):
+            lief_type = self._getLiefType()
+            if lief_type == "PE":
                 self.oep = lief_result.optional_header.addressof_entrypoint
-            elif isinstance(lief_result, lief.ELF.Binary):
+            elif lief_type == "ELF":
                 self.oep = lief_result.header.entrypoint
         return self.oep
 
     def getExportedFunctions(self):
         if self.exported_functions is None:
             lief_result = self.getLiefBinary()
-            if isinstance(lief_result, lief.PE.Binary):
-                self.exported_functions = PeSymbolProvider(None).parseExports(lief_result)
-            elif isinstance(lief_result, lief.ELF.Binary):
-                self.exported_functions = ElfSymbolProvider(None).parseExports(lief_result)
+            lief_type = self._getLiefType()
+            if lief_type in ("PE", "ELF"):
+                self.exported_functions = self._symbol_provider.parseExports(lief_result)
         return self.exported_functions
 
     def getImportedFunctions(self):
         if self.imported_functions is None:
             lief_result = self.getLiefBinary()
-            if isinstance(lief_result, lief.PE.Binary):
-                self.imported_functions = PeSymbolProvider(None).parseImports(lief_result)
-            elif isinstance(lief_result, lief.ELF.Binary):
-                self.imported_functions = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
+            lief_type = self._getLiefType()
+            if lief_type == "PE":
+                self.imported_functions = self._symbol_provider.parseImports(lief_result)
+            elif lief_type == "ELF":
+                self.imported_functions = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
         return self.imported_functions
 
     def getSymbols(self):
         if self.symbols is None:
             lief_result = self.getLiefBinary()
-            if isinstance(lief_result, lief.PE.Binary):
-                self.symbols = PeSymbolProvider(None).parseSymbols(lief_result)
-            elif isinstance(lief_result, lief.ELF.Binary):
-                self.symbols = ElfSymbolProvider(None).parseSymbols(lief_result.dynamic_symbols)
+            lief_type = self._getLiefType()
+            if lief_type == "PE":
+                self.symbols = self._symbol_provider.parseSymbols(lief_result)
+            elif lief_type == "ELF":
+                self.symbols = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
         return self.symbols
 
     def getSections(self):
@@ -103,24 +120,22 @@ class BinaryInfo:
         if not parsed_binary:
             return
 
-        is_pe = isinstance(parsed_binary, lief.PE.Binary)
-        is_elf = isinstance(parsed_binary, lief.ELF.Binary)
-
-        if not (is_pe or is_elf) or not parsed_binary.sections:
+        lief_type = self._getLiefType()
+        if lief_type not in ("PE", "ELF") or not parsed_binary.sections:
             return
 
-        for section in parsed_binary.sections:
-            if is_pe:
+        if lief_type == "PE":
+            for section in parsed_binary.sections:
                 section_start = self.base_addr + section.virtual_address
                 section_size = section.virtual_size
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
-            elif is_elf:
+                yield section.name, section_start, section_start + section_size
+        elif lief_type == "ELF":
+            for section in parsed_binary.sections:
                 section_start = section.virtual_address
                 section_size = section.size
-
-            section_end = section_start + section_size
-            yield section.name, section_start, section_end
+                yield section.name, section_start, section_start + section_size
 
     def isInCodeAreas(self, address):
         is_inside = False
@@ -134,10 +149,10 @@ class BinaryInfo:
 
     def getHeaderBytes(self):
         if self.raw_data:
-            lief_result = self.getLiefBinary()
-            if isinstance(lief_result, lief.PE.Binary):
+            lief_type = self._getLiefType()
+            if lief_type == "PE":
                 return self.raw_data[:0x400]
-            elif isinstance(lief_result, lief.ELF.Binary):
+            elif lief_type == "ELF":
                 return self.raw_data[:0x40]
             elif self.architecture == "dalvik" or self.raw_data[:4] == b"dex\n":
                 return self.raw_data[:0x70]
