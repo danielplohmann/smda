@@ -15,6 +15,7 @@ class SmdaInstruction:
     mnemonic = None
     operands = None
     detailed = None
+    _data_refs = None
 
     def __init__(self, ins_list=None, smda_function=None):
         self.smda_function = smda_function
@@ -25,15 +26,24 @@ class SmdaInstruction:
             self.operands = ins_list[3]
 
     def getDataRefs(self):
+        if getattr(self, "_data_refs", None) is not None:
+            yield from self._data_refs
+            return
+
+        data_refs = []
         emitted = set()
         smda_report = self.smda_function.smda_report
         if smda_report.data_refs_from is not None and self.offset in smda_report.data_refs_from:
-            for value in sorted(smda_report.data_refs_from[self.offset]):
-                emitted.add(value)
-                yield value
-        if smda_report.architecture != "intel":
-            return
-        if self.getMnemonicGroup(IntelInstructionEscaper) != "C":
+            for value in smda_report.data_refs_from[self.offset]:
+                if value not in emitted:
+                    emitted.add(value)
+                    data_refs.append(value)
+        if (
+            smda_report.architecture == "intel"
+            and self.getMnemonicGroup(IntelInstructionEscaper) != "C"
+            and self.operands
+            and "0x" in self.operands
+        ):
             detailed = self.getDetailed()
             if len(detailed.operands) > 0:
                 for i in detailed.operands:
@@ -45,13 +55,11 @@ class SmdaInstruction:
                         if detailed.reg_name(i.mem.base) == "rip":
                             # add RIP value
                             value += detailed.address + detailed.size
-                    if (
-                        value is not None
-                        and value not in emitted
-                        and self.smda_function.smda_report.isAddrWithinMemoryImage(value)
-                    ):
+                    if value is not None and value not in emitted and smda_report.isAddrWithinMemoryImage(value):
                         emitted.add(value)
-                        yield value
+                        data_refs.append(value)
+        self._data_refs = data_refs
+        yield from self._data_refs
 
     def getDetailed(self):
         arch = self.smda_function.smda_report.architecture

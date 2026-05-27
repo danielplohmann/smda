@@ -1,3 +1,4 @@
+import re
 import string
 import struct
 from typing import Iterator, Tuple
@@ -6,6 +7,8 @@ from smda.common import SmdaFunction
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 
 _IS_PRINTABLE_CHAR_CODE = tuple(chr(char) in string.printable for char in range(256))
+_ASCII_RE = re.compile(b"[\x09-\x0d\x20-\x7e]*")
+_UNICODE_RE = re.compile(b"(?:[\x09-\x0d\x20-\x7e]\x00)*")
 
 # ported back from our PR to capa v4.0.0
 # https://github.com/mandiant/capa/blob/v4.0.0/capa/features/extractors/smda/insn.py
@@ -36,42 +39,57 @@ def derefs(smda_report, p):
 
     based on the implementation in viv/insn.py
     """
+    if not hasattr(smda_report, "_derefs_cache"):
+        smda_report._derefs_cache = {}
+
+    if p in smda_report._derefs_cache:
+        yield from smda_report._derefs_cache[p]
+        return
+
+    chain = []
+    current = p
     depth = 0
     while True:
-        if not smda_report.isAddrWithinMemoryImage(p):
-            return
-        yield p
+        if not smda_report.isAddrWithinMemoryImage(current):
+            break
+        chain.append(current)
 
-        bytes_ = read_bytes(smda_report, p, num_bytes=4)
+        bytes_ = read_bytes(smda_report, current, num_bytes=4)
+        if len(bytes_) < 4:
+            break
         val = struct.unpack("I", bytes_)[0]
 
-        # sanity: pointer points to self
-        if val == p:
-            return
+        # sanity: pointer points to self or creates a loop
+        if val == current or val in chain:
+            break
 
         # sanity: avoid chains of pointers that are unreasonably deep
         depth += 1
         if depth > 10:
-            return
+            break
 
-        p = val
+        current = val
+
+    smda_report._derefs_cache[p] = chain
+    yield from chain
 
 
 def detect_ascii_len(smda_report, offset, maxlen=None):
     if smda_report.buffer is None:
         return 0
-    ascii_len = 0
+    buffer = smda_report.buffer
+    buffer_len = len(buffer)
     rva = offset - smda_report.base_addr
-    if not 0 <= rva < len(smda_report.buffer):
+    if not 0 <= rva < buffer_len:
         return 0
-    char = smda_report.buffer[rva]
-    while (
-        _IS_PRINTABLE_CHAR_CODE[char] and (maxlen is None or ascii_len < maxlen) and rva + 1 < len(smda_report.buffer)
-    ):
-        ascii_len += 1
-        rva += 1
-        char = smda_report.buffer[rva]
-    if char == 0 or (maxlen is not None and ascii_len >= maxlen):
+
+    endpos = rva + maxlen if maxlen is not None else buffer_len
+    match = _ASCII_RE.match(buffer, rva, endpos)
+    if not match:
+        return 0
+    ascii_len = match.end() - rva
+    next_char_idx = match.end()
+    if (next_char_idx < buffer_len and buffer[next_char_idx] == 0) or (maxlen is not None and ascii_len >= maxlen):
         return ascii_len if maxlen is None else min(ascii_len, maxlen)
     return 0
 
@@ -79,23 +97,21 @@ def detect_ascii_len(smda_report, offset, maxlen=None):
 def detect_unicode_len(smda_report, offset, maxlen=None):
     if smda_report.buffer is None:
         return 0
-    unicode_len = 0
+    buffer = smda_report.buffer
+    buffer_len = len(buffer)
     rva = offset - smda_report.base_addr
-    if not 0 <= rva < len(smda_report.buffer) - 1:
+    if not 0 <= rva < buffer_len - 1:
         return 0
-    char = smda_report.buffer[rva]
-    second_char = smda_report.buffer[rva + 1]
-    while (
-        _IS_PRINTABLE_CHAR_CODE[char]
-        and second_char == 0
-        and (maxlen is None or unicode_len < 2 * maxlen)
-        and rva + 3 < len(smda_report.buffer)
+
+    endpos = rva + 2 * maxlen if maxlen is not None else buffer_len
+    match = _UNICODE_RE.match(buffer, rva, endpos)
+    if not match:
+        return 0
+    unicode_len = match.end() - rva
+    next_char_idx = match.end()
+    if (next_char_idx + 1 < buffer_len and buffer[next_char_idx] == 0 and buffer[next_char_idx + 1] == 0) or (
+        maxlen is not None and unicode_len >= 2 * maxlen
     ):
-        unicode_len += 2
-        rva += 2
-        char = smda_report.buffer[rva]
-        second_char = smda_report.buffer[rva + 1]
-    if char == 0 and second_char == 0 or (maxlen is not None and unicode_len >= 2 * maxlen):
         return unicode_len if maxlen is None else min(unicode_len, 2 * maxlen)
     return 0
 
@@ -121,6 +137,15 @@ def read_go_string(smda_report, offset):
 def read_string(smda_report, offset, maxlen=None):
     # in case we are dealing with Go/Rust, we need to dereference the pointer and extract the expected length of the string
     # TODO handle Go/Rust
+    if smda_report.buffer is None:
+        return None
+    rva = offset - smda_report.base_addr
+    if not 0 <= rva < len(smda_report.buffer):
+        return None
+    first_byte = smda_report.buffer[rva]
+    if not _IS_PRINTABLE_CHAR_CODE[first_byte]:
+        return None
+
     alen = detect_ascii_len(smda_report, offset, maxlen)
     if alen >= 1:
         return read_bytes(smda_report, offset, alen).decode("utf-8"), "ascii"
