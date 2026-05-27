@@ -51,9 +51,16 @@ class PdbSymbolProvider(AbstractLabelProvider):
         self._base_addr = binary_info.base_addr
         if not binary_info.file_path:
             return
-        data = ""
-        with open(binary_info.file_path, "rb") as fin:
-            data = fin.read(16)
+        # Use getBinaryData to check magic without opening the file if it's already in memory
+        binary_data = binary_info.getBinaryData()
+        if binary_data:
+            data = binary_data[:16]
+        else:
+            try:
+                with open(binary_info.file_path, "rb") as fin:
+                    data = fin.read(16)
+            except OSError:
+                return
         self._parseOep(data)
         if data[:15] != b"Microsoft C/C++" or pdbparse is None:
             return
@@ -95,3 +102,6 @@ class PdbSymbolProvider(AbstractLabelProvider):
 
     def getFunctionSymbols(self):
         return self._func_symbols
+
+    def is_active(self):
+        return bool(self._func_symbols)

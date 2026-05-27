@@ -24,24 +24,22 @@ class ElfApiResolver(AbstractLabelProvider):
 
             for relocation in lief_binary.relocations:
                 if not relocation.has_symbol:
-                    # doesn't have a name, we won't care about it
                     continue
-                if not relocation.symbol.imported:
-                    # only interested in APIs from external sources
+                symbol = relocation.symbol
+                if symbol is None:
                     continue
-                if not relocation.symbol.is_function:
-                    # only interested in APIs (which are functions)
+                if not symbol.imported or not symbol.is_function:
                     continue
 
                 # we can't really say what library the symbol came from
                 # however, we can treat the version (if present) as relevant metadata?
                 # note: this only works for GNU binaries, such as for Linux
                 lib = None
-                if relocation.symbol.has_version and relocation.symbol.symbol_version.has_auxiliary_version:
+                if symbol.has_version and symbol.symbol_version.has_auxiliary_version:
                     # like "GLIBC_2.2.5"
-                    lib = relocation.symbol.symbol_version.symbol_version_auxiliary.name
+                    lib = symbol.symbol_version.symbol_version_auxiliary.name
 
-                name = relocation.symbol.name
+                name = symbol.name
                 address = relocation.address
 
                 self._api_map["lief"][address] = (lib, name)
@@ -70,3 +68,6 @@ class ElfApiResolver(AbstractLabelProvider):
         ELF lookups are keyed by relocation slot address (`to_addr`) in `_api_map["lief"]`.
         """
         return self._api_map["lief"].get(to_addr, (None, None))
+
+    def is_active(self):
+        return bool(self._api_map.get("lief"))

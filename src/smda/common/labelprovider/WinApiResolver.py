@@ -125,3 +125,6 @@ class WinApiResolver(AbstractLabelProvider):
 
     def getFunctionSymbols(self):
         return {}
+
+    def is_active(self):
+        return bool(self._is_buffer or self._api_map.get("lief"))

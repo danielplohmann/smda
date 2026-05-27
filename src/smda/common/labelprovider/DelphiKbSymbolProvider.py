@@ -43,6 +43,9 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
     def getRelocations(self):
         return self._relocations
 
+    def is_active(self):
+        return bool(self._func_symbols)
+
     def parseKbBuffer(self, binary, base_addr):
         result = {}
         fh = BytesIO(binary)
