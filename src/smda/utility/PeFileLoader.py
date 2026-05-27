@@ -4,6 +4,7 @@ import struct
 import lief
 
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.common import mergeCodeAreas
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +29,6 @@ class PeFileLoader:
 
     @staticmethod
     def mapBinary(binary, parsed=_NOT_PROVIDED):
-        del parsed
         # This is a pretty rough implementation but does the job for now
         mapped_binary = bytearray([])
         pe_offset = PeFileLoader.getPeOffset(binary)
@@ -101,7 +101,6 @@ class PeFileLoader:
 
     @staticmethod
     def getBitness(binary, parsed=_NOT_PROVIDED):
-        del parsed
         bitness_id = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 0x6:
@@ -110,13 +109,13 @@ class PeFileLoader:
 
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):
-        del parsed
         base_addr = 0
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 0x38:
-            if PeFileLoader.getBitness(binary) == 32:
+            bitness = PeFileLoader.getBitness(binary)
+            if bitness == 32:
                 base_addr = struct.unpack("I", binary[pe_offset + 0x34 : pe_offset + 0x38])[0]
-            elif PeFileLoader.getBitness(binary) == 64:
+            elif bitness == 64:
                 base_addr = struct.unpack("Q", binary[pe_offset + 0x30 : pe_offset + 0x38])[0]
         if base_addr:
             LOGGER.debug(
@@ -143,7 +142,6 @@ class PeFileLoader:
 
     @staticmethod
     def getAbi(binary, parsed=_NOT_PROVIDED):
-        del binary, parsed
         return ""
 
     @staticmethod
@@ -183,15 +181,4 @@ class PeFileLoader:
 
     @staticmethod
     def mergeCodeAreas(code_areas):
-        if not code_areas:
-            return []
-        sorted_areas = sorted(code_areas)
-        result = [sorted_areas[0]]
-        for i in range(1, len(sorted_areas)):
-            last_area = result[-1]
-            current_area = sorted_areas[i]
-            if last_area[1] == current_area[0]:
-                result[-1] = [last_area[0], current_area[1]]
-            else:
-                result.append(current_area)
-        return result
+        return mergeCodeAreas(code_areas)

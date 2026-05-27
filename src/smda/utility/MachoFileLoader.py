@@ -1,6 +1,8 @@
 import logging
+from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.common import mergeCodeAreas
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,6 +28,56 @@ def align(v, alignment):
         return v + (alignment - remainder)
 
 
+@lru_cache(maxsize=16)
+def _get_sorted_sections(macho_file):
+    return sorted(macho_file.sections, key=lambda section: section.size, reverse=True)
+
+
+@lru_cache(maxsize=16)
+def _get_sorted_segments(macho_file):
+    return sorted(macho_file.segments, key=lambda segment: segment.file_size, reverse=True)
+
+
+@lru_cache(maxsize=16)
+def _calculate_base_address(macho_file):
+    base_addr = 0
+    if not macho_file:
+        return base_addr
+    candidates = [0xFFFFFFFFFFFFFFFF, macho_file.imagebase]
+    for section in macho_file.sections:
+        if section.virtual_address:
+            candidates.append(section.virtual_address - section.offset)
+    if len(candidates) > 1:
+        base_addr = min(candidates)
+    return base_addr
+
+
+@lru_cache(maxsize=16)
+def _calculate_boundaries(macho_file):
+    # find min and max virtual addresses.
+    max_virtual_address = 0
+    min_virtual_address = 0xFFFFFFFFFFFFFFFF
+    min_raw_offset = 0xFFFFFFFFFFFFFFFF
+
+    # find begin of the first section/segment and end of the last section/segment.
+    for section in _get_sorted_sections(macho_file):
+        if not section.virtual_address:
+            continue
+
+        max_virtual_address = max(max_virtual_address, section.size + section.virtual_address)
+        min_virtual_address = min(min_virtual_address, section.virtual_address)
+        min_raw_offset = min(min_raw_offset, section.offset)
+
+    for segment in macho_file.segments:
+        if not segment.virtual_address:
+            continue
+        max_virtual_address = max(max_virtual_address, segment.virtual_size + segment.virtual_address)
+        min_virtual_address = min(min_virtual_address, segment.virtual_address)
+        min_raw_offset = min(min_raw_offset, segment.file_offset)
+
+    return max_virtual_address, min_virtual_address, min_raw_offset
+
+
 class MachoFileLoader:
     @staticmethod
     def isCompatible(data):
@@ -43,18 +95,9 @@ class MachoFileLoader:
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):
         macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
-        # Determine base address of binary
-        #
-        base_addr = 0
         if not macho_file:
-            return base_addr
-        candidates = [0xFFFFFFFFFFFFFFFF, macho_file.imagebase]
-        for section in macho_file.sections:
-            if section.virtual_address:
-                candidates.append(section.virtual_address - section.offset)
-        if len(candidates) > 1:
-            base_addr = min(candidates)
-        return base_addr
+            return 0
+        return _calculate_base_address(macho_file)
 
     @staticmethod
     def mapBinary(binary, parsed=_NOT_PROVIDED):
@@ -62,8 +105,6 @@ class MachoFileLoader:
         map the MachO file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
-        # MachO needs a file-like object...
-        # Attention: for Python 2.x use the cStringIO package for StringIO
         macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not macho_file:
             return b""
@@ -71,34 +112,7 @@ class MachoFileLoader:
 
         LOGGER.debug("MachO: base address: 0x%x", base_addr)
 
-        # a segment may contain 0 or more sections.
-        # ref: https://stackoverflow.com/a/14382477/87207
-        #
-        # i'm not sure if a section may be found outside of a segment.
-        # therefore, lets load segments first, and then load sections over them.
-        # we expect the section data to overwrite the segment data; however,
-        # it should be exactly the same data.
-
-        # find min and max virtual addresses.
-        max_virtual_address = 0
-        min_virtual_address = 0xFFFFFFFFFFFFFFFF
-        min_raw_offset = 0xFFFFFFFFFFFFFFFF
-
-        # find begin of the first section/segment and end of the last section/segment.
-        for section in sorted(macho_file.sections, key=lambda section: section.size, reverse=True):
-            if not section.virtual_address:
-                continue
-
-            max_virtual_address = max(max_virtual_address, section.size + section.virtual_address)
-            min_virtual_address = min(min_virtual_address, section.virtual_address)
-            min_raw_offset = min(min_raw_offset, section.offset)
-
-        for segment in macho_file.segments:
-            if not segment.virtual_address:
-                continue
-            max_virtual_address = max(max_virtual_address, segment.virtual_size + segment.virtual_address)
-            min_virtual_address = min(min_virtual_address, segment.virtual_address)
-            min_raw_offset = min(min_raw_offset, segment.file_offset)
+        max_virtual_address, min_virtual_address, min_raw_offset = _calculate_boundaries(macho_file)
 
         if not max_virtual_address:
             LOGGER.debug("MachO: no section or segment data")
@@ -115,15 +129,7 @@ class MachoFileLoader:
         mapped_binary = bytearray(align(virtual_size, 0x1000))
 
         # map segments.
-        # segments may contains 0 or more sections,
-        # so we do segments first.
-        #
-        # load sections from largest to smallest,
-        # because some segments may overlap.
-        #
-        # technically, we should only have to load PT_LOAD segments,
-        # but we do all of them here.
-        for segment in sorted(macho_file.segments, key=lambda segment: segment.file_size, reverse=True):
+        for segment in _get_sorted_segments(macho_file):
             if not segment.virtual_address:
                 continue
             rva = segment.virtual_address - base_addr
@@ -141,8 +147,7 @@ class MachoFileLoader:
             mapped_binary[rva : rva + segment.file_size] = segment.content
 
         # map sections.
-        # may overwrite some segment data, but we expect the content to be identical.
-        for section in sorted(macho_file.sections, key=lambda section: section.size, reverse=True):
+        for section in _get_sorted_sections(macho_file):
             if not section.virtual_address:
                 continue
             rva = section.virtual_address - base_addr
@@ -153,13 +158,10 @@ class MachoFileLoader:
                 rva + section.size,
                 section.virtual_address,
             )
-            # section may be empty or smaller, so we may not always copy data here
             if len(section.content) == section.size:
                 mapped_binary[rva : rva + section.size] = section.content
-            # assert len(section.content) == section.size
 
         # map header.
-        # we consider the headers to be any data found before the first section/segment
         if min_raw_offset != 0:
             LOGGER.debug(
                 "MachO: mapping 0x%x bytes of header at 0x0 (0x%x)",
@@ -212,16 +214,7 @@ class MachoFileLoader:
 
     @staticmethod
     def mergeCodeAreas(code_areas):
-        if not code_areas:
-            return []
-        sorted_areas = sorted(code_areas)
-        result = [sorted_areas[0]]
-        for current_area in sorted_areas[1:]:
-            if result[-1][1] == current_area[0]:
-                result[-1] = [result[-1][0], current_area[1]]
-            else:
-                result.append(current_area)
-        return result
+        return mergeCodeAreas(code_areas)
 
     @staticmethod
     def getCodeAreas(binary, parsed=_NOT_PROVIDED):
