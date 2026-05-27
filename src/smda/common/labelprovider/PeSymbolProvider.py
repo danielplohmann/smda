@@ -105,3 +105,6 @@ class PeSymbolProvider(AbstractLabelProvider):
 
     def getFunctionSymbols(self):
         return self._func_symbols
+
+    def is_active(self):
+        return bool(self._func_symbols)

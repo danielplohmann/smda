@@ -242,6 +242,10 @@ class DelphiReSymProvider(AbstractLabelProvider):
         if not self._is_compatible():
             return
 
+        # Cheap Delphi signature check
+        if b"TObject" not in self._binary:
+            return
+
         # Determine code areas
         code_areas = binary_info.code_areas
         if not code_areas:
@@ -701,3 +705,6 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def getRelocations(self):
         return {}
+
+    def is_active(self):
+        return bool(self._func_symbols)

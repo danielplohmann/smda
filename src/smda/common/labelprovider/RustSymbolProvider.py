@@ -60,14 +60,66 @@ class RustSymbolProvider(AbstractLabelProvider):
         Checks for Rust signatures in the binary data.
         Based on Ghidra's Rust detection logic.
         """
+        if hasattr(binary_info, "_is_rust"):
+            return binary_info._is_rust
+
+        try:
+            lief_binary = binary_info.getLiefBinary()
+            if lief_binary:
+                # 1. Check exported functions
+                if hasattr(lief_binary, "exported_functions"):
+                    for func in lief_binary.exported_functions:
+                        try:
+                            func_name = func.name
+                            if func_name and func_name.startswith(("_ZN", "_R", "__ZN", "__R")):
+                                binary_info._is_rust = True
+                                return True
+                        except (UnicodeDecodeError, AttributeError):
+                            continue
+                # 2. Check symbols
+                if hasattr(lief_binary, "symbols"):
+                    for sym in lief_binary.symbols:
+                        try:
+                            sym_name = sym.name
+                            if sym_name and sym_name.startswith(("_ZN", "_R", "__ZN", "__R")):
+                                binary_info._is_rust = True
+                                return True
+                        except (UnicodeDecodeError, AttributeError):
+                            continue
+                # 3. Check symtab_symbols
+                if hasattr(lief_binary, "symtab_symbols"):
+                    for sym in lief_binary.symtab_symbols:
+                        try:
+                            sym_name = sym.name
+                            if sym_name and sym_name.startswith(("_ZN", "_R", "__ZN", "__R")):
+                                binary_info._is_rust = True
+                                return True
+                        except (UnicodeDecodeError, AttributeError):
+                            continue
+                # 4. Check dynamic_symbols
+                if hasattr(lief_binary, "dynamic_symbols"):
+                    for sym in lief_binary.dynamic_symbols:
+                        try:
+                            sym_name = sym.name
+                            if sym_name and sym_name.startswith(("_ZN", "_R", "__ZN", "__R")):
+                                binary_info._is_rust = True
+                                return True
+                        except (UnicodeDecodeError, AttributeError):
+                            continue
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+
+        # Fallback to scanning the binary data (cached)
         data = self._get_binary_data(binary_info)
         if not data:
+            binary_info._is_rust = False
             return False
 
         # Ghidra checks for these byte sequences
         signatures = [b"RUST_BACKTRACE", b"RUST_MIN_STACK", b"/rustc/"]
-
-        return any(sig in data for sig in signatures)
+        is_rust = any(sig in data for sig in signatures)
+        binary_info._is_rust = is_rust
+        return is_rust
 
     def _get_binary_data(self, binary_info):
         """Safely retrieves binary data from either raw_data or a file path."""
@@ -168,3 +220,6 @@ class RustSymbolProvider(AbstractLabelProvider):
 
     def getFunctionSymbols(self):
         return self._func_symbols
+
+    def is_active(self):
+        return bool(self._func_symbols)

@@ -33,7 +33,7 @@ class TestDelphiPythiaProvider(unittest.TestCase):
 
         if include_valid_vmt:
             for candidate_offset, class_name_offset, class_name, method_base in (
-                (parent_candidate_offset, class_name_parent_offset, b"\x07TParent", 0x401300),
+                (parent_candidate_offset, class_name_parent_offset, b"\x07TObject", 0x401300),
                 (child_candidate_offset, class_name_child_offset, b"\x06TChild", 0x401350),
             ):
                 binary[candidate_offset : candidate_offset + 4] = self._pack_ptr(base_addr + candidate_offset + 0x4C)

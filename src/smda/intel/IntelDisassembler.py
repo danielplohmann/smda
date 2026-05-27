@@ -64,6 +64,8 @@ class IntelDisassembler:
         self.label_providers = []
         self.api_providers = []
         self.symbol_providers = []
+        self.active_api_providers = []
+        self.active_symbol_providers = []
         self._addLabelProviders()
         self.fc_manager = None
         self.tailcall_analyzer = None
@@ -113,6 +115,8 @@ class IntelDisassembler:
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
             provider.update(binary_info)
+        self.active_api_providers = [p for p in self.api_providers if p.is_active()]
+        self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
     def addPdbFile(self, binary_info, pdb_path):
         LOGGER.debug("adding PDB file: %s", pdb_path)
@@ -122,6 +126,8 @@ class IntelDisassembler:
             pdb_info.base_addr = binary_info.base_addr
             for provider in self.label_providers:
                 provider.update(pdb_info)
+            self.active_api_providers = [p for p in self.api_providers if p.is_active()]
+            self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
     def resolveApi(self, to_address, api_address):
         if not hasattr(self, "_api_cache"):
@@ -129,7 +135,8 @@ class IntelDisassembler:
         cache_key = (to_address, api_address)
         if cache_key in self._api_cache:
             return self._api_cache[cache_key]
-        for provider in self.api_providers:
+        active_providers = getattr(self, "active_api_providers", self.api_providers)
+        for provider in active_providers:
             dll, api = provider.getApi(to_address, api_address)
             if dll or api:
                 self._api_cache[cache_key] = (dll, api)
@@ -143,7 +150,8 @@ class IntelDisassembler:
             self._symbol_cache = {}
         if address in self._symbol_cache:
             return self._symbol_cache[address]
-        for provider in self.symbol_providers:
+        active_providers = getattr(self, "active_symbol_providers", self.symbol_providers)
+        for provider in active_providers:
             result = provider.getSymbol(address)
             if result:
                 self._symbol_cache[address] = result
@@ -153,7 +161,8 @@ class IntelDisassembler:
 
     def getSymbolCandidates(self):
         symbol_offsets = set()
-        for provider in self.symbol_providers:
+        active_providers = getattr(self, "active_symbol_providers", self.symbol_providers)
+        for provider in active_providers:
             function_symbols = provider.getFunctionSymbols()
             symbol_offsets.update(function_symbols)
         return list(symbol_offsets)

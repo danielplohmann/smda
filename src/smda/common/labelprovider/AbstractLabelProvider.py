@@ -39,3 +39,7 @@ class AbstractLabelProvider(ABC):
     def getFunctionSymbols(self):
         """Return all function symbol data"""
         return {}
+
+    def is_active(self):
+        """Returns whether this label provider is active and has data loaded for the current binary"""
+        return True

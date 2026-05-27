@@ -22,10 +22,34 @@ class GoSymbolProvider(AbstractLabelProvider):
         # addr:func_name
         self._func_symbols = {}
 
+    _pclntab_cache = {}
+
     def getPcLntabOffset(self, binary):
+        from smda.common.BinaryInfo import BinaryInfo
+
+        binary_info = None
+        if isinstance(binary, BinaryInfo) or hasattr(binary, "binary"):
+            binary_info = binary
+            if hasattr(binary_info, "_go_pclntab_offset"):
+                return binary_info._go_pclntab_offset
+            binary_bytes = binary_info.binary
+        else:
+            binary_bytes = binary
+
+        cache_key = (id(binary_bytes), len(binary_bytes), binary_bytes[:16])
+        if cache_key in GoSymbolProvider._pclntab_cache:
+            res = GoSymbolProvider._pclntab_cache[cache_key]
+            if binary_info is not None:
+                binary_info._go_pclntab_offset = res
+            return res
+
         pclntab_offset = None
         try:
-            lief_binary = lief.parse(binary)
+            lief_binary = None
+            if binary_info is not None:
+                lief_binary = binary_info.getLiefBinary()
+            if lief_binary is None:
+                lief_binary = lief.parse(binary_bytes)
             if lief_binary is not None:
                 if lief_binary.format == lief.EXE_FORMATS.ELF:
                     section = lief_binary.get_section(".gopclntab")
@@ -45,14 +69,17 @@ class GoSymbolProvider(AbstractLabelProvider):
         if pclntab_offset is None:
             # scan for offset of structure
             pclntab_regex = re.compile(b".\xff\xff\xff\x00\x00\x01(\x04|\x08)")
-            hits = [match.start() for match in re.finditer(pclntab_regex, binary)]
+            hits = [match.start() for match in re.finditer(pclntab_regex, binary_bytes)]
             if len(hits) == 1:
                 pclntab_offset = hits[0]
+        GoSymbolProvider._pclntab_cache[cache_key] = pclntab_offset
+        if binary_info is not None:
+            binary_info._go_pclntab_offset = pclntab_offset
         return pclntab_offset
 
     def update(self, binary_info):
         binary = binary_info.binary
-        pclntab_offset = self.getPcLntabOffset(binary)
+        pclntab_offset = self.getPcLntabOffset(binary_info)
         # if we found a valid offset, do the pclntab parsing
         if pclntab_offset is not None:
             try:
@@ -77,6 +104,9 @@ class GoSymbolProvider(AbstractLabelProvider):
 
     def getFunctionSymbols(self):
         return self._func_symbols
+
+    def is_active(self):
+        return bool(self._func_symbols)
 
     def _readUtf8(self, buffer):
         string_read = ""
