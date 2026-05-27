@@ -14,6 +14,7 @@ class FunctionAnalysisState:
         self.blocks = []
         self.num_blocks_analyzed = 0
         self.instructions = []
+        self._instructions_sorted = True
         self.instruction_start_bytes = set()
         self.processed_blocks = set()
         self.processed_bytes = set()
@@ -58,6 +59,7 @@ class FunctionAnalysisState:
     def addInstruction(self, i_address, i_size, i_mnemonic, i_op_str, i_bytes):
         ins = (i_address, i_size, i_mnemonic, i_op_str, i_bytes)
         self.instructions.append(ins)
+        self._instructions_sorted = False
         self.instruction_start_bytes.add(ins[0])
         self.current_block.append(ins)
         for byte in range(i_size):
@@ -94,12 +96,19 @@ class FunctionAnalysisState:
             self.data_bytes.update([addr_to + i])
 
     def backtrackInstructions(self, addr_from, num_instructions):
-        backtracked = []
-        for instruction in sorted(self.instructions, key=lambda x: x[0]):
-            if instruction[0] >= addr_from:
-                break
-            backtracked.append(instruction)
-        return backtracked[-num_instructions:]
+        if not self._instructions_sorted:
+            self.instructions.sort(key=lambda x: x[0])
+            self._instructions_sorted = True
+        # Binary search for the first instruction with address >= addr_from
+        low = 0
+        high = len(self.instructions)
+        while low < high:
+            mid = (low + high) // 2
+            if self.instructions[mid][0] < addr_from:
+                low = mid + 1
+            else:
+                high = mid
+        return self.instructions[max(0, low - num_instructions) : low]
 
     def identifyCallConflicts(self, all_refs):
         conflicts = {}
@@ -194,7 +203,9 @@ class FunctionAnalysisState:
         """
         if self.blocks:
             return self.blocks
-        self.instructions.sort()
+        if not self._instructions_sorted:
+            self.instructions.sort(key=lambda x: x[0])
+            self._instructions_sorted = True
         ins = {i[0]: ind for ind, i in enumerate(self.instructions)}
         potential_starts = {self.start_addr}
         potential_starts.update(list(self.jump_targets))

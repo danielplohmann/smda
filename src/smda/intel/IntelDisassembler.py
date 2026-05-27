@@ -72,6 +72,8 @@ class IntelDisassembler:
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
         self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
+        self._symbol_cache = {}
+        self._api_cache = {}
 
     def _initCapstone(self):
         self.capstone = (
@@ -122,18 +124,31 @@ class IntelDisassembler:
                 provider.update(pdb_info)
 
     def resolveApi(self, to_address, api_address):
+        if not hasattr(self, "_api_cache"):
+            self._api_cache = {}
+        cache_key = (to_address, api_address)
+        if cache_key in self._api_cache:
+            return self._api_cache[cache_key]
         for provider in self.api_providers:
             dll, api = provider.getApi(to_address, api_address)
             if dll or api:
+                self._api_cache[cache_key] = (dll, api)
                 return (dll, api)
 
+        self._api_cache[cache_key] = ("", "")
         return ("", "")
 
     def resolveSymbol(self, address):
+        if not hasattr(self, "_symbol_cache"):
+            self._symbol_cache = {}
+        if address in self._symbol_cache:
+            return self._symbol_cache[address]
         for provider in self.symbol_providers:
             result = provider.getSymbol(address)
             if result:
+                self._symbol_cache[address] = result
                 return result
+        self._symbol_cache[address] = ""
         return ""
 
     def getSymbolCandidates(self):
@@ -545,6 +560,8 @@ class IntelDisassembler:
             binary_info.base_addr,
         )
         self._updateLabelProviders(binary_info)
+        self._symbol_cache = {}
+        self._api_cache = {}
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setBinaryInfo(binary_info)

@@ -25,7 +25,7 @@ class FunctionCandidateManager:
         self.candidates = {}
         self.candidate_queue = []
         self.cached_candidates = None
-        self._candidate_offsets = []
+        self._candidate_offsets = set()
         self.candidate_index = 0
         self._all_call_refs = {}
         self.symbol_addresses = []
@@ -217,6 +217,18 @@ class FunctionCandidateManager:
             "nextGapCandidate() finding new gap candidate, current gap_ptr: 0x%08x",
             self.gap_pointer,
         )
+        window_offset = -1
+        window_bytes = b""
+
+        def get_window_slice(offset, length):
+            nonlocal window_offset, window_bytes
+            if window_offset <= offset and offset + length <= window_offset + len(window_bytes):
+                start = offset - window_offset
+                return window_bytes[start : start + length]
+            window_offset = offset
+            window_bytes = self.disassembly.getRawBytes(offset, max(256, length))
+            return window_bytes[:length]
+
         while True:
             if self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size < self.gap_pointer:
                 LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)
@@ -225,15 +237,13 @@ class FunctionCandidateManager:
             if gap_offset >= self.disassembly.binary_info.binary_size:
                 return None
             # compatibility with python2/3...
+            byte = b""
             try:
-                byte = self.disassembly.getRawByte(gap_offset)
+                byte = get_window_slice(gap_offset, 1)
             except Exception as exc:
                 reraise_non_operational_exception(exc)
                 LOGGER.warning("could not fetch raw byte for gap pointer.")
-                # print("0x%08x" % self.disassembly.binary_info.base_addr, "0x%08x" % self.disassembly.binary_info.binary_size, "0x%08x" % self.gap_pointer, "0x%08x" % gap_offset)
             # try to find padding symbols and skip them
-            if isinstance(byte, int):
-                byte = struct.pack("B", byte)
             if byte in GAP_SEQUENCES[1]:
                 LOGGER.debug(
                     "nextGapCandidate() found 0xCC / 0x00 - gap_ptr += 1: 0x%08x",
@@ -242,7 +252,7 @@ class FunctionCandidateManager:
                 self.gap_pointer += 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
-            ins_buf = list(self.capstone.disasm_lite(self.disassembly.getRawBytes(gap_offset, 15), gap_offset))
+            ins_buf = list(self.capstone.disasm_lite(get_window_slice(gap_offset, 15), gap_offset))
             if ins_buf:
                 i_address, i_size, i_mnemonic, i_op_str = ins_buf[0]
                 if i_mnemonic == "nop":
@@ -259,7 +269,7 @@ class FunctionCandidateManager:
             # try to find effective NOPs and skip them.
             found_multi_byte_nop = False
             for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
-                if self.disassembly.getRawBytes(gap_offset, gap_length) in GAP_SEQUENCES[gap_length]:
+                if get_window_slice(gap_offset, gap_length) in GAP_SEQUENCES[gap_length]:
                     LOGGER.debug(
                         "nextGapCandidate() found %d byte effective nop - gap_ptr += %d: 0x%08x",
                         gap_length,
@@ -288,7 +298,7 @@ class FunctionCandidateManager:
                 continue
             # we may have a candidate here
             LOGGER.debug("nextGapCandidate() using 0x%08x as candidate", self.gap_pointer)
-            start_byte = self.disassembly.getRawByte(gap_offset)
+            start_byte = byte[0] if byte else 0
             has_common_prologue = True  # start_byte in FunctionCandidate(self.gap_pointer, start_byte, self.bitness).common_gap_starts[self.bitness]
             if self.previously_analyzed_gap == self.gap_pointer:
                 LOGGER.debug(
@@ -407,22 +417,23 @@ class FunctionCandidateManager:
     def _identifyAlignment(self):
         identified_alignment = 0
         if self.config.USE_ALIGNMENT:
-            num_candidates = 0
-            num_aligned_16_candidates = 0
-            num_aligned_4_candidates = 0
-            for candidate in self.candidates.values():
-                if len(candidate.call_ref_sources) > 1:
-                    num_candidates += 1
-                    if candidate.alignment == 16:
-                        num_aligned_16_candidates += 1
-                    if candidate.alignment >= 4:
-                        num_aligned_4_candidates += 1
-            if num_candidates:
-                alignment_16_ratio = 1.0 * num_aligned_16_candidates / num_candidates
-                alignment_4_ratio = 1.0 * num_aligned_4_candidates / num_candidates
-                if num_candidates > 20 and alignment_4_ratio > 0.95:
+            candidates_with_refs = [c for c in self.candidates.values() if len(c.call_ref_sources) > 1]
+            num_candidates = len(candidates_with_refs)
+            if num_candidates > 20:
+                max_unaligned_16_budget = int(0.05 * num_candidates)
+                max_unaligned_4_budget = int(0.05 * num_candidates)
+                unaligned_16_count = 0
+                unaligned_4_count = 0
+                for candidate in candidates_with_refs:
+                    if candidate.alignment != 16:
+                        unaligned_16_count += 1
+                    if candidate.alignment < 4:
+                        unaligned_4_count += 1
+                    if unaligned_16_count > max_unaligned_16_budget and unaligned_4_count > max_unaligned_4_budget:
+                        break
+                if unaligned_4_count <= max_unaligned_4_budget:
                     identified_alignment = 4
-                if num_candidates > 20 and alignment_16_ratio > 0.95:
+                if unaligned_16_count <= max_unaligned_16_budget:
                     identified_alignment = 16
         return identified_alignment
 
@@ -437,8 +448,8 @@ class FunctionCandidateManager:
 
     def _buildQueue(self):
         LOGGER.debug("Located %d function candidates", len(self.candidates))
-        # increase lookup speed with static list
-        self._candidate_offsets = [c.addr for c in self.candidates.values()]
+        # increase lookup speed with static set
+        self._candidate_offsets = {c.addr for c in self.candidates.values()}
         self.cached_candidates = list(self.candidates.values())
         if self.config.CANDIDATE_QUEUE == "BracketQueue":
             self.candidate_queue = BracketQueue(candidates=self.cached_candidates)
