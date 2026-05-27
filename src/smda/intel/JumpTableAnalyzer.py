@@ -29,6 +29,8 @@ class JumpTableAnalyzer:
         jmp     rcx
     """
 
+    RE_CMP_SIZE = re.compile(r"[a-z0-9]{2,4}, (([0-9])|(0x[0-9a-f]+))")
+
     def __init__(self, disassembler):
         self.disassembler = disassembler
         self.disassembly = self.disassembler.disassembly
@@ -52,7 +54,7 @@ class JumpTableAnalyzer:
         for instr in backtracked[::-1]:
             if instr[2].startswith("ret"):
                 break
-            if instr[2] == "cmp" and re.match(r"[a-z0-9]{2,4}, (([0-9])|(0x[0-9a-f]+))", instr[3]):
+            if instr[2] == "cmp" and self.RE_CMP_SIZE.match(instr[3]):
                 jumptable_size = int(instr[3].split(",")[-1].strip(), base=16) + 1
                 # print("  0x%x: found potential jump table size with backtracking: 0x%x (%s %s)" % (instr[0], jumptable_size, instr[2], instr[3]))
                 break
