@@ -282,7 +282,7 @@ if __name__ == "__main__":
             input_queue.append(input_element)
     results = []
     # Use Pooling for parallel processing
-    with Pool(cpu_count() - 2) as pool:
+    with Pool(max(1, cpu_count() - 2)) as pool:
         for result in tqdm.tqdm(pool.imap_unordered(work, input_queue), total=len(input_queue)):
             results.append(result)
     print("DONE, shutting down")
