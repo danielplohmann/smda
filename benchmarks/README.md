@@ -5,13 +5,9 @@ pull request against its base commit on the same runner.
 
 ## Corpus setup
 
-The workflow expects an encrypted ZIP archive at:
+The workflow expects an encrypted ZIP archive at `benchmarks/corpus/smda-samples.zip`. For forks that cannot upload Git LFS objects, store the same encrypted ZIP as split files named `benchmarks/corpus/smda-samples.zip.part-00`, `benchmarks/corpus/smda-samples.zip.part-01`, and so on; the workflow reassembles them before unzipping.
 
-```text
-benchmarks/corpus/smda-samples.zip
-```
-
-Track that archive with Git LFS and store the ZIP password in the repository
+Store the ZIP password in the repository
 secret `SMDA_SAMPLE_ARCHIVE_PASSWORD`. The workflow decrypts the archive inside
 the runner temp directory and statically disassembles the extracted samples; it
 does not execute sample binaries.

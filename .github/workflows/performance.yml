@@ -136,6 +136,12 @@ jobs:
         run: |
           set -euo pipefail
           archive="$GITHUB_WORKSPACE/head/$ARCHIVE_PATH"
+          shopt -s nullglob
+          archive_parts=("$archive".part-*)
+          if [[ ! -f "$archive" && ${#archive_parts[@]} -gt 0 ]]; then
+            cat "${archive_parts[@]}" > "$RUNNER_TEMP/smda-samples.zip"
+            archive="$RUNNER_TEMP/smda-samples.zip"
+          fi
           corpus_dir="$RUNNER_TEMP/smda-corpus"
           results_dir="$RUNNER_TEMP/smda-perf-results"
           mkdir -p "$corpus_dir" "$results_dir"
