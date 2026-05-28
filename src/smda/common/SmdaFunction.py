@@ -6,6 +6,7 @@ import struct
 from typing import Iterator
 
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.Tarjan import Tarjan
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
@@ -180,8 +181,8 @@ class SmdaFunction:
                 tree = build_dominator_tree(normalized_blockrefs, root)
                 if tree:
                     nesting_depth = get_nesting_depth(normalized_blockrefs, tree, root)
-        except Exception:
-            pass
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
         return nesting_depth
 
     def getPicHash(self, binary_info):
@@ -199,7 +200,7 @@ class SmdaFunction:
                         upper_addr=binary_info.base_addr + binary_info.binary_size,
                     )
                 )
-        return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+        return "".join(escaped_binary_seqs).encode("ascii")
 
     def getOpcHash(self):
         return struct.unpack("<Q", hashlib.sha256(self.getOpcHashSequence()).digest()[:8])[0]
@@ -209,7 +210,7 @@ class SmdaFunction:
         for _, block in sorted(self.blocks.items()):
             for instruction in block:
                 escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self._escaper))
-        return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+        return "".join(escaped_binary_seqs).encode("ascii")
 
     def _parseBlocks(self, block_dict):
         self.blocks = {}

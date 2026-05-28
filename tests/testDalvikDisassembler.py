@@ -11,7 +11,13 @@ import unittest
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaReport import SmdaReport
-from smda.dalvik.DalvikOpcodeDecoder import decode_instruction, parse_code_item_header, read_sleb128, read_uleb128
+from smda.dalvik.DalvikOpcodeDecoder import (
+    OPCODES,
+    decode_instruction,
+    parse_code_item_header,
+    read_sleb128,
+    read_uleb128,
+)
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.utility.DexFileLoader import DexFileLoader
@@ -386,6 +392,79 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         decoded_array = decode_instruction(fill_array, 0, DummyResolver())
         self.assertEqual(decoded_array.mnemonic, "fill-array-data")
         self.assertEqual(decoded_array.payload_idx, 4)
+
+    def testThrowableOpcodeMetadataFeedsExceptionEdges(self):
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        disassembler = DalvikDisassembler(config)
+        by_mnemonic = {spec.mnemonic: opcode for opcode, spec in OPCODES.items()}
+
+        throwable_mnemonics = [
+            "sget",
+            "sget-wide",
+            "sget-object",
+            "sget-boolean",
+            "sget-byte",
+            "sget-char",
+            "sget-short",
+            "sput",
+            "sput-wide",
+            "sput-object",
+            "sput-boolean",
+            "sput-byte",
+            "sput-char",
+            "sput-short",
+            "div-int",
+            "rem-int",
+            "div-long",
+            "rem-long",
+            "div-int/2addr",
+            "rem-int/2addr",
+            "div-long/2addr",
+            "rem-long/2addr",
+            "div-int/lit16",
+            "rem-int/lit16",
+            "div-int/lit8",
+            "rem-int/lit8",
+        ]
+        for mnemonic in throwable_mnemonics:
+            with self.subTest(mnemonic=mnemonic):
+                opcode = by_mnemonic[mnemonic]
+                decoded = decode_instruction(
+                    bytes([opcode]) + b"\x00" * (OPCODES[opcode].size_units * 2 - 1), 0, DummyResolver()
+                )
+                self.assertTrue(decoded.can_throw)
+                self.assertTrue(disassembler._instructionCanThrow(decoded))
+
+        non_throwing_mnemonics = ["add-int", "mul-int", "add-long", "div-float", "rem-double", "shl-int/lit8"]
+        for mnemonic in non_throwing_mnemonics:
+            with self.subTest(mnemonic=mnemonic):
+                opcode = by_mnemonic[mnemonic]
+                decoded = decode_instruction(
+                    bytes([opcode]) + b"\x00" * (OPCODES[opcode].size_units * 2 - 1), 0, DummyResolver()
+                )
+                self.assertFalse(decoded.can_throw)
+                self.assertFalse(disassembler._instructionCanThrow(decoded))
+
+    def testThrowableFieldAndIntegerDivideOpcodesAddExceptionEdges(self):
+        cases = [
+            ("sget", bytes.fromhex("60000000")),
+            ("div-int", bytes.fromhex("93000102")),
+            ("div-int/2addr", bytes.fromhex("b300")),
+            ("div-int/lit8", bytes.fromhex("db000001")),
+        ]
+        for mnemonic, protected_instruction in cases:
+            with self.subTest(mnemonic=mnemonic):
+                handler_addr_units = len(protected_instruction) // 2 + 1
+                code_item = build_code_item(
+                    protected_instruction + bytes.fromhex("0e000d010e00"),
+                    tries=[(0, len(protected_instruction) // 2, 1)],
+                    handlers_blob=bytes([1, 0, handler_addr_units]),
+                )
+                disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+                handler_addr = func_addr + handler_addr_units * 2
+
+                self.assertIn(handler_addr, disassembly.code_refs_from[func_addr])
 
     def testDisassembleBufferDexAutodetect(self):
         generic_disasm = Disassembler(config)

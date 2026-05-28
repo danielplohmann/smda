@@ -134,7 +134,8 @@ class FunctionCandidateManager:
             candidates_0 = len([c.getScore() for c in self.candidates.values() if c.getScore() == 0])
             LOGGER.debug("  Max: %f, Min: %f", maxc, minc)
             LOGGER.debug("  2: %d, 1: %d, 0: %d", candidates_2, candidates_1, candidates_0)
-        except Exception:
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
             LOGGER.debug("  No candidates found.")
 
     def getFunctionStartCandidates(self):

@@ -65,7 +65,7 @@ This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code form
 
 ```bash
 # Install development dependencies
-python3 -m pip install --upgrade pip "setuptools>=64.0.0,<75.4.0" wheel
+python3 -m pip install --upgrade pip "setuptools>=64.0.0,<82.1.0" "wheel>=0.47.0"
 python3 -m pip install -e ".[dev]"
 
 # Install pre-commit hooks (optional but recommended)
@@ -104,6 +104,8 @@ make test
 ```
 
 ## Version History
+ * 2026-05-26: v3.2.0 - Several performance optimizations to reduce processing time (THX: @r0ny123)
+ * 2026-05-26: v3.1.0 - Repository structure changed to src-style, modernized overall package and CI procedures (THX: @r0ny123)
  * 2026-05-20: v3.0.1 - Improved performance for string extraction by reducing type casts (THX: @r0ny123)
  * 2026-05-20: v3.0.0 - Support for Android Dalvik disassembly (THX: @r0ny123)
  * 2026-05-20: v2.6.0 - Use Pythia as drop-in replacement for current Delphi VMT parser (THX: @r0ny123)

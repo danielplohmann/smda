@@ -12,6 +12,8 @@
 
 import logging
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -142,7 +144,8 @@ def get_nesting_depth(graph, domtree, root):
 
     try:
         return maximum_costs(root)
-    except Exception:
+    except Exception as exc:
+        reraise_non_operational_exception(exc)
         return 0
 
 

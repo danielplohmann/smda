@@ -6,6 +6,12 @@ import re
 import sys
 import textwrap
 
+if not __package__:
+    # Make CLI runnable from repo source folder without installing the package
+    package_source_path = os.path.dirname(os.path.dirname(__file__))
+    package_source_path = package_source_path + os.sep + "smda" + os.sep + "src"
+    sys.path.insert(0, package_source_path)
+
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.DexFileLoader import DexFileLoader

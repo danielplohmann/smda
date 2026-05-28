@@ -59,7 +59,8 @@ class GoSymbolProvider(AbstractLabelProvider):
                 result = self._parse_pclntab(pclntab_offset, binary)
                 if result:
                     self._func_symbols = result
-            except Exception:
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
                 return
 
     def isSymbolProvider(self):

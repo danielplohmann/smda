@@ -21,3 +21,4 @@ coverage-html/
 
 # Tool caches
 .ruff_cache/
+.vscode

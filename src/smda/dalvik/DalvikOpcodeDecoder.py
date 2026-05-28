@@ -1,5 +1,5 @@
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional
 
 
@@ -105,6 +105,26 @@ def _register(opcode, mnemonic, fmt, size_units, **kwargs):
 def _register_range(start, names, fmt, size_units, **kwargs):
     for index, mnemonic in enumerate(names):
         _register(start + index, mnemonic, fmt, size_units, **kwargs)
+
+
+def _mark_can_throw(*mnemonics):
+    """
+    Mark all opcodes matching the given mnemonics as can_throw=True.
+
+    Args:
+        *mnemonics: Variable length list of mnemonics to mark as throwable.
+    Raises:
+        ValueError: If any mnemonic is not found in OPCODES.
+    """
+    to_mark = set(mnemonics)
+    matched = set()
+    for opcode, spec in OPCODES.items():
+        if spec.mnemonic in to_mark:
+            OPCODES[opcode] = replace(spec, can_throw=True)
+            matched.add(spec.mnemonic)
+    remaining = to_mark - matched
+    if remaining:
+        raise ValueError(f"Unknown Dalvik throwable opcodes: {', '.join(sorted(remaining))}")
 
 
 _register(0x00, "nop", "10x", 1)
@@ -239,6 +259,7 @@ _register_range(
     "21c",
     2,
     ref_kind="field",
+    can_throw=True,
 )
 _register_range(
     0x6E,
@@ -403,6 +424,20 @@ _register_range(
     "22b",
     2,
 )
+_mark_can_throw(
+    "div-int",
+    "rem-int",
+    "div-long",
+    "rem-long",
+    "div-int/2addr",
+    "rem-int/2addr",
+    "div-long/2addr",
+    "rem-long/2addr",
+    "div-int/lit16",
+    "rem-int/lit16",
+    "div-int/lit8",
+    "rem-int/lit8",
+)
 _register(0xFA, "invoke-polymorphic", "45cc", 4, ref_kind="method", can_throw=True, is_invoke=True)
 _register(0xFB, "invoke-polymorphic/range", "4rcc", 4, ref_kind="method", can_throw=True, is_invoke=True)
 _register(0xFC, "invoke-custom", "35c", 3, ref_kind="call_site", can_throw=True, is_invoke=True)
@@ -440,6 +475,361 @@ def _signed(value, bits):
     return (value & (sign_bit - 1)) - (value & sign_bit)
 
 
+FORMAT_DECODERS = {}
+
+
+def _decode_fmt_10x(raw_bytes, byte_idx, opcode, resolve_ref):
+    return {}
+
+
+FORMAT_DECODERS["10x"] = _decode_fmt_10x
+
+
+def _decode_fmt_10t(raw_bytes, byte_idx, opcode, resolve_ref):
+    branch_delta = int.from_bytes(raw_bytes[1:2], byteorder="little", signed=True) * 2
+    branch_target_idx = byte_idx + branch_delta
+    return {
+        "operands": f"{hex(branch_target_idx)}",
+        "branch_target_idx": branch_target_idx,
+    }
+
+
+FORMAT_DECODERS["10t"] = _decode_fmt_10t
+
+
+def _decode_fmt_11n(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1] & 0x0F
+    literal = _signed((raw_bytes[1] >> 4) & 0x0F, 4)
+    return {
+        "registers": [reg_a],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, #{literal:+d}",
+    }
+
+
+FORMAT_DECODERS["11n"] = _decode_fmt_11n
+
+
+def _decode_fmt_11x(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    return {
+        "registers": [reg_a],
+        "operands": _reg_name(reg_a),
+    }
+
+
+FORMAT_DECODERS["11x"] = _decode_fmt_11x
+
+
+def _decode_fmt_12x(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
+    return {
+        "registers": [reg_a, reg_b],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}",
+    }
+
+
+FORMAT_DECODERS["12x"] = _decode_fmt_12x
+
+
+def _decode_fmt_20t(raw_bytes, byte_idx, opcode, resolve_ref):
+    branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
+    branch_target_idx = byte_idx + branch_delta
+    return {
+        "operands": f"{hex(branch_target_idx)}",
+        "branch_target_idx": branch_target_idx,
+    }
+
+
+FORMAT_DECODERS["20t"] = _decode_fmt_20t
+
+
+def _decode_fmt_21c(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    return {
+        "registers": [reg_a],
+        "ref_index": ref_index,
+        "operands": f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}",
+    }
+
+
+FORMAT_DECODERS["21c"] = _decode_fmt_21c
+
+
+def _decode_fmt_21h(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    # The 16-bit immediate is sign-extended per the Dalvik spec before shifting.
+    # Using signed=True ensures negative values like 0xFFFF produce -1 << shift
+    # rather than 0xFFFF << shift, matching baksmali's output.
+    value = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
+    shift = 48 if opcode.mnemonic.endswith("wide/high16") else 16
+    literal = value << shift
+    return {
+        "registers": [reg_a],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, #{hex(literal)}",
+    }
+
+
+FORMAT_DECODERS["21h"] = _decode_fmt_21h
+
+
+def _decode_fmt_21s(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
+    return {
+        "registers": [reg_a],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, #{literal:+d}",
+    }
+
+
+FORMAT_DECODERS["21s"] = _decode_fmt_21s
+
+
+def _decode_fmt_21t(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
+    branch_target_idx = byte_idx + branch_delta
+    return {
+        "registers": [reg_a],
+        "branch_target_idx": branch_target_idx,
+        "operands": f"{_reg_name(reg_a)}, {hex(branch_target_idx)}",
+    }
+
+
+FORMAT_DECODERS["21t"] = _decode_fmt_21t
+
+
+def _decode_fmt_22b(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    reg_b = raw_bytes[2]
+    literal = int.from_bytes(raw_bytes[3:4], byteorder="little", signed=True)
+    return {
+        "registers": [reg_a, reg_b],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}",
+    }
+
+
+FORMAT_DECODERS["22b"] = _decode_fmt_22b
+
+
+def _decode_fmt_22c(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
+    ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    return {
+        "registers": [reg_a, reg_b],
+        "ref_index": ref_index,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {resolve_ref(opcode.ref_kind, ref_index)}",
+    }
+
+
+FORMAT_DECODERS["22c"] = _decode_fmt_22c
+
+
+def _decode_fmt_22s(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
+    literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
+    return {
+        "registers": [reg_a, reg_b],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}",
+    }
+
+
+FORMAT_DECODERS["22s"] = _decode_fmt_22s
+
+
+def _decode_fmt_22t(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1] & 0x0F
+    reg_b = (raw_bytes[1] >> 4) & 0x0F
+    branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
+    branch_target_idx = byte_idx + branch_delta
+    return {
+        "registers": [reg_a, reg_b],
+        "branch_target_idx": branch_target_idx,
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {hex(branch_target_idx)}",
+    }
+
+
+FORMAT_DECODERS["22t"] = _decode_fmt_22t
+
+
+def _decode_fmt_22x(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    reg_b = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    return {
+        "registers": [reg_a, reg_b],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}",
+    }
+
+
+FORMAT_DECODERS["22x"] = _decode_fmt_22x
+
+
+def _decode_fmt_23x(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    reg_b = raw_bytes[2]
+    reg_c = raw_bytes[3]
+    return {
+        "registers": [reg_a, reg_b, reg_c],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {_reg_name(reg_c)}",
+    }
+
+
+FORMAT_DECODERS["23x"] = _decode_fmt_23x
+
+
+def _decode_fmt_30t(raw_bytes, byte_idx, opcode, resolve_ref):
+    branch_delta = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True) * 2
+    branch_target_idx = byte_idx + branch_delta
+    return {
+        "operands": f"{hex(branch_target_idx)}",
+        "branch_target_idx": branch_target_idx,
+    }
+
+
+FORMAT_DECODERS["30t"] = _decode_fmt_30t
+
+
+def _decode_fmt_31c(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    ref_index = int.from_bytes(raw_bytes[2:6], byteorder="little")
+    return {
+        "registers": [reg_a],
+        "ref_index": ref_index,
+        "operands": f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}",
+    }
+
+
+FORMAT_DECODERS["31c"] = _decode_fmt_31c
+
+
+def _decode_fmt_31i(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    literal = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True)
+    return {
+        "registers": [reg_a],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, #{literal:+d}",
+    }
+
+
+FORMAT_DECODERS["31i"] = _decode_fmt_31i
+
+
+def _decode_fmt_31t(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    branch_delta = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True) * 2
+    payload_idx = byte_idx + branch_delta
+    return {
+        "registers": [reg_a],
+        "payload_idx": payload_idx,
+        "operands": f"{_reg_name(reg_a)}, payload@{hex(payload_idx)}",
+    }
+
+
+FORMAT_DECODERS["31t"] = _decode_fmt_31t
+
+
+def _decode_fmt_32x(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    reg_b = int.from_bytes(raw_bytes[4:6], byteorder="little")
+    return {
+        "registers": [reg_a, reg_b],
+        "operands": f"{_reg_name(reg_a)}, {_reg_name(reg_b)}",
+    }
+
+
+FORMAT_DECODERS["32x"] = _decode_fmt_32x
+
+
+def _decode_fmt_35c(raw_bytes, byte_idx, opcode, resolve_ref):
+    _, registers = _decode_register_list_35c(raw_bytes)
+    ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    return {
+        "registers": registers,
+        "ref_index": ref_index,
+        "operands": f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}",
+    }
+
+
+FORMAT_DECODERS["35c"] = _decode_fmt_35c
+
+
+def _decode_fmt_3rc(raw_bytes, byte_idx, opcode, resolve_ref):
+    count = raw_bytes[1]
+    ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
+    registers = _decode_register_range(count, first_reg)
+    return {
+        "registers": registers,
+        "ref_index": ref_index,
+        "operands": f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}",
+    }
+
+
+FORMAT_DECODERS["3rc"] = _decode_fmt_3rc
+
+
+def _decode_fmt_45cc(raw_bytes, byte_idx, opcode, resolve_ref):
+    _, registers = _decode_register_list_35c(raw_bytes[:6])
+    ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
+    return {
+        "registers": registers,
+        "ref_index": ref_index,
+        "ref_index_aux": ref_index_aux,
+        "operands": (
+            f"{{{_format_registers(registers)}}}, "
+            f"{resolve_ref(opcode.ref_kind, ref_index)}, "
+            f"{resolve_ref('proto', ref_index_aux)}"
+        ),
+    }
+
+
+FORMAT_DECODERS["45cc"] = _decode_fmt_45cc
+
+
+def _decode_fmt_4rcc(raw_bytes, byte_idx, opcode, resolve_ref):
+    count = raw_bytes[1]
+    ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
+    first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
+    ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
+    registers = _decode_register_range(count, first_reg)
+    return {
+        "registers": registers,
+        "ref_index": ref_index,
+        "ref_index_aux": ref_index_aux,
+        "operands": (
+            f"{{{_format_registers(registers)}}}, "
+            f"{resolve_ref(opcode.ref_kind, ref_index)}, "
+            f"{resolve_ref('proto', ref_index_aux)}"
+        ),
+    }
+
+
+FORMAT_DECODERS["4rcc"] = _decode_fmt_4rcc
+
+
+def _decode_fmt_51l(raw_bytes, byte_idx, opcode, resolve_ref):
+    reg_a = raw_bytes[1]
+    literal = int.from_bytes(raw_bytes[2:10], byteorder="little", signed=True)
+    return {
+        "registers": [reg_a],
+        "literal": literal,
+        "operands": f"{_reg_name(reg_a)}, #{hex(literal)}",
+    }
+
+
+FORMAT_DECODERS["51l"] = _decode_fmt_51l
+
+
 def decode_instruction(bytecode, byte_idx, resolve_ref):
     opcode_value = bytecode[byte_idx]
     if opcode_value not in OPCODES:
@@ -451,163 +841,12 @@ def decode_instruction(bytecode, byte_idx, resolve_ref):
         raise ValueError("Truncated Dalvik instruction")
 
     raw_bytes = bytes(bytecode[byte_idx : byte_idx + size_bytes])
-    registers = []
-    operands = ""
-    literal = None
-    ref_index = None
-    ref_index_aux = None
-    branch_target_idx = None
-    payload_idx = None
 
-    if opcode.fmt == "10x":
-        operands = ""
-    elif opcode.fmt == "10t":
-        branch_delta = int.from_bytes(raw_bytes[1:2], byteorder="little", signed=True) * 2
-        branch_target_idx = byte_idx + branch_delta
-        operands = f"{hex(branch_target_idx)}"
-    elif opcode.fmt == "11n":
-        reg_a = raw_bytes[1] & 0x0F
-        literal = _signed((raw_bytes[1] >> 4) & 0x0F, 4)
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, #{literal:+d}"
-    elif opcode.fmt == "11x":
-        reg_a = raw_bytes[1]
-        registers = [reg_a]
-        operands = _reg_name(reg_a)
-    elif opcode.fmt == "12x":
-        reg_a = raw_bytes[1] & 0x0F
-        reg_b = (raw_bytes[1] >> 4) & 0x0F
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
-    elif opcode.fmt == "20t":
-        branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
-        branch_target_idx = byte_idx + branch_delta
-        operands = f"{hex(branch_target_idx)}"
-    elif opcode.fmt == "21c":
-        reg_a = raw_bytes[1]
-        ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}"
-    elif opcode.fmt == "21h":
-        reg_a = raw_bytes[1]
-        # The 16-bit immediate is sign-extended per the Dalvik spec before shifting.
-        # Using signed=True ensures negative values like 0xFFFF produce -1 << shift
-        # rather than 0xFFFF << shift, matching baksmali's output.
-        value = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
-        shift = 48 if opcode.mnemonic.endswith("wide/high16") else 16
-        literal = value << shift
-        registers = [reg_a]
-        sign = "-" if literal < 0 else ""
-        operands = f"{_reg_name(reg_a)}, #{sign}{hex(abs(literal))}"
-    elif opcode.fmt == "21s":
-        reg_a = raw_bytes[1]
-        literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, #{literal:+d}"
-    elif opcode.fmt == "21t":
-        reg_a = raw_bytes[1]
-        branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
-        branch_target_idx = byte_idx + branch_delta
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, {hex(branch_target_idx)}"
-    elif opcode.fmt == "22b":
-        reg_a = raw_bytes[1]
-        reg_b = raw_bytes[2]
-        literal = int.from_bytes(raw_bytes[3:4], byteorder="little", signed=True)
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}"
-    elif opcode.fmt == "22c":
-        reg_a = raw_bytes[1] & 0x0F
-        reg_b = (raw_bytes[1] >> 4) & 0x0F
-        ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {resolve_ref(opcode.ref_kind, ref_index)}"
-    elif opcode.fmt == "22s":
-        reg_a = raw_bytes[1] & 0x0F
-        reg_b = (raw_bytes[1] >> 4) & 0x0F
-        literal = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True)
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, #{literal:+d}"
-    elif opcode.fmt == "22t":
-        reg_a = raw_bytes[1] & 0x0F
-        reg_b = (raw_bytes[1] >> 4) & 0x0F
-        branch_delta = int.from_bytes(raw_bytes[2:4], byteorder="little", signed=True) * 2
-        branch_target_idx = byte_idx + branch_delta
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {hex(branch_target_idx)}"
-    elif opcode.fmt == "22x":
-        reg_a = raw_bytes[1]
-        reg_b = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
-    elif opcode.fmt == "23x":
-        reg_a = raw_bytes[1]
-        reg_b = raw_bytes[2]
-        reg_c = raw_bytes[3]
-        registers = [reg_a, reg_b, reg_c]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}, {_reg_name(reg_c)}"
-    elif opcode.fmt == "30t":
-        branch_delta = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True) * 2
-        branch_target_idx = byte_idx + branch_delta
-        operands = f"{hex(branch_target_idx)}"
-    elif opcode.fmt == "31c":
-        reg_a = raw_bytes[1]
-        ref_index = int.from_bytes(raw_bytes[2:6], byteorder="little")
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, {resolve_ref(opcode.ref_kind, ref_index)}"
-    elif opcode.fmt == "31i":
-        reg_a = raw_bytes[1]
-        literal = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True)
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, #{literal:+d}"
-    elif opcode.fmt == "31t":
-        reg_a = raw_bytes[1]
-        branch_delta = int.from_bytes(raw_bytes[2:6], byteorder="little", signed=True) * 2
-        payload_idx = byte_idx + branch_delta
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, payload@{hex(payload_idx)}"
-    elif opcode.fmt == "32x":
-        reg_a = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        reg_b = int.from_bytes(raw_bytes[4:6], byteorder="little")
-        registers = [reg_a, reg_b]
-        operands = f"{_reg_name(reg_a)}, {_reg_name(reg_b)}"
-    elif opcode.fmt == "35c":
-        _, registers = _decode_register_list_35c(raw_bytes)
-        ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        operands = f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}"
-    elif opcode.fmt == "3rc":
-        count = raw_bytes[1]
-        ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
-        registers = _decode_register_range(count, first_reg)
-        operands = f"{{{_format_registers(registers)}}}, {resolve_ref(opcode.ref_kind, ref_index)}"
-    elif opcode.fmt == "45cc":
-        _, registers = _decode_register_list_35c(raw_bytes[:6])
-        ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
-        operands = "{{{}}}, {}, {}".format(
-            _format_registers(registers),
-            resolve_ref(opcode.ref_kind, ref_index),
-            resolve_ref("proto", ref_index_aux),
-        )
-    elif opcode.fmt == "4rcc":
-        count = raw_bytes[1]
-        ref_index = int.from_bytes(raw_bytes[2:4], byteorder="little")
-        first_reg = int.from_bytes(raw_bytes[4:6], byteorder="little")
-        ref_index_aux = int.from_bytes(raw_bytes[6:8], byteorder="little")
-        registers = _decode_register_range(count, first_reg)
-        operands = "{{{}}}, {}, {}".format(
-            _format_registers(registers),
-            resolve_ref(opcode.ref_kind, ref_index),
-            resolve_ref("proto", ref_index_aux),
-        )
-    elif opcode.fmt == "51l":
-        reg_a = raw_bytes[1]
-        literal = int.from_bytes(raw_bytes[2:10], byteorder="little", signed=True)
-        registers = [reg_a]
-        operands = f"{_reg_name(reg_a)}, #{hex(literal)}"
-    else:
+    decoder = FORMAT_DECODERS.get(opcode.fmt)
+    if decoder is None:
         raise ValueError(f"Unsupported Dalvik format {opcode.fmt}")
+
+    result = decoder(raw_bytes, byte_idx, opcode, resolve_ref)
 
     return DecodedDalvikInstruction(
         opcode=opcode_value,
@@ -616,14 +855,14 @@ def decode_instruction(bytecode, byte_idx, resolve_ref):
         size_units=opcode.size_units,
         size_bytes=size_bytes,
         bytes_=raw_bytes,
-        operands=operands,
-        registers=registers,
-        literal=literal,
+        operands=result.get("operands", ""),
+        registers=result.get("registers", []),
+        literal=result.get("literal"),
         ref_kind=opcode.ref_kind,
-        ref_index=ref_index,
-        ref_index_aux=ref_index_aux,
-        branch_target_idx=branch_target_idx,
-        payload_idx=payload_idx,
+        ref_index=result.get("ref_index"),
+        ref_index_aux=result.get("ref_index_aux"),
+        branch_target_idx=result.get("branch_target_idx"),
+        payload_idx=result.get("payload_idx"),
         is_invoke=opcode.is_invoke,
         is_terminator=opcode.is_terminator,
         is_conditional=opcode.is_conditional,

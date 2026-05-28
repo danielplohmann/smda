@@ -59,7 +59,7 @@ class SmdaBasicBlock:
                         + self.smda_function.smda_report.binary_size,
                     )
                 )
-            return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+            return "".join(escaped_binary_seqs).encode("ascii")
 
     def getOpcBlockHash(self):
         if self.opcblockhash is not None:
@@ -76,7 +76,7 @@ class SmdaBasicBlock:
             escaped_binary_seqs = []
             for instruction in self.getInstructions():
                 escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self.smda_function._escaper))
-            return bytes([ord(c) for c in "".join(escaped_binary_seqs)])
+            return "".join(escaped_binary_seqs).encode("ascii")
 
     def getPredecessors(self):
         predecessors = []
