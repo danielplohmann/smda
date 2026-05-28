@@ -87,7 +87,7 @@ class NativeCodeIdentifier:
         return b"Go build ID:" in content[:5120]
 
     def _identifyPython(self, content):
-        return bool(re.search(b"python(2|3).\\.dll", content))
+        return bool(re.search(rb"python(2|3)\d*\.dll", content))
 
     def isNativeCode(self, filepath):
         for family in self.family_override:
@@ -186,16 +186,15 @@ def work(input_element):
     REPORT = None
     INPUT_FILEPATH = input_element["filepath"]
     INPUT_FILENAME = input_element["filename"]
-    input_element["malpedia_path"]
-    identifier = NativeCodeIdentifier()
-    if not identifier.isNativeCode(INPUT_FILEPATH):
-        return
-    malpedia_relative_path = getMalpediaFilePath(INPUT_FILEPATH)
-    in_family_path = os.sep.join(malpedia_relative_path.split(os.sep)[1:])
-    if in_family_path.startswith("module"):
-        return
-    disassembler = get_disassembler()
     try:
+        identifier = NativeCodeIdentifier()
+        if not identifier.isNativeCode(INPUT_FILEPATH):
+            return
+        malpedia_relative_path = getMalpediaFilePath(INPUT_FILEPATH)
+        in_family_path = os.sep.join(malpedia_relative_path.split(os.sep)[1:])
+        if in_family_path.startswith("module"):
+            return
+        disassembler = get_disassembler()
         if (
             "elf." in INPUT_FILEPATH
             and ("x86" in INPUT_FILEPATH or "x64" in INPUT_FILEPATH)

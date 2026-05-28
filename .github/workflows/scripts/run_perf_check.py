@@ -113,4 +113,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default="", help="Path to write output JSON results")
     args = parser.parse_args()
 
+    if args.iterations < 1:
+        parser.error("--iterations must be >= 1")
     run_benchmark(args.iterations, args.output)
