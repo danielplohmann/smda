@@ -23,7 +23,6 @@ jobs:
   benchmark:
     name: Run Benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - name: Checkout PR code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -61,7 +60,6 @@ jobs:
         run: |
           python .github/workflows/scripts/compare_perf.py pr_results.json base_results.json
 
-      # --- Daniel's Malpedia Evaluation Setup ---
       - name: Check Malpedia Password Availability
         id: check_password
         run: |
