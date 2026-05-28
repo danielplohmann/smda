@@ -50,10 +50,12 @@ jobs:
 
       - name: Run benchmark on base branch
         run: |
+          PYTHONPATH=base-repo/src python -c "import os, smda; expected = os.path.abspath('base-repo/src'); actual = os.path.abspath(smda.__file__); print('base smda:', actual); assert actual.startswith(expected + os.sep), f'Expected base smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
           PYTHONPATH=base-repo/src python .github/workflows/scripts/run_perf_check.py --output base_results.json
 
       - name: Run benchmark on PR branch
         run: |
+          PYTHONPATH=src python -c "import os, smda; expected = os.path.abspath('src'); actual = os.path.abspath(smda.__file__); print('pr smda:', actual); assert actual.startswith(expected + os.sep), f'Expected PR smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
           PYTHONPATH=src python .github/workflows/scripts/run_perf_check.py --output pr_results.json
 
       - name: Compare results
@@ -111,7 +113,7 @@ jobs:
 
       - name: Upload Malpedia Evaluation Artifacts
         if: steps.check_password.outputs.available == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malpedia-evaluation-report
           path: |
