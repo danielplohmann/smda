@@ -14,6 +14,8 @@ from smda.Disassembler import Disassembler
 dump_file_pattern = re.compile("dump7?_0x[0-9a-fA-F]{8,16}")
 unpacked_file_pattern = re.compile("_unpacked(_x64)?$")
 
+logger = logging.getLogger("smda-multithreaded")
+
 
 def get_word(buffer, start):
     return _get_binary_data(buffer, start, 2)
@@ -223,9 +225,10 @@ def work(input_element):
             REPORT.family = getFamilyName(INPUT_FILEPATH)
             REPORT.version = getSampleVersion(INPUT_FILEPATH, REPORT.family)
             REPORT.filename = os.path.basename(malpedia_relative_path)
-            with open("finished-reports" + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
+            output_dir = input_element.get("output_dir", "finished-reports")
+            with open(output_dir + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
                 json.dump(REPORT.toDict(), fout, indent=1, sort_keys=True)
-                logger.info("Wrote " + "finished-reports/" + INPUT_FILENAME + ".smda")
+                logger.info("Wrote " + output_dir + "/" + INPUT_FILENAME + ".smda")
     except Exception:
         print("RunTimeError, we skip!")
         print("smda: " + str(INPUT_FILENAME))
@@ -242,7 +245,6 @@ if __name__ == "__main__":
         level=logging.INFO,
     )
 
-    logger = logging.getLogger("smda-multithreaded")
     formatter = logging.Formatter(
         "%(process)d - %(processName)s - %(threadName)s - %(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
@@ -254,10 +256,13 @@ if __name__ == "__main__":
     logger.addHandler(handler)
 
     if len(sys.argv) < 2:
-        print(f"usage: {sys.argv[0]} <malpedia_root>")
+        print(f"usage: {sys.argv[0]} <malpedia_root> [output_dir]")
         sys.exit(1)
     malpedia_path = sys.argv[1]
-    finished_reports = getAllReportFilenames("finished-reports")
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else "finished-reports"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    finished_reports = getAllReportFilenames(output_dir)
     input_queue = []
     # Find all targets (everything) to disassemble in malpedia.
     for root, _subdir, files in sorted(os.walk(malpedia_path)):
@@ -272,6 +277,7 @@ if __name__ == "__main__":
                 "finished_reports": finished_reports,
                 "filepath": filepath,
                 "malpedia_path": malpedia_path,
+                "output_dir": output_dir,
             }
             input_queue.append(input_element)
     results = []
