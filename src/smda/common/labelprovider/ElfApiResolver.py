@@ -13,6 +13,7 @@ class ElfApiResolver(AbstractLabelProvider):
         self._api_map = {"lief": {}}
 
     def update(self, binary_info):
+        self._api_map["lief"] = {}
         if binary_info.is_buffer:
             # cannot reconstruct from shellcode/memory dump at this time
             return

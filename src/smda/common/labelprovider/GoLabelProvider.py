@@ -78,6 +78,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         return pclntab_offset
 
     def update(self, binary_info):
+        self._func_symbols = {}
         binary = binary_info.binary
         pclntab_offset = self.getPcLntabOffset(binary_info)
         # if we found a valid offset, do the pclntab parsing
