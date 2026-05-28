@@ -1,0 +1,304 @@
+name: Performance Gate
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+    inputs:
+      base-ref:
+        description: "Base ref or SHA to compare against"
+        required: false
+        default: "master"
+      head-ref:
+        description: "Head ref or SHA to benchmark; defaults to the workflow ref"
+        required: false
+        default: ""
+      threshold-percent:
+        description: "Fail when PR pyperf mean is more than this percent slower"
+        required: false
+        default: "5"
+      sample-archive-path:
+        description: "Encrypted ZIP archive path in the repository"
+        required: false
+        default: "benchmarks/corpus/smda-samples.zip"
+      corpus-manifest:
+        description: "Optional JSONL manifest path after archive extraction"
+        required: false
+        default: ""
+      limit:
+        description: "Optional target limit; 0 means all discovered targets"
+        required: false
+        default: "0"
+      pyperf-profile:
+        description: "pyperf run profile"
+        required: false
+        default: "ci"
+        type: choice
+        options:
+          - ci
+          - rigorous
+          - fast
+      diagnostic-limit:
+        description: "Number of targets to profile when the gate fails"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  performance:
+    name: SMDA corpus benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHON_VERSION: "3.11"
+      ARCHIVE_PATH: ${{ inputs['sample-archive-path'] || 'benchmarks/corpus/smda-samples.zip' }}
+      CORPUS_MANIFEST: ${{ inputs['corpus-manifest'] || '' }}
+      LIMIT: ${{ inputs.limit || '0' }}
+      PYPERF_PROFILE: ${{ inputs['pyperf-profile'] || 'ci' }}
+      THRESHOLD_PERCENT: ${{ inputs['threshold-percent'] || '5' }}
+      DIAGNOSTIC_LIMIT: ${{ inputs['diagnostic-limit'] || '1' }}
+      SMDA_SAMPLE_ARCHIVE_PASSWORD: ${{ secrets.SMDA_SAMPLE_ARCHIVE_PASSWORD }}
+
+    steps:
+      - name: Checkout PR head
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          lfs: true
+          persist-credentials: false
+
+      - name: Checkout workflow head
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs['head-ref'] || github.sha }}
+          path: head
+          lfs: true
+          persist-credentials: false
+
+      - name: Checkout base
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs['base-ref'] || 'master' }}
+          path: base
+          lfs: true
+          persist-credentials: false
+
+      - name: Select benchmark tooling
+        id: tools
+        run: |
+          set -euo pipefail
+          tools_dir="$GITHUB_WORKSPACE/base/benchmarks"
+          if [[ ! -f "$tools_dir/smda_perf_runner.py" ]]; then
+            tools_dir="$GITHUB_WORKSPACE/head/benchmarks"
+          fi
+          if [[ ! -f "$tools_dir/smda_perf_runner.py" ]]; then
+            echo "Cannot find SMDA benchmark tooling in base or head checkout" >&2
+            exit 2
+          fi
+          echo "dir=$tools_dir" >> "$GITHUB_OUTPUT"
+          echo "requirements=$tools_dir/requirements-performance.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            head/pyproject.toml
+            head/benchmarks/requirements-performance.txt
+            base/benchmarks/requirements-performance.txt
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./head
+          python -m pip install -r "${{ steps.tools.outputs.requirements }}"
+
+      - name: Prepare encrypted corpus
+        id: corpus
+        run: |
+          set -euo pipefail
+          archive="$GITHUB_WORKSPACE/head/$ARCHIVE_PATH"
+          corpus_dir="$RUNNER_TEMP/smda-corpus"
+          results_dir="$RUNNER_TEMP/smda-perf-results"
+          mkdir -p "$corpus_dir" "$results_dir"
+          echo "dir=$corpus_dir" >> "$GITHUB_OUTPUT"
+          echo "results=$results_dir" >> "$GITHUB_OUTPUT"
+          if [[ ! -f "$archive" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "<!-- smda-performance-gate -->"
+              echo "### SMDA Performance Gate"
+              echo
+              echo "Result: **SKIPPED**"
+              echo
+              echo "The encrypted benchmark archive was not found at \`$ARCHIVE_PATH\`. Add the Git LFS archive and the \`SMDA_SAMPLE_ARCHIVE_PASSWORD\` secret to enable the corpus-backed performance gate."
+            } > "$results_dir/comment.md"
+            exit 0
+          fi
+          if [[ -z "${SMDA_SAMPLE_ARCHIVE_PASSWORD:-}" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "<!-- smda-performance-gate -->"
+              echo "### SMDA Performance Gate"
+              echo
+              echo "Result: **SKIPPED**"
+              echo
+              echo "The benchmark archive is present, but \`SMDA_SAMPLE_ARCHIVE_PASSWORD\` is unavailable for this run. Fork PRs do not receive repository secrets."
+            } > "$results_dir/comment.md"
+            exit 0
+          fi
+          unzip -q -P "$SMDA_SAMPLE_ARCHIVE_PASSWORD" "$archive" -d "$corpus_dir"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run base/head pyperf benchmarks
+        id: benchmark
+        if: steps.corpus.outputs.available == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          tools_dir="${{ steps.tools.outputs.dir }}"
+          results_dir="${{ steps.corpus.outputs.results }}"
+          corpus_dir="${{ steps.corpus.outputs.dir }}"
+          manifest_args=()
+          if [[ -n "$CORPUS_MANIFEST" ]]; then
+            manifest_args=(--manifest "$corpus_dir/$CORPUS_MANIFEST")
+          fi
+          pyperf_args=()
+          case "$PYPERF_PROFILE" in
+            rigorous)
+              pyperf_args=(--rigorous)
+              ;;
+            fast)
+              pyperf_args=(--fast)
+              ;;
+            ci)
+              pyperf_args=(--processes 3 --warmups 1 --min-time 1.0)
+              ;;
+            *)
+              echo "Unknown pyperf profile: $PYPERF_PROFILE" >&2
+              exit 2
+              ;;
+          esac
+          python -m pyperf command --quiet "${pyperf_args[@]}" \
+            -o "$results_dir/base.pyperf.json" \
+            -- python "$tools_dir/smda_perf_runner.py" \
+              --repo "$GITHUB_WORKSPACE/base" \
+              --corpus-root "$corpus_dir" \
+              --output-dir "$results_dir/base-run" \
+              --limit "$LIMIT" \
+              "${manifest_args[@]}"
+          python -m pyperf command --quiet "${pyperf_args[@]}" \
+            -o "$results_dir/head.pyperf.json" \
+            -- python "$tools_dir/smda_perf_runner.py" \
+              --repo "$GITHUB_WORKSPACE/head" \
+              --corpus-root "$corpus_dir" \
+              --output-dir "$results_dir/head-run" \
+              --limit "$LIMIT" \
+              "${manifest_args[@]}"
+
+      - name: Compare benchmark results
+        id: compare
+        if: steps.corpus.outputs.available == 'true' && steps.benchmark.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          tools_dir="${{ steps.tools.outputs.dir }}"
+          results_dir="${{ steps.corpus.outputs.results }}"
+          python "$tools_dir/compare_perf_gate.py" \
+            --base-pyperf "$results_dir/base.pyperf.json" \
+            --head-pyperf "$results_dir/head.pyperf.json" \
+            --base-summary "$results_dir/base-run/summary.json" \
+            --head-summary "$results_dir/head-run/summary.json" \
+            --threshold-percent "$THRESHOLD_PERCENT" \
+            --output-json "$results_dir/comparison.json" \
+            --comment-md "$results_dir/comment.md"
+
+      - name: Write benchmark failure comment
+        if: steps.corpus.outputs.available == 'true' && steps.benchmark.outcome == 'failure'
+        run: |
+          results_dir="${{ steps.corpus.outputs.results }}"
+          {
+            echo "<!-- smda-performance-gate -->"
+            echo "### SMDA Performance Gate"
+            echo
+            echo "Result: **FAIL**"
+            echo
+            echo "The benchmark runner failed before a safe base/head comparison could be made. Inspect the uploaded artifacts and workflow logs for the failing command."
+          } > "$results_dir/comment.md"
+
+      - name: Capture failure diagnostics
+        if: steps.corpus.outputs.available == 'true' && (steps.benchmark.outcome == 'failure' || steps.compare.outcome == 'failure')
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          tools_dir="${{ steps.tools.outputs.dir }}"
+          results_dir="${{ steps.corpus.outputs.results }}"
+          corpus_dir="${{ steps.corpus.outputs.dir }}"
+          manifest_args=()
+          if [[ -n "$CORPUS_MANIFEST" ]]; then
+            manifest_args=(--manifest "$corpus_dir/$CORPUS_MANIFEST")
+          fi
+          python "$tools_dir/profile_diagnostics.py" \
+            --repo "$GITHUB_WORKSPACE/head" \
+            --corpus-root "$corpus_dir" \
+            --output-dir "$results_dir/profiles" \
+            --limit "$DIAGNOSTIC_LIMIT" \
+            "${manifest_args[@]}"
+          if [[ -f "$results_dir/profiles/diagnostics-summary.md" ]]; then
+            cat "$results_dir/profiles/diagnostics-summary.md" >> "$results_dir/comment.md"
+          fi
+
+      - name: Add summary
+        if: always()
+        run: |
+          results_dir="$RUNNER_TEMP/smda-perf-results"
+          if [[ -f "$results_dir/comment.md" ]]; then
+            cat "$results_dir/comment.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No SMDA performance summary was generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smda-performance-gate-${{ github.run_id }}
+          path: ${{ runner.temp }}/smda-perf-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Comment on PR
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          results_dir="$RUNNER_TEMP/smda-perf-results"
+          if [[ -f "$results_dir/comment.md" ]]; then
+            python "${{ steps.tools.outputs.dir }}/post_github_comment.py" \
+              --repo "$GITHUB_REPOSITORY" \
+              --issue-number "${{ github.event.pull_request.number }}" \
+              --body-file "$results_dir/comment.md"
+          fi
+
+      - name: Enforce performance gate
+        if: steps.benchmark.outcome == 'failure' || steps.compare.outcome == 'failure'
+        run: exit 1
