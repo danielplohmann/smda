@@ -28,6 +28,12 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
     def isSymbolProvider(self):
         return True
 
+    def isApiProvider(self):
+        return False
+
+    def getApi(self, to_addr, absolute_addr=None):
+        return ("", "")
+
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
 
@@ -58,8 +64,14 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
         temp_off = fh.tell()
         for modID in modules:
             fh.seek(modules[modID]["offset"])
-            if modID != int.from_bytes(fh.read(2), byteorder="little"):
-                print("ModID doesnt match" + str(modules[modID]["offset"]))
+            actual_mod_id = int.from_bytes(fh.read(2), byteorder="little")
+            if modID != actual_mod_id:
+                LOGGER.warning(
+                    "ModID mismatch at offset 0x%x: expected %d, got %d",
+                    modules[modID]["offset"],
+                    modID,
+                    actual_mod_id,
+                )
             len_name = int.from_bytes(fh.read(2), byteorder="little")
             modules[modID]["name"] = fh.read(len_name).decode()
             modules[modID]["functions"] = []

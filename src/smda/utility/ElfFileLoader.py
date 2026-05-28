@@ -22,8 +22,7 @@ def has_bogus_sections(elffile, base_addr=0):
     for section in elffile.sections:
         if section.virtual_address:
             max_virtual_address = max(max_virtual_address, section.size + section.virtual_address)
-    if (max_virtual_address - base_addr) > sys.maxsize:
-        return True
+    return (max_virtual_address - base_addr) > sys.maxsize
 
 
 class ElfFileLoader:
@@ -258,6 +257,8 @@ class ElfFileLoader:
     def getCodeAreas(binary):
         # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary)
+        if elffile is None:
+            return []
         code_areas = []
         for section in elffile.sections:
             section_flags = 0

@@ -23,6 +23,8 @@ class V0Demangler:
         self.suffix = ""
         self.disp = ""
 
+        if "R" not in inpstr:
+            raise UnableTov0Demangle(inpstr)
         self.inpstr = inpstr[inpstr.index("R") + 1 :]
         self.sanity_check(self.inpstr)
 
@@ -735,17 +737,24 @@ class Printer:
             self.recursion -= 1
 
     def print_path_maybe_open_generics(self):
-        if self.eat("B"):
-            return self.backref_printer().print_path_maybe_open_generics()
+        self.check_recursion_limit()
+        try:
+            if self.eat("B"):
+                prin = self.backref_printer()
+                result = prin.print_path_maybe_open_generics()
+                self.out = prin.out
+                return result
 
-        elif self.eat("I"):
-            self.print_path(False)
-            self.out += "<"
-            self.print_sep_list("print_generic_arg", ", ")
-            return True
-        else:
-            self.print_path(False)
-            return False
+            elif self.eat("I"):
+                self.print_path(False)
+                self.out += "<"
+                self.print_sep_list("print_generic_arg", ", ")
+                return True
+            else:
+                self.print_path(False)
+                return False
+        finally:
+            self.recursion -= 1
 
     def print_dyn_trait(self):
         open = self.print_path_maybe_open_generics()
@@ -828,5 +837,8 @@ class Printer:
 
         char_val = "0x"
         char_val += hex_val
-        c = chr(int(char_val, 16))
+        try:
+            c = chr(int(char_val, 16))
+        except (OverflowError, ValueError):
+            self.invalid()
         self.out += repr(c)

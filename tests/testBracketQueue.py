@@ -6,6 +6,7 @@ import unittest
 from smda.common.BinaryInfo import BinaryInfo
 from smda.intel.FunctionCandidate import FunctionCandidate
 from smda.utility.BracketQueue import BracketQueue
+from smda.utility.PriorityQueue import PriorityQueue
 
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
@@ -215,6 +216,19 @@ class BracketQueueTestSuite(unittest.TestCase):
         queue.ensure_order()
         for _index, candidate in enumerate(queue):
             print(candidate)
+
+    def test_priority_queue_uses_public_heap_ordering(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        low = FunctionCandidate(binary_info, 0x20)
+        high = FunctionCandidate(binary_info, 0x10)
+        high.addCallRef(0x100)
+
+        queue = PriorityQueue([low, high])
+
+        self.assertIs(next(queue), high)
+        self.assertIs(next(queue), low)
 
 
 if __name__ == "__main__":

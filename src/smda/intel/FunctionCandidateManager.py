@@ -409,9 +409,9 @@ class FunctionCandidateManager:
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
             function_pointer = struct.unpack("i", addr_block)[0]
             # we need to calculate RIP + offset + 7 (48 ff 25 ** ** ** **)
-            if self.disassembly.getRawBytes(offset, 2) == "\xff\x25":
+            if self.disassembly.getRawBytes(offset, 2) == b"\xff\x25":
                 function_pointer += offset + 7
-            elif self.disassembly.getRawBytes(offset, 2) == "\xff\x15":
+            elif self.disassembly.getRawBytes(offset, 2) == b"\xff\x15":
                 function_pointer += offset + 6
             else:
                 raise Exception("resolvePointerReference: should only be used on call/jmp * ptr")

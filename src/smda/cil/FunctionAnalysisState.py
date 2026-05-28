@@ -133,7 +133,6 @@ class FunctionAnalysisState:
                     and i != len(self.instructions) - 1
                     and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
                 ):
-                    break
                     # if we can reach a colliding address from here, the block is broken and should end.
                     reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
                     next_addr = current[0] + current[1]
@@ -141,7 +140,7 @@ class FunctionAnalysisState:
                     if reachable_collisions and is_next_addr:
                         # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
                         self.removeCodeRef(current[0], next_addr)
-                        break
+                    break
                 if (
                     i != len(self.instructions) - 1
                     and self.instructions[i + 1][0] in self.code_refs_to

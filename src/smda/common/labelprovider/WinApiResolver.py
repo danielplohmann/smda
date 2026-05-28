@@ -91,7 +91,7 @@ class WinApiResolver(AbstractLabelProvider):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""
         return True
 
-    def getApi(self, to_addr, absolute_addr):
+    def getApi(self, to_addr, absolute_addr=None):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return (None, None)"""
         # if we work on a dump, use ApiScout method:
         if self._is_buffer:
@@ -102,3 +102,12 @@ class WinApiResolver(AbstractLabelProvider):
         # otherwise take import table info from LIEF
         else:
             return self._api_map["lief"].get(to_addr, (None, None))
+
+    def isSymbolProvider(self):
+        return False
+
+    def getSymbol(self, address):
+        return ""
+
+    def getFunctionSymbols(self):
+        return {}

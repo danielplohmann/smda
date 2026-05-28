@@ -142,19 +142,21 @@ class JumpTableAnalyzer:
         jumptable_size = jumptable_size if jumptable_size is not None else 0xFF
         jumptable_addresses = []
         bitness = self.disassembly.binary_info.bitness
-        entry_size = 4 if bitness == 32 else 8
+        if bitness == 32:
+            entry_size = 4
+            entry_format = "I"
+        elif bitness == 64:
+            entry_size = 8
+            entry_format = "Q"
+        else:
+            LOGGER.warning("Unsupported %s-bit jump table analysis", bitness)
+            return jumptable_addresses
         if self.disassembly.isAddrWithinMemoryImage(jumptable_address):
             for i in range(jumptable_size):
-                if bitness == 32:
-                    table_entry = struct.unpack(
-                        "I",
-                        self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
-                    )[0]
-                elif bitness == 64:
-                    table_entry = struct.unpack(
-                        "Q",
-                        self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
-                    )[0]
+                table_entry = struct.unpack(
+                    entry_format,
+                    self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
+                )[0]
                 if not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
                 state.addDataRef(

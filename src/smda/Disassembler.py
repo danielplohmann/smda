@@ -26,6 +26,7 @@ class Disassembler:
             config = SmdaConfig()
         self.config = config
         self.disassembler = None
+        self._explicit_backend = bool(backend)
         if backend == "intel":
             self.disassembler = IntelDisassembler(self.config)
         elif backend == "cil":
@@ -136,8 +137,8 @@ class Disassembler:
                 self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
-                string_mode = "go" if is_go_binary else None
+                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                string_mode = "go" if go_pclntab_offset is not None else None
                 self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = binary_info.binary
@@ -159,8 +160,8 @@ class Disassembler:
             self.initDisassembler(binary_info.architecture)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
-                string_mode = "go" if is_go_binary else None
+                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                string_mode = "go" if go_pclntab_offset is not None else None
                 self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
@@ -190,7 +191,7 @@ class Disassembler:
         # Auto-detect DEX when the caller did not explicitly override architecture.
         # disassembleUnmappedBuffer / disassembleFile already use FileLoader for detection;
         # this path bypasses it, so we check the magic bytes manually here.
-        if architecture == "intel" and DexFileLoader.isCompatible(file_content):
+        if not self._explicit_backend and architecture == "intel" and DexFileLoader.isCompatible(file_content):
             architecture = "dalvik"
             if bitness is None:
                 bitness = DexFileLoader.getBitness(file_content)
@@ -209,8 +210,8 @@ class Disassembler:
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                is_go_binary = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
-                string_mode = "go" if is_go_binary else None
+                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                string_mode = "go" if go_pclntab_offset is not None else None
                 self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content

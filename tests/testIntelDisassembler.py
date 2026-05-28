@@ -1,6 +1,12 @@
 import unittest
+from types import SimpleNamespace
 
+from smda.common.BinaryInfo import BinaryInfo
+from smda.intel.FunctionCandidate import FunctionCandidate
+from smda.intel.FunctionCandidateManager import FunctionCandidateManager
 from smda.intel.IntelDisassembler import IntelDisassembler
+from smda.intel.MnemonicTfIdf import MnemonicTfIdf
+from smda.SmdaConfig import SmdaConfig
 
 
 class DummyProvider:
@@ -66,6 +72,39 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertEqual(disassembler.resolveApi(0x401000, 0x500000), ("kernel32.dll", "CreateFileA"))
         self.assertEqual(disassembler.resolveSymbol(0x401100), "handler")
         self.assertEqual(set(disassembler.getSymbolCandidates()), {0x401000, 0x401100})
+
+    def test_function_candidate_alignment_and_empty_tfidf_are_safe(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+
+        candidate = FunctionCandidate(binary_info, 0x10)
+
+        self.assertEqual(candidate.alignment, 16)
+        self.assertIsNone(candidate.getTfIdf())
+
+    def test_mnemonic_tfidf_empty_counts_returns_zero(self):
+        self.assertEqual(MnemonicTfIdf().tfidf({}), 0.0)
+
+    def test_pointer_reference_uses_byte_prefixes(self):
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.bitness = 64
+        manager.disassembly = SimpleNamespace(
+            binary_info=SimpleNamespace(base_addr=0x1000),
+            getRawBytes=lambda offset, size: b"\xff\x25" if size == 2 else (1).to_bytes(4, "little", signed=True),
+        )
+
+        self.assertEqual(manager.resolvePointerReference(0x20), 0x1028)
+
+    def test_accepts_missing_timeout_callback(self):
+        binary_info = BinaryInfo(b"\x90\xc3")
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertFalse(result.analysis_timeout)
 
 
 if __name__ == "__main__":

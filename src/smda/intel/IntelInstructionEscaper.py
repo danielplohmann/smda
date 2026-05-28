@@ -2047,7 +2047,6 @@ class IntelInstructionEscaper:
                 mnemonic,
             )
             return "U"
-        return mnemonic
 
     @staticmethod
     def escapeField(op_field, escape_registers=True, escape_pointers=True, escape_constants=True):

@@ -438,6 +438,8 @@ class MnemonicTfIdf:
         return self.tfidf(term_counts)
 
     def tfidf(self, term_counts):
+        if not term_counts:
+            return 0.0
         score = 0
         sum_term_counts = sum(term_counts.values())
         max_count = max(term_counts.values())

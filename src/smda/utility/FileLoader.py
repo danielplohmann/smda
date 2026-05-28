@@ -16,12 +16,13 @@ class FileLoader:
     _bitness = 0
     _abi = ""
     _architecture = ""
-    _code_areas = []
+    _code_areas = None
     file_loaders = [PeFileLoader, ElfFileLoader, MachoFileLoader, DelphiKbFileLoader, DexFileLoader]
 
     def __init__(self, file_path, load_file=True, map_file=False):
         self._file_path = file_path
         self._map_file = map_file
+        self._code_areas = []
         if load_file:
             self._loadFile()
 

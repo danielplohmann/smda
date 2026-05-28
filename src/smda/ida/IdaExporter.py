@@ -1,10 +1,13 @@
 import datetime
+import logging
 
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.DisassemblyResult import DisassemblyResult
 
 from .IdaInterface import IdaInterface
+
+LOGGER = logging.getLogger(__name__)
 
 
 class IdaExporter:
@@ -30,7 +33,7 @@ class IdaExporter:
         else:
             # record error and emit placeholder instruction
             bytes_as_hex = "".join([f"{c:02x}" for c in bytearray(instruction_bytes)])
-            print(f"missing capstone disassembly output at 0x{offset:x} ({bytes_as_hex})")
+            LOGGER.warning("missing capstone disassembly output at 0x%x (%s)", offset, bytes_as_hex)
             self.disassembly.errors[offset] = {
                 "type": "capstone disassembly failure",
                 "instruction_bytes": bytes_as_hex,

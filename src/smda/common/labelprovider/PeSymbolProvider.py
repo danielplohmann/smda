@@ -24,6 +24,12 @@ class PeSymbolProvider(AbstractLabelProvider):
     def isSymbolProvider(self):
         return True
 
+    def isApiProvider(self):
+        return False
+
+    def getApi(self, to_addr, absolute_addr=None):
+        return ("", "")
+
     def _parseOep(self, lief_result):
         if lief_result:
             self._func_symbols[lief_result.entrypoint] = "original_entry_point"
@@ -61,7 +67,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                 code_base_address = lief_binary.imagebase + section.virtual_address
                 break
         if code_base_address is None:
-            return
+            return function_symbols
         for symbol in lief_binary.symbols:
             if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
                 function_name = ""

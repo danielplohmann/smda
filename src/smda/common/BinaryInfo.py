@@ -17,7 +17,7 @@ class BinaryInfo:
     raw_data = b""
     binary_size = 0
     bitness = None
-    code_areas = []
+    code_areas = None
     component = ""
     family = ""
     file_path = ""
@@ -36,6 +36,7 @@ class BinaryInfo:
         self.binary = binary
         self.raw_data = binary
         self.binary_size = len(binary)
+        self.code_areas = []
         self._lief_binary = None
         self.abi = ""
 

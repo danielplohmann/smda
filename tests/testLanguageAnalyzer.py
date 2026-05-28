@@ -35,6 +35,18 @@ class TestLanguageAnalyzer(unittest.TestCase):
         self.assertEqual(len({call[0] for call in findall_calls}), 2)
         self.assertTrue(all(call[1] == binary for call in findall_calls))
 
+    def test_uses_bytes_for_pe_and_language_markers(self):
+        binary = bytearray(b"MZ" + b"\x00" * 0x100)
+        binary[0x3C:0x40] = (0x80).to_bytes(4, "little")
+        binary[0x80:0x82] = b"PE"
+        binary.extend(b"MSVBVM60.DLL\x00mscorelib.dll\x00Borland\\locales\x00")
+        analyzer = LanguageAnalyzer(_DummyDisassembly(bytes(binary)))
+
+        self.assertTrue(analyzer.validPEHeader())
+        self.assertEqual(analyzer.getVisualBasicScore(), 0.5)
+        self.assertGreaterEqual(analyzer.getDotNetScore(), 0.35)
+        self.assertEqual(analyzer.getDelphiScore(), 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

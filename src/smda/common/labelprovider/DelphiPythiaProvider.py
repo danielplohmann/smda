@@ -476,7 +476,7 @@ class DelphiPythiaProvider(AbstractLabelProvider):
     def isApiProvider(self):
         return False
 
-    def getApi(self, absolute_addr):
+    def getApi(self, to_addr, absolute_addr=None):
         return None
 
     def getSymbol(self, address):
