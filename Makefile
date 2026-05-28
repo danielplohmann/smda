@@ -23,6 +23,8 @@ test:
 	$(PYTHON) -m pytest tests/test*
 test-coverage:
 	$(PYTHON) -m pytest --cov=smda --cov-report=html:coverage-html tests/
+benchmark:
+	$(PYTHON) .github/workflows/scripts/run_perf_check.py --output benchmark_results.json
 clean:
 	find . | grep -E "(__pycache__|\.pyc|\.pyo$\)" | xargs rm -rf
 	rm -rf .coverage

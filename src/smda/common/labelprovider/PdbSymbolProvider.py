@@ -48,6 +48,7 @@ class PdbSymbolProvider(AbstractLabelProvider):
             self._func_symbols[self._base_addr + oep_rva] = "original_entry_point"
 
     def update(self, binary_info):
+        self._func_symbols = {}
         self._base_addr = binary_info.base_addr
         if not binary_info.file_path:
             return

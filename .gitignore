@@ -22,3 +22,6 @@ coverage-html/
 # Tool caches
 .ruff_cache/
 .vscode
+
+# Benchmark results
+*results.json
