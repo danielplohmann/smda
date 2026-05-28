@@ -81,42 +81,16 @@ jobs:
       - name: Run Malpedia Benchmark - Base Branch
         if: steps.check_password.outputs.available == 'true'
         run: |
-          mkdir -p finished-reports
-
-          mkdir -p runtime_measurements/base_0
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia
-          mv finished-reports/*.smda runtime_measurements/base_0/
-          rm -rf finished-reports/*
-
-          mkdir -p runtime_measurements/base_1
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia
-          mv finished-reports/*.smda runtime_measurements/base_1/
-          rm -rf finished-reports/*
-
-          mkdir -p runtime_measurements/base_2
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia
-          mv finished-reports/*.smda runtime_measurements/base_2/
-          rm -rf finished-reports/*
+          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/base_0
+          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/base_1
+          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/base_2
 
       - name: Run Malpedia Benchmark - PR Branch
         if: steps.check_password.outputs.available == 'true'
         run: |
-          mkdir -p finished-reports
-
-          mkdir -p runtime_measurements/pr_0
-          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia
-          mv finished-reports/*.smda runtime_measurements/pr_0/
-          rm -rf finished-reports/*
-
-          mkdir -p runtime_measurements/pr_1
-          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia
-          mv finished-reports/*.smda runtime_measurements/pr_1/
-          rm -rf finished-reports/*
-
-          mkdir -p runtime_measurements/pr_2
-          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia
-          mv finished-reports/*.smda runtime_measurements/pr_2/
-          rm -rf finished-reports/*
+          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/pr_0
+          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/pr_1
+          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/pr_2
 
       - name: Evaluate Malpedia Runtime
         if: steps.check_password.outputs.available == 'true'
