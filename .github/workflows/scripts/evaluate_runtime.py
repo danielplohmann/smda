@@ -484,7 +484,7 @@ def compute_paired_stats(paired, noise_floor_pct=0.0):
 
 
 def side_summary(aggregated):
-    """Per-side aggregate timing/throughput summary (uses min-of-runs times)."""
+    """Per-side aggregate timing/throughput summary (uses each file's best run)."""
     times = [v["time_min"] for v in aggregated.values()]
     total_funcs = sum(v["function_count"] for v in aggregated.values())
     total_time = sum(times)
@@ -545,25 +545,30 @@ def generate_markdown_report(model, output_path):
         f"| Correctness | **{corr_icon}** — {len(corr['regressions'])} / {corr['n_common']} common file(s) differ |",
         f"| Determinism | **{det_icon}** — base {det['base']['runs']} run(s), PR {det['pr']['runs']} run(s) |",
         f"| Verdict | **{paired['verdict']}** |",
-        f"| Median speedup | {paired['median_speedup']:+.2f}% "
+        f"| Median paired speedup | {paired['median_speedup']:+.2f}% "
         f"(95% CI [{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]) |",
-        f"| Cross-runner noise floor | ±{paired.get('noise_floor_pct', 0.0):.1f}% |",
+        f"| Timing noise band | ±{paired.get('noise_floor_pct', 0.0):.1f}% |",
         "",
     ]
 
     lines += [
-        f"#### Performance Context (min of {model['runs']['base']}/{model['runs']['pr']} runs)",
-        "| Side | Files | Functions | Median time (s) | Total time (s) | Throughput (func/s) |",
+        f"#### Per-side Timing Context (best of {model['runs']['base']}/{model['runs']['pr']} runs per file)",
+        "| Side | Files | Functions | Median best time/file (s) | Sum of best times (s) | Throughput estimate (func/s) |",
         "| --- | --- | --- | --- | --- | --- |",
         f"| base | {base_s['files']} | {base_s['total_functions']} | {base_s['median_time']:.4f} | "
         f"{base_s['total_time']:.2f} | ~{base_s['functions_per_sec']:.0f} |",
         f"| pr | {pr_s['files']} | {pr_s['total_functions']} | {pr_s['median_time']:.4f} | "
         f"{pr_s['total_time']:.2f} | ~{pr_s['functions_per_sec']:.0f} |",
         "",
+        "> These context rows sum each file's best observed time across repeated runs; "
+        "they are normalized comparison estimates, not single-run CI wall-clock times.",
+        "",
         "**Paired per-file timing (positive speedup = PR faster):**",
         "| Statistic | Value |",
         "| --- | --- |",
         f"| Files compared | {paired['n']} |",
+        f"| Median paired speedup | {paired['median_speedup']:+.2f}% "
+        f"(95% CI [{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]) |",
         f"| Mean speedup | {paired['mean_speedup']:+.2f}% "
         f"(95% CI [{paired['ci_mean'][0]:+.2f}%, {paired['ci_mean'][1]:+.2f}%]) |",
         f"| Std dev / IQR | {paired['stdev_speedup']:.2f}% / {paired['iqr_speedup']:.2f}% |",
@@ -571,7 +576,7 @@ def generate_markdown_report(model, output_path):
         "",
         "> ℹ️ base and PR are timed on **separate** CI runners, so a small median "
         "difference can reflect per-runner hardware variance rather than code. "
-        "Differences within the noise floor above are reported as inconclusive; "
+        "Differences within the timing noise band above are reported as inconclusive; "
         "correctness and determinism are unaffected (they are not timing-based).",
         "",
         "#### Determinism (self-check across repeated runs)",
@@ -587,7 +592,10 @@ def generate_markdown_report(model, output_path):
     if pairwise:
         lines += [
             "<details>",
-            "<summary>Pairwise run matrix</summary>",
+            "<summary>Pairwise run matrix (individual run medians, diagnostic)</summary>",
+            "",
+            "Diagnostic only: each row compares one raw PR run against one raw base run. "
+            "The headline verdict above uses paired per-file best-of-runs timings.",
             "",
             "| Comparison Run | PR Files | Base Files | Common | Function Set Matches | Med PR (s) | Med Base (s) | Med Diff (s) | Speedup % |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -701,20 +709,20 @@ def generate_html_report(model, output_path):
     html += card("Correctness", '<span class="pass">PASS</span>' if corr_ok else '<span class="fail">FAIL</span>')
     html += card("Common Files", corr["n_common"])
     html += card("Regressions", len(corr["regressions"]))
-    html += card("Median Speedup", f"{paired['median_speedup']:+.2f}%")
-    html += card("Median Speedup 95% CI", f"[{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]")
+    html += card("Median Paired Speedup", f"{paired['median_speedup']:+.2f}%")
+    html += card("Median Paired Speedup 95% CI", f"[{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]")
     html += card("Wilcoxon p", p_text)
-    html += card("Cross-runner noise floor", f"±{paired.get('noise_floor_pct', 0.0):.1f}%")
+    html += card("Timing Noise Band", f"±{paired.get('noise_floor_pct', 0.0):.1f}%")
     html += card("Verdict", paired["verdict"])
     html += "        </div>\n    </div>\n"
 
-    html += '    <div class="summary">\n        <h3>Per-side Summary (min-of-runs)</h3>\n        <div class="stats">\n'
+    html += '    <div class="summary">\n        <h3>Per-side Timing Context (best run per file)</h3>\n        <div class="stats">\n'
     html += card("base Files", base_s["files"])
     html += card("pr Files", pr_s["files"])
-    html += card("Med base Time", f"{base_s['median_time']:.4f}s")
-    html += card("Med pr Time", f"{pr_s['median_time']:.4f}s")
-    html += card("base Func/s", f"~{base_s['functions_per_sec']:.0f}")
-    html += card("pr Func/s", f"~{pr_s['functions_per_sec']:.0f}")
+    html += card("Median base best time/file", f"{base_s['median_time']:.4f}s")
+    html += card("Median pr best time/file", f"{pr_s['median_time']:.4f}s")
+    html += card("base Func/s estimate", f"~{base_s['functions_per_sec']:.0f}")
+    html += card("pr Func/s estimate", f"~{pr_s['functions_per_sec']:.0f}")
     html += "        </div>\n    </div>\n"
 
     html += '    <div class="summary">\n        <h3>Determinism</h3>\n        <div class="stats">\n'
