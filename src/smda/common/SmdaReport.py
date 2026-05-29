@@ -58,6 +58,11 @@ class SmdaReport:
     capstone = None
 
     def __init__(self, disassembly=None, config=None, buffer=None):
+        # caches owned by SmdaReport but populated lazily by StringExtractor; declared here so
+        # their lifecycle is explicit and every construction path (incl. fromDict via cls(None))
+        # starts with empty caches rather than relying on monkey-patched attributes.
+        self._string_cache = {}
+        self._derefs_cache = {}
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.abi = disassembly.binary_info.abi

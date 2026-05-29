@@ -39,11 +39,9 @@ def derefs(smda_report, p):
 
     based on the implementation in viv/insn.py
     """
-    if not hasattr(smda_report, "_derefs_cache"):
-        smda_report._derefs_cache = {}
-
-    if p in smda_report._derefs_cache:
-        yield from smda_report._derefs_cache[p]
+    cache = smda_report._derefs_cache
+    if p in cache:
+        yield from cache[p]
         return
 
     chain = []
@@ -70,7 +68,7 @@ def derefs(smda_report, p):
 
         current = val
 
-    smda_report._derefs_cache[p] = chain
+    cache[p] = chain
     yield from chain
 
 
@@ -139,36 +137,33 @@ def read_string(smda_report, offset, maxlen=None):
     # TODO handle Go/Rust
     if smda_report.buffer is None:
         return None
-    if not hasattr(smda_report, "_string_cache"):
-        smda_report._string_cache = {}
-    elif len(smda_report._string_cache) > 10000:
-        smda_report._string_cache.clear()
+    cache = smda_report._string_cache
     cache_key = (offset, maxlen)
-    if cache_key in smda_report._string_cache:
-        return smda_report._string_cache[cache_key]
+    if cache_key in cache:
+        return cache[cache_key]
 
     rva = offset - smda_report.base_addr
     if not 0 <= rva < len(smda_report.buffer):
-        smda_report._string_cache[cache_key] = None
-        return None
-    first_byte = smda_report.buffer[rva]
-    if not _IS_PRINTABLE_CHAR_CODE[first_byte]:
-        smda_report._string_cache[cache_key] = None
-        return None
+        res = None
+    else:
+        first_byte = smda_report.buffer[rva]
+        if not _IS_PRINTABLE_CHAR_CODE[first_byte]:
+            res = None
+        else:
+            alen = detect_ascii_len(smda_report, offset, maxlen)
+            ulen = detect_unicode_len(smda_report, offset, maxlen) if alen < 1 else 0
+            if alen >= 1:
+                res = (read_bytes(smda_report, offset, alen).decode("utf-8"), "ascii")
+            elif ulen >= 2:
+                res = (read_bytes(smda_report, offset, ulen).decode("utf-16"), "unicode")
+            else:
+                res = None
 
-    alen = detect_ascii_len(smda_report, offset, maxlen)
-    if alen >= 1:
-        res = (read_bytes(smda_report, offset, alen).decode("utf-8"), "ascii")
-        smda_report._string_cache[cache_key] = res
-        return res
-    ulen = detect_unicode_len(smda_report, offset, maxlen)
-    if ulen >= 2:
-        res = (read_bytes(smda_report, offset, ulen).decode("utf-16"), "unicode")
-        smda_report._string_cache[cache_key] = res
-        return res
-
-    smda_report._string_cache[cache_key] = None
-    return None
+    # bound cache growth; only checked on the miss/write path, not on hits
+    if len(cache) > 10000:
+        cache.clear()
+    cache[cache_key] = res
+    return res
 
 
 def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:

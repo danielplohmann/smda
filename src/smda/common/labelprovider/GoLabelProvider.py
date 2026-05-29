@@ -112,7 +112,11 @@ class GoSymbolProvider(AbstractLabelProvider):
     def _readUtf8(self, buffer):
         null_byte_index = buffer.find(b"\x00")
         if null_byte_index == -1:
-            return buffer.decode("utf-8", errors="replace").replace("\u00b7", ":")
+            # No terminator \u2192 truncated/corrupt name table; treat the name as absent instead of
+            # decoding the rest of the binary into a single (potentially multi-MB) symbol string.
+            return ""
+        # errors="replace" is intentional: a single bad byte should not abort parsing of the
+        # entire symbol table (the old hex-decode path raised and lost all symbols for the binary).
         return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ":")
 
     def _parse_pclntab(self, pclntab_offset, binary):
