@@ -25,10 +25,6 @@ def get_dword(buffer, start):
     return _get_binary_data(buffer, start, 4)
 
 
-def get_qword(buffer, start):
-    return _get_binary_data(buffer, start, 8)
-
-
 def _get_binary_data(buffer, start, length):
     if length not in _unsigned_unpack_formats:
         raise RuntimeError("Unsupported data length")
@@ -71,20 +67,9 @@ class NativeCodeIdentifier:
         elif file_characteristics == 0x20B:
             field_offset = 0xF8
         image_dir_com_descriptor_offset = pe_offset + field_offset
-        # only .NET binaries will feature a COM dscription table in the data directory
+        # only .NET binaries will feature a COM descriptor table in the data directory
         com_descriptor_offset = get_dword(content, image_dir_com_descriptor_offset)
         return bool(field_offset > 0 and len(content) - 8 > com_descriptor_offset > 0)
-
-    def _identifyDelphi(self, content):
-        # check PE header for typical sections
-        if b"CODE" in content[:0x400] and b"DATA" in content[:0x400]:
-            return True
-        # check CODE for typical Delphi class names
-        return bool(b"\x07TObject" in content[:8192] or b"\nWideString" in content[:8192])
-
-    def _identifyGo(self, content):
-        # Go binaries should always have a build ID in their beginning
-        return b"Go build ID:" in content[:5120]
 
     def _identifyPython(self, content):
         return bool(re.search(rb"python(2|3)\d*\.dll", content))
@@ -96,18 +81,11 @@ class NativeCodeIdentifier:
         content = ""
         with open(filepath, "rb") as fin:
             content = fin.read()
-        ### We want to process both Delphi and Go for this, so ensure they are not excluded.
-        # identify Delphi
-        # is_delphi = self._identifyDelphi(content)
-        is_delphi = False
-        # identify Go
-        # is_go = self._identifyGo(content)
-        is_go = False
-        # identify .NET
+        # Keep Delphi and Go in the benchmark scope; exclude formats handled by
+        # other SMDA backends or wrappers.
         is_dotnet = self._identifyDotnet(content)
-        # identify PyInstaller
         is_python = self._identifyPython(content)
-        return not (is_delphi or is_go or is_dotnet or is_python)
+        return not (is_dotnet or is_python)
 
 
 def parseBaseAddrFromArgs(filename):
@@ -265,11 +243,9 @@ if __name__ == "__main__":
                 "filename": filename,
                 "finished_reports": finished_reports,
                 "filepath": filepath,
-                "malpedia_path": malpedia_path,
                 "output_dir": output_dir,
             }
             input_queue.append(input_element)
-    results = []
     # Use Pooling for parallel processing. A fresh Disassembler is created per
     # file (see work()), so multi-process workers are safe and order-independent.
     # Default to all cores (capped) since disassembly is CPU-bound; allow an
@@ -277,6 +253,6 @@ if __name__ == "__main__":
     workers = int(os.environ.get("SMDA_BENCH_WORKERS", "0")) or (cpu_count() or 1)
     workers = max(1, min(workers, 8))
     with Pool(workers) as pool:
-        for result in tqdm.tqdm(pool.imap_unordered(work, input_queue), total=len(input_queue)):
-            results.append(result)
+        for _ in tqdm.tqdm(pool.imap_unordered(work, input_queue), total=len(input_queue)):
+            pass
     print("DONE, shutting down")

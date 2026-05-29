@@ -41,16 +41,6 @@ CACHE_PATH = RUNTIME_PATH / "cache"
 SCHEMA_VERSION = 2
 
 
-# Version name mapping - rename pr_* and base_* for stability
-def get_version_name(folder_name):
-    """Map folder names to stable version identifiers."""
-    if folder_name.startswith("pr_"):
-        return "pr"
-    elif folder_name.startswith("base_"):
-        return "base"
-    return folder_name
-
-
 def compute_file_hash(filepath):
     """Compute SHA256 hash of a file."""
     sha256 = hashlib.sha256()
@@ -298,6 +288,46 @@ def build_paired(base_agg, pr_agg):
     }
 
 
+def build_pairwise_matrix(base_caches, pr_caches):
+    """Compare every PR run against every base run for reviewer-visible context.
+
+    This does not drive the gate. It shows whether the headline min-of-runs
+    result is representative across the individual run combinations.
+    """
+    rows = []
+    for pr_name in sorted(pr_caches):
+        pr_reports = pr_caches[pr_name]
+        for base_name in sorted(base_caches):
+            base_reports = base_caches[base_name]
+            common = sorted(set(pr_reports) & set(base_reports))
+            pr_times = [float(pr_reports[f].get("execution_time", 0) or 0) for f in common]
+            base_times = [float(base_reports[f].get("execution_time", 0) or 0) for f in common]
+            function_set_matches = sum(
+                set(pr_reports[f].get("block_counts", {})) == set(base_reports[f].get("block_counts", {}))
+                for f in common
+            )
+            median_pr = statistics.median(pr_times) if pr_times else 0.0
+            median_base = statistics.median(base_times) if base_times else 0.0
+            median_diff = median_pr - median_base
+            speedup_pct = ((median_base - median_pr) / median_base * 100.0) if median_base > 0 else 0.0
+            rows.append(
+                {
+                    "comparison": f"{pr_name} vs {base_name}",
+                    "pr_files": len(pr_reports),
+                    "base_files": len(base_reports),
+                    "common_files": len(common),
+                    "function_set_matches": function_set_matches,
+                    "median_pr_time": median_pr,
+                    "median_base_time": median_base,
+                    "median_diff": median_diff,
+                    "speedup_pct": speedup_pct,
+                    "only_in_pr": len(set(pr_reports) - set(base_reports)),
+                    "only_in_base": len(set(base_reports) - set(pr_reports)),
+                }
+            )
+    return rows
+
+
 def bootstrap_ci(values, statistic, n_resamples=10000, confidence=0.95, seed=12345):
     """Percentile bootstrap CI for ``statistic`` over ``values``.
 
@@ -488,6 +518,7 @@ def generate_markdown_report(model, output_path):
     det = model["determinism"]
     base_s = perf["base_summary"]
     pr_s = perf["pr_summary"]
+    pairwise = perf.get("pairwise_runs", [])
     wil = paired["wilcoxon"]
 
     lines = [
@@ -506,32 +537,37 @@ def generate_markdown_report(model, output_path):
         ]
 
     corr_icon = "✅ PASS" if corr["pass"] else "❌ FAIL"
+    det_icon = "✅ PASS" if det["base"]["is_deterministic"] and det["pr"]["is_deterministic"] else "❌ FAIL"
     lines += [
-        "#### Correctness",
-        f"**{corr_icon}** — {len(corr['regressions'])} of {corr['n_common']} common file(s) "
-        "differ in function-address set between base and PR.",
+        "#### Summary",
+        "| Metric | Result |",
+        "| --- | --- |",
+        f"| Correctness | **{corr_icon}** — {len(corr['regressions'])} / {corr['n_common']} common file(s) differ |",
+        f"| Determinism | **{det_icon}** — base {det['base']['runs']} run(s), PR {det['pr']['runs']} run(s) |",
+        f"| Verdict | **{paired['verdict']}** |",
+        f"| Median speedup | {paired['median_speedup']:+.2f}% "
+        f"(95% CI [{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]) |",
+        f"| Cross-runner noise floor | ±{paired.get('noise_floor_pct', 0.0):.1f}% |",
         "",
     ]
 
     lines += [
-        f"#### Performance (paired per file, min of {model['runs']['base']}/{model['runs']['pr']} runs)",
-        "| Side | Files | Median time (s) | Throughput (func/s) |",
-        "| --- | --- | --- | --- |",
-        f"| base | {base_s['files']} | {base_s['median_time']:.4f} | ~{base_s['functions_per_sec']:.0f} |",
-        f"| pr | {pr_s['files']} | {pr_s['median_time']:.4f} | ~{pr_s['functions_per_sec']:.0f} |",
+        f"#### Performance Context (min of {model['runs']['base']}/{model['runs']['pr']} runs)",
+        "| Side | Files | Functions | Median time (s) | Total time (s) | Throughput (func/s) |",
+        "| --- | --- | --- | --- | --- | --- |",
+        f"| base | {base_s['files']} | {base_s['total_functions']} | {base_s['median_time']:.4f} | "
+        f"{base_s['total_time']:.2f} | ~{base_s['functions_per_sec']:.0f} |",
+        f"| pr | {pr_s['files']} | {pr_s['total_functions']} | {pr_s['median_time']:.4f} | "
+        f"{pr_s['total_time']:.2f} | ~{pr_s['functions_per_sec']:.0f} |",
         "",
-        "**Paired per-file speedup (positive = PR faster):**",
+        "**Paired per-file timing (positive speedup = PR faster):**",
         "| Statistic | Value |",
         "| --- | --- |",
         f"| Files compared | {paired['n']} |",
-        f"| Median speedup | {paired['median_speedup']:+.2f}% "
-        f"(95% CI [{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]) |",
         f"| Mean speedup | {paired['mean_speedup']:+.2f}% "
         f"(95% CI [{paired['ci_mean'][0]:+.2f}%, {paired['ci_mean'][1]:+.2f}%]) |",
         f"| Std dev / IQR | {paired['stdev_speedup']:.2f}% / {paired['iqr_speedup']:.2f}% |",
         f"| Wilcoxon signed-rank p | {_fmt_p(wil)} |",
-        f"| Cross-runner noise floor | ±{paired.get('noise_floor_pct', 0.0):.1f}% |",
-        f"| **Verdict** | **{paired['verdict']}** |",
         "",
         "> ℹ️ base and PR are timed on **separate** CI runners, so a small median "
         "difference can reflect per-runner hardware variance rather than code. "
@@ -547,6 +583,26 @@ def generate_markdown_report(model, output_path):
         f"{'✅' if det['pr']['is_deterministic'] else '❌'} | {det['pr']['median_timing_cv'] * 100:.1f}% |",
         "",
     ]
+
+    if pairwise:
+        lines += [
+            "<details>",
+            "<summary>Pairwise run matrix</summary>",
+            "",
+            "| Comparison Run | PR Files | Base Files | Common | Function Set Matches | Med PR (s) | Med Base (s) | Med Diff (s) | Speedup % |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for row in pairwise:
+            lines.append(
+                f"| {row['comparison']} | {row['pr_files']} | {row['base_files']} | {row['common_files']} | "
+                f"{row['function_set_matches']}/{row['common_files']} | {row['median_pr_time']:.4f}s | "
+                f"{row['median_base_time']:.4f}s | {row['median_diff']:+.4f}s | {row['speedup_pct']:+.2f}% |"
+            )
+        lines += [
+            "",
+            "</details>",
+            "",
+        ]
 
     if corr["regressions"]:
         lines.append("#### ⚠️ Correctness Regressions (PR vs base)")
@@ -755,6 +811,7 @@ def evaluate(runtime_path):
             "base_summary": side_summary(base_agg),
             "pr_summary": side_summary(pr_agg),
             "paired": paired_stats,
+            "pairwise_runs": build_pairwise_matrix(base_caches, pr_caches),
             "degenerate_files": paired["degenerate"],
         },
         "meta": {"base": base_meta, "pr": pr_meta},
