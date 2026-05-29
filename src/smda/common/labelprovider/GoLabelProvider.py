@@ -13,6 +13,11 @@ from .AbstractLabelProvider import AbstractLabelProvider
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
 
+# Go symbol names are short; cap the fallback decode when no null terminator is found so a
+# truncated/corrupt name table cannot pull the entire (potentially multi-MB) binary tail into
+# one symbol string.
+_MAX_SYMBOL_NAME_LEN = 4096
+
 
 class GoSymbolProvider(AbstractLabelProvider):
     """Minimal resolver for Go symbols"""
@@ -112,9 +117,9 @@ class GoSymbolProvider(AbstractLabelProvider):
     def _readUtf8(self, buffer):
         null_byte_index = buffer.find(b"\x00")
         if null_byte_index == -1:
-            # No terminator \u2192 truncated/corrupt name table; treat the name as absent instead of
-            # decoding the rest of the binary into a single (potentially multi-MB) symbol string.
-            return ""
+            # No terminator (truncated/corrupt name table): decode a bounded prefix so a
+            # genuinely-present name is preserved, without decoding the entire binary tail.
+            null_byte_index = min(len(buffer), _MAX_SYMBOL_NAME_LEN)
         # errors="replace" is intentional: a single bad byte should not abort parsing of the
         # entire symbol table (the old hex-decode path raised and lost all symbols for the binary).
         return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ":")
