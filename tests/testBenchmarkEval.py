@@ -128,6 +128,25 @@ class TestAggregationAndDeterminism(unittest.TestCase):
         self.assertEqual(len(paired["regressions"]), 0)
 
 
+class TestNoiseAwareVerdict(unittest.TestCase):
+    def _paired(self, base_t, pr_t):
+        speedups = [(b - p) / b * 100.0 for b, p in zip(base_t, pr_t, strict=False)]
+        return {"speedups": speedups, "base_times": base_t, "pr_times": pr_t}
+
+    def test_small_consistent_diff_within_noise_is_inconclusive(self):
+        paired = self._paired([1.0] * 12, [1.017] * 12)  # ~-1.7% consistent slowdown
+        within = er.compute_paired_stats(paired, noise_floor_pct=4.0)
+        self.assertIn("inconclusive", within["verdict"])
+        # With no noise floor, the same consistent diff reads as a (spurious) regression.
+        strict = er.compute_paired_stats(paired, noise_floor_pct=0.0)
+        self.assertEqual(strict["verdict"], "PR is slower")
+
+    def test_large_diff_beyond_noise_is_reported(self):
+        paired = self._paired([2.0] * 12, [1.0] * 12)  # +50%, well beyond noise
+        stats = er.compute_paired_stats(paired, noise_floor_pct=4.0)
+        self.assertEqual(stats["verdict"], "PR is faster")
+
+
 class TestEndToEnd(unittest.TestCase):
     def _run(self, root, extra_args=None):
         args = ["--runtime-path", str(root)] + (extra_args or [])

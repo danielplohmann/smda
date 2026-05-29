@@ -395,8 +395,15 @@ def wilcoxon_signed_rank(base_times, pr_times, min_n=10):
     }
 
 
-def compute_paired_stats(paired):
-    """Headline timing statistics for the paired comparison."""
+def compute_paired_stats(paired, noise_floor_pct=0.0):
+    """Headline timing statistics for the paired comparison.
+
+    ``noise_floor_pct`` is the cross-runner/run-to-run timing noise band (derived
+    from the per-side timing CV). Because base and PR are timed on separate CI
+    runners, a systematic per-runner speed offset can make a tiny difference look
+    statistically "significant"; so a median speedup whose magnitude is within the
+    noise floor is reported as inconclusive regardless of the CI/p-value.
+    """
     speedups = paired["speedups"]
     m = len(speedups)
     if m == 0:
@@ -408,6 +415,7 @@ def compute_paired_stats(paired):
             "iqr_speedup": 0.0,
             "ci_median": (0.0, 0.0),
             "ci_mean": (0.0, 0.0),
+            "noise_floor_pct": noise_floor_pct,
             "wilcoxon": {"p_value": None, "n_nonzero": 0, "note": "no paired samples"},
             "verdict": "no comparable timing data",
         }
@@ -422,7 +430,9 @@ def compute_paired_stats(paired):
     wilcoxon = wilcoxon_signed_rank(paired["base_times"], paired["pr_times"])
 
     lo, hi = ci_median
-    if lo > 0:
+    if abs(median_speedup) <= noise_floor_pct:
+        verdict = f"inconclusive — within cross-runner noise (±{noise_floor_pct:.1f}%)"
+    elif lo > 0:
         verdict = "PR is faster"
     elif hi < 0:
         verdict = "PR is slower"
@@ -437,6 +447,7 @@ def compute_paired_stats(paired):
         "iqr_speedup": iqr,
         "ci_median": ci_median,
         "ci_mean": ci_mean,
+        "noise_floor_pct": noise_floor_pct,
         "wilcoxon": wilcoxon,
         "verdict": verdict,
     }
@@ -519,7 +530,13 @@ def generate_markdown_report(model, output_path):
         f"(95% CI [{paired['ci_mean'][0]:+.2f}%, {paired['ci_mean'][1]:+.2f}%]) |",
         f"| Std dev / IQR | {paired['stdev_speedup']:.2f}% / {paired['iqr_speedup']:.2f}% |",
         f"| Wilcoxon signed-rank p | {_fmt_p(wil)} |",
+        f"| Cross-runner noise floor | ±{paired.get('noise_floor_pct', 0.0):.1f}% |",
         f"| **Verdict** | **{paired['verdict']}** |",
+        "",
+        "> ℹ️ base and PR are timed on **separate** CI runners, so a small median "
+        "difference can reflect per-runner hardware variance rather than code. "
+        "Differences within the noise floor above are reported as inconclusive; "
+        "correctness and determinism are unaffected (they are not timing-based).",
         "",
         "#### Determinism (self-check across repeated runs)",
         "| Side | Runs | Files | Deterministic | Median timing CV |",
@@ -631,6 +648,7 @@ def generate_html_report(model, output_path):
     html += card("Median Speedup", f"{paired['median_speedup']:+.2f}%")
     html += card("Median Speedup 95% CI", f"[{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]")
     html += card("Wilcoxon p", p_text)
+    html += card("Cross-runner noise floor", f"±{paired.get('noise_floor_pct', 0.0):.1f}%")
     html += card("Verdict", paired["verdict"])
     html += "        </div>\n    </div>\n"
 
@@ -715,7 +733,10 @@ def evaluate(runtime_path):
     pr_det = check_determinism(pr_agg)
 
     paired = build_paired(base_agg, pr_agg)
-    paired_stats = compute_paired_stats(paired)
+    # Cross-runner/run-to-run noise band: base and PR are timed on separate CI
+    # runners, so treat a median speedup within the per-side timing CV as noise.
+    noise_floor_pct = max(base_det["median_timing_cv"], pr_det["median_timing_cv"]) * 100.0
+    paired_stats = compute_paired_stats(paired, noise_floor_pct=noise_floor_pct)
 
     model = {
         "schema_version": SCHEMA_VERSION,
