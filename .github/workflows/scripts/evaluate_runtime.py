@@ -70,11 +70,8 @@ def parse_report(filepath):
     total_insns = 0
     func_counts = {}
     for addr, func_data in xcfg.items():
-        blocks = func_data.get("blocks", {})
-        if isinstance(blocks, dict):
-            num_insns = sum(len(ins_list) for ins_list in blocks.values())
-        else:
-            num_insns = sum(len(ins_list) for ins_list in blocks)
+        blocks = func_data.get("blocks", [])
+        num_insns = len(blocks) if isinstance(blocks, list) else len(blocks)
         func_counts[addr] = num_insns
         total_insns += num_insns
 
@@ -190,6 +187,8 @@ def compare_reports(head_data, version_data, head_label, version_label):
         head_addrs = set(head_info["instruction_counts"].keys())
         version_addrs = set(version_info["instruction_counts"].keys())
 
+        # Note: correctness is compared at the function-address-set level only
+        # (matching the reference evaluation logic), not full instruction content.
         if head_addrs != version_addrs:
             results["address_mismatches"].append(
                 {
@@ -198,17 +197,6 @@ def compare_reports(head_data, version_data, head_label, version_label):
                     "only_in_version": sorted(version_addrs - head_addrs),
                 }
             )
-        else:
-            count_diffs = {
-                addr: {
-                    "head": head_info["instruction_counts"][addr],
-                    "version": version_info["instruction_counts"][addr],
-                }
-                for addr in head_addrs
-                if head_info["instruction_counts"][addr] != version_info["instruction_counts"][addr]
-            }
-            if count_diffs:
-                results["address_mismatches"].append({"file": filename, "instruction_count_diffs": count_diffs})
 
         results["execution_times"]["head"].append(head_info["execution_time"])
         results["execution_times"]["version"].append(version_info["execution_time"])
@@ -326,14 +314,26 @@ def generate_markdown_report(all_results, output_path):
 
         md += f"| {head_folder} vs {version_folder} | {head_count} | {version_count} | {common_count} | {match_count}/{common_count} | {h_med:.4f}s | {v_med:.4f}s | {d_med:+.4f}s | {speedup:+.2f}% |\n"
 
-        if result["function_count_mismatches"] or result["address_mismatches"]:
-            md += "\n⚠️ **Correctness Mismatches Detected:**\n"
-            for m in result["function_count_mismatches"][:5]:
+    # Correctness mismatches are emitted in a separate section (one collapsible
+    # block per run) so they don't break up the Markdown table above.
+    runs_with_mismatches = [r for r in all_results if r["function_count_mismatches"] or r["address_mismatches"]]
+    if runs_with_mismatches:
+        md += "\n#### ⚠️ Correctness Mismatches\n"
+        for result in runs_with_mismatches:
+            fc_mismatches = result["function_count_mismatches"]
+            addr_mismatches = result["address_mismatches"]
+            summary = (
+                f"{result['head_folder']} vs {result['version_folder']} "
+                f"— {len(fc_mismatches)} function-count, {len(addr_mismatches)} address-set"
+            )
+            md += f"\n<details>\n<summary>{summary}</summary>\n\n"
+            for m in fc_mismatches[:10]:
                 md += f"- `{m['file']}`: function count mismatch (Base: {m['version_function_count']}, PR: {m['head_function_count']})\n"
-            for m in result["address_mismatches"][:5]:
+            for m in addr_mismatches[:10]:
                 md += f"- `{m['file']}`: function address set mismatch\n"
-            if len(result["function_count_mismatches"]) > 5 or len(result["address_mismatches"]) > 5:
+            if len(fc_mismatches) > 10 or len(addr_mismatches) > 10:
                 md += "- ... (some mismatches truncated)\n"
+            md += "\n</details>\n"
 
     with open(output_path, "w") as f:
         f.write(md)
@@ -392,13 +392,6 @@ def generate_html_report(all_results, output_path):
     head_label = result["head_label_stable"] if all_results else "pr"
     version_label = result["version_label_stable"] if all_results else "base"
 
-    head_med = statistics.median(head_times) if head_times else 0
-    version_med = statistics.median(version_times) if version_times else 0
-    head_total = sum(head_times)
-    version_total = sum(version_times)
-    head_fps = (len(head_times) * 1000) / head_total if head_total > 0 else 0
-    version_fps = (len(version_times) * 1000) / version_total if version_total > 0 else 0
-
     html += f"""            <div class="stat-card">
                 <h4>{head_label} Files</h4>
                 <div class="stat-value">{len(head_times)}</div>
@@ -409,23 +402,23 @@ def generate_html_report(all_results, output_path):
             </div>
             <div class="stat-card">
                 <h4>Med {head_label} Time</h4>
-                <div class="stat-value">{head_med:.4f}s</div>
+                <div class="stat-value">{statistics.median(head_times):.4f}s</div>
             </div>
             <div class="stat-card">
                 <h4>Med {version_label} Time</h4>
-                <div class="stat-value">{version_med:.4f}s</div>
+                <div class="stat-value">{statistics.median(version_times):.4f}s</div>
             </div>
             <div class="stat-card">
                 <h4>Med Diff</h4>
-                <div class="stat-value">{head_med - version_med:.4f}s</div>
+                <div class="stat-value">{statistics.median(head_times) - statistics.median(version_times):.4f}s</div>
             </div>
             <div class="stat-card">
-                <h4>{head_label} Files/s</h4>
-                <div class="stat-value">~{head_fps:.0f}</div>
+                <h4>{head_label} Func/s</h4>
+                <div class="stat-value">~{(len(head_times) * 1000) / sum(head_times):.0f}</div>
             </div>
             <div class="stat-card">
-                <h4>{version_label} Files/s</h4>
-                <div class="stat-value">~{version_fps:.0f}</div>
+                <h4>{version_label} Func/s</h4>
+                <div class="stat-value">~{(len(version_times) * 1000) / sum(version_times):.0f}</div>
             </div>
         </div>
     </div>

@@ -169,16 +169,6 @@ def getMalpediaFilePath(input_path):
     return malpedia_filepath
 
 
-_disassembler = None
-
-
-def get_disassembler():
-    global _disassembler
-    if _disassembler is None:
-        _disassembler = Disassembler()
-    return _disassembler
-
-
 def work(input_element):
     if input_element["filename"] + ".smda" in input_element["finished_reports"]:
         print("Skipping file {}".format(input_element["filepath"]))
@@ -194,7 +184,7 @@ def work(input_element):
         in_family_path = os.sep.join(malpedia_relative_path.split(os.sep)[1:])
         if in_family_path.startswith("module"):
             return
-        disassembler = get_disassembler()
+        disassembler = Disassembler()
         if (
             "elf." in INPUT_FILEPATH
             and ("x86" in INPUT_FILEPATH or "x64" in INPUT_FILEPATH)
