@@ -155,6 +155,7 @@ jobs:
       - name: Run Malpedia Benchmark
         if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
         run: |
+          PYTHONPATH=${{ matrix.pythonpath }} python -c "import os, smda; expected = os.path.abspath('${{ matrix.pythonpath }}'); actual = os.path.abspath(smda.__file__); print('${{ matrix.side }} smda:', actual); assert actual.startswith(expected + os.sep), f'Expected ${{ matrix.side }} smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
           for i in $(seq 0 $((RUNS - 1))); do
             PYTHONPATH=${{ matrix.pythonpath }} python .github/workflows/scripts/process_malpedia.py \
               malpedia_extracted/malpedia "runtime_measurements/${{ matrix.side }}_$i"

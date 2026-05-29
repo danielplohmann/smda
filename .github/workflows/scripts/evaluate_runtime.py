@@ -203,6 +203,7 @@ def aggregate_runs(side_caches):
             "function_addrs": addr_sets[0],
             "function_count": reps[0].get("function_count", len(addr_sets[0])),
             "addr_sets": addr_sets,
+            "block_counts": reps[0].get("block_counts", {}),
         }
     meta = {"folders": folders, "dropped": dropped, "files": len(aggregated)}
     return aggregated, meta
@@ -249,7 +250,7 @@ def build_paired(base_agg, pr_agg):
     only_in_pr = sorted(set(pr_agg) - set(base_agg))
 
     base_times, pr_times, speedups, timed_files = [], [], [], []
-    regressions, degenerate = [], []
+    regressions, degenerate, block_drift = [], [], []
 
     for filename in common:
         b = base_agg[filename]
@@ -265,6 +266,22 @@ def build_paired(base_agg, pr_agg):
                     "only_in_pr": sorted(p["function_addrs"] - b["function_addrs"]),
                 }
             )
+
+        # Informational only (not gated): for functions present on both sides, flag
+        # per-function block-count differences. Function-set changes are already in
+        # `regressions`, so only shared addresses are compared here.
+        base_blocks = b.get("block_counts", {})
+        pr_blocks = p.get("block_counts", {})
+        for addr in base_blocks.keys() & pr_blocks.keys():
+            if base_blocks[addr] != pr_blocks[addr]:
+                block_drift.append(
+                    {
+                        "file": filename,
+                        "addr": addr,
+                        "base_blocks": base_blocks[addr],
+                        "pr_blocks": pr_blocks[addr],
+                    }
+                )
 
         bt, pt = b["time_min"], p["time_min"]
         if bt > 0 and pt >= 0:
@@ -285,6 +302,7 @@ def build_paired(base_agg, pr_agg):
         "speedups": speedups,
         "regressions": regressions,
         "degenerate": degenerate,
+        "block_drift": block_drift,
     }
 
 
@@ -519,6 +537,7 @@ def generate_markdown_report(model, output_path):
     base_s = perf["base_summary"]
     pr_s = perf["pr_summary"]
     pairwise = perf.get("pairwise_runs", [])
+    block_drift = perf.get("block_drift", [])
     wil = paired["wilcoxon"]
 
     lines = [
@@ -628,6 +647,25 @@ def generate_markdown_report(model, output_path):
         lines.append("</details>")
         lines.append("")
 
+    if block_drift:
+        lines.append("#### ℹ️ Block-count Drift (informational — not gated)")
+        lines.append("")
+        lines.append(
+            "Functions present on both sides whose basic-block count changed. This is reported "
+            "for visibility only and does not affect the correctness gate (which compares the "
+            "function-address set)."
+        )
+        lines.append("")
+        lines.append(f"<details>\n<summary>{len(block_drift)} function(s) with differing block counts</summary>")
+        lines.append("")
+        for d in block_drift[:25]:
+            lines.append(f"- `{d['file']}` @ `{d['addr']}`: base {d['base_blocks']} → PR {d['pr_blocks']} blocks")
+        if len(block_drift) > 25:
+            lines.append(f"- ... and {len(block_drift) - 25} more")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+
     for side in ("base", "pr"):
         disagreeing = det[side]["files_disagreeing"]
         if disagreeing:
@@ -713,6 +751,7 @@ def generate_html_report(model, output_path):
     html += card("Median Paired Speedup 95% CI", f"[{paired['ci_median'][0]:+.2f}%, {paired['ci_median'][1]:+.2f}%]")
     html += card("Wilcoxon p", p_text)
     html += card("Timing Noise Band", f"±{paired.get('noise_floor_pct', 0.0):.1f}%")
+    html += card("Block-count Drift (info)", len(perf.get("block_drift", [])))
     html += card("Verdict", paired["verdict"])
     html += "        </div>\n    </div>\n"
 
@@ -821,6 +860,7 @@ def evaluate(runtime_path):
             "paired": paired_stats,
             "pairwise_runs": build_pairwise_matrix(base_caches, pr_caches),
             "degenerate_files": paired["degenerate"],
+            "block_drift": paired["block_drift"],
         },
         "meta": {"base": base_meta, "pr": pr_meta},
     }

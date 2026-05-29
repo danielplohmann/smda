@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import logging
 import os
 import statistics
 import sys
@@ -30,9 +31,10 @@ def decrypt_binary(filepath):
 
 
 def run_benchmark(iterations, output_file):
+    # Disable logging during benchmark to avoid stdout/file write overhead in the timed region
+    logging.disable(logging.CRITICAL)
     config = SmdaConfig()
     config.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-    # Disable logging during benchmark to avoid stdout/file write overhead
     config.API_COLLECTION_FILES = {"winxp": os.path.join(config.PROJECT_ROOT, "data", "apiscout_winxp_prof_sp3.json")}
 
     fixtures = [
