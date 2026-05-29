@@ -112,7 +112,7 @@ class GoSymbolProvider(AbstractLabelProvider):
     def _readUtf8(self, buffer):
         null_byte_index = buffer.find(b"\x00")
         if null_byte_index == -1:
-            return ""
+            return buffer.decode("utf-8", errors="replace").replace("\u00b7", ":")
         return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ":")
 
     def _parse_pclntab(self, pclntab_offset, binary):
