@@ -111,6 +111,7 @@ class SmdaFunction:
         self.smda_report = smda_report
         self.nesting_depth = 0
         self._normalized_blockrefs = None
+        self._basic_blocks = None
         if disassembly is not None and function_offset is not None:
             self._escaper = IntelInstructionEscaper if disassembly.binary_info.architecture in ["intel"] else None
             self.offset = function_offset
@@ -205,8 +206,11 @@ class SmdaFunction:
         return self.is_exported
 
     def getBlocks(self) -> Iterator["SmdaBasicBlock"]:
-        for key in self._sorted_block_keys:
-            yield SmdaBasicBlock(self.blocks[key], smda_function=self)
+        if self._basic_blocks is None:
+            self._basic_blocks = [
+                SmdaBasicBlock(self.blocks[key], smda_function=self) for key in self._sorted_block_keys
+            ]
+        yield from self._basic_blocks
 
     def getPicHashAsLong(self):
         return self.pic_hash

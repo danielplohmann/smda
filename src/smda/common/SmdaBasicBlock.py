@@ -21,9 +21,6 @@ class SmdaBasicBlock:
         self.length = len(instructions)
         self.picblockhash = None
         self.opcblockhash = None
-        if instructions:
-            self.picblockhash = self.getPicBlockHash()
-            self.opcblockhash = self.getOpcBlockHash()
 
     def getInstructions(self) -> Iterator["SmdaInstruction"]:
         if self.instructions is None:

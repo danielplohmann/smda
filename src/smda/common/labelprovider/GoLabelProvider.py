@@ -110,14 +110,10 @@ class GoSymbolProvider(AbstractLabelProvider):
         return bool(self._func_symbols)
 
     def _readUtf8(self, buffer):
-        string_read = ""
-        offset = 0
-        while buffer[offset] != 0:
-            string_read += f"{buffer[offset]:02x}"
-            offset += 1
-        # need to defang special char(s)
-        decoded_string = bytearray.fromhex(string_read).decode().replace("\u00b7", ":")
-        return decoded_string
+        null_byte_index = buffer.find(b"\x00")
+        if null_byte_index == -1:
+            return ""
+        return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ":")
 
     def _parse_pclntab(self, pclntab_offset, binary):
         pclntab_buffer = binary[pclntab_offset:]
