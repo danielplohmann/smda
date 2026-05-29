@@ -127,6 +127,25 @@ class TestAggregationAndDeterminism(unittest.TestCase):
         self.assertGreater(stats["median_speedup"], 0)  # +50%
         self.assertEqual(len(paired["regressions"]), 0)
 
+    def test_pairwise_matrix_reports_every_run_combination(self):
+        base = {
+            "base_0": {"a.smda": self._rep(["0x1"], 2.0)},
+            "base_1": {"a.smda": self._rep(["0x1"], 4.0)},
+        }
+        pr = {
+            "pr_0": {"a.smda": self._rep(["0x1"], 1.0)},
+            "pr_1": {"a.smda": self._rep(["0x1"], 3.0)},
+        }
+
+        rows = er.build_pairwise_matrix(base, pr)
+
+        self.assertEqual(
+            [r["comparison"] for r in rows], ["pr_0 vs base_0", "pr_0 vs base_1", "pr_1 vs base_0", "pr_1 vs base_1"]
+        )
+        self.assertEqual(rows[0]["function_set_matches"], 1)
+        self.assertEqual(rows[0]["common_files"], 1)
+        self.assertEqual(rows[0]["speedup_pct"], 50.0)
+
 
 class TestNoiseAwareVerdict(unittest.TestCase):
     def _paired(self, base_t, pr_t):
@@ -166,8 +185,10 @@ class TestEndToEnd(unittest.TestCase):
             self.assertGreater(model["performance"]["paired"]["median_speedup"], 0)
             # Markdown table stays contiguous (header + 2 side rows, no interleaving)
             md = (root / "cache" / "evaluation.md").read_text()
-            self.assertIn("#### Correctness", md)
+            self.assertIn("#### Summary", md)
             self.assertIn("Wilcoxon signed-rank p", md)
+            self.assertIn("<summary>Pairwise run matrix</summary>", md)
+            self.assertIn("pr_0 vs base_0", md)
 
     def test_correctness_regression_exit_1(self):
         with tempfile.TemporaryDirectory() as d:
