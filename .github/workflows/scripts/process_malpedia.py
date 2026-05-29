@@ -270,8 +270,13 @@ if __name__ == "__main__":
             }
             input_queue.append(input_element)
     results = []
-    # Use Pooling for parallel processing
-    with Pool(max(1, cpu_count() - 2)) as pool:
+    # Use Pooling for parallel processing. A fresh Disassembler is created per
+    # file (see work()), so multi-process workers are safe and order-independent.
+    # Default to all cores (capped) since disassembly is CPU-bound; allow an
+    # explicit override via SMDA_BENCH_WORKERS for tuning per runner size.
+    workers = int(os.environ.get("SMDA_BENCH_WORKERS", "0")) or (cpu_count() or 1)
+    workers = max(1, min(workers, 8))
+    with Pool(workers) as pool:
         for result in tqdm.tqdm(pool.imap_unordered(work, input_queue), total=len(input_queue)):
             results.append(result)
     print("DONE, shutting down")
