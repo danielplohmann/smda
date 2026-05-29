@@ -148,7 +148,10 @@ def getMalpediaFilePath(input_path):
 
 
 def work(input_element):
-    if input_element["filename"] + ".smda" in input_element["finished_reports"]:
+    # Resume + output are keyed on the family-relative stem (not the bare basename) so
+    # same-named samples in different family folders do not collide / overwrite each other.
+    REPORT_STEM = input_element["report_stem"]
+    if REPORT_STEM + ".smda" in input_element["finished_reports"]:
         print("Skipping file {}".format(input_element["filepath"]))
         return
     REPORT = None
@@ -193,9 +196,9 @@ def work(input_element):
             REPORT.version = getSampleVersion(INPUT_FILEPATH, REPORT.family)
             REPORT.filename = os.path.basename(malpedia_relative_path)
             output_dir = input_element.get("output_dir", "finished-reports")
-            with open(output_dir + os.sep + INPUT_FILENAME + ".smda", "w") as fout:
+            with open(output_dir + os.sep + REPORT_STEM + ".smda", "w") as fout:
                 json.dump(REPORT.toDict(), fout, indent=1, sort_keys=True)
-                logger.info("Wrote " + output_dir + "/" + INPUT_FILENAME + ".smda")
+                logger.info("Wrote " + output_dir + "/" + REPORT_STEM + ".smda")
     except Exception:
         print("RunTimeError, we skip!")
         print("smda: " + str(INPUT_FILENAME))
@@ -239,8 +242,12 @@ if __name__ == "__main__":
             if not (re.search(unpacked_file_pattern, filename) or re.search(dump_file_pattern, filename)):
                 continue
             filepath = root + os.sep + filename
+            # Family-relative stem keeps reports unique across family folders that reuse
+            # the same dump/sample basename (e.g. dump_0x00400000).
+            report_stem = os.path.relpath(filepath, malpedia_path).replace(os.sep, "_")
             input_element = {
                 "filename": filename,
+                "report_stem": report_stem,
                 "finished_reports": finished_reports,
                 "filepath": filepath,
                 "output_dir": output_dir,
