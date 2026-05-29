@@ -20,9 +20,15 @@ defaults:
     shell: bash
 
 jobs:
-  benchmark:
-    name: Run Benchmark
+  # Fast fixture benchmark — the CI correctness/perf gate. Runs first so a broken
+  # PR fails before we spin up the (slower) malpedia matrix runners. Also resolves
+  # whether the malpedia password is available, which gates the heavier jobs.
+  fixture_gate:
+    name: Fixture Benchmark Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      password_available: ${{ steps.check_password.outputs.available }}
     steps:
       - name: Checkout PR code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -73,46 +79,143 @@ jobs:
         env:
           MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
 
+  # Malpedia disassembly. Base and PR run as concurrent matrix legs (instead of
+  # six sequential passes in one job). The base leg's results are cached on the
+  # base commit SHA, so re-pushing to a PR while master is unchanged skips the
+  # base passes entirely.
+  malpedia:
+    name: Malpedia Benchmark (${{ matrix.side }})
+    needs: fixture_gate
+    if: needs.fixture_gate.outputs.password_available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: base
+            pythonpath: base-repo/src
+          - side: pr
+            pythonpath: src
+    env:
+      RUNS: 3
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout base code
+        if: matrix.side == 'base'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
+          path: base-repo
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
       - name: Decrypt Malpedia Samples
-        if: steps.check_password.outputs.available == 'true'
         run: |
           unzip -q -P "$MALPEDIA_ZIP_PASSWORD" .github/workflows/data/malpedia.zip -d malpedia_extracted
         env:
           MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
 
-      - name: Run Malpedia Benchmark - Base Branch
-        if: steps.check_password.outputs.available == 'true'
-        run: |
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/base_0
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/base_1
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/base_2
+      - name: Resolve base SHA
+        if: matrix.side == 'base'
+        id: basesha
+        run: echo "sha=$(git -C base-repo rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Run Malpedia Benchmark - PR Branch
-        if: steps.check_password.outputs.available == 'true'
-        run: |
-          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/pr_0
-          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/pr_1
-          PYTHONPATH=src python .github/workflows/scripts/process_malpedia.py malpedia_extracted/malpedia runtime_measurements/pr_2
+      # Cache base results on the base commit SHA + harness hash. Exact-match only
+      # (no restore-keys) so a stale base never silently compares against the
+      # wrong baseline.
+      - name: Restore cached base results
+        if: matrix.side == 'base'
+        id: basecache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            runtime_measurements/base_0
+            runtime_measurements/base_1
+            runtime_measurements/base_2
+          key: smda-base-${{ runner.os }}-py3.11-${{ steps.basesha.outputs.sha }}-${{ hashFiles('.github/workflows/scripts/process_malpedia.py') }}
 
+      - name: Run Malpedia Benchmark
+        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
+        run: |
+          for i in $(seq 0 $((RUNS - 1))); do
+            PYTHONPATH=${{ matrix.pythonpath }} python .github/workflows/scripts/process_malpedia.py \
+              malpedia_extracted/malpedia "runtime_measurements/${{ matrix.side }}_$i"
+          done
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smda-${{ matrix.side }}
+          path: runtime_measurements/${{ matrix.side }}_*
+          if-no-files-found: error
+
+  # Aggregate both sides, run the paired statistical evaluation, gate CI on
+  # correctness/determinism, and publish the report.
+  evaluate:
+    name: Evaluate & Report
+    needs: [fixture_gate, malpedia]
+    if: needs.fixture_gate.outputs.password_available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Download benchmark runs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: smda-*
+          merge-multiple: true
+          path: runtime_measurements
+
+      # evaluate_runtime.py exits non-zero on a correctness regression (1) or
+      # base/PR non-determinism (2); that failure gates CI. The reporting steps
+      # below run regardless so the verdict is always published.
       - name: Evaluate Malpedia Runtime
-        if: steps.check_password.outputs.available == 'true'
         run: |
           python .github/workflows/scripts/evaluate_runtime.py
 
       - name: Publish Malpedia Results to Step Summary
-        if: steps.check_password.outputs.available == 'true'
+        if: always()
         run: |
-          cat runtime_measurements/cache/evaluation.md >> $GITHUB_STEP_SUMMARY
+          if [ -f runtime_measurements/cache/evaluation.md ]; then
+            cat runtime_measurements/cache/evaluation.md >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Post PR Comment with Malpedia Results
-        if: steps.check_password.outputs.available == 'true' && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body-file runtime_measurements/cache/evaluation.md
+          if [ -f runtime_measurements/cache/evaluation.md ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file runtime_measurements/cache/evaluation.md
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Malpedia Evaluation Artifacts
-        if: steps.check_password.outputs.available == 'true'
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: malpedia-evaluation-report
