@@ -8,8 +8,8 @@ from smda.common.SmdaInstruction import SmdaInstruction
 class SmdaBasicBlock:
     smda_function = None
     instructions = None
-    picblockhash = None
-    opcblockhash = None
+    _picblockhash = None
+    _opcblockhash = None
     offset = None
     length = None
 
@@ -19,8 +19,28 @@ class SmdaBasicBlock:
         self.instructions = instructions
         self.offset = instructions[0].offset if instructions else None
         self.length = len(instructions)
-        self.picblockhash = None
-        self.opcblockhash = None
+        self._picblockhash = None
+        self._opcblockhash = None
+
+    @property
+    def picblockhash(self):
+        if self._picblockhash is None:
+            self.getPicBlockHash()
+        return self._picblockhash
+
+    @picblockhash.setter
+    def picblockhash(self, value):
+        self._picblockhash = value
+
+    @property
+    def opcblockhash(self):
+        if self._opcblockhash is None:
+            self.getOpcBlockHash()
+        return self._opcblockhash
+
+    @opcblockhash.setter
+    def opcblockhash(self, value):
+        self._opcblockhash = value
 
     def getInstructions(self) -> Iterator["SmdaInstruction"]:
         if self.instructions is None:
@@ -28,12 +48,12 @@ class SmdaBasicBlock:
         yield from self.instructions
 
     def getPicBlockHash(self):
-        if self.picblockhash is not None:
-            return self.picblockhash
+        if self._picblockhash is not None:
+            return self._picblockhash
         picblockhash_sequence = self.getPicBlockHashSequence()
         if picblockhash_sequence is not None:
-            self.picblockhash = struct.unpack("<Q", hashlib.sha256(picblockhash_sequence).digest()[:8])[0]
-        return self.picblockhash
+            self._picblockhash = struct.unpack("<Q", hashlib.sha256(picblockhash_sequence).digest()[:8])[0]
+        return self._picblockhash
 
     def getPicBlockHashSequence(self):
         """if we have a SmdaFunction as parent, we can try to generate the PicBlockHash ad-hoc"""
@@ -59,12 +79,12 @@ class SmdaBasicBlock:
             return "".join(escaped_binary_seqs).encode("ascii")
 
     def getOpcBlockHash(self):
-        if self.opcblockhash is not None:
-            return self.opcblockhash
+        if self._opcblockhash is not None:
+            return self._opcblockhash
         opcblockhash_sequence = self.getOpcBlockHashSequence()
         if opcblockhash_sequence is not None:
-            self.opcblockhash = struct.unpack("<Q", hashlib.sha256(opcblockhash_sequence).digest()[:8])[0]
-        return self.opcblockhash
+            self._opcblockhash = struct.unpack("<Q", hashlib.sha256(opcblockhash_sequence).digest()[:8])[0]
+        return self._opcblockhash
 
     def getOpcBlockHashSequence(self):
         """if we have a SmdaFunction as parent, we can try to generate the OpcBlockHash ad-hoc"""

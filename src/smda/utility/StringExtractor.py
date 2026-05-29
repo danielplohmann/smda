@@ -141,6 +141,8 @@ def read_string(smda_report, offset, maxlen=None):
         return None
     if not hasattr(smda_report, "_string_cache"):
         smda_report._string_cache = {}
+    elif len(smda_report._string_cache) > 10000:
+        smda_report._string_cache.clear()
     cache_key = (offset, maxlen)
     if cache_key in smda_report._string_cache:
         return smda_report._string_cache[cache_key]
