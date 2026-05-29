@@ -186,8 +186,11 @@ class TestEndToEnd(unittest.TestCase):
             # Markdown table stays contiguous (header + 2 side rows, no interleaving)
             md = (root / "cache" / "evaluation.md").read_text()
             self.assertIn("#### Summary", md)
+            self.assertIn("Median paired speedup", md)
+            self.assertIn("Throughput estimate (func/s)", md)
             self.assertIn("Wilcoxon signed-rank p", md)
-            self.assertIn("<summary>Pairwise run matrix</summary>", md)
+            self.assertIn("<summary>Pairwise run matrix (individual run medians, diagnostic)</summary>", md)
+            self.assertIn("Diagnostic only", md)
             self.assertIn("pr_0 vs base_0", md)
 
     def test_correctness_regression_exit_1(self):
