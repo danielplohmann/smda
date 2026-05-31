@@ -199,7 +199,9 @@ class IndirectCallAnalyzer:
         # process previous blocks
         if depth >= 0:
             processed_addrs = frozenset(ins[0] for blk in processed for ins in blk)
-            refs_in = [fr for (fr, to) in analysis_state.code_refs if to == block[0][0] and fr not in processed_addrs]
+            # Use the reverse index (addr_to -> {addr_from}) maintained by
+            # add/removeCodeRef instead of scanning the full code_refs set per block.
+            refs_in = [fr for fr in analysis_state.code_refs_to.get(block[0][0], set()) if fr not in processed_addrs]
             LOGGER.debug(
                 "start processing previous blocks, searching in %d in_refs with remaining depth: %d",
                 len(refs_in),
