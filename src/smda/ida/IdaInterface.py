@@ -19,9 +19,15 @@ import re
 
 from .BackendInterface import BackendInterface
 
+Database = None
 with contextlib.suppress(ImportError):
     # only importable when ida-domain (and an IDA installation) is available
     from ida_domain import Database
+
+_IDA_DOMAIN_MISSING = (
+    "ida-domain is not available. Install it with 'pip install ida-domain' and "
+    "ensure IDA Pro 9.1+ is installed with IDADIR configured."
+)
 
 
 # processor identifiers that SMDA maps onto its "intel" architecture
@@ -52,6 +58,8 @@ class IdaInterface(BackendInterface):
         if database is not None:
             self.db = database
         else:
+            if Database is None:
+                raise ImportError(_IDA_DOMAIN_MISSING)
             # inside the IDA GUI: get a handle to the currently open database
             self.db = Database.open()
         self._processor_map = dict.fromkeys(_INTEL_PROCESSORS, "intel")
@@ -63,6 +71,8 @@ class IdaInterface(BackendInterface):
         The caller is responsible for keeping the interface alive while the
         report is being built; call :meth:`close` when done.
         """
+        if Database is None:
+            raise ImportError(_IDA_DOMAIN_MISSING)
         database = Database.open(path=input_path, save_on_close=save_on_close)
         interface = cls(database=database)
         interface._owns_database = True
@@ -124,6 +134,8 @@ class IdaInterface(BackendInterface):
 
     def getInstructionBytes(self, offset):
         instruction = self.db.instructions.get_at(offset)
+        if instruction is None:
+            return b""
         return self.db.bytes.get_bytes_at(offset, instruction.size)
 
     def getCodeInRefs(self, offset):
@@ -195,4 +207,5 @@ class IdaInterface(BackendInterface):
     def getIdbDir(self):
         if not self.db.path:
             return ""
-        return os.path.dirname(self.db.path) + os.sep
+        dirname = os.path.dirname(self.db.path)
+        return dirname + os.sep if dirname else ""
