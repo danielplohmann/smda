@@ -92,12 +92,10 @@ def cmd_cpu(args):
     workload = build_workload(args.target, with_strings=args.strings)
 
     print(f"cProfile: '{args.target}' x{args.iterations}...")
-    profiler = cProfile.Profile()
     report = None
-    profiler.enable()
-    for _ in range(max(1, args.iterations)):
-        report = workload()
-    profiler.disable()
+    with cProfile.Profile() as profiler:
+        for _ in range(max(1, args.iterations)):
+            report = workload()
     _print_report_summary(report)
 
     prof_path = os.path.join(OUTPUT_DIR, f"{label}.cpu.prof")
@@ -155,16 +153,18 @@ def cmd_mem(args):
 
     uss_before = _uss()
     tracemalloc.start()
-    snap_before = tracemalloc.take_snapshot()
+    try:
+        snap_before = tracemalloc.take_snapshot()
 
-    print(f"memray (native_traces={args.native}): '{args.target}' x{args.iterations}...")
-    report = None
-    with memray.Tracker(bin_path, native_traces=args.native):
-        for _ in range(max(1, args.iterations)):
-            report = workload()
+        print(f"memray (native_traces={args.native}): '{args.target}' x{args.iterations}...")
+        report = None
+        with memray.Tracker(bin_path, native_traces=args.native):
+            for _ in range(max(1, args.iterations)):
+                report = workload()
 
-    snap_after = tracemalloc.take_snapshot()
-    tracemalloc.stop()
+        snap_after = tracemalloc.take_snapshot()
+    finally:
+        tracemalloc.stop()
     uss_after = _uss()
     _print_report_summary(report)
 

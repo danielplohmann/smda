@@ -39,12 +39,7 @@ def decrypt_binary(filepath):
     """Decrypt an XOR-obfuscated test fixture (byte ^ (index % 256))."""
     with open(filepath, "rb") as f:
         binary = f.read()
-    decrypted = bytearray()
-    for index, byte in enumerate(binary):
-        if isinstance(byte, str):
-            byte = ord(byte)
-        decrypted.append(byte ^ (index % 256))
-    return bytes(decrypted)
+    return bytes(byte ^ (index % 256) for index, byte in enumerate(binary))
 
 
 def _make_config():
