@@ -68,6 +68,18 @@ class TestSmdaReportBufferPacking(unittest.TestCase):
         restored = SmdaReport.fromDict(report_dict)
         self.assertEqual(restored.getBuffer(), b"")
 
+    def test_packed_buffer_is_deterministic(self):
+        # packing the same bytes twice must produce identical output (reproducible reports/caching)
+        payload = b"reproducible payload" * 16
+        self.assertEqual(SmdaReport._packBuffer(payload), SmdaReport._packBuffer(payload))
+
+    def test_corrupt_buffer_field_does_not_abort_load(self):
+        # a corrupt/tampered buffer field degrades to buffer=None instead of failing the whole load
+        report_dict = _make_minimal_report(buffer=None).toDict()
+        report_dict["buffer"] = "this is not valid packed buffer data!!!"
+        restored = SmdaReport.fromDict(report_dict)
+        self.assertIsNone(restored.getBuffer())
+
     def test_string_extraction_buffer_is_not_retained(self):
         # a buffer handed to string extraction must not linger on the report and get serialized;
         # only STORE_BUFFER (which sets report.buffer afterwards) should persist it.
