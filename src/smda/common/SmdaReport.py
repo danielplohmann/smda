@@ -205,8 +205,13 @@ class SmdaReport:
         copy of the analyzed buffer at a fraction of its on-disk footprint.
         """
         zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            zip_file.writestr("buffer", buffer)
+        # write via a ZipInfo with its default fixed timestamp so packing the same bytes is
+        # reproducible across runs; writestr() with a plain str name would stamp the current
+        # time into the entry header and make the output non-deterministic.
+        entry = zipfile.ZipInfo("buffer")
+        entry.compress_type = zipfile.ZIP_DEFLATED
+        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+            zip_file.writestr(entry, buffer)
         return base64.b85encode(zip_buffer.getvalue()).decode("ascii")
 
     @staticmethod
@@ -291,7 +296,11 @@ class SmdaReport:
         # buffer is only present when the report was serialized with STORE_BUFFER enabled;
         # older reports omit it and keep buffer == None for backward compatibility.
         if report_dict.get("buffer") is not None:
-            smda_report.buffer = cls._unpackBuffer(report_dict["buffer"])
+            try:
+                smda_report.buffer = cls._unpackBuffer(report_dict["buffer"])
+            except Exception as exc:
+                # a corrupt/tampered buffer field must not abort loading the rest of the report
+                LOGGER.warning("Failed to unpack stored buffer, leaving it unset: %s", exc)
         return smda_report
 
     def toDict(self) -> dict:
