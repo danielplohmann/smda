@@ -20,6 +20,39 @@ except ImportError:
 _NOT_PROVIDED = object()
 
 
+def _build_macho_cpu_types():
+    # Single source of truth mapping Mach-O CPU types to
+    # (architecture, bitness, has_backend). Mach-O CPU types already encode
+    # the width (the 64-bit flag is part of the CPU type), so no extra lookup
+    # is needed to resolve bitness. SMDA only ships an Intel backend; recognized
+    # non-Intel CPU types are still reported accurately so loader metadata stays
+    # meaningful, but they intentionally resolve to no disassembler later
+    # (controlled error report) instead of being mis-analyzed as x86.
+    if not LIEF_AVAILABLE:
+        return {}
+    cpu = lief.MachO.Header.CPU_TYPE
+    return {
+        cpu.X86_64: ("intel", 64, True),
+        cpu.X86: ("intel", 32, True),
+        cpu.ARM64: ("arm", 64, False),
+        cpu.ARM: ("arm", 32, False),
+        cpu.POWERPC64: ("ppc", 64, False),
+        cpu.POWERPC: ("ppc", 32, False),
+    }
+
+
+_MACHO_CPU_TYPES = _build_macho_cpu_types()
+
+
+def _resolve_macho_cpu(macho_file):
+    """Return (architecture, bitness, has_backend) for a parsed Mach-O file,
+    derived from its CPU type. Unknown CPU types report empty/unsupported
+    metadata rather than guessing."""
+    if not macho_file:
+        return "", 0, False
+    return _MACHO_CPU_TYPES.get(macho_file.header.cpu_type, ("", 0, False))
+
+
 def align(v, alignment):
     remainder = v % alignment
     if remainder == 0:
@@ -180,37 +213,13 @@ class MachoFileLoader:
 
     @staticmethod
     def getArchitecture(binary, parsed=_NOT_PROVIDED):
-        # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
-        if not macho_file:
-            return ""
-        machine_type = macho_file.header.cpu_type
-        if machine_type in [
-            lief.MachO.Header.CPU_TYPE.X86_64,
-            lief.MachO.Header.CPU_TYPE.X86,
-        ]:
-            return "intel"
-        elif machine_type in [
-            lief.MachO.Header.CPU_TYPE.ARM64,
-            lief.MachO.Header.CPU_TYPE.ARM,
-        ]:
-            return "arm"
-        raise NotImplementedError("SMDA does not support this architecture yet.")
+        return _resolve_macho_cpu(macho_file)[0]
 
     @staticmethod
     def getBitness(binary, parsed=_NOT_PROVIDED):
-        # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
-        if not macho_file:
-            return 0
-        machine_type = macho_file.header.cpu_type
-        if machine_type == lief.MachO.Header.CPU_TYPE.X86_64:
-            return 64
-        elif machine_type == lief.MachO.Header.CPU_TYPE.X86:
-            return 32
-        elif machine_type == lief.MachO.Header.CPU_TYPE.ARM64:
-            raise NotImplementedError("SMDA does not support ARM yet.")
-        return 0
+        return _resolve_macho_cpu(macho_file)[1]
 
     @staticmethod
     def mergeCodeAreas(code_areas):
@@ -218,7 +227,6 @@ class MachoFileLoader:
 
     @staticmethod
     def getCodeAreas(binary, parsed=_NOT_PROVIDED):
-        # TODO add machine types whenever we add more architectures
         macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not macho_file:
             return []
