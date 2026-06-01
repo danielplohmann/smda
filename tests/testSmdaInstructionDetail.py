@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
+from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 
 def _intel_instruction(offset, raw_bytes, mnemonic, operands, bitness=32):
@@ -42,6 +43,13 @@ class TestGetDetailed(unittest.TestCase):
         ins.smda_function.smda_report.architecture = "dalvik"
         with self.assertRaises(NotImplementedError):
             ins.getDetailed()
+
+    def test_escaper_tolerates_undecodable_bytes(self):
+        # getDetailed() now raises ValueError (not AssertionError) on undecodable bytes;
+        # escapeBinaryPtrRef must still swallow it and fall back rather than crash.
+        ins = _intel_instruction(0x1000, "", "mov", "eax, dword ptr [0x401000]")
+        result = IntelInstructionEscaper.escapeBinaryPtrRef(ins)
+        self.assertIsInstance(result, str)
 
 
 if __name__ == "__main__":
