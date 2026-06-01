@@ -92,6 +92,21 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
         self.assertEqual(resolver.getApi(0x4000), (None, "printf"))
         self.assertEqual(resolver.getApi(0x1000), (None, None))
 
+    def test_api_resolver_resolves_imports_for_buffer_elf(self):
+        # memory-dump / raw-buffer ELF inputs (is_buffer=True) must still get imported APIs;
+        # this is the path that previously relied on ElfSymbolProvider holding relocation names.
+        resolver = ElfApiResolver(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            resolver.update(SimpleNamespace(is_buffer=True, getLiefBinary=lambda: MOCK_ELF))
+        self.assertEqual(resolver.getApi(0x4000), (None, "printf"))
+
+    def test_api_resolver_inactive_for_non_elf_buffer(self):
+        # raw shellcode (non-ELF) buffers have no ELF relocations and stay unresolved
+        resolver = ElfApiResolver(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            resolver.update(SimpleNamespace(is_buffer=True, getLiefBinary=lambda: object()))
+        self.assertFalse(resolver.is_active())
+
     def test_symbol_provider_inactive_for_non_elf(self):
         provider = ElfSymbolProvider(None)
         with mock.patch("lief.ELF.Binary", _MockElfBinary):
