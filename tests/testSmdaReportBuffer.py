@@ -2,6 +2,7 @@ import datetime
 import unittest
 
 from smda.common.SmdaReport import SmdaReport
+from smda.Disassembler import Disassembler
 from smda.DisassemblyStatistics import DisassemblyStatistics
 
 
@@ -59,6 +60,21 @@ class TestSmdaReportBufferPacking(unittest.TestCase):
         self.assertNotIn("buffer", report_dict)
         restored = SmdaReport.fromDict(report_dict)
         self.assertIsNone(restored.getBuffer())
+
+    def test_empty_buffer_roundtrips_as_empty_not_none(self):
+        # an intentionally stored empty buffer must survive as b"" and not collapse to None
+        report_dict = _make_minimal_report(buffer=b"").toDict()
+        self.assertIn("buffer", report_dict)
+        restored = SmdaReport.fromDict(report_dict)
+        self.assertEqual(restored.getBuffer(), b"")
+
+    def test_string_extraction_buffer_is_not_retained(self):
+        # a buffer handed to string extraction must not linger on the report and get serialized;
+        # only STORE_BUFFER (which sets report.buffer afterwards) should persist it.
+        report = _make_minimal_report(buffer=None)
+        Disassembler()._addStringsToReport(report, b"transient buffer for string extraction")
+        self.assertIsNone(report.getBuffer())
+        self.assertNotIn("buffer", report.toDict())
 
 
 if __name__ == "__main__":
