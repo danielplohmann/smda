@@ -10,6 +10,7 @@ from typing import Iterator, Optional
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.common.BlockLocator import BlockLocator
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.DisassemblyStatistics import DisassemblyStatistics
 
 from .BinaryInfo import BinaryInfo
@@ -299,7 +300,9 @@ class SmdaReport:
             try:
                 smda_report.buffer = cls._unpackBuffer(report_dict["buffer"])
             except Exception as exc:
-                # a corrupt/tampered buffer field must not abort loading the rest of the report
+                # re-raise genuine non-operational errors (MemoryError, etc.); a corrupt/tampered
+                # buffer field is operational and must not abort loading the rest of the report
+                reraise_non_operational_exception(exc)
                 LOGGER.warning("Failed to unpack stored buffer, leaving it unset: %s", exc)
         return smda_report
 
