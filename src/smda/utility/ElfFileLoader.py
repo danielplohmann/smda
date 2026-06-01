@@ -15,6 +15,46 @@ LOGGER = logging.getLogger(__name__)
 # got None" (e.g. FileLoader saw lief.parse fail; do NOT retry).
 _NOT_PROVIDED = object()
 
+# Single source of truth mapping ELF machine types to (architecture, bitness,
+# has_backend). SMDA only ships an Intel disassembly backend, but reporting the
+# real architecture for recognized non-Intel ELFs keeps loader metadata honest
+# instead of pretending every ELF is x86. Architectures with has_backend=False
+# intentionally resolve to no disassembler later (controlled error report).
+# A bitness of 0 here means the machine type alone is width-ambiguous; it is
+# then resolved from the ELF class (identity_class) in _resolve_elf_machine().
+_ELF_MACHINE_TYPES = {
+    lief.ELF.ARCH.X86_64: ("intel", 64, True),
+    lief.ELF.ARCH.I386: ("intel", 32, True),
+    lief.ELF.ARCH.AARCH64: ("arm", 64, False),
+    lief.ELF.ARCH.ARM: ("arm", 32, False),
+    lief.ELF.ARCH.PPC64: ("ppc", 64, False),
+    lief.ELF.ARCH.PPC: ("ppc", 32, False),
+    lief.ELF.ARCH.SPARCV9: ("sparc", 64, False),
+    lief.ELF.ARCH.SPARC: ("sparc", 32, False),
+    lief.ELF.ARCH.MIPS: ("mips", 0, False),
+    lief.ELF.ARCH.RISCV: ("riscv", 0, False),
+}
+
+
+def _resolve_elf_machine(elffile):
+    """Return (architecture, bitness, has_backend) for a parsed ELF.
+
+    Architecture and support status come from the machine type. Bitness comes
+    from the same mapping when the machine type implies a fixed width; for
+    width-ambiguous architectures (e.g. MIPS, RISC-V) it falls back to the ELF
+    class so the reported bitness stays correct.
+    """
+    if elffile is None:
+        return "", 0, False
+    architecture, bitness, has_backend = _ELF_MACHINE_TYPES.get(elffile.header.machine_type, ("", 0, False))
+    if architecture and bitness == 0:
+        identity_class = elffile.header.identity_class
+        if identity_class == lief.ELF.Header.CLASS.ELF64:
+            bitness = 64
+        elif identity_class == lief.ELF.Header.CLASS.ELF32:
+            bitness = 32
+    return architecture, bitness, has_backend
+
 
 def align(v, alignment):
     remainder = v % alignment
@@ -246,21 +286,13 @@ class ElfFileLoader:
 
     @staticmethod
     def getArchitecture(binary, parsed=_NOT_PROVIDED):
-        del binary, parsed
-        return "intel"
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        return _resolve_elf_machine(elffile)[0]
 
     @staticmethod
     def getBitness(binary, parsed=_NOT_PROVIDED):
-        # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
-        if not elffile:
-            return 0
-        machine_type = elffile.header.machine_type
-        if machine_type == lief.ELF.ARCH.X86_64:
-            return 64
-        elif machine_type == lief.ELF.ARCH.I386:
-            return 32
-        return 0
+        return _resolve_elf_machine(elffile)[1]
 
     @staticmethod
     def mergeCodeAreas(code_areas):
@@ -268,7 +300,6 @@ class ElfFileLoader:
 
     @staticmethod
     def getCodeAreas(binary, parsed=_NOT_PROVIDED):
-        # TODO add machine types whenever we add more architectures
         elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         if elffile is None:
             return []

@@ -17,6 +17,7 @@ from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.ElfFileLoader import ElfFileLoader, _resolve_elf_machine
 from smda.utility.FileLoader import FileLoader
 
 from .context import config
@@ -216,6 +217,40 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
         self.assertEqual(provider.getFunctionSymbols(), {})
         self.assertIsNone(provider.getAddress("stale"))
+
+    @staticmethod
+    def _fake_elf(machine_type, identity_class):
+        return SimpleNamespace(header=SimpleNamespace(machine_type=machine_type, identity_class=identity_class))
+
+    def test_elf_machine_type_resolves_architecture_bitness_and_support(self):
+        # (machine_type, identity_class) -> (architecture, bitness, has_backend)
+        cases = [
+            (lief.ELF.ARCH.I386, lief.ELF.Header.CLASS.ELF32, ("intel", 32, True)),
+            (lief.ELF.ARCH.X86_64, lief.ELF.Header.CLASS.ELF64, ("intel", 64, True)),
+            # recognized but unsupported (no backend): metadata must stay accurate
+            (lief.ELF.ARCH.AARCH64, lief.ELF.Header.CLASS.ELF64, ("arm", 64, False)),
+            # width-ambiguous machine types: bitness comes from the ELF class
+            (lief.ELF.ARCH.MIPS, lief.ELF.Header.CLASS.ELF64, ("mips", 64, False)),
+            (lief.ELF.ARCH.MIPS, lief.ELF.Header.CLASS.ELF32, ("mips", 32, False)),
+            (lief.ELF.ARCH.RISCV, lief.ELF.Header.CLASS.ELF64, ("riscv", 64, False)),
+        ]
+        for machine_type, identity_class, expected in cases:
+            with self.subTest(machine_type=machine_type):
+                fake_elf = self._fake_elf(machine_type, identity_class)
+                self.assertEqual(_resolve_elf_machine(fake_elf), expected)
+                # public accessors must agree with the central resolver
+                self.assertEqual(ElfFileLoader.getArchitecture(b"", parsed=fake_elf), expected[0])
+                self.assertEqual(ElfFileLoader.getBitness(b"", parsed=fake_elf), expected[1])
+
+    def test_elf_unknown_machine_type_reports_empty_metadata(self):
+        # AVR is intentionally not in the mapping -> unsupported/empty, not "intel"
+        fake_elf = self._fake_elf(lief.ELF.ARCH.AVR, lief.ELF.Header.CLASS.ELF32)
+        self.assertEqual(ElfFileLoader.getArchitecture(b"", parsed=fake_elf), "")
+        self.assertEqual(ElfFileLoader.getBitness(b"", parsed=fake_elf), 0)
+
+    def test_elf_metadata_empty_when_parse_failed(self):
+        self.assertEqual(ElfFileLoader.getArchitecture(b"", parsed=None), "")
+        self.assertEqual(ElfFileLoader.getBitness(b"", parsed=None), 0)
 
 
 if __name__ == "__main__":
