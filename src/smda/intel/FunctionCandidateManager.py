@@ -633,10 +633,11 @@ class FunctionCandidateManager:
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
-                self.addPrologueCandidate(stub_addr & self.getBitMask())
-                self.setInitialCandidate(stub_addr & self.getBitMask())
-                if stub_addr in self.candidates:
-                    self.candidates[stub_addr].setIsStub(True)
+                stub_addr_masked = stub_addr & self.getBitMask()
+                self.addPrologueCandidate(stub_addr_masked)
+                self.setInitialCandidate(stub_addr_masked)
+                if stub_addr_masked in self.candidates:
+                    self.candidates[stub_addr_masked].setIsStub(True)
         # structure for plt entries is similar but interleaved with additional code not considered functions
         for block in re.finditer(
             b"(?P<block>(\xff\x25[\\S\\s]{4}\x68[\\S\\s]{4}\xe9[\\S\\s]{4}){2,})",
@@ -646,10 +647,11 @@ class FunctionCandidateManager:
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
-                self.addPrologueCandidate(stub_addr & self.getBitMask())
-                self.setInitialCandidate(stub_addr & self.getBitMask())
-                if stub_addr in self.candidates:
-                    self.candidates[stub_addr].setIsStub(True)
+                stub_addr_masked = stub_addr & self.getBitMask()
+                self.addPrologueCandidate(stub_addr_masked)
+                self.setInitialCandidate(stub_addr_masked)
+                if stub_addr_masked in self.candidates:
+                    self.candidates[stub_addr_masked].setIsStub(True)
                 # define data bytes inbetween
                 for offset in range(10):
                     self.disassembly.data_map.add(stub_addr + 6 + offset)
@@ -681,10 +683,11 @@ class FunctionCandidateManager:
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
-                self.addPrologueCandidate(stub_addr & self.getBitMask())
-                self.setInitialCandidate(stub_addr & self.getBitMask())
-                if stub_addr in self.candidates:
-                    self.candidates[stub_addr].setIsStub(True)
+                stub_addr_masked = stub_addr & self.getBitMask()
+                self.addPrologueCandidate(stub_addr_masked)
+                self.setInitialCandidate(stub_addr_masked)
+                if stub_addr_masked in self.candidates:
+                    self.candidates[stub_addr_masked].setIsStub(True)
                 # define data bytes inbetween
                 for offset in range(5):
                     self.disassembly.data_map.add(stub_addr + 7 + offset)
