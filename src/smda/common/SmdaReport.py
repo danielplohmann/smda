@@ -290,7 +290,7 @@ class SmdaReport:
         smda_report.xmetadata = report_dict.get("xmetadata", None)
         # buffer is only present when the report was serialized with STORE_BUFFER enabled;
         # older reports omit it and keep buffer == None for backward compatibility.
-        if report_dict.get("buffer"):
+        if report_dict.get("buffer") is not None:
             smda_report.buffer = cls._unpackBuffer(report_dict["buffer"])
         return smda_report
 
@@ -340,7 +340,8 @@ class SmdaReport:
         }
         # only emit the (compressed) buffer when one was retained, e.g. via STORE_BUFFER;
         # keeps serialized reports unchanged for the default file/memory analysis path.
-        if self.buffer:
+        # `is not None` so an intentionally stored empty buffer survives as b"" (not dropped).
+        if self.buffer is not None:
             report_dict["buffer"] = self._packBuffer(self.buffer)
         return report_dict
 
