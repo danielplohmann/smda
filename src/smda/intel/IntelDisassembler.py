@@ -50,6 +50,50 @@ SYSCALL_BACKTRACK_BOUNDARY = (
     | {"syscall", "sysenter", "int", "int3", "hlt"}
 )
 
+# Instructions that implicitly write the rax/eax register family without naming
+# it as their (first) explicit operand. capstone's disasm_lite shows no rax
+# destination for these, so syscall-number backtracking must treat them as
+# clobbers and stop, otherwise a stale value could be read past a real write.
+SYSCALL_IMPLICIT_RAX_WRITERS = {
+    "cpuid",
+    "rdtsc",
+    "rdtscp",
+    "rdmsr",
+    "rdpmc",
+    "lodsb",
+    "lodsw",
+    "lodsd",
+    "lodsq",
+    "cbw",
+    "cwde",
+    "cdqe",
+    "lahf",
+    "xlat",
+    "xlatb",
+    "mul",
+    "div",
+    "idiv",
+    "in",
+    "ins",
+    "insb",
+    "insw",
+    "insd",
+    "cmpxchg",
+    "cmpxchg8b",
+    "cmpxchg16b",
+    "aaa",
+    "aas",
+    "aad",
+    "aam",
+    "daa",
+    "das",
+}
+
+# Instructions whose first operand is a source rather than a destination, so the
+# target register appearing there is read, not clobbered: backtracking may
+# continue past them.
+SYSCALL_READ_ONLY_INS = {"cmp", "test", "push", "bt"}
+
 
 class SimpleIns:
     address = None
@@ -384,8 +428,24 @@ class IntelDisassembler:
             mnemonic = instruction[2].split(" ")[-1]
             if mnemonic in SYSCALL_BACKTRACK_BOUNDARY or mnemonic.startswith("j"):
                 return None
+            # instructions that implicitly modify rax/eax (no explicit destination
+            # operand) must stop resolution, or a write could be silently skipped
+            if mnemonic in SYSCALL_IMPLICIT_RAX_WRITERS:
+                return None
             operands = [operand.strip().lower() for operand in instruction[3].split(",") if operand.strip()]
+            # single-operand imul writes rdx:rax implicitly (the multi-operand
+            # forms write only their explicit destination, handled below)
+            if mnemonic == "imul" and len(operands) == 1:
+                return None
+            # xchg writes both operands, so the target register being written is
+            # not necessarily the first operand
+            if mnemonic == "xchg" and any(operand in clobber_regs for operand in operands):
+                return None
+            # read-only instructions whose first operand is a source do not clobber
+            if mnemonic in SYSCALL_READ_ONLY_INS:
+                continue
             if not operands:
+                # operand-less and not a known implicit writer (nop, cld, leave, ...)
                 continue
             destination = operands[0]
             if destination not in clobber_regs:
