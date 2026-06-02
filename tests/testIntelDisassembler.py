@@ -162,6 +162,7 @@ class TestIntelDisassembler(unittest.TestCase):
         for implicit in (
             self._ins("cpuid", ""),  # operand-less implicit write
             self._ins("rdtsc", ""),
+            self._ins("xgetbv", ""),  # operand-less, writes edx:eax
             self._ins("lodsq", ""),
             self._ins("cdqe", ""),
             self._ins("div", "rcx"),  # implicit rax:rdx write with an explicit operand

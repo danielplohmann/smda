@@ -60,6 +60,7 @@ SYSCALL_IMPLICIT_RAX_WRITERS = {
     "rdtscp",
     "rdmsr",
     "rdpmc",
+    "xgetbv",
     "lodsb",
     "lodsw",
     "lodsd",
