@@ -149,6 +149,33 @@ class TestIntelDisassembler(unittest.TestCase):
         # no preceding instructions at all
         self.assertIsNone(disassembler._resolveSyscallNumber([], 64))
 
+    def test_syscall_number_continues_past_read_only_instructions(self):
+        disassembler = self._create_disassembler()
+        # cmp/test/push read rax as a source but do not clobber it -> still resolves
+        for read_only in (self._ins("cmp", "rax, 1"), self._ins("test", "rax, rax"), self._ins("push", "rax")):
+            preceding = [self._ins("mov", "rax, 0x3c"), read_only]
+            self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
+
+    def test_syscall_number_unresolved_on_implicit_rax_clobber(self):
+        disassembler = self._create_disassembler()
+        # instructions that implicitly write rax/eax must stop resolution (no false 60)
+        for implicit in (
+            self._ins("cpuid", ""),  # operand-less implicit write
+            self._ins("rdtsc", ""),
+            self._ins("lodsq", ""),
+            self._ins("cdqe", ""),
+            self._ins("div", "rcx"),  # implicit rax:rdx write with an explicit operand
+            self._ins("imul", "rcx"),  # one-operand form writes rdx:rax
+        ):
+            preceding = [self._ins("mov", "rax, 0x3c"), implicit]
+            self.assertIsNone(disassembler._resolveSyscallNumber(preceding, 64))
+        # xchg writes both operands, even when rax is the second one
+        xchg_second = [self._ins("mov", "rax, 0x3c"), self._ins("xchg", "qword ptr [rdi], rax")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(xchg_second, 64))
+        # multi-operand imul to an unrelated register does not clobber rax
+        imul_other = [self._ins("mov", "rax, 0x3c"), self._ins("imul", "rbx, rcx, 2")]
+        self.assertEqual(disassembler._resolveSyscallNumber(imul_other, 64), 60)
+
 
 if __name__ == "__main__":
     unittest.main()
