@@ -44,11 +44,15 @@ def _resolve_elf_machine(elffile):
     width-ambiguous architectures (e.g. MIPS, RISC-V) it falls back to the ELF
     class so the reported bitness stays correct.
     """
-    if elffile is None:
+    # Guard against a missing header (failed parse, or an incomplete/mock
+    # object) so we report unsupported metadata instead of raising. We avoid a
+    # blanket try/except here so genuine parse/memory errors still surface.
+    if elffile is None or not hasattr(elffile, "header"):
         return "", 0, False
-    architecture, bitness, has_backend = _ELF_MACHINE_TYPES.get(elffile.header.machine_type, ("", 0, False))
+    header = elffile.header
+    architecture, bitness, has_backend = _ELF_MACHINE_TYPES.get(header.machine_type, ("", 0, False))
     if architecture and bitness == 0:
-        identity_class = elffile.header.identity_class
+        identity_class = header.identity_class
         if identity_class == lief.ELF.Header.CLASS.ELF64:
             bitness = 64
         elif identity_class == lief.ELF.Header.CLASS.ELF32:
