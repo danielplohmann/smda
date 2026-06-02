@@ -252,6 +252,13 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(ElfFileLoader.getArchitecture(b"", parsed=None), "")
         self.assertEqual(ElfFileLoader.getBitness(b"", parsed=None), 0)
 
+    def test_elf_metadata_empty_for_header_less_object(self):
+        # an incomplete/unexpected parse result without a header -> unsupported, no raise
+        header_less = SimpleNamespace(sections=[])
+        self.assertEqual(_resolve_elf_machine(header_less), ("", 0, False))
+        self.assertEqual(ElfFileLoader.getArchitecture(b"", parsed=header_less), "")
+        self.assertEqual(ElfFileLoader.getBitness(b"", parsed=header_less), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
