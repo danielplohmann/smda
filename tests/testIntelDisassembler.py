@@ -106,6 +106,49 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertFalse(result.analysis_timeout)
 
+    @staticmethod
+    def _ins(mnemonic, op_str, address=0x1000, size=0):
+        # (address, size, mnemonic, op_str) as produced by capstone disasm_lite
+        return (address, size, mnemonic, op_str)
+
+    def test_syscall_number_resolved_from_direct_mov(self):
+        disassembler = self._create_disassembler()
+        # mov rax, 0x3c ; syscall  -> exit (60)
+        preceding = [self._ins("mov", "rax, 0x3c")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
+        # 32-bit eax variant
+        preceding32 = [self._ins("mov", "eax, 0x1")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding32, 32), 1)
+
+    def test_syscall_number_backtracks_over_unrelated_instructions(self):
+        disassembler = self._create_disassembler()
+        # mov rax, 0x3c ; xor edi, edi ; syscall  -> still resolves to 60
+        preceding = [self._ins("mov", "rax, 0x3c"), self._ins("xor", "edi, edi")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
+        # 64-bit also honors a zero-extending eax write
+        preceding_eax = [self._ins("mov", "eax, 0x3c"), self._ins("mov", "rsi, 0x0")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding_eax, 64), 60)
+        # movabs (capstone's mnemonic for the imm64 mov encoding) is honored
+        preceding_movabs = [self._ins("movabs", "rax, 0x3c")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding_movabs, 64), 60)
+
+    def test_syscall_number_unresolved_on_clobber_or_boundary(self):
+        disassembler = self._create_disassembler()
+        # rax overwritten by an untrackable instruction after the mov -> None
+        clobbered = [self._ins("mov", "rax, 0x3c"), self._ins("xor", "rax, rax")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(clobbered, 64))
+        # a control-flow boundary between the mov and the syscall stops backtracking
+        across_boundary = [self._ins("mov", "rax, 0x3c"), self._ins("call", "0x401000")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(across_boundary, 64))
+        # prefixed boundary mnemonic ("bnd ret") is still recognized after prefix split
+        across_prefixed_boundary = [self._ins("mov", "rax, 0x3c"), self._ins("bnd ret", "")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(across_prefixed_boundary, 64))
+        # value sourced from a register/memory operand is not a parseable immediate
+        from_register = [self._ins("mov", "rax, rbx")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(from_register, 64))
+        # no preceding instructions at all
+        self.assertIsNone(disassembler._resolveSyscallNumber([], 64))
+
 
 if __name__ == "__main__":
     unittest.main()

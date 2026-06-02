@@ -38,6 +38,18 @@ from .MnemonicTfIdf import MnemonicTfIdf
 
 LOGGER = logging.getLogger(__name__)
 
+# Mnemonics that terminate basic-block-local backtracking when resolving a
+# syscall number: any branch/call/return or a further syscall/interrupt marks a
+# control-flow boundary that we must not cross, so value recovery stays local.
+SYSCALL_BACKTRACK_BOUNDARY = (
+    set(CALL_INS)
+    | set(JMP_INS)
+    | set(CJMP_INS)
+    | set(LOOP_INS)
+    | set(RET_INS)
+    | {"syscall", "sysenter", "int", "int3", "hlt"}
+)
+
 
 class SimpleIns:
     address = None
@@ -342,6 +354,54 @@ class IntelDisassembler:
         relative_end = relative_start + 15
         return self.disassembly.binary_info.binary[relative_start:relative_end]
 
+    def _resolveSyscallNumber(self, preceding_instructions, bitness):
+        """Conservatively recover the syscall-number register (rax on 64-bit,
+        eax on 32-bit) by backtracking over the preceding block-local
+        instructions.
+
+        ``preceding_instructions`` is the list of ``(address, size, mnemonic,
+        op_str)`` tuples already analyzed in the current block before the
+        ``syscall``, in execution order. We walk them in reverse and:
+
+        * return the integer value of the first ``mov <target_reg>, <imm>`` that
+          sets the register, or
+        * return ``None`` if the register is written by anything we cannot track
+          (computed value, register/memory source, sub-register write) or if a
+          control-flow boundary is reached first.
+
+        Returning ``None`` rather than guessing keeps speculative value recovery
+        from introducing false process endings.
+        """
+        if bitness == 64:
+            # a 32-bit write (e.g. ``mov eax, 0x3c``) zero-extends into rax,
+            # so eax also carries the syscall number on 64-bit.
+            target_regs = ("rax", "eax")
+            clobber_regs = ("rax", "eax", "ax", "al", "ah")
+        else:
+            target_regs = ("eax",)
+            clobber_regs = ("eax", "ax", "al", "ah")
+        for instruction in reversed(preceding_instructions):
+            mnemonic = instruction[2].split(" ")[-1]
+            if mnemonic in SYSCALL_BACKTRACK_BOUNDARY or mnemonic.startswith("j"):
+                return None
+            operands = [operand.strip().lower() for operand in instruction[3].split(",") if operand.strip()]
+            if not operands:
+                continue
+            destination = operands[0]
+            if destination not in clobber_regs:
+                # this instruction does not touch the syscall register; keep going
+                continue
+            if mnemonic in ("mov", "movabs") and len(operands) == 2 and destination in target_regs:
+                try:
+                    # base 0 handles capstone's 0x-prefixed hex as well as decimal
+                    return int(operands[1], 0)
+                except ValueError:
+                    # source is a register, memory operand, or expression -> unresolved
+                    return None
+            # any other write to the register family cannot be tracked conservatively
+            return None
+        return None
+
     def analyzeFunction(self, start_addr, as_gap=False):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         self.tailcall_analyzer.initFunction()
@@ -367,6 +427,10 @@ class IntelDisassembler:
             previous_address = None
             previous_mnemonic = None
             previous_op_str = None
+            # instructions analyzed so far in the current block, accumulated across
+            # cache-window refills so syscall-number backtracking stays block-local
+            # (the cache itself is only a small look-ahead window).
+            block_instructions = []
             while True:
                 for i in cache:
                     i_address, i_size, i_mnemonic, i_op_str = i
@@ -434,29 +498,24 @@ class IntelDisassembler:
                             i_address,
                         )
                     elif i_mnemonic_noprefix in ["syscall"]:
-                        if previous_address and previous_mnemonic == "mov":
-                            prev_operands = previous_op_str.split(",")
-                            if len(prev_operands) == 2:
-                                reg = prev_operands[0].strip().lower()
-                                if (self.disassembly.binary_info.bitness == 64 and reg == "rax") or (
-                                    self.disassembly.binary_info.bitness == 32 and reg == "eax"
-                                ):
-                                    try:
-                                        syscall_number_str = int(prev_operands[1].strip(), 16)
-                                    except ValueError:
-                                        # TODO we should do backtracking on the basic block to resolve the value properly
-                                        LOGGER.debug(
-                                            "failed to extract syscall number from: %s at 0x%x",
-                                            prev_operands,
-                                            i_address,
-                                        )
-                                        syscall_number_str = None
-                                    if syscall_number_str == 60:
-                                        self._analyzeEndInstruction(state)
-                                        LOGGER.debug(
-                                            "  analyzeFunction() found program ending instruction @0x%08x",
-                                            i_address,
-                                        )
+                        # Resolve the syscall number register (rax/eax) by backtracking
+                        # over the preceding block-local instructions, so we still detect
+                        # the process-ending exit syscall (60) when its number is not set
+                        # by the directly preceding instruction.
+                        syscall_number = self._resolveSyscallNumber(
+                            block_instructions, self.disassembly.binary_info.bitness
+                        )
+                        if syscall_number == 60:
+                            self._analyzeEndInstruction(state)
+                            LOGGER.debug(
+                                "  analyzeFunction() found program ending instruction @0x%08x",
+                                i_address,
+                            )
+                        elif syscall_number is None:
+                            LOGGER.debug(
+                                "could not resolve syscall number for syscall @0x%x",
+                                i_address,
+                            )
                     elif previous_address and i_address != start_addr and previous_mnemonic == "call":
                         instruction_sequence = list(
                             self.capstone.disasm(self._getDisasmWindowBuffer(i_address), i_address)
@@ -499,6 +558,7 @@ class IntelDisassembler:
                     previous_address = i_address
                     previous_mnemonic = i_mnemonic_noprefix
                     previous_op_str = i_op_str
+                    block_instructions.append(i)
                     if (
                         i_address not in self.disassembly.code_map
                         and i_address not in self.disassembly.data_map
