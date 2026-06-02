@@ -48,7 +48,10 @@ def _resolve_macho_cpu(macho_file):
     """Return (architecture, bitness, has_backend) for a parsed Mach-O file,
     derived from its CPU type. Unknown CPU types report empty/unsupported
     metadata rather than guessing."""
-    if not macho_file:
+    # A FAT Mach-O parses to a lief.MachO.FatBinary, which has no ``header``;
+    # guard against that (and any incomplete object) so we report unsupported
+    # metadata instead of raising.
+    if not macho_file or not hasattr(macho_file, "header"):
         return "", 0, False
     return _MACHO_CPU_TYPES.get(macho_file.header.cpu_type, ("", 0, False))
 

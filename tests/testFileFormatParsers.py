@@ -251,6 +251,13 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(MachoFileLoader.getArchitecture(b"", parsed=None), "")
         self.assertEqual(MachoFileLoader.getBitness(b"", parsed=None), 0)
 
+    def test_macho_fat_binary_without_header_reports_empty_metadata(self):
+        # a FAT Mach-O parses to a header-less FatBinary -> unsupported, no raise
+        fat_binary = SimpleNamespace(architectures=[])
+        self.assertEqual(_resolve_macho_cpu(fat_binary), ("", 0, False))
+        self.assertEqual(MachoFileLoader.getArchitecture(b"", parsed=fat_binary), "")
+        self.assertEqual(MachoFileLoader.getBitness(b"", parsed=fat_binary), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
