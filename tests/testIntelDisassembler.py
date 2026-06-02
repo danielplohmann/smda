@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from smda.common.BinaryInfo import BinaryInfo
+from smda.intel.FunctionAnalysisState import FunctionAnalysisState
 from smda.intel.FunctionCandidate import FunctionCandidate
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager
 from smda.intel.IntelDisassembler import IntelDisassembler
@@ -105,6 +106,50 @@ class TestIntelDisassembler(unittest.TestCase):
         result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
 
         self.assertFalse(result.analysis_timeout)
+
+    def test_repeated_reference_candidates_participate_in_conflict_resolution(self):
+        config = SmdaConfig()
+        config.HIGH_ACCURACY = True
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+
+        manager = FunctionCandidateManager(config)
+        manager.disassembly = SimpleNamespace(binary_info=binary_info)
+        manager.bitness = 32
+        manager.addReferenceCandidate(0x1010, 0x1000)
+        manager.addReferenceCandidate(0x1010, 0x1005)
+        manager._buildQueue()
+
+        state = FunctionAnalysisState(0x1000, SimpleNamespace())
+        state.instruction_start_bytes = {0x1000}
+        state.processed_bytes = {0x1000, 0x1001, 0x1002, 0x1003, 0x1004, 0x1005}
+
+        manager.updateCandidates(state)
+
+        self.assertEqual(manager.candidates[0x1010].call_ref_sources, {0x1000})
+
+    def test_late_reference_candidates_participate_in_conflict_resolution(self):
+        config = SmdaConfig()
+        config.HIGH_ACCURACY = True
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+
+        manager = FunctionCandidateManager(config)
+        manager.disassembly = SimpleNamespace(binary_info=binary_info)
+        manager.bitness = 32
+        manager._buildQueue()
+        manager.addCandidate(0x1010, reference_source=0x1000)
+        manager.addCandidate(0x1010, reference_source=0x1005)
+
+        state = FunctionAnalysisState(0x1000, SimpleNamespace())
+        state.instruction_start_bytes = {0x1000}
+        state.processed_bytes = {0x1000, 0x1001, 0x1002, 0x1003, 0x1004, 0x1005}
+
+        manager.updateCandidates(state)
+
+        self.assertEqual(manager.candidates[0x1010].call_ref_sources, {0x1000})
 
 
 if __name__ == "__main__":

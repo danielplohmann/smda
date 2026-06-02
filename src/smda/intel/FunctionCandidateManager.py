@@ -111,6 +111,7 @@ class FunctionCandidateManager:
         self.ensureCandidate(addr)
         self.candidates[addr].setIsGapCandidate(is_gap)
         if reference_source:
+            self._all_call_refs[reference_source] = addr
             self.candidates[addr].addCallRef(reference_source)
         self.candidate_queue.add(self.candidates[addr])
         self.candidate_queue.update()
@@ -367,9 +368,10 @@ class FunctionCandidateManager:
     def addReferenceCandidate(self, addr, source_ref):
         if not self._passesCodeFilter(addr):
             return False
-        if self.ensureCandidate(addr):
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
             self._all_call_refs[source_ref] = addr
-        self.candidates[addr].addCallRef(source_ref)
+            self.candidates[addr].addCallRef(source_ref)
 
     def addLanguageSpecCandidate(self, addr, lang_spec):
         if not self._passesCodeFilter(addr):
