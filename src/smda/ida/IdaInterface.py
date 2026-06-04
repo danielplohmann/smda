@@ -126,6 +126,10 @@ class IdaInterface(BackendInterface):
         if flowchart is None:
             return blocks
         for block in flowchart:
+            start_ea = getattr(block, "start_ea", None)
+            end_ea = getattr(block, "end_ea", None)
+            if start_ea is not None and end_ea is not None and start_ea >= end_ea:
+                continue
             instructions = block.get_instructions()
             extracted_block = [instruction.ea for instruction in instructions] if instructions else []
             if extracted_block:

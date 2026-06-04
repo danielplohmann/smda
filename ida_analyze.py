@@ -5,6 +5,7 @@ IDA. Uses the ida-domain backend (IDA Pro 9.1+).
 
 from export import detectBackend
 from smda.Disassembler import Disassembler
+from smda.ida.IdaExporter import IdaExporter
 from smda.ida.IdaInterface import IdaInterface
 from smda.SmdaConfig import SmdaConfig
 
@@ -16,6 +17,8 @@ if __name__ == "__main__":
         base_addr = ida_interface.getBaseAddr()
         config = SmdaConfig()
         DISASSEMBLER = Disassembler(config)
+        DISASSEMBLER.disassembler = IdaExporter(config, ida_interface=ida_interface)
+        DISASSEMBLER._explicit_backend = True
         REPORT = DISASSEMBLER.disassembleBuffer(binary, base_addr)
         smda_function_count = 0
         smda_name_count = 0
