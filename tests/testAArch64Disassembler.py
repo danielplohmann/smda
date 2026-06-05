@@ -317,6 +317,45 @@ class TestAArch64BranchTarget(unittest.TestCase):
         self.assertIsNone(AArch64Backend._branchTarget("x8"))
 
 
+class TestAArch64PrologueDiscovery(unittest.TestCase):
+    """Frame-less prologues are discovered with no inbound call reference.
+
+    Beyond the frame-record store (stp x29,x30) the scanner recognizes the
+    callee-saved GPR-pair save (stp x{19..28},x{19..28},[sp,#-imm]!) and the
+    link-register save (str x30,[sp,#-imm]!) — verified against capstone 5.0.7.
+    Both functions below are reachable only via the prologue scan (no BL targets
+    them), mirroring functions reached through pointer tables in real binaries.
+    """
+
+    def _disassemble_words(self, words):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            architecture="aarch64",
+        )
+
+    def test_calleesaved_and_lr_save_prologues_are_function_starts(self):
+        report = self._disassemble_words(
+            [
+                0xA9BE53F3,  # 0x401000 stp x19, x20, [sp, #-0x20]!   (callee-saved pair)
+                0x52800000,  # 0x401004 mov w0, #0
+                0xA8C253F3,  # 0x401008 ldp x19, x20, [sp], #0x20
+                0xD65F03C0,  # 0x40100c ret
+                0xF81F0FFE,  # 0x401010 str x30, [sp, #-0x10]!        (link-register save)
+                0x52800020,  # 0x401014 mov w0, #1
+                0xF84107FE,  # 0x401018 ldr x30, [sp], #0x10
+                0xD65F03C0,  # 0x40101c ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0x10})
+
+
 class TestAArch64FunctionBoundaries(unittest.TestCase):
     def _disassemble_words(self, words, oep=None):
         config = SmdaConfig()
@@ -533,9 +572,9 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x400534)
-        self.assertEqual(len(self.report.xcfg), 250)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 15215)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 2863)
+        self.assertEqual(len(self.report.xcfg), 265)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19527)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3471)
         self.assertIsNotNone(self.report.getFunction(0x400534))
 
     def test_real_fixture_binja_boundary_regressions(self):
@@ -569,7 +608,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
         self.assertEqual(roundtrip.oep, 0x400534)
-        self.assertEqual(len(roundtrip.xcfg), 250)
+        self.assertEqual(len(roundtrip.xcfg), 265)
 
 
 if __name__ == "__main__":
