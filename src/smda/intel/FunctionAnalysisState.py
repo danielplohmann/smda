@@ -6,6 +6,13 @@ LOGGER = logging.getLogger(__name__)
 
 
 class FunctionAnalysisState:
+    # Mnemonic sets consulted by getBlocks() for basic-block boundary decisions.
+    # Exposed as class attributes (defaulting to the x86 sets) so other architecture
+    # backends can subclass this state and override them without re-implementing
+    # getBlocks(). Calls must NOT terminate a block; ret/trap instructions must.
+    CALL_MNEMONICS = CALL_INS
+    END_MNEMONICS = END_INS
+
     def __init__(self, start_addr, disassembly):
         self.start_addr = start_addr
         self.disassembly = disassembly
@@ -223,7 +230,7 @@ class FunctionAnalysisState:
                 # if one code reference is to another address than the next
                 if (
                     current[0] in self.code_refs_from
-                    and current[2] not in CALL_INS
+                    and current[2] not in self.CALL_MNEMONICS
                     and i != len(self.instructions) - 1
                     and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
                 ):
@@ -245,7 +252,7 @@ class FunctionAnalysisState:
                     )
                 ):
                     break
-                if current[2] in END_INS:
+                if current[2] in self.END_MNEMONICS:
                     break
             if block:
                 blocks.append(block)

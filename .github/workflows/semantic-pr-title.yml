@@ -38,6 +38,7 @@ jobs:
           scopes: |
             core
             intel
+            aarch64
             dalvik
             cil
             common

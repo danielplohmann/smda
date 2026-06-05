@@ -16,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 _NOT_PROVIDED = object()
 
 # Single source of truth mapping ELF machine types to (architecture, bitness,
-# has_backend). SMDA only ships an Intel disassembly backend, but reporting the
+# has_backend). SMDA ships Intel and AArch64 disassembly backends, but reporting the
 # real architecture for recognized non-Intel ELFs keeps loader metadata honest
 # instead of pretending every ELF is x86. Architectures with has_backend=False
 # intentionally resolve to no disassembler later (controlled error report).
@@ -25,7 +25,7 @@ _NOT_PROVIDED = object()
 _ELF_MACHINE_TYPES = {
     lief.ELF.ARCH.X86_64: ("intel", 64, True),
     lief.ELF.ARCH.I386: ("intel", 32, True),
-    lief.ELF.ARCH.AARCH64: ("arm", 64, False),
+    lief.ELF.ARCH.AARCH64: ("aarch64", 64, True),
     lief.ELF.ARCH.ARM: ("arm", 32, False),
     lief.ELF.ARCH.PPC64: ("ppc", 64, False),
     lief.ELF.ARCH.PPC: ("ppc", 32, False),
