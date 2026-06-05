@@ -62,9 +62,62 @@ BL_VALUE = 0x94000000
 BL_IMM_MASK = 0x03FFFFFF
 BL_IMM_SIGN_BIT = 0x02000000  # bit 25 of the 26-bit immediate
 
-# Prologue: ``stp x29, x30, [sp, #imm]!`` (pre-index store of the frame record).
-# Strong, position-independent function-start marker on AArch64.
+# --- function-entry prologues ---------------------------------------------
+# AArch64 has no single dominant byte prologue (no `push ebp`). The recognized
+# strong, position-independent function-start markers are, in rough frequency
+# order, the frame-record store, a callee-saved GPR-pair save, the link-register
+# save, and the pointer-auth sign. Masks/values verified live against capstone 5.0.7.
+
+# stp x29, x30, [sp, #imm]!  — pre-index frame-record store (any immediate)
 STP_FP_LR_PREINDEX_MASK = 0xFFC07FFF
 STP_FP_LR_PREINDEX_VALUE = 0xA9807BFD
-# Prologue: ``paciasp`` (pointer-auth sign LR) emitted at the top of PAC frames.
+# stp <Xt>, <Xt2>, [sp, #imm]!  — pre-index, 64-bit GPR pair (opcode bits 31:22)
+STP_PREINDEX_MASK = 0xFFC00000
+STP_PREINDEX_VALUE = 0xA9800000
+STP_IMM7_NEGATIVE = 0x00200000  # imm7 sign bit (instr bit 21): stack-allocating
+# str <Xt>, [sp, #imm]!  — pre-index, 64-bit store (pre-index marker in bits 11:10)
+STR_PREINDEX_MASK = 0xFFE00C00
+STR_PREINDEX_VALUE = 0xF8000C00
+STR_IMM9_NEGATIVE = 0x00100000  # imm9 sign bit (instr bit 20)
+# paciasp — pointer-auth sign LR, emitted at the top of PAC frames
 PACIASP = 0xD503233F
+
+_SP = 31  # x31 in an Rn field denotes the stack pointer
+_CALLEE_SAVED_GPR = frozenset(range(19, 29))  # x19..x28
+_LINK_REGISTER = 30  # x30
+
+
+def is_function_prologue(word):
+    """Whether a 32-bit little-endian word is a recognized AArch64 entry prologue.
+
+    Covers ``paciasp``, the frame-record store ``stp x29,x30,[sp,#imm]!``, a
+    callee-saved GPR-pair pre-index store ``stp x{19..28},x{19..28},[sp,#-imm]!``,
+    and the link-register save ``str x30,[sp,#-imm]!``. The pair/LR-save forms
+    require a *negative* (stack-allocating) immediate to an SP base — the
+    unambiguous prologue signal. Mid-function nested frames that reuse the same
+    encoding are absorbed by the engine's collision-abort when the enclosing
+    function claims the bytes first, so no terminator-preceded guard is applied
+    (such a guard would wrongly drop functions that follow a no-return call).
+    """
+    if word == PACIASP:
+        return True
+    # frame-record store: stp x29, x30, [sp, #imm]!
+    if (word & STP_FP_LR_PREINDEX_MASK) == STP_FP_LR_PREINDEX_VALUE:
+        return True
+    rn = (word >> 5) & 0x1F
+    # callee-saved pair: stp x{19..28}, x{19..28}, [sp, #-imm]!
+    if (
+        (word & STP_PREINDEX_MASK) == STP_PREINDEX_VALUE
+        and rn == _SP
+        and word & STP_IMM7_NEGATIVE
+        and (word & 0x1F) in _CALLEE_SAVED_GPR
+        and ((word >> 10) & 0x1F) in _CALLEE_SAVED_GPR
+    ):
+        return True
+    # link-register save: str x30, [sp, #-imm]!
+    return bool(
+        (word & STR_PREINDEX_MASK) == STR_PREINDEX_VALUE
+        and rn == _SP
+        and word & STR_IMM9_NEGATIVE
+        and (word & 0x1F) == _LINK_REGISTER
+    )

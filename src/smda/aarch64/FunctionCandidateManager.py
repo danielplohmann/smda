@@ -23,9 +23,7 @@ from .definitions import (
     BL_MASK,
     BL_VALUE,
     INSTRUCTION_SIZE,
-    PACIASP,
-    STP_FP_LR_PREINDEX_MASK,
-    STP_FP_LR_PREINDEX_VALUE,
+    is_function_prologue,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -60,16 +58,15 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 self.setInitialCandidate(target)
 
     def locatePrologueCandidates(self):
-        # AArch64 lacks a single dominant byte prologue (no push ebp). The strongest
-        # position-independent function-start markers are the frame-record store
-        # (stp x29, x30, [sp, #imm]!) and the pointer-auth sign (paciasp).
+        # AArch64 lacks a single dominant byte prologue (no push ebp). Scan the
+        # image word-by-word for the recognized function-entry prologues
+        # (frame-record store, callee-saved pair save, link-register save, paciasp);
+        # see definitions.is_function_prologue for the exact encodings.
         binary = self.disassembly.binary_info.binary
         base = self.disassembly.binary_info.base_addr
         for offset in range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE):
             word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
-            is_stp = (word & STP_FP_LR_PREINDEX_MASK) == STP_FP_LR_PREINDEX_VALUE
-            is_paciasp = word == PACIASP
-            if not (is_stp or is_paciasp):
+            if not is_function_prologue(word):
                 continue
             addr = (base + offset) & self.getBitMask()
             if not self._passesCodeFilter(addr):

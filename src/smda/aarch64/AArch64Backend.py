@@ -17,11 +17,9 @@ from .definitions import (
     INDIRECT_JUMP_INS,
     INSTRUCTION_SIZE,
     NOP,
-    PACIASP,
     RET_INS,
-    STP_FP_LR_PREINDEX_MASK,
-    STP_FP_LR_PREINDEX_VALUE,
     UNCOND_JUMP_INS,
+    is_function_prologue,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -112,7 +110,7 @@ class AArch64Backend(ArchBackend):
         word = cls._wordAt(d, addr)
         if word is None:
             return False
-        return word == PACIASP or (word & STP_FP_LR_PREINDEX_MASK) == STP_FP_LR_PREINDEX_VALUE
+        return is_function_prologue(word)
 
     @classmethod
     def _callFallthroughFunctionStart(cls, d, addr):
