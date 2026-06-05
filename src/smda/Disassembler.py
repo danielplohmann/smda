@@ -3,6 +3,7 @@ import hashlib
 import logging
 import traceback
 
+from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -29,6 +30,8 @@ class Disassembler:
         self._explicit_backend = bool(backend)
         if backend == "intel":
             self.disassembler = IntelDisassembler(self.config)
+        elif backend == "aarch64":
+            self.disassembler = AArch64Disassembler(self.config)
         elif backend == "cil":
             self.disassembler = CilDisassembler(self.config)
         elif backend == "dalvik":
@@ -46,6 +49,8 @@ class Disassembler:
         if self.disassembler is None:
             if architecture == "intel":
                 self.disassembler = IntelDisassembler(self.config)
+            elif architecture == "aarch64":
+                self.disassembler = AArch64Disassembler(self.config)
             elif architecture == "cil":
                 self.disassembler = CilDisassembler(self.config)
             elif architecture == "dalvik":
