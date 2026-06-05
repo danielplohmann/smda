@@ -101,6 +101,57 @@ def _build_aarch64_elf(code, base=0x400000, vaddr=0x401000):
     return ehdr + phdr + code
 
 
+def _build_aarch64_elf_with_init_array(text, init_pointers, base=0x400000, text_va=0x401000):
+    """ELF64/AArch64 object carrying an .init_array of function pointers.
+
+    Builds a section header table (.text exec + .init_array + .shstrtab) plus a
+    single covering PT_LOAD, so the loader exposes sections and the candidate
+    manager can read the .init_array entries.
+    """
+    em_aarch64, ehsize, phentsize, shentsize = 183, 64, 56, 64
+    shstrtab = b"\x00.text\x00.init_array\x00.shstrtab\x00"
+    name_text = shstrtab.index(b".text")
+    name_init = shstrtab.index(b".init_array")
+    name_str = shstrtab.index(b".shstrtab")
+    init_data = b"".join(struct.pack("<Q", p) for p in init_pointers)
+
+    text_off = ehsize + phentsize
+    init_off = text_off + len(text)
+    shstr_off = init_off + len(init_data)
+    sh_off = shstr_off + len(shstrtab)
+    init_va = text_va + len(text)
+
+    ehdr = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        b"\x7fELF\x02\x01\x01" + b"\x00" * 9,
+        2,  # ET_EXEC
+        em_aarch64,
+        1,
+        text_va,  # e_entry
+        ehsize,  # e_phoff
+        sh_off,  # e_shoff
+        0,
+        ehsize,
+        phentsize,
+        1,  # e_phnum
+        shentsize,
+        4,  # e_shnum
+        3,  # e_shstrndx
+    )
+    phdr = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, sh_off, sh_off, 0x1000)
+
+    def shdr(name, sh_type, flags, addr, offset, size, align, entsize):
+        return struct.pack("<IIQQQQIIQQ", name, sh_type, flags, addr, offset, size, 0, 0, align, entsize)
+
+    section_headers = (
+        shdr(0, 0, 0, 0, 0, 0, 0, 0)  # SHT_NULL
+        + shdr(name_text, 1, 0x6, text_va, text_off, len(text), 4, 0)  # PROGBITS, ALLOC|EXECINSTR
+        + shdr(name_init, 14, 0x3, init_va, init_off, len(init_data), 8, 8)  # INIT_ARRAY, ALLOC|WRITE
+        + shdr(name_str, 3, 0, 0, shstr_off, len(shstrtab), 1, 0)  # STRTAB
+    )
+    return ehdr + phdr + text + init_data + shstrtab + section_headers
+
+
 class TestAArch64Disassembler(unittest.TestCase):
     def _disassemble_fixture(self):
         config = SmdaConfig()
@@ -537,6 +588,44 @@ class TestAArch64ElfLoader(unittest.TestCase):
         self.assertTrue(any(start <= 0x401000 < end for start, end in code_areas))
 
 
+class TestAArch64DataPointerRecovery(unittest.TestCase):
+    """Functions reachable only through stored pointers are recovered.
+
+    The constructor below has no recognized prologue and no inbound BL; it is
+    discoverable only via its .init_array entry, so its recovery proves the
+    data-pointer pass works end to end through FileLoader(map_file=True).
+    """
+
+    def test_init_array_pointer_is_recovered(self):
+        text_va = 0x401000
+        ctor_va = text_va + 0x10
+        text = b"".join(
+            w.to_bytes(4, "little")
+            for w in [
+                0xA9BF7BFD,  # 0x401000 main: stp x29, x30, [sp, #-16]!
+                0x52800000,  # 0x401004      mov w0, #0
+                0xA8C17BFD,  # 0x401008      ldp x29, x30, [sp], #16
+                0xD65F03C0,  # 0x40100c      ret
+                0xD2800020,  # 0x401010 ctor: mov x0, #1   (no prologue, no BL target)
+                0xD65F03C0,  # 0x401014      ret
+                0xD503201F,  # 0x401018      nop
+                0xD503201F,  # 0x40101c      nop
+            ]
+        )
+        blob = _build_aarch64_elf_with_init_array(text, [ctor_va], text_va=text_va)
+
+        loader = FileLoader("/", map_file=True)
+        loader._loadFile(blob)
+        self.assertEqual(loader.getArchitecture(), "aarch64")
+
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        report = Disassembler(config).disassembleUnmappedBuffer(blob)
+        self.assertEqual(report.status, "ok")
+        self.assertIsNotNone(report.getFunction(text_va))
+        self.assertIsNotNone(report.getFunction(ctor_va))
+
+
 class TestAArch64StaticFixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -572,10 +661,19 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x400534)
-        self.assertEqual(len(self.report.xcfg), 265)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19527)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3471)
+        self.assertEqual(len(self.report.xcfg), 270)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19788)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3514)
         self.assertIsNotNone(self.report.getFunction(0x400534))
+
+    def test_real_fixture_data_pointer_recovery(self):
+        # init_array / data pointer-table functions recovered by #2, none of which
+        # is reachable via a direct BL or a recognized prologue.
+        for function_start in (0x400180, 0x400630, 0x401600, 0x401670):
+            self.assertIsNotNone(self.report.getFunction(function_start), f"missing 0x{function_start:x}")
+        # the .init_array pointer anchors _INIT_0's true entry (0x400630), so the
+        # prologue scan no longer mislabels its inner frame-record block (0x40063c).
+        self.assertIsNone(self.report.getFunction(0x40063C))
 
     def test_real_fixture_binja_boundary_regressions(self):
         expected_function_starts = {
@@ -608,7 +706,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
         self.assertEqual(roundtrip.oep, 0x400534)
-        self.assertEqual(len(roundtrip.xcfg), 265)
+        self.assertEqual(len(roundtrip.xcfg), 270)
 
 
 if __name__ == "__main__":
