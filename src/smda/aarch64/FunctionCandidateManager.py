@@ -6,14 +6,21 @@ x86 byte-level scans with AArch64-aware ones:
 
 * call-reference discovery scans for ``BL`` (direct call) and resolves its
   PC-relative target, in place of the x86 ``0xE8`` scan;
-* prologue discovery scans for the frame-record store and ``paciasp``, in place
-  of the x86 push/mov prologues.
+* prologue discovery scans for the recognized function-entry prologues (see
+  :func:`smda.aarch64.definitions.is_function_prologue`), in place of the x86
+  push/mov prologues;
+* data-pointer discovery seeds candidates from ELF ``.init_array``/``.fini_array``
+  entries and from data-section words that point into executable code, recovering
+  functions reached only indirectly.
 
-x86-only passes (PLT/stub chains, PE ``.pdata`` exception tables, the NOP-based
-gap scan) are disabled for v1 and are tracked as future iterate-steps.
+x86-only passes (PLT/stub chains, PE ``.pdata`` exception tables) do not apply,
+and the NOP-based gap scan is disabled for v1; both remain future iterate-steps.
 """
 
+import contextlib
 import logging
+
+import lief
 
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
 
@@ -35,6 +42,77 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # The base init() builds an x86 capstone purely for its NOP-based gap scan,
         # which this backend disables (see nextGapCandidate); drop the stale handle.
         self.capstone = None
+
+    def locateCandidates(self):
+        # AArch64 candidate discovery: symbols, BL call references, stored function
+        # pointers (.init_array/.fini_array + data tables), then entry prologues.
+        # The x86-only PLT/stub-chain and PE .pdata passes do not apply and are
+        # omitted; the NOP-based gap scan is disabled (see nextGapCandidate).
+        self.locateSymbolCandidates()
+        self.locateReferenceCandidates()
+        self.locateDataPointerCandidates()
+        self.locatePrologueCandidates()
+        self.locateLangSpecCandidates()
+        self.identified_alignment = self._identifyAlignment()
+
+    @staticmethod
+    def _executableSectionRanges(lief_binary):
+        # Absolute [start, end) VAs of executable ELF sections (.text/.init/.fini/...).
+        # Used to constrain pointer targets to genuine code: the loader's code_areas
+        # can include read-only data sharing the same RX segment.
+        ranges = []
+        exec_flag = lief.ELF.Section.FLAGS.EXECINSTR.value
+        for section in lief_binary.sections:
+            flags = 0
+            with contextlib.suppress(ValueError):
+                flags = section.flags
+            if section.virtual_address and (flags & exec_flag):
+                ranges.append((section.virtual_address, section.virtual_address + section.size))
+        return ranges
+
+    def locateDataPointerCandidates(self):
+        # Seed candidates from stored function pointers. ELF .init_array/.fini_array
+        # entries are authoritative constructor/destructor pointers; other data
+        # sections are scanned for aligned words pointing into executable code.
+        # This recovers functions reached only indirectly (CRT init stubs, pointer
+        # / dispatch tables) that no direct BL or recognized prologue would find,
+        # and anchors true entries so the prologue scan no longer mislabels an
+        # inner block as the function start.
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.ELF.Binary) or not lief_binary.sections:
+            return
+        exec_ranges = self._executableSectionRanges(lief_binary)
+        if not exec_ranges:
+            return
+
+        def in_exec(addr):
+            return any(start <= addr < end for start, end in exec_ranges)
+
+        pointer_size = 8 if binary_info.bitness == 64 else 4
+        bit_mask = self.getBitMask()
+        exec_flag = lief.ELF.Section.FLAGS.EXECINSTR.value
+        for section in lief_binary.sections:
+            flags = 0
+            with contextlib.suppress(ValueError):
+                flags = section.flags
+            # scan only non-executable, addressable sections for pointers into code
+            if not section.virtual_address or (flags & exec_flag):
+                continue
+            section_start = section.virtual_address
+            section_end = section_start + section.size
+            for pointer_va in range(section_start, section_end - (pointer_size - 1), pointer_size):
+                raw = self.disassembly.getBytes(pointer_va, pointer_size)
+                if raw is None or len(raw) != pointer_size:
+                    continue
+                target = int.from_bytes(raw, "little") & bit_mask
+                # a function pointer is instruction-aligned and lands inside code
+                if target % INSTRUCTION_SIZE != 0 or not in_exec(target):
+                    continue
+                if not self._passesCodeFilter(target):
+                    continue
+                self.addReferenceCandidate(target, pointer_va)
+                self.setInitialCandidate(target)
 
     def locateReferenceCandidates(self):
         # AArch64 direct calls are BL (100101 + imm26). Scan the mapped image
@@ -73,16 +151,6 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 continue
             self.addPrologueCandidate(addr)
             self.setInitialCandidate(addr)
-
-    def locateStubChainCandidates(self):
-        # x86 jmp-dword-ptr stub chains do not apply to AArch64; PLT recovery is a
-        # future iterate-step.
-        return
-
-    def locateExceptionHandlerCandidates(self):
-        # PE .pdata exception tables do not apply to ELF/AArch64; .eh_frame-based
-        # function-start recovery is a future iterate-step.
-        return
 
     def addTailcallCandidate(self, addr):
         if not self._passesCodeFilter(addr):
