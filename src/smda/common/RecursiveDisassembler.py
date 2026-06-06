@@ -19,10 +19,6 @@ from smda.DisassemblyResult import DisassemblyResult
 
 LOGGER = logging.getLogger(__name__)
 
-# two consecutive null bytes are a strong, architecture-independent indicator of
-# non-function code; used to abort analysis of obviously bogus candidates
-DOUBLE_ZERO = b"\x00\x00"
-
 
 class RecursiveDisassembler:
     """Architecture-agnostic recursive CFG-recovery engine.
@@ -240,8 +236,11 @@ class RecursiveDisassembler:
                     )
                     cache_pos += i_size
                     state.setNextInstructionReachable(True)
-                    # count appearences of "suspicious" byte patterns (like 00 00) that indicate non-function code
-                    if i_bytes == DOUBLE_ZERO:
+                    # count "suspicious" all-zero instructions (e.g. x86 `00 00`,
+                    # AArch64 `udf #0`) that indicate non-function code. Testing for an
+                    # all-zero decoded instruction is architecture-independent; a
+                    # fixed-width constant would never match wider fixed-width ISAs.
+                    if i_bytes and not any(i_bytes):
                         state.suspicious_ins_count += 1
                         LOGGER.debug(
                             "    analyzeFunction() found suspicious function @0x%08x",

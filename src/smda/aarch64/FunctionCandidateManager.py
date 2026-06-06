@@ -59,6 +59,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # The base init() builds an x86 capstone purely for its NOP-based gap scan,
         # which this backend disables (see nextGapCandidate); drop the stale handle.
         self.capstone = None
+        # Drop the memoized executable-section ranges so a reused manager instance
+        # recomputes them for the new binary instead of leaking stale ranges.
+        self._exec_ranges = None
 
     def locateCandidates(self):
         # AArch64 candidate discovery: symbols, BL call references, stored function
@@ -119,7 +122,11 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 continue
             section_start = section.virtual_address
             section_end = section_start + section.size
-            for pointer_va in range(section_start, section_end - (pointer_size - 1), pointer_size):
+            # Align the scan to a pointer_size boundary: stored pointers are
+            # naturally aligned, so an unaligned section start would otherwise
+            # stride past every aligned pointer in the section.
+            scan_start = (section_start + (pointer_size - 1)) & ~(pointer_size - 1)
+            for pointer_va in range(scan_start, section_end - (pointer_size - 1), pointer_size):
                 raw = self.disassembly.getBytes(pointer_va, pointer_size)
                 if raw is None or len(raw) != pointer_size:
                     continue
@@ -287,7 +294,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # that flow into the interior of an already-mapped function.
         if self.gap_pointer is None:
             self.initGapSearch()
-        if start_gap_pointer:
+        # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
+        # real argument, not "unset", so a truthiness check would wrongly drop it.
+        if start_gap_pointer is not None:
             self.gap_pointer = start_gap_pointer
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size
