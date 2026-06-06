@@ -25,6 +25,7 @@ from pathlib import Path
 import lief
 
 from smda.aarch64.AArch64Backend import AArch64Backend
+from smda.aarch64.definitions import adrp_page_value
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
@@ -624,6 +625,21 @@ class TestAArch64DataPointerRecovery(unittest.TestCase):
         self.assertEqual(report.status, "ok")
         self.assertIsNotNone(report.getFunction(text_va))
         self.assertIsNotNone(report.getFunction(ctor_va))
+
+
+class TestAArch64AddressMaterialization(unittest.TestCase):
+    """adrp page resolution used by the address-reference recovery pass."""
+
+    def test_adrp_page_value_matches_capstone(self):
+        # real .text adrp encodings from the fixture, cross-checked vs capstone 5.0.7
+        self.assertEqual(adrp_page_value(0xF00000E0, 0x400630), 0x41F000)  # adrp x0, #0x41f000
+        self.assertEqual(adrp_page_value(0x900000E0, 0x400644), 0x41C000)  # adrp x0, #0x41c000
+
+    def test_adrp_page_value_rounds_to_pc_page(self):
+        # the page is relative to the PC's 4 KiB page (low 12 bits cleared)
+        self.assertEqual(adrp_page_value(0xF00000E0, 0x400630) & 0xFFF, 0)
+        # a zero immediate yields the PC's own page regardless of PC offset within it
+        self.assertEqual(adrp_page_value(0x90000000, 0x401ABC), 0x401000)
 
 
 class TestAArch64GapScan(unittest.TestCase):

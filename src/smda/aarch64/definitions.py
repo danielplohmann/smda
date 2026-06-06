@@ -78,6 +78,29 @@ TBZ_TBNZ_VALUE = 0x36000000
 BCOND_MASK = 0xFF000010
 BCOND_VALUE = 0x54000000  # b.<cond> (also matches the always-branches b.al/b.nv)
 
+# --- PC-relative address materialization (reference recovery) -------------
+# adrp Xd, #page and adr Xd, #imm share the mask; bit 31 selects adrp vs adr.
+ADRP_MASK = 0x9F000000
+ADRP_VALUE = 0x90000000
+ADR_VALUE = 0x10000000
+# add Xd, Xn, #imm12 — the lo12 of an adrp+add pair (sh=0 is required by the mask).
+ADD_IMM64_MASK = 0xFFC00000
+ADD_IMM64_VALUE = 0x91000000
+
+
+def adrp_page_value(word, pc):
+    """Absolute 4 KiB page address materialized by ``adrp`` at ``pc``.
+
+    page = (pc & ~0xFFF) + sign_extend21(immhi:immlo) << 12. Cross-checked against
+    capstone 5.0.7's resolved page for every adrp in the reference fixture's .text.
+    """
+    immlo = (word >> 29) & 0x3
+    immhi = (word >> 5) & 0x7FFFF
+    imm = (immhi << 2) | immlo
+    if imm & (1 << 20):
+        imm -= 1 << 21
+    return (pc & ~0xFFF) + (imm << 12)
+
 
 def is_conditional_branch(word):
     """True for cbz/cbnz, tbz/tbnz and b.<cond> (compare/test/condition branches).
