@@ -28,6 +28,11 @@ import lief
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
 
 from .definitions import (
+    ADD_IMM64_MASK,
+    ADD_IMM64_VALUE,
+    ADR_VALUE,
+    ADRP_MASK,
+    ADRP_VALUE,
     B_MASK,
     B_VALUE,
     BL_IMM_MASK,
@@ -40,6 +45,7 @@ from .definitions import (
     NOP,
     RET_MASK,
     RET_VALUE,
+    adrp_page_value,
     is_conditional_branch,
     is_function_prologue,
 )
@@ -61,6 +67,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # omitted; the NOP-based gap scan is disabled (see nextGapCandidate).
         self.locateSymbolCandidates()
         self.locateReferenceCandidates()
+        self.locateAddressRefCandidates()
         self.locateDataPointerCandidates()
         self.locatePrologueCandidates()
         self.locateLangSpecCandidates()
@@ -124,6 +131,71 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                     continue
                 self.addReferenceCandidate(target, pointer_va)
                 self.setInitialCandidate(target)
+
+    def locateAddressRefCandidates(self):
+        # Reference discovery for addresses materialized in code: adr Xd, #imm and the
+        # adrp Xd, #page / add Xd, Xn, #lo12 pair. When the resulting address lands in
+        # an executable section it is a function reference (e.g. a function pointer
+        # passed to a callback), so seed it as a (weak) reference candidate. Tracks the
+        # adrp page held per register along straight-line runs, invalidating on writes
+        # and clearing at any control-flow edge. Targets reached only this way are
+        # common in position-independent code.
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.ELF.Binary) or not lief_binary.sections:
+            return
+        exec_ranges = self._executableSectionRanges(lief_binary)
+        if not exec_ranges:
+            return
+        base = binary_info.base_addr
+        binary = binary_info.binary
+        bit_mask = self.getBitMask()
+
+        def in_exec(addr):
+            return any(start <= addr < end for start, end in exec_ranges)
+
+        def seed(target, source):
+            target &= bit_mask
+            if target % INSTRUCTION_SIZE != 0 or not in_exec(target):
+                return
+            if self._passesCodeFilter(target) and self.disassembly.isAddrWithinMemoryImage(target):
+                self.addReferenceCandidate(target, source)
+
+        for low, high in exec_ranges:
+            pages = {}  # Xd -> adrp page base currently held in that register
+            addr = low
+            while addr + INSTRUCTION_SIZE <= high:
+                offset = addr - base
+                if offset < 0 or offset + INSTRUCTION_SIZE > len(binary):
+                    addr += INSTRUCTION_SIZE
+                    continue
+                word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
+                if (word & ADRP_MASK) == ADRP_VALUE:
+                    pages[word & 0x1F] = adrp_page_value(word, addr)
+                elif (word & ADRP_MASK) == ADR_VALUE:
+                    immlo = (word >> 29) & 0x3
+                    immhi = (word >> 5) & 0x7FFFF
+                    imm = (immhi << 2) | immlo
+                    if imm & (1 << 20):
+                        imm -= 1 << 21
+                    seed(addr + imm, addr)
+                    pages.pop(word & 0x1F, None)
+                elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
+                    rn = (word >> 5) & 0x1F
+                    if rn in pages:
+                        seed(pages[rn] + ((word >> 10) & 0xFFF), addr)
+                    pages.pop(word & 0x1F, None)
+                elif (
+                    (word & B_MASK) == B_VALUE
+                    or (word & BL_MASK) == BL_VALUE
+                    or (word & RET_MASK) == RET_VALUE
+                    or (word & BR_MASK) == BR_VALUE
+                    or is_conditional_branch(word)
+                ):
+                    pages.clear()  # control-flow edge: register provenance no longer holds
+                else:
+                    pages.pop(word & 0x1F, None)  # any other write invalidates the dest register
+                addr += INSTRUCTION_SIZE
 
     def locateReferenceCandidates(self):
         # AArch64 direct calls are BL (100101 + imm26). Scan the mapped image
