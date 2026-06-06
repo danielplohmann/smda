@@ -11,10 +11,13 @@ x86 byte-level scans with AArch64-aware ones:
   push/mov prologues;
 * data-pointer discovery seeds candidates from ELF ``.init_array``/``.fini_array``
   entries and from data-section words that point into executable code, recovering
-  functions reached only indirectly.
+  functions reached only indirectly;
+* the gap scan (:meth:`nextGapCandidate`) is an AArch64-aware linear sweep of
+  unanalyzed executable bytes, recovering unreferenced / indirect-only functions
+  that none of the above reaches.
 
-x86-only passes (PLT/stub chains, PE ``.pdata`` exception tables) do not apply,
-and the NOP-based gap scan is disabled for v1; both remain future iterate-steps.
+x86-only passes (PLT/stub chains, PE ``.pdata`` exception tables) do not apply and
+remain future iterate-steps; for a statically linked ELF there is no PLT to recover.
 """
 
 import contextlib
@@ -25,11 +28,19 @@ import lief
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
 
 from .definitions import (
+    B_MASK,
+    B_VALUE,
     BL_IMM_MASK,
     BL_IMM_SIGN_BIT,
     BL_MASK,
     BL_VALUE,
+    BR_MASK,
+    BR_VALUE,
     INSTRUCTION_SIZE,
+    NOP,
+    RET_MASK,
+    RET_VALUE,
+    is_conditional_branch,
     is_function_prologue,
 )
 
@@ -163,9 +174,90 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             self.candidate_queue.update()
         return True
 
+    def _cachedExecutableSectionRanges(self):
+        ranges = getattr(self, "_exec_ranges", None)
+        if ranges is None:
+            lief_binary = self.disassembly.binary_info.getLiefBinary()
+            ranges = self._executableSectionRanges(lief_binary) if isinstance(lief_binary, lief.ELF.Binary) else []
+            self._exec_ranges = ranges
+        return ranges
+
+    def _gapRunFlowsIntoInterior(self, start):
+        # G3: decode the straight-line run from `start` to its first terminator. If it
+        # ends in an unconditional `b` into the interior of already-mapped code (a
+        # known instruction that is not itself a function-start candidate), the run is
+        # a mid-function tail rather than a new function — so suppress it.
+        base = self.disassembly.binary_info.base_addr
+        size = self.disassembly.binary_info.binary_size
+        binary = self.disassembly.binary_info.binary
+        addr = start
+        limit = start + 0x400
+        while addr + INSTRUCTION_SIZE <= base + size and addr < limit:
+            word = int.from_bytes(binary[addr - base : addr - base + INSTRUCTION_SIZE], "little")
+            if (word & B_MASK) == B_VALUE:
+                imm = word & 0x03FFFFFF
+                if imm & 0x02000000:
+                    imm -= 0x04000000
+                target = addr + imm * INSTRUCTION_SIZE
+                return target in self.disassembly.code_map and target not in self.getFunctionStartCandidates()
+            if (word & RET_MASK) == RET_VALUE or (word & BR_MASK) == BR_VALUE:
+                return False
+            addr += INSTRUCTION_SIZE
+        return False
+
     def nextGapCandidate(self, start_gap_pointer=None):
-        # v1 relies on prologue + call-reference discovery only. The base-class gap
-        # scan assumes x86 NOP/padding encodings (and an x86 capstone), so it is
-        # disabled here pending an AArch64-aware gap heuristic.
-        del start_gap_pointer
-        return None
+        # AArch64 gap scan: a fixed-stride linear sweep of unanalyzed executable bytes
+        # for functions that no prologue, call reference or stored pointer reached
+        # (typically unreferenced / indirect-only routines). Guards keep each gap
+        # candidate at a plausible function entry: skip padding (nop / zero) and a
+        # leading conditional branch, constrain to genuine executable sections (the
+        # loader's code_areas can be a coarse segment covering data), and drop runs
+        # that flow into the interior of an already-mapped function.
+        if self.gap_pointer is None:
+            self.initGapSearch()
+        if start_gap_pointer:
+            self.gap_pointer = start_gap_pointer
+        base = self.disassembly.binary_info.base_addr
+        size = self.disassembly.binary_info.binary_size
+        binary = self.disassembly.binary_info.binary
+        exec_ranges = self._cachedExecutableSectionRanges()
+
+        def in_exec(addr):
+            return any(start <= addr < end for start, end in exec_ranges)
+
+        while True:
+            if base + size < self.gap_pointer:
+                return None
+            # align to the instruction stride
+            self.gap_pointer = (self.gap_pointer + (INSTRUCTION_SIZE - 1)) & ~(INSTRUCTION_SIZE - 1)
+            offset = self.gap_pointer - base
+            if offset < 0 or offset + INSTRUCTION_SIZE > size:
+                return None
+            if self.gap_pointer in self.disassembly.code_map:
+                self.gap_pointer = self.getNextGap()
+                continue
+            if self.gap_pointer in self.disassembly.data_map:
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            if exec_ranges and not in_exec(self.gap_pointer):
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
+            if word in (0, NOP):  # inter-function padding
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            if is_conditional_branch(word):  # a function never opens with a cond branch
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            if self.previously_analyzed_gap == self.gap_pointer:
+                self.gap_pointer = self.getNextGap(dont_skip=True)
+                continue
+            if not self._passesCodeFilter(self.gap_pointer):
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            if self._gapRunFlowsIntoInterior(self.gap_pointer):
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            self.previously_analyzed_gap = self.gap_pointer
+            self.addGapCandidate(self.gap_pointer)
+            return self.gap_pointer

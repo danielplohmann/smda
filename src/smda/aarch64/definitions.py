@@ -62,6 +62,37 @@ BL_VALUE = 0x94000000
 BL_IMM_MASK = 0x03FFFFFF
 BL_IMM_SIGN_BIT = 0x02000000  # bit 25 of the 26-bit immediate
 
+# --- control-flow masks consumed by the gap scan --------------------------
+# Used by FunctionCandidateManager.nextGapCandidate to skip padding/stray tails
+# and detect run terminators. Verified live against capstone 5.0.7.
+B_MASK = 0xFC000000
+B_VALUE = 0x14000000  # b <label> (unconditional direct branch; BL shares the mask at 0x94000000)
+RET_MASK = 0xFFFFFC1F
+RET_VALUE = 0xD65F0000  # ret {Xn}
+BR_MASK = 0xFFFFFC1F
+BR_VALUE = 0xD61F0000  # br Xn (indirect branch)
+CBZ_CBNZ_MASK = 0x7E000000
+CBZ_CBNZ_VALUE = 0x34000000
+TBZ_TBNZ_MASK = 0x7E000000
+TBZ_TBNZ_VALUE = 0x36000000
+BCOND_MASK = 0xFF000010
+BCOND_VALUE = 0x54000000  # b.<cond> (also matches the always-branches b.al/b.nv)
+
+
+def is_conditional_branch(word):
+    """True for cbz/cbnz, tbz/tbnz and b.<cond> (compare/test/condition branches).
+
+    A function never opens with one of these, so the gap scan treats a leading
+    conditional branch as a stray block tail (not an entry) and skips it. b.al/b.nv
+    also match the b.<cond> mask; they are never valid entries, so skipping is benign.
+    """
+    return (
+        (word & CBZ_CBNZ_MASK) == CBZ_CBNZ_VALUE
+        or (word & TBZ_TBNZ_MASK) == TBZ_TBNZ_VALUE
+        or (word & BCOND_MASK) == BCOND_VALUE
+    )
+
+
 # --- function-entry prologues ---------------------------------------------
 # AArch64 has no single dominant byte prologue (no `push ebp`). The recognized
 # strong, position-independent function-start markers are, in rough frequency
