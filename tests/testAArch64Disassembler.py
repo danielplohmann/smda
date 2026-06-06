@@ -626,6 +626,39 @@ class TestAArch64DataPointerRecovery(unittest.TestCase):
         self.assertIsNotNone(report.getFunction(ctor_va))
 
 
+class TestAArch64GapScan(unittest.TestCase):
+    """A function reached by nothing else is recovered by the gap scan.
+
+    f2 below has no recognized prologue, no inbound BL, and no stored pointer; it
+    sits in the gap after f1 and is discoverable only by the linear gap sweep.
+    """
+
+    def test_unreferenced_function_recovered_in_gap(self):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(
+            w.to_bytes(4, "little")
+            for w in [
+                0xA9BF7BFD,  # 0x401000 f1: stp x29, x30, [sp, #-16]!  (prologue -> found)
+                0x52800000,  # 0x401004     mov w0, #0
+                0xA8C17BFD,  # 0x401008     ldp x29, x30, [sp], #16
+                0xD65F03C0,  # 0x40100c     ret
+                0xD503201F,  # 0x401010     nop  (inter-function padding)
+                0xD2800CE0,  # 0x401014 f2: mov x0, #0x67   (no prologue / ref / pointer)
+                0xD65F03C0,  # 0x401018     ret
+            ]
+        )
+        report = Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            architecture="aarch64",
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0x14})
+
+
 class TestAArch64StaticFixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -661,10 +694,17 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x400534)
-        self.assertEqual(len(self.report.xcfg), 270)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19788)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3514)
+        self.assertEqual(len(self.report.xcfg), 278)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19881)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3525)
         self.assertIsNotNone(self.report.getFunction(0x400534))
+
+    def test_real_fixture_gap_scan_recovery(self):
+        # Functions recovered only by the gap scan (#3): unreferenced / indirect-only
+        # routines that no BL, prologue, or stored pointer reaches. With the gap scan
+        # every Binary Ninja function start is now recovered.
+        for function_start in (0x40CFE0, 0x40DD78, 0x40DF34, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
+            self.assertIsNotNone(self.report.getFunction(function_start), f"missing 0x{function_start:x}")
 
     def test_real_fixture_data_pointer_recovery(self):
         # init_array / data pointer-table functions recovered by #2, none of which
@@ -706,7 +746,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
         self.assertEqual(roundtrip.oep, 0x400534)
-        self.assertEqual(len(roundtrip.xcfg), 270)
+        self.assertEqual(len(roundtrip.xcfg), 278)
 
 
 if __name__ == "__main__":
