@@ -239,8 +239,13 @@ class Disassembler:
         report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
+        report.timestamp = datetime.datetime.now(datetime.timezone.utc)
         report.execution_time = self._getDurationInSeconds(start, datetime.datetime.now(datetime.timezone.utc))
         report.message = traceback.format_exc()
+        report.xcfg = {}
+        report.data_refs_from = {}
+        report.data_refs_to = {}
+        report.xmetadata = {}
         return report
 
     def _handleDisassemblyException(self, start, exception, log_message):

@@ -30,6 +30,7 @@ dependencies = [
     "dncil",
     "dnfile",
     "lief>=0.16.0",
+    "ida-domain>=0.5.0",
 ]
 
 [project.urls]

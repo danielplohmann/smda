@@ -48,6 +48,22 @@ There is also a demo script:
 
 * analyze.py -- example usage: perform disassembly on a file or memory dump and optionally store results in JSON to a given output path.
 
+### IDA Pro export
+
+SMDA can also turn an IDA-analyzed database into a SMDA report instead of running its own disassembly. The IDA backend (`smda.ida.IdaInterface`) is built on the [IDA Domain API](https://ida-domain.docs.hex-rays.com/) and ships by default with `pip install smda` (the `ida-domain` dependency is included). Using it requires a licensed **IDA Pro 9.1+** installation with `IDADIR` configured.
+
+> The older IDAPython-based backend (IDA 7.x/8.x) has been removed; SMDA now targets IDA 9.1+ via the IDA Domain API only.
+
+Inside the IDA GUI, run `export.py` (dumps a `.smda` next to the database) or `ida_analyze.py` (pushes recovered functions/names back into IDA) via *File -> Script file...*.
+
+For headless export (no GUI), use `ida_domain_analyze.py`:
+
+```
+python ida_domain_analyze.py /path/to/sample.i64 -o sample.smda
+```
+
+Make sure `IDADIR` points at your IDA Pro 9.1+ installation (see the [getting started guide](https://ida-domain.docs.hex-rays.com/getting_started/)).
+
 For Dalvik, the current scope is raw single-DEX inputs. APK, multi-dex container handling, and ODEX/VDEX/CDEX runtime-artifact analysis are not yet first-class workflows in SMDA.
 
 The code should be fully compatible with Python 3.8+.

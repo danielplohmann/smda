@@ -8,3 +8,4 @@ ruff
 pre-commit
 build
 twine
+ida-domain>=0.5.0
