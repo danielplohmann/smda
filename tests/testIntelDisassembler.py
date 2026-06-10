@@ -175,6 +175,45 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(result.ins2fn.get(0x100E), 0x1000)
 
+    def test_resolve_indirect_switch_stops_at_image_end(self):
+        disassembler = IntelDisassembler.__new__(IntelDisassembler)
+        disassembler.disassembly = SimpleNamespace(
+            isAddrWithinMemoryImage=lambda addr: 0x1000 <= addr < 0x1008,
+            getByte=lambda addr: 0 if 0x1000 <= addr < 0x1008 else None,
+        )
+        disassembler.fc_manager = SimpleNamespace(getFunctionStartCandidates=lambda: set())
+
+        # walks from 0x1004 past the image end without raising on the None byte
+        self.assertEqual(
+            disassembler.resolveIndirectSwitch(0x1000, 1),
+            list(range(0x1004, 0x1008)),
+        )
+
+    def test_push_ret_obfuscation_detected_at_address_zero(self):
+        # a push at address 0 (base-0 buffer) must not disable push-ret detection;
+        # the stub at 0x0 becomes a candidate through the call in the second function
+        buf = (
+            b"\x68\x10\x00\x00\x00"  # 0x0: push 0x10
+            + b"\xc3"  # 0x5: ret
+            + b"\xcc" * 10  # 0x6: padding
+            + b"\x31\xc0"  # 0x10: xor eax, eax (push-ret destination)
+            + b"\xc3"  # 0x12: ret
+            + b"\x55"  # 0x13: push ebp
+            + b"\x89\xe5"  # 0x14: mov ebp, esp
+            + b"\xe8\xe5\xff\xff\xff"  # 0x16: call 0x0
+            + b"\x5d"  # 0x1b: pop ebp
+            + b"\xc3"  # 0x1c: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x0, result.functions)
+        self.assertEqual(result.ins2fn.get(0x10), 0x0)
+
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
         binary_info.base_addr = 0
