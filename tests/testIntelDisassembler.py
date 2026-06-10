@@ -152,6 +152,29 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertIn(0x1028, result.functions)
         self.assertIn(0x1028, result.code_refs_from.get(0x100C, set()))
 
+    def test_loop_taken_edge_is_disassembled(self):
+        # a forward loop target is only reachable via the taken edge; it must end up
+        # as a block of the same function
+        buf = (
+            b"\x55"  # 0x1000: push ebp
+            + b"\x89\xe5"  # 0x1001: mov ebp, esp
+            + b"\xb9\x03\x00\x00\x00"  # 0x1003: mov ecx, 3
+            + b"\xe2\x04"  # 0x1008: loop 0x100e
+            + b"\x31\xc0"  # 0x100a: xor eax, eax
+            + b"\x5d"  # 0x100c: pop ebp
+            + b"\xc3"  # 0x100d: ret
+            + b"\x89\xc0"  # 0x100e: mov eax, eax (loop target)
+            + b"\xeb\xf8"  # 0x1010: jmp 0x100a
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertEqual(result.ins2fn.get(0x100E), 0x1000)
+
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
         binary_info.base_addr = 0
