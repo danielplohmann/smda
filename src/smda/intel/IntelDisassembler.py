@@ -219,9 +219,17 @@ class IntelDisassembler:
             rip = i_address + i_size
             call_destination = rip + self.getReferencedAddr(i_op_str)
             dereferenced = self.disassembly.dereferenceQword(call_destination)
-            state.addCodeRef(i_address, call_destination)
-            if dereferenced is not None:
+            if dereferenced is not None and self.disassembly.isAddrWithinMemoryImage(dereferenced):
+                # the slot holds an in-image target (thunk/local function): book the call
+                # against the real destination, like the 32-bit dword-ptr path does
+                state.addCodeRef(i_address, dereferenced)
+                self._handleCallTarget(state, i_address, dereferenced)
                 self._handleApiTarget(i_address, call_destination, dereferenced)
+            else:
+                # import-like case: keep the reference on the slot itself
+                state.addCodeRef(i_address, call_destination)
+                if dereferenced is not None:
+                    self._handleApiTarget(i_address, call_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
             self._handleCallTarget(state, i_address, call_destination)

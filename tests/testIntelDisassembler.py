@@ -126,6 +126,32 @@ class TestIntelDisassembler(unittest.TestCase):
         # the call must reference the slot at 0x1000, not a bogus positive displacement target
         self.assertIn(0x1000, result.code_refs_from.get(0x100C, set()))
 
+    def test_rip_relative_call_through_in_image_slot_reaches_target(self):
+        # the slot at 0x1000 points at a second function inside the image: the call must
+        # be booked against the dereferenced target so recursion reaches the real function
+        buf = (
+            (0x1028).to_bytes(8, "little")  # 0x1000: slot -> in-image function
+            + b"\x55"  # 0x1008: push rbp
+            + b"\x48\x89\xe5"  # 0x1009: mov rbp, rsp
+            + b"\xff\x15\xee\xff\xff\xff"  # 0x100c: call qword ptr [rip - 0x12] -> 0x1000
+            + b"\x5d"  # 0x1012: pop rbp
+            + b"\xc3"  # 0x1013: ret
+            + b"\xcc" * 20  # 0x1014: padding
+            + b"\x55"  # 0x1028: push rbp
+            + b"\x48\x89\xe5"  # 0x1029: mov rbp, rsp
+            + b"\x5d"  # 0x102c: pop rbp
+            + b"\xc3"  # 0x102d: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x1028, result.functions)
+        self.assertIn(0x1028, result.code_refs_from.get(0x100C, set()))
+
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
         binary_info.base_addr = 0
