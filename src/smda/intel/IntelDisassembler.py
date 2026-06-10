@@ -168,9 +168,12 @@ class IntelDisassembler:
         return list(symbol_offsets)
 
     def getReferencedAddr(self, op_str):
-        referenced_addr = re.search(r"0x[a-fA-F0-9]+", op_str)
+        # preserve a leading sign so that negative displacements (e.g. "qword ptr [rip - 0x20]")
+        # resolve to the correct address instead of being treated as positive
+        referenced_addr = re.search(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)", op_str)
         if referenced_addr:
-            return int(referenced_addr.group(), 16)
+            value = int(referenced_addr.group("value"), 16)
+            return -value if referenced_addr.group("sign") == "-" else value
         return 0
 
     def resolveIndirectSwitch(self, addr_switch_array, size):

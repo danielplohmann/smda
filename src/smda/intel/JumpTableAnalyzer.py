@@ -86,10 +86,8 @@ class JumpTableAnalyzer:
                 if target_register and target_register not in instr[3]:
                     continue
                 data_ref_instruction_addr = instr[0]
+                # getReferencedAddr() preserves the displacement sign
                 offset = self.disassembler.getReferencedAddr(instr[3])
-                rip_sign = "+" if "+" in instr[3] else "-"
-                if rip_sign == "-":
-                    offset = offset * -1
                 off_jumptable = instr[0] + instr[1] + offset
                 state.addDataRef(data_ref_instruction_addr, off_jumptable, size=4)
                 # print("  0x%x: _addHandler() found potential jump table offset (mov) with backtracking: 0x%x (%s %s)" % (instr[0], off_jumptable, instr[2], instr[3]))

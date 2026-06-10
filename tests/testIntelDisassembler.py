@@ -96,6 +96,36 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(manager.resolvePointerReference(0x20), 0x1028)
 
+    def test_get_referenced_addr_preserves_sign(self):
+        disassembler = IntelDisassembler.__new__(IntelDisassembler)
+        self.assertEqual(disassembler.getReferencedAddr("qword ptr [rip - 0x20]"), -0x20)
+        self.assertEqual(disassembler.getReferencedAddr("qword ptr [rip + 0x20]"), 0x20)
+        self.assertEqual(disassembler.getReferencedAddr("dword ptr [0x401000]"), 0x401000)
+        self.assertEqual(disassembler.getReferencedAddr("0x401000"), 0x401000)
+        self.assertEqual(disassembler.getReferencedAddr("eax"), 0)
+
+    def test_rip_relative_call_negative_displacement_resolves_correct_slot(self):
+        # 8-byte import-like slot at 0x1000 (value outside the image), then a function
+        # at 0x1008 that calls through the slot with a negative RIP-relative displacement
+        buf = (
+            (0x7FFF12345678).to_bytes(8, "little")  # 0x1000: slot
+            + b"\x55"  # 0x1008: push rbp
+            + b"\x48\x89\xe5"  # 0x1009: mov rbp, rsp
+            + b"\xff\x15\xee\xff\xff\xff"  # 0x100c: call qword ptr [rip - 0x12] -> 0x1000
+            + b"\x5d"  # 0x1012: pop rbp
+            + b"\xc3"  # 0x1013: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x1008, result.functions)
+        # the call must reference the slot at 0x1000, not a bogus positive displacement target
+        self.assertIn(0x1000, result.code_refs_from.get(0x100C, set()))
+
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
         binary_info.base_addr = 0
