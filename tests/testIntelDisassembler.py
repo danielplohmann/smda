@@ -150,6 +150,76 @@ class TestIntelDisassembler(unittest.TestCase):
         manager.updateCandidates(state)
 
         self.assertEqual(manager.candidates[0x1010].call_ref_sources, {0x1000})
+    @staticmethod
+    def _ins(mnemonic, op_str, address=0x1000, size=0):
+        # (address, size, mnemonic, op_str) as produced by capstone disasm_lite
+        return (address, size, mnemonic, op_str)
+
+    def test_syscall_number_resolved_from_direct_mov(self):
+        disassembler = self._create_disassembler()
+        # mov rax, 0x3c ; syscall  -> exit (60)
+        preceding = [self._ins("mov", "rax, 0x3c")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
+        # 32-bit eax variant
+        preceding32 = [self._ins("mov", "eax, 0x1")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding32, 32), 1)
+
+    def test_syscall_number_backtracks_over_unrelated_instructions(self):
+        disassembler = self._create_disassembler()
+        # mov rax, 0x3c ; xor edi, edi ; syscall  -> still resolves to 60
+        preceding = [self._ins("mov", "rax, 0x3c"), self._ins("xor", "edi, edi")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
+        # 64-bit also honors a zero-extending eax write
+        preceding_eax = [self._ins("mov", "eax, 0x3c"), self._ins("mov", "rsi, 0x0")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding_eax, 64), 60)
+        # movabs (capstone's mnemonic for the imm64 mov encoding) is honored
+        preceding_movabs = [self._ins("movabs", "rax, 0x3c")]
+        self.assertEqual(disassembler._resolveSyscallNumber(preceding_movabs, 64), 60)
+
+    def test_syscall_number_unresolved_on_clobber_or_boundary(self):
+        disassembler = self._create_disassembler()
+        # rax overwritten by an untrackable instruction after the mov -> None
+        clobbered = [self._ins("mov", "rax, 0x3c"), self._ins("xor", "rax, rax")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(clobbered, 64))
+        # a control-flow boundary between the mov and the syscall stops backtracking
+        across_boundary = [self._ins("mov", "rax, 0x3c"), self._ins("call", "0x401000")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(across_boundary, 64))
+        # prefixed boundary mnemonic ("bnd ret") is still recognized after prefix split
+        across_prefixed_boundary = [self._ins("mov", "rax, 0x3c"), self._ins("bnd ret", "")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(across_prefixed_boundary, 64))
+        # value sourced from a register/memory operand is not a parseable immediate
+        from_register = [self._ins("mov", "rax, rbx")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(from_register, 64))
+        # no preceding instructions at all
+        self.assertIsNone(disassembler._resolveSyscallNumber([], 64))
+
+    def test_syscall_number_continues_past_read_only_instructions(self):
+        disassembler = self._create_disassembler()
+        # cmp/test/push read rax as a source but do not clobber it -> still resolves
+        for read_only in (self._ins("cmp", "rax, 1"), self._ins("test", "rax, rax"), self._ins("push", "rax")):
+            preceding = [self._ins("mov", "rax, 0x3c"), read_only]
+            self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
+
+    def test_syscall_number_unresolved_on_implicit_rax_clobber(self):
+        disassembler = self._create_disassembler()
+        # instructions that implicitly write rax/eax must stop resolution (no false 60)
+        for implicit in (
+            self._ins("cpuid", ""),  # operand-less implicit write
+            self._ins("rdtsc", ""),
+            self._ins("xgetbv", ""),  # operand-less, writes edx:eax
+            self._ins("lodsq", ""),
+            self._ins("cdqe", ""),
+            self._ins("div", "rcx"),  # implicit rax:rdx write with an explicit operand
+            self._ins("imul", "rcx"),  # one-operand form writes rdx:rax
+        ):
+            preceding = [self._ins("mov", "rax, 0x3c"), implicit]
+            self.assertIsNone(disassembler._resolveSyscallNumber(preceding, 64))
+        # xchg writes both operands, even when rax is the second one
+        xchg_second = [self._ins("mov", "rax, 0x3c"), self._ins("xchg", "qword ptr [rdi], rax")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(xchg_second, 64))
+        # multi-operand imul to an unrelated register does not clobber rax
+        imul_other = [self._ins("mov", "rax, 0x3c"), self._ins("imul", "rbx, rcx, 2")]
+        self.assertEqual(disassembler._resolveSyscallNumber(imul_other, 64), 60)
 
 
 if __name__ == "__main__":

@@ -234,6 +234,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def update(self, binary_info):
         """Parse Delphi metadata from the given binary."""
+        self._func_symbols = {}
         self._binary = binary_info.binary
         self._base_addr = binary_info.base_addr
         self._bitness = binary_info.bitness
