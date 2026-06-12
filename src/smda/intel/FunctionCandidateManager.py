@@ -123,6 +123,7 @@ class FunctionCandidateManager:
             return False
         self.candidates[addr].setIsGapCandidate(is_gap)
         if reference_source:
+            self._all_call_refs[reference_source] = addr
             self._addCappedCallRef(self.candidates[addr], reference_source)
         self.candidate_queue.add(self.candidates[addr])
         self.candidate_queue.update()
