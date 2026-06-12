@@ -150,6 +150,7 @@ class TestIntelDisassembler(unittest.TestCase):
         manager.updateCandidates(state)
 
         self.assertEqual(manager.candidates[0x1010].call_ref_sources, {0x1000})
+
     @staticmethod
     def _ins(mnemonic, op_str, address=0x1000, size=0):
         # (address, size, mnemonic, op_str) as produced by capstone disasm_lite
