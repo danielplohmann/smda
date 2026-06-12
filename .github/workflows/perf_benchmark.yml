@@ -1,0 +1,249 @@
+name: Performance & Correctness Benchmark
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Fast fixture benchmark — the CI correctness/perf gate. Runs first so a broken
+  # PR fails before we spin up the (slower) malpedia matrix runners. Also resolves
+  # whether the malpedia password is available, which gates the heavier jobs.
+  fixture_gate:
+    name: Fixture Benchmark Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      password_available: ${{ steps.check_password.outputs.available }}
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout base code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
+          path: base-repo
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run benchmark on base branch
+        run: |
+          PYTHONPATH=base-repo/src python -c "import os, smda; expected = os.path.abspath('base-repo/src'); actual = os.path.abspath(smda.__file__); print('base smda:', actual); assert actual.startswith(expected + os.sep), f'Expected base smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
+          PYTHONPATH=base-repo/src python .github/workflows/scripts/run_perf_check.py --output base_results.json
+
+      - name: Run benchmark on PR branch
+        run: |
+          PYTHONPATH=src python -c "import os, smda; expected = os.path.abspath('src'); actual = os.path.abspath(smda.__file__); print('pr smda:', actual); assert actual.startswith(expected + os.sep), f'Expected PR smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
+          PYTHONPATH=src python .github/workflows/scripts/run_perf_check.py --output pr_results.json
+
+      - name: Compare results
+        run: |
+          python .github/workflows/scripts/compare_perf.py pr_results.json base_results.json
+
+      - name: Check Malpedia Password Availability
+        id: check_password
+        run: |
+          if [ -n "$MALPEDIA_ZIP_PASSWORD" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
+
+  # Malpedia disassembly. Base and PR run as concurrent matrix legs (instead of
+  # six sequential passes in one job). The base leg's results are cached on the
+  # base commit SHA, so re-pushing to a PR while master is unchanged skips the
+  # base passes entirely.
+  malpedia:
+    name: Malpedia Benchmark (${{ matrix.side }})
+    needs: fixture_gate
+    if: needs.fixture_gate.outputs.password_available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: base
+            pythonpath: base-repo/src
+          - side: pr
+            pythonpath: src
+    env:
+      RUNS: 3
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout base code
+        if: matrix.side == 'base'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
+          path: base-repo
+          persist-credentials: false
+
+      - name: Resolve base SHA
+        if: matrix.side == 'base'
+        id: basesha
+        run: echo "sha=$(git -C base-repo rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Cache base results on the base commit SHA + harness hash. Exact-match only
+      # (no restore-keys) so a stale base never silently compares against the
+      # wrong baseline.
+      - name: Restore cached base results
+        if: matrix.side == 'base'
+        id: basecache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            runtime_measurements/base_0
+            runtime_measurements/base_1
+            runtime_measurements/base_2
+          key: smda-base-${{ runner.os }}-py3.11-${{ steps.basesha.outputs.sha }}-${{ hashFiles('.github/workflows/scripts/process_malpedia.py') }}
+
+      - name: Set up Python
+        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Decrypt Malpedia Samples
+        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
+        run: |
+          unzip -q -P "$MALPEDIA_ZIP_PASSWORD" .github/workflows/data/malpedia.zip -d malpedia_extracted
+        env:
+          MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
+
+      - name: Run Malpedia Benchmark
+        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
+        run: |
+          PYTHONPATH=${{ matrix.pythonpath }} python -c "import os, smda; expected = os.path.abspath('${{ matrix.pythonpath }}'); actual = os.path.abspath(smda.__file__); print('${{ matrix.side }} smda:', actual); assert actual.startswith(expected + os.sep), f'Expected ${{ matrix.side }} smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
+          for i in $(seq 0 $((RUNS - 1))); do
+            PYTHONPATH=${{ matrix.pythonpath }} python .github/workflows/scripts/process_malpedia.py \
+              malpedia_extracted/malpedia "runtime_measurements/${{ matrix.side }}_$i"
+          done
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smda-${{ matrix.side }}
+          path: runtime_measurements/${{ matrix.side }}_*
+          if-no-files-found: error
+
+  # Aggregate both sides, run the paired statistical evaluation, gate CI on
+  # correctness/determinism, and publish the report.
+  evaluate:
+    name: Evaluate & Report
+    needs: [fixture_gate, malpedia]
+    if: needs.fixture_gate.outputs.password_available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Download benchmark runs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: smda-*
+          merge-multiple: true
+          path: runtime_measurements
+
+      # evaluate_runtime.py exits non-zero on a correctness regression (1) or
+      # base/PR non-determinism (2); that failure gates CI. The reporting steps
+      # below run regardless so the verdict is always published.
+      - name: Evaluate Malpedia Runtime
+        run: |
+          python .github/workflows/scripts/evaluate_runtime.py
+
+      - name: Publish Malpedia Results to Step Summary
+        if: always()
+        run: |
+          if [ -f runtime_measurements/cache/evaluation.md ]; then
+            cat runtime_measurements/cache/evaluation.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post PR Comment with Malpedia Results
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          if [ -f runtime_measurements/cache/evaluation.md ]; then
+            marker="<!-- smda-benchmark-evaluation-report -->"
+            comment_body="$(printf '%s\n' "$marker"; cat runtime_measurements/cache/evaluation.md)"
+            benchmark_comment_ids="$(
+              gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+                --jq ".[] | select(.user.login == \"github-actions[bot]\" and (((.body // \"\") | contains(\"$marker\")) or ((.body // \"\") | startswith(\"### 📊 SMDA Performance Evaluation Benchmark Results\")))) | .id"
+            )"
+            comment_id="$(printf '%s\n' "$benchmark_comment_ids" | tail -n 1)"
+            if [ -n "$comment_id" ]; then
+              gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$comment_id" \
+                --raw-field body="$comment_body" >/dev/null
+              printf '%s\n' "$benchmark_comment_ids" | sed '$d' | while read -r old_comment_id; do
+                if [ -n "$old_comment_id" ]; then
+                  gh api --method DELETE "repos/${{ github.repository }}/issues/comments/$old_comment_id" >/dev/null
+                fi
+              done
+            else
+              gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+                --raw-field body="$comment_body" >/dev/null
+            fi
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Malpedia Evaluation Artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: malpedia-evaluation-report
+          path: |
+            runtime_measurements/cache/evaluation.html
+            runtime_measurements/cache/evaluation.json
+            runtime_measurements/cache/evaluation.md

@@ -62,14 +62,13 @@ class FunctionAnalysisState:
         self._instructions_sorted = False
         self.instruction_start_bytes.add(ins[0])
         self.current_block.append(ins)
-        for byte in range(i_size):
-            self.processed_bytes.add(i_address + byte)
+        self.processed_bytes.update(range(i_address, i_address + i_size))
         if self.is_next_instruction_reachable:
             self.addCodeRef(i_address, i_address + i_size, self.is_jmp)
         self.is_jmp = False
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
-        self.code_refs.update([(addr_from, addr_to)])
+        self.code_refs.add((addr_from, addr_to))
         refs_from = self.code_refs_from.get(addr_from, set())
         refs_from.update([addr_to])
         self.code_refs_from[addr_from] = refs_from

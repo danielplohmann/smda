@@ -25,3 +25,5 @@ coverage-html/
 
 # Profiling artifacts
 profiling/output/
+# Benchmark results
+*results.json

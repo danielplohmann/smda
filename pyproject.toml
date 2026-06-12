@@ -42,6 +42,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "tqdm",
     "twine",
 ]
 # Optional CPU/memory profiling toolkit (see profiling/). Kept out of `dev` so
@@ -63,7 +64,6 @@ version = {attr = "smda.__version__"}
 [tool.pytest.ini_options]
 python_files = ["test*.py"]
 testpaths = ["tests"]
-addopts = ["-p", "no:cacheprovider"]
 pythonpath = ["src"]
 
 [tool.coverage.run]
