@@ -112,8 +112,12 @@ class FunctionAnalysisState:
     def identifyCallConflicts(self, all_refs):
         conflicts = {}
         non_instruction_start_bytes = self.processed_bytes.difference(self.instruction_start_bytes)
-        conflict_addrs = set(all_refs.keys()).intersection(non_instruction_start_bytes)
-        for candidate_source_ref in conflict_addrs:
+        # iterate this function's processed bytes (bounded by the function size)
+        # instead of rebuilding a set from the whole-binary all_refs on every call;
+        # same conflict set, but avoids an O(total_refs) copy per analyzed function.
+        for candidate_source_ref in non_instruction_start_bytes:
+            if candidate_source_ref not in all_refs:
+                continue
             candidate = all_refs[candidate_source_ref]
             if candidate not in conflicts:
                 conflicts[candidate] = []
