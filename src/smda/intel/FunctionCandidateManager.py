@@ -391,7 +391,8 @@ class FunctionCandidateManager:
     def addReferenceCandidate(self, addr, source_ref):
         if not self._passesCodeFilter(addr):
             return False
-        if self.ensureCandidate(addr):
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
             self._all_call_refs[source_ref] = addr
         if addr in self.candidates:
             self._addCappedCallRef(self.candidates[addr], source_ref)
