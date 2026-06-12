@@ -67,6 +67,11 @@ class SmdaReport:
         # starts with empty caches rather than relying on monkey-patched attributes.
         self._string_cache = {}
         self._derefs_cache = {}
+        # start every construction path with an empty CFG so accessors like
+        # num_functions/getFunction work on reports without a disassembly
+        # (e.g. controlled error reports for unsupported architectures);
+        # the regular path and fromDict overwrite this with the real CFG.
+        self.xcfg = {}
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.abi = disassembly.binary_info.abi
