@@ -45,6 +45,15 @@ dev = [
     "tqdm",
     "twine",
 ]
+# Optional CPU/memory profiling toolkit (see profiling/). Kept out of `dev` so
+# the default install stays lean. Install with: pip install -e ".[dev,profile]"
+profile = [
+    "py-spy",
+    "memray",
+    "line_profiler",
+    "snakeviz",
+    "psutil",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
