@@ -39,11 +39,15 @@ class FunctionCandidateManager:
         self.gap_pointer = None
         self.previously_analyzed_gap = 0
         self.capstone = None
+        # backstop against memory usage explosion during candidate identification
+        self._candidate_cap_logged = False
+        self._cb_analysis_timeout = None
 
-    def init(self, disassembly):
+    def init(self, disassembly, cbAnalysisTimeout=None):
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
+        self._cb_analysis_timeout = cbAnalysisTimeout
         self.lang_analyzer = LanguageAnalyzer(disassembly)
         self.disassembly.language = self.lang_analyzer.identify()
         self.bitness = disassembly.binary_info.bitness
@@ -105,13 +109,21 @@ class FunctionCandidateManager:
                     self.candidate_queue.update(self.candidates[candidate_addr])
                 self.candidate_queue.update()
 
+    def _addCappedCallRef(self, candidate, source_ref):
+        """add an inbound call reference, honoring MAX_CALL_REFS_PER_CANDIDATE to bound set growth and rescoring."""
+        cap = getattr(self.config, "MAX_CALL_REFS_PER_CANDIDATE", 0)
+        if cap == 0 or len(candidate.call_ref_sources) < cap:
+            candidate.addCallRef(source_ref)
+
     def addCandidate(self, addr, is_gap=False, reference_source=None):
         if not self._passesCodeFilter(addr):
             return False
         self.ensureCandidate(addr)
+        if addr not in self.candidates:
+            return False
         self.candidates[addr].setIsGapCandidate(is_gap)
         if reference_source:
-            self.candidates[addr].addCallRef(reference_source)
+            self._addCappedCallRef(self.candidates[addr], reference_source)
         self.candidate_queue.add(self.candidates[addr])
         self.candidate_queue.update()
 
@@ -348,6 +360,16 @@ class FunctionCandidateManager:
     def ensureCandidate(self, addr):
         """create candidate if it does not exist yet, returns True if newly created, else False"""
         if addr not in self.candidates:
+            cap = getattr(self.config, "MAX_FUNCTION_CANDIDATES", 0)
+            if cap and len(self.candidates) >= cap:
+                if not self._candidate_cap_logged:
+                    LOGGER.warning(
+                        "MAX_FUNCTION_CANDIDATES cap (%d) reached during candidate identification; "
+                        "refusing further candidates to bound memory usage.",
+                        cap,
+                    )
+                    self._candidate_cap_logged = True
+                return False
             self.candidates[addr] = FunctionCandidate(self.disassembly.binary_info, addr)
             return True
         return False
@@ -356,26 +378,30 @@ class FunctionCandidateManager:
         if not self._passesCodeFilter(addr):
             return False
         self.ensureCandidate(addr)
-        self.candidates[addr].setIsGapCandidate(True)
+        if addr in self.candidates:
+            self.candidates[addr].setIsGapCandidate(True)
 
     def addTailcallCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
         self.ensureCandidate(addr)
-        self.candidates[addr].setIsTailcallCandidate(True)
+        if addr in self.candidates:
+            self.candidates[addr].setIsTailcallCandidate(True)
 
     def addReferenceCandidate(self, addr, source_ref):
         if not self._passesCodeFilter(addr):
             return False
         if self.ensureCandidate(addr):
             self._all_call_refs[source_ref] = addr
-        self.candidates[addr].addCallRef(source_ref)
+        if addr in self.candidates:
+            self._addCappedCallRef(self.candidates[addr], source_ref)
 
     def addLanguageSpecCandidate(self, addr, lang_spec):
         if not self._passesCodeFilter(addr):
             return False
         self.ensureCandidate(addr)
-        self.candidates[addr].setLanguageSpec(lang_spec)
+        if addr in self.candidates:
+            self.candidates[addr].setLanguageSpec(lang_spec)
 
     def addPrologueCandidate(self, addr):
         if not self._passesCodeFilter(addr):
@@ -386,15 +412,17 @@ class FunctionCandidateManager:
         if not self._passesCodeFilter(addr):
             return False
         self.ensureCandidate(addr)
-        self.candidates[addr].setIsSymbol(True)
-        self.candidates[addr].setInitialCandidate(True)
+        if addr in self.candidates:
+            self.candidates[addr].setIsSymbol(True)
+            self.candidates[addr].setInitialCandidate(True)
 
     def addExceptionCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
         self.ensureCandidate(addr)
-        self.candidates[addr].setIsExceptionHandler(True)
-        self.candidates[addr].setInitialCandidate(True)
+        if addr in self.candidates:
+            self.candidates[addr].setIsExceptionHandler(True)
+            self.candidates[addr].setInitialCandidate(True)
 
     def resolvePointerReference(self, offset):
         if self.bitness == 32:
@@ -437,13 +465,35 @@ class FunctionCandidateManager:
                     identified_alignment = 16
         return identified_alignment
 
+    def _candidateTimeoutTripped(self):
+        """returns True once the wall-clock analysis timeout has been hit during candidate identification."""
+        if self.disassembly is not None and self.disassembly.analysis_timeout:
+            return True
+        if self._cb_analysis_timeout is not None and self._cb_analysis_timeout():
+            if self.disassembly is not None:
+                self.disassembly.analysis_timeout = True
+            return True
+        return False
+
     def locateCandidates(self):
+        # add guaranteed / high-value starts first so that, if the candidate cap is hit, the most reliable
+        # candidates are retained before the high-volume prologue and stub-chain scans can consume the budget.
         self.locateSymbolCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locateReferenceCandidates()
-        self.locatePrologueCandidates()
-        self.locateLangSpecCandidates()
-        self.locateStubChainCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locateExceptionHandlerCandidates()
+        if self._candidateTimeoutTripped():
+            return
+        self.locateLangSpecCandidates()
+        if self._candidateTimeoutTripped():
+            return
+        self.locatePrologueCandidates()
+        if self._candidateTimeoutTripped():
+            return
+        self.locateStubChainCandidates()
         self.identified_alignment = self._identifyAlignment()
 
     def _buildQueue(self):
@@ -464,7 +514,9 @@ class FunctionCandidateManager:
 
     def locateReferenceCandidates(self):
         # check for potential call instructions and check if their destinations have a common function prologue
-        for call_match in re.finditer(b"\xe8", self.disassembly.binary_info.binary):
+        for match_count, call_match in enumerate(re.finditer(b"\xe8", self.disassembly.binary_info.binary)):
+            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                return
             if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + call_match.start()):
                 continue
             if len(self.disassembly.binary_info.binary) - call_match.start() > 5:
@@ -484,7 +536,9 @@ class FunctionCandidateManager:
                     self.setInitialCandidate(call_destination)
         # also check for "jmp dword ptr <offset>", as they sometimes point to local functions (i.e. non-API)
         if self.bitness == 32:
-            for match in re.finditer(b"\xff\x25", self.disassembly.binary_info.binary):
+            for match_count, match in enumerate(re.finditer(b"\xff\x25", self.disassembly.binary_info.binary)):
+                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                    return
                 function_addr = self.resolvePointerReference(match.start())
                 if not self._passesCodeFilter(function_addr):
                     continue
@@ -495,7 +549,9 @@ class FunctionCandidateManager:
                     )
                     self.setInitialCandidate(function_addr)
             # also check for "call dword ptr <offset>", as they sometimes point to local functions (i.e. non-API)
-            for match in re.finditer(b"\xff\x15", self.disassembly.binary_info.binary):
+            for match_count, match in enumerate(re.finditer(b"\xff\x15", self.disassembly.binary_info.binary)):
+                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                    return
                 function_addr = self.resolvePointerReference(match.start())
                 if not self._passesCodeFilter(function_addr):
                     continue
@@ -509,7 +565,11 @@ class FunctionCandidateManager:
     def locatePrologueCandidates(self):
         # next check for the default function prologue regardless of references
         for re_prologue in DEFAULT_PROLOGUES:
-            for prologue_match in re.finditer(re.escape(re_prologue), self.disassembly.binary_info.binary):
+            for match_count, prologue_match in enumerate(
+                re.finditer(re.escape(re_prologue), self.disassembly.binary_info.binary)
+            ):
+                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                    return
                 if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + prologue_match.start()):
                     continue
                 self.addPrologueCandidate(
@@ -573,9 +633,11 @@ class FunctionCandidateManager:
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
-                self.addPrologueCandidate(stub_addr & self.getBitMask())
-                self.setInitialCandidate(stub_addr & self.getBitMask())
-                self.candidates[stub_addr].setIsStub(True)
+                stub_addr_masked = stub_addr & self.getBitMask()
+                self.addPrologueCandidate(stub_addr_masked)
+                self.setInitialCandidate(stub_addr_masked)
+                if stub_addr_masked in self.candidates:
+                    self.candidates[stub_addr_masked].setIsStub(True)
         # structure for plt entries is similar but interleaved with additional code not considered functions
         for block in re.finditer(
             b"(?P<block>(\xff\x25[\\S\\s]{4}\x68[\\S\\s]{4}\xe9[\\S\\s]{4}){2,})",
@@ -585,9 +647,11 @@ class FunctionCandidateManager:
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
-                self.addPrologueCandidate(stub_addr & self.getBitMask())
-                self.setInitialCandidate(stub_addr & self.getBitMask())
-                self.candidates[stub_addr].setIsStub(True)
+                stub_addr_masked = stub_addr & self.getBitMask()
+                self.addPrologueCandidate(stub_addr_masked)
+                self.setInitialCandidate(stub_addr_masked)
+                if stub_addr_masked in self.candidates:
+                    self.candidates[stub_addr_masked].setIsStub(True)
                 # define data bytes inbetween
                 for offset in range(10):
                     self.disassembly.data_map.add(stub_addr + 6 + offset)
@@ -619,9 +683,11 @@ class FunctionCandidateManager:
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
-                self.addPrologueCandidate(stub_addr & self.getBitMask())
-                self.setInitialCandidate(stub_addr & self.getBitMask())
-                self.candidates[stub_addr].setIsStub(True)
+                stub_addr_masked = stub_addr & self.getBitMask()
+                self.addPrologueCandidate(stub_addr_masked)
+                self.setInitialCandidate(stub_addr_masked)
+                if stub_addr_masked in self.candidates:
+                    self.candidates[stub_addr_masked].setIsStub(True)
                 # define data bytes inbetween
                 for offset in range(5):
                     self.disassembly.data_map.add(stub_addr + 7 + offset)
