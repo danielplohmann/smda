@@ -71,7 +71,18 @@ class Disassembler:
         return False
 
     def _addStringsToReport(self, smda_report, buffer, mode=None):
+        # StringExtractor reads the buffer off the report, so set it only for the duration of
+        # extraction and then restore the previous value. This keeps a buffer captured purely for
+        # string extraction from being serialized later (persisting it is gated by STORE_BUFFER,
+        # which assigns smda_report.buffer after this call).
+        previous_buffer = smda_report.buffer
         smda_report.buffer = buffer
+        try:
+            self._extractStrings(smda_report, mode=mode)
+        finally:
+            smda_report.buffer = previous_buffer
+
+    def _extractStrings(self, smda_report, mode=None):
         for smda_function in smda_report.getFunctions():
             if smda_report.architecture == "dalvik":
                 if smda_function.stringrefs and isinstance(smda_function.stringrefs, dict):

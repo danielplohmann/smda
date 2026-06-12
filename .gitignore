@@ -22,3 +22,8 @@ coverage-html/
 # Tool caches
 .ruff_cache/
 .vscode
+
+# Profiling artifacts
+profiling/output/
+# Benchmark results
+*results.json

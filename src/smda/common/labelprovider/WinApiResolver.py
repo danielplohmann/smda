@@ -35,6 +35,7 @@ class WinApiResolver(AbstractLabelProvider):
 
     def update(self, binary_info):
         self._is_buffer = binary_info.is_buffer
+        self._api_map["lief"] = {}
         if not self._is_buffer:
             # setup import table info from LIEF
             lief_binary = binary_info.getLiefBinary()

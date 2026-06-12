@@ -599,7 +599,7 @@ class IntelDisassembler:
         # once we are initialized, add OEP
         if binary_info.oep is not None:
             self.fc_manager.symbol_addresses.append(binary_info.base_addr + binary_info.oep)
-        self.fc_manager.init(self.disassembly)
+        self.fc_manager.init(self.disassembly, cbAnalysisTimeout)
         self._initCapstone()
         self._initTfIdf()
         LOGGER.debug("Starting heuristical analysis.")

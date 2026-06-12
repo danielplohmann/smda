@@ -40,13 +40,14 @@ class ElfSymbolProvider(AbstractLabelProvider):
             return
 
         self._parseOep(lief_binary)
-        # TODO split resolution into API/dynamic part and local symbols
+        # Keep only local/defined function symbols here: exported functions plus defined
+        # static and dynamic symtab entries (parseSymbols drops undefined imports via value != 0).
+        # Imported, relocation-backed API names are intentionally NOT merged in - they are
+        # resolved as APIs by ElfApiResolver, so this stays a pure symbol provider
+        # (isApiProvider() == False) and relocation slot addresses are not mistaken for symbols.
         self._func_symbols.update(self.parseExports(lief_binary))
         self._func_symbols.update(self.parseSymbols(lief_binary.symtab_symbols))
         self._func_symbols.update(self.parseSymbols(lief_binary.dynamic_symbols))
-        for reloc in lief_binary.relocations:
-            if reloc.has_symbol:
-                self._func_symbols[reloc.address] = reloc.symbol.name
 
     def parseExports(self, binary):
         function_symbols = {}
