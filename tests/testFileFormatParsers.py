@@ -259,6 +259,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(MachoFileLoader.getArchitecture(b"", parsed=fat_binary), "")
         self.assertEqual(MachoFileLoader.getBitness(b"", parsed=fat_binary), 0)
 
+    @staticmethod
     def _fake_elf(machine_type, identity_class):
         return SimpleNamespace(header=SimpleNamespace(machine_type=machine_type, identity_class=identity_class))
 
@@ -298,6 +299,65 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(_resolve_elf_machine(header_less), ("", 0, False))
         self.assertEqual(ElfFileLoader.getArchitecture(b"", parsed=header_less), "")
         self.assertEqual(ElfFileLoader.getBitness(b"", parsed=header_less), 0)
+
+    # real Mirai samples, one per ELF machine type:
+    # fixture -> (architecture, bitness, has_backend)
+    MIRAI_ELF_FIXTURES = {
+        "mirai_arm_xored": ("arm", 32, False),
+        # both MIPS endiannesses, bitness derived from the ELF class
+        "mirai_mips_xored": ("mips", 32, False),
+        "mirai_mipsel_xored": ("mips", 32, False),
+        "mirai_ppc_xored": ("ppc", 32, False),
+        "mirai_sparc_xored": ("sparc", 32, False),
+        "mirai_m68k_xored": ("m68k", 32, False),
+        "mirai_sh4_xored": ("sh", 32, False),
+        "mirai_nios2_xored": ("nios2", 32, False),
+        "mirai_openrisc_xored": ("openrisc", 32, False),
+        "mirai_xtensa_xored": ("xtensa", 32, False),
+        "mirai_i386_xored": ("intel", 32, True),
+        "mirai_x64_xored": ("intel", 64, True),
+    }
+
+    def test_elf_real_binaries_resolve_architecture_and_bitness(self):
+        for fixture_name, (architecture, bitness, has_backend) in self.MIRAI_ELF_FIXTURES.items():
+            with self.subTest(fixture=fixture_name):
+                binary = self._load_xored_fixture(fixture_name)
+                self.assertEqual(binary[:4], b"\x7fELF")
+                elffile = lief.parse(binary)
+                self.assertEqual(_resolve_elf_machine(elffile), (architecture, bitness, has_backend))
+                # the FileLoader path must report the same metadata
+                loader = FileLoader("/", map_file=True)
+                loader._loadFile(binary)
+                self.assertEqual(loader.getArchitecture(), architecture)
+                self.assertEqual(loader.getBitness(), bitness)
+
+    def test_elf_real_binaries_without_backend_yield_controlled_error_report(self):
+        for fixture_name, (architecture, _, has_backend) in self.MIRAI_ELF_FIXTURES.items():
+            if has_backend:
+                continue
+            with self.subTest(fixture=fixture_name, architecture=architecture):
+                binary = self._load_xored_fixture(fixture_name)
+                report = Disassembler(config).disassembleUnmappedBuffer(binary)
+                # no backend for this architecture: a controlled error report,
+                # NOT a mis-analysis of the buffer as x86
+                self.assertEqual(report.status, "error")
+                self.assertEqual(report.num_functions, 0)
+                self.assertEqual(list(report.getFunctions()), [])
+                # the controlled error report must also serialize cleanly
+                self.assertIsNotNone(report.timestamp)
+                self.assertEqual(report.toDict()["status"], "error")
+
+    def test_elf_real_intel_binaries_disassemble(self):
+        for fixture_name, (architecture, bitness, has_backend) in self.MIRAI_ELF_FIXTURES.items():
+            if not has_backend:
+                continue
+            with self.subTest(fixture=fixture_name, bitness=bitness):
+                binary = self._load_xored_fixture(fixture_name)
+                report = Disassembler(config).disassembleUnmappedBuffer(binary)
+                self.assertEqual(report.status, "ok")
+                self.assertEqual(report.architecture, architecture)
+                self.assertEqual(report.bitness, bitness)
+                self.assertEqual(report.num_functions, 151)
 
 
 if __name__ == "__main__":

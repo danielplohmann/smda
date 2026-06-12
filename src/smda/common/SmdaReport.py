@@ -67,6 +67,14 @@ class SmdaReport:
         # starts with empty caches rather than relying on monkey-patched attributes.
         self._string_cache = {}
         self._derefs_cache = {}
+        # start every construction path with an empty CFG so accessors like
+        # num_functions/getFunction work on reports without a disassembly
+        # (e.g. controlled error reports for unsupported architectures);
+        # the regular path and fromDict overwrite this with the real CFG.
+        self.xcfg = {}
+        # likewise keep xmetadata serializable on reports without a disassembly
+        # (it has no class-level default), so toDict()/toFile() never raise.
+        self.xmetadata = {}
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.abi = disassembly.binary_info.abi
@@ -275,9 +283,16 @@ class SmdaReport:
         smda_report.sha1 = report_dict.get("sha1", None)
         smda_report.md5 = report_dict.get("md5", None)
         smda_report.smda_version = report_dict["smda_version"]
-        smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
+        # mirror toDict: statistics is {} on a report without a disassembly
+        statistics_raw = report_dict.get("statistics")
+        smda_report.statistics = DisassemblyStatistics.fromDict(statistics_raw) if statistics_raw else None
         smda_report.status = report_dict["status"]
-        smda_report.timestamp = datetime.datetime.strptime(report_dict["timestamp"], "%Y-%m-%dT%H-%M-%S")
+        # mirror toDict: a report serialized without a disassembly carries an
+        # empty timestamp, which must round-trip back to None rather than raise
+        timestamp_raw = report_dict.get("timestamp", "")
+        smda_report.timestamp = (
+            datetime.datetime.strptime(timestamp_raw, "%Y-%m-%dT%H-%M-%S") if timestamp_raw else None
+        )
         smda_report.data_refs_from = {int(k): sorted(v) for k, v in report_dict.get("xdata_refs_from", {}).items()}
         smda_report.data_refs_to = {int(k): sorted(v) for k, v in report_dict.get("xdata_refs_to", {}).items()}
         binary_info = BinaryInfo(b"")
@@ -348,7 +363,7 @@ class SmdaReport:
             "smda_version": self.smda_version,
             "statistics": self.statistics.toDict() if self.statistics else {},
             "status": self.status,
-            "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
+            "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S") if self.timestamp else "",
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
             "xdata_refs_from": self.data_refs_from if self.data_refs_from is not None else {},
             "xdata_refs_to": self.data_refs_to if self.data_refs_to is not None else {},
