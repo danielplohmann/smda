@@ -34,6 +34,11 @@ class SmdaConfig:
     RESOLVE_REGISTER_CALLS = True
     # limit this to avoid blowing up analysis time for weird samples
     MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
+    # backstops against memory usage explosion during candidate identification on pathological/junk samples
+    # maximum number of function candidates to track; 0 == unlimited. Normal binaries have orders of magnitude fewer.
+    MAX_FUNCTION_CANDIDATES = 200000
+    # maximum number of inbound call references tracked per candidate; 0 == unlimited. Bounds set growth and rescoring.
+    MAX_CALL_REFS_PER_CANDIDATE = 2000
     HIGH_ACCURACY = True
     RESOLVE_TAILCALLS = False
     # optional metadata generation options

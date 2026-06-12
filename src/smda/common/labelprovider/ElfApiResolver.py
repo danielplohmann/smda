@@ -13,36 +13,34 @@ class ElfApiResolver(AbstractLabelProvider):
         self._api_map = {"lief": {}}
 
     def update(self, binary_info):
-        if binary_info.is_buffer:
-            # cannot reconstruct from shellcode/memory dump at this time
+        # Gate on the parsed ELF type rather than is_buffer: a memory dump / raw buffer that LIEF
+        # parses as an ELF still exposes its relocation table, so imported APIs remain resolvable
+        # here. Non-ELF input (raw shellcode, PE, DEX) fails the isinstance check and is skipped.
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.ELF.Binary):
             return
 
-        else:
-            lief_binary = binary_info.getLiefBinary()
-            if not isinstance(lief_binary, lief.ELF.Binary):
-                return
+        for relocation in lief_binary.relocations:
+            if not relocation.has_symbol:
+                continue
+            symbol = relocation.symbol
+            if symbol is None:
+                continue
+            if not symbol.imported or not symbol.is_function:
+                continue
 
-            for relocation in lief_binary.relocations:
-                if not relocation.has_symbol:
-                    continue
-                symbol = relocation.symbol
-                if symbol is None:
-                    continue
-                if not symbol.imported or not symbol.is_function:
-                    continue
+            # we can't really say what library the symbol came from
+            # however, we can treat the version (if present) as relevant metadata?
+            # note: this only works for GNU binaries, such as for Linux
+            lib = None
+            if symbol.has_version and symbol.symbol_version.has_auxiliary_version:
+                # like "GLIBC_2.2.5"
+                lib = symbol.symbol_version.symbol_version_auxiliary.name
 
-                # we can't really say what library the symbol came from
-                # however, we can treat the version (if present) as relevant metadata?
-                # note: this only works for GNU binaries, such as for Linux
-                lib = None
-                if symbol.has_version and symbol.symbol_version.has_auxiliary_version:
-                    # like "GLIBC_2.2.5"
-                    lib = symbol.symbol_version.symbol_version_auxiliary.name
+            name = symbol.name
+            address = relocation.address
 
-                name = symbol.name
-                address = relocation.address
-
-                self._api_map["lief"][address] = (lib, name)
+            self._api_map["lief"][address] = (lib, name)
 
     def isApiProvider(self):
         """Returns whether the get_api(..) function of the AbstractLabelProvider is functional"""

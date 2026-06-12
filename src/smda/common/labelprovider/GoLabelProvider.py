@@ -13,6 +13,11 @@ from .AbstractLabelProvider import AbstractLabelProvider
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
 
+# Go symbol names are short; cap the fallback decode when no null terminator is found so a
+# truncated/corrupt name table cannot pull the entire (potentially multi-MB) binary tail into
+# one symbol string.
+_MAX_SYMBOL_NAME_LEN = 4096
+
 
 class GoSymbolProvider(AbstractLabelProvider):
     """Minimal resolver for Go symbols"""
@@ -78,6 +83,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         return pclntab_offset
 
     def update(self, binary_info):
+        self._func_symbols = {}
         binary = binary_info.binary
         pclntab_offset = self.getPcLntabOffset(binary_info)
         # if we found a valid offset, do the pclntab parsing
@@ -109,14 +115,14 @@ class GoSymbolProvider(AbstractLabelProvider):
         return bool(self._func_symbols)
 
     def _readUtf8(self, buffer):
-        string_read = ""
-        offset = 0
-        while buffer[offset] != 0:
-            string_read += f"{buffer[offset]:02x}"
-            offset += 1
-        # need to defang special char(s)
-        decoded_string = bytearray.fromhex(string_read).decode().replace("\u00b7", ":")
-        return decoded_string
+        null_byte_index = buffer.find(b"\x00")
+        if null_byte_index == -1:
+            # No terminator (truncated/corrupt name table): decode a bounded prefix so a
+            # genuinely-present name is preserved, without decoding the entire binary tail.
+            null_byte_index = min(len(buffer), _MAX_SYMBOL_NAME_LEN)
+        # errors="replace" is intentional: a single bad byte should not abort parsing of the
+        # entire symbol table (the old hex-decode path raised and lost all symbols for the binary).
+        return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ":")
 
     def _parse_pclntab(self, pclntab_offset, binary):
         pclntab_buffer = binary[pclntab_offset:]
