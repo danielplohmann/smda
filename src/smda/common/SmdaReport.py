@@ -283,9 +283,16 @@ class SmdaReport:
         smda_report.sha1 = report_dict.get("sha1", None)
         smda_report.md5 = report_dict.get("md5", None)
         smda_report.smda_version = report_dict["smda_version"]
-        smda_report.statistics = DisassemblyStatistics.fromDict(report_dict["statistics"])
+        # mirror toDict: statistics is {} on a report without a disassembly
+        statistics_raw = report_dict.get("statistics")
+        smda_report.statistics = DisassemblyStatistics.fromDict(statistics_raw) if statistics_raw else None
         smda_report.status = report_dict["status"]
-        smda_report.timestamp = datetime.datetime.strptime(report_dict["timestamp"], "%Y-%m-%dT%H-%M-%S")
+        # mirror toDict: a report serialized without a disassembly carries an
+        # empty timestamp, which must round-trip back to None rather than raise
+        timestamp_raw = report_dict.get("timestamp", "")
+        smda_report.timestamp = (
+            datetime.datetime.strptime(timestamp_raw, "%Y-%m-%dT%H-%M-%S") if timestamp_raw else None
+        )
         smda_report.data_refs_from = {int(k): sorted(v) for k, v in report_dict.get("xdata_refs_from", {}).items()}
         smda_report.data_refs_to = {int(k): sorted(v) for k, v in report_dict.get("xdata_refs_to", {}).items()}
         binary_info = BinaryInfo(b"")

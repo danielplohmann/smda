@@ -25,6 +25,10 @@ class TestCommonModels(unittest.TestCase):
         self.assertEqual(report_dict["xcfg"], {})
         self.assertEqual(report_dict["xmetadata"], {})
         self.assertEqual(report_dict["timestamp"], "")
+        # and round-trip back through fromDict without a strptime("") crash
+        restored = SmdaReport.fromDict(report_dict)
+        self.assertIsNone(restored.timestamp)
+        self.assertEqual(restored.num_functions, 0)
 
     def test_function_hash_helpers_use_little_endian(self):
         function = SmdaFunction()
