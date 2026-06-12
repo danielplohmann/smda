@@ -258,6 +258,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(_resolve_macho_cpu(fat_binary), ("", 0, False))
         self.assertEqual(MachoFileLoader.getArchitecture(b"", parsed=fat_binary), "")
         self.assertEqual(MachoFileLoader.getBitness(b"", parsed=fat_binary), 0)
+
     def _fake_elf(machine_type, identity_class):
         return SimpleNamespace(header=SimpleNamespace(machine_type=machine_type, identity_class=identity_class))
 
