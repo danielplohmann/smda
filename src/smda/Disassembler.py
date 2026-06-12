@@ -252,6 +252,9 @@ class Disassembler:
         report.status = "error"
         report.execution_time = self._getDurationInSeconds(start, datetime.datetime.now(datetime.timezone.utc))
         report.message = traceback.format_exc()
+        # stamp the report like the regular path so error reports (e.g. for
+        # unsupported architectures) survive toDict()/toFile() serialization
+        report.timestamp = datetime.datetime.now(datetime.timezone.utc)
         return report
 
     def _handleDisassemblyException(self, start, exception, log_message):

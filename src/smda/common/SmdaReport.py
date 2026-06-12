@@ -72,6 +72,9 @@ class SmdaReport:
         # (e.g. controlled error reports for unsupported architectures);
         # the regular path and fromDict overwrite this with the real CFG.
         self.xcfg = {}
+        # likewise keep xmetadata serializable on reports without a disassembly
+        # (it has no class-level default), so toDict()/toFile() never raise.
+        self.xmetadata = {}
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.abi = disassembly.binary_info.abi
@@ -353,7 +356,7 @@ class SmdaReport:
             "smda_version": self.smda_version,
             "statistics": self.statistics.toDict() if self.statistics else {},
             "status": self.status,
-            "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S"),
+            "timestamp": self.timestamp.strftime("%Y-%m-%dT%H-%M-%S") if self.timestamp else "",
             "xcfg": {function_addr: smda_function.toDict() for function_addr, smda_function in self.xcfg.items()},
             "xdata_refs_from": self.data_refs_from if self.data_refs_from is not None else {},
             "xdata_refs_to": self.data_refs_to if self.data_refs_to is not None else {},

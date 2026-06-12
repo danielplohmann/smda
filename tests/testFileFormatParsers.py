@@ -343,6 +343,9 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
                 self.assertEqual(report.status, "error")
                 self.assertEqual(report.num_functions, 0)
                 self.assertEqual(list(report.getFunctions()), [])
+                # the controlled error report must also serialize cleanly
+                self.assertIsNotNone(report.timestamp)
+                self.assertEqual(report.toDict()["status"], "error")
 
     def test_elf_real_intel_binaries_disassemble(self):
         for fixture_name, (architecture, bitness, has_backend) in self.MIRAI_ELF_FIXTURES.items():

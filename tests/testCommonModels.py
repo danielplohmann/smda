@@ -19,6 +19,13 @@ class TestCommonModels(unittest.TestCase):
         self.assertIsNone(report.getFunction(0x1000))
         self.assertEqual(list(report.getFunctions()), [])
 
+    def test_report_without_disassembly_serializes(self):
+        # such a report must also survive toDict() (no xmetadata/timestamp crash)
+        report_dict = SmdaReport().toDict()
+        self.assertEqual(report_dict["xcfg"], {})
+        self.assertEqual(report_dict["xmetadata"], {})
+        self.assertEqual(report_dict["timestamp"], "")
+
     def test_function_hash_helpers_use_little_endian(self):
         function = SmdaFunction()
         function.pic_hash = 0x0102030405060708
