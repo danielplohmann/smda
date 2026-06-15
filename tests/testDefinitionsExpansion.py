@@ -1,10 +1,15 @@
 import unittest
 
+from smda.aarch64.definitions import BTI, BTI_C, BTI_J, BTI_JC, PACIASP, PACIAZ, PACIBSP, PACIBZ, is_function_prologue
 from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 from smda.intel.definitions import GAP_SEQUENCES
 
 
 class TestDefinitionsExpansion(unittest.TestCase):
+    def test_aarch64_pac_and_bti_prologues(self):
+        for word in [PACIAZ, PACIASP, PACIBZ, PACIBSP, BTI, BTI_C, BTI_J, BTI_JC]:
+            self.assertTrue(is_function_prologue(word), f"0x{word:08x} should be an AArch64 prologue")
+
     def test_gap_sequences(self):
         expected_sequences = [
             (2, b"\xeb\x00"),  # jmp $+2 (NOP-equivalent padding)

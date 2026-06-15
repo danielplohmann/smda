@@ -407,6 +407,23 @@ class TestAArch64PrologueDiscovery(unittest.TestCase):
         self.assertEqual(report.status, "ok")
         self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0x10})
 
+    def test_pac_and_bti_entries_are_function_starts(self):
+        report = self._disassemble_words(
+            [
+                0xD503231F,  # 0x401000 paciaz
+                0x52800000,  # 0x401004 mov w0, #0
+                0xD65F03C0,  # 0x401008 ret
+                0xD503245F,  # 0x40100c bti c
+                0x52800020,  # 0x401010 mov w0, #1
+                0xD65F03C0,  # 0x401014 ret
+                0xD503237F,  # 0x401018 pacibsp
+                0x52800040,  # 0x40101c mov w0, #2
+                0xD65F03C0,  # 0x401020 ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0xC, BASE + 0x18})
+
 
 class TestAArch64FunctionBoundaries(unittest.TestCase):
     def _disassemble_words(self, words, oep=None):
@@ -463,6 +480,27 @@ class TestAArch64FunctionBoundaries(unittest.TestCase):
             {block.offset for block in function.getBlocks()},
             {BASE, BASE + 0x8, BASE + 0x10},
         )
+
+    def test_bti_landing_pad_inside_function_does_not_split(self):
+        report = self._disassemble_words(
+            [
+                0xD503233F,  # 0x401000 paciasp
+                0x35000060,  # 0x401004 cbnz w0, 0x401010
+                0x52800021,  # 0x401008 mov w1, #1
+                0xD503245F,  # 0x40100c bti c
+                0x52800000,  # 0x401010 mov w0, #0
+                0xD65F03C0,  # 0x401014 ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE})
+        function = report.getFunction(BASE)
+        self.assertEqual(function.num_blocks, 3)
+        self.assertEqual(
+            {block.offset for block in function.getBlocks()},
+            {BASE, BASE + 0x8, BASE + 0x10},
+        )
+        self.assertIsNone(report.getFunction(BASE + 0xC))
 
     def test_short_no_frame_branch_stub_promotes_target(self):
         target = BASE + 0x80
