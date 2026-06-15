@@ -269,7 +269,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             (lief.ELF.ARCH.I386, lief.ELF.Header.CLASS.ELF32, ("intel", 32, True)),
             (lief.ELF.ARCH.X86_64, lief.ELF.Header.CLASS.ELF64, ("intel", 64, True)),
             # recognized but unsupported (no backend): metadata must stay accurate
-            (lief.ELF.ARCH.AARCH64, lief.ELF.Header.CLASS.ELF64, ("arm", 64, False)),
+            (lief.ELF.ARCH.AARCH64, lief.ELF.Header.CLASS.ELF64, ("aarch64", 64, True)),
             # width-ambiguous machine types: bitness comes from the ELF class
             (lief.ELF.ARCH.MIPS, lief.ELF.Header.CLASS.ELF64, ("mips", 64, False)),
             (lief.ELF.ARCH.MIPS, lief.ELF.Header.CLASS.ELF32, ("mips", 32, False)),
