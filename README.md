@@ -104,12 +104,21 @@ make test
 ```
 
 ## Version History
- * 2026-05-26: v3.2.0 - Several performance optimizations to reduce processing time (THX: @r0ny123)
- * 2026-05-26: v3.1.0 - Repository structure changed to src-style, modernized overall package and CI procedures (THX: @r0ny123)
- * 2026-05-20: v3.0.1 - Improved performance for string extraction by reducing type casts (THX: @r0ny123)
- * 2026-05-20: v3.0.0 - Support for Android Dalvik disassembly (THX: @r0ny123)
- * 2026-05-20: v2.6.0 - Use Pythia as drop-in replacement for current Delphi VMT parser (THX: @r0ny123)
- * 2026-05-20: v2.5.4 - Improve performance by precompiling regexes, doing additional prefix extraction and covering more GAP sequence NOPs (THX: @r0ny123)
+
+ * 2026-06-12: v4.0.0 - Support for Aarch64! (THX: @r0ny123)
+ * 2026-06-12: v3.4.2 - Minor bugfixes regarding corner case offset extraction and calculations. (THX: @r0ny123)
+ * 2026-06-12: v3.4.1 - Added test payloads for various additional architectures. (THX: @r0ny123)
+ * 2026-06-12: v3.4.0 - Now properly inferring architecture and bitness based on ELF headers. Information sources like symbols etc. are properly handled. (THX: @r0ny123)
+ * 2026-06-12: v3.3.2 - Added ability to store binary input file/buffer using MCRIT's deflate+base85 method. (THX: @r0ny123)
+ * 2026-06-12: v3.3.1 - Added safeguards intended to limit processing time and heap consumption explosions. (THX: @r0ny123)
+ * 2026-06-12: v3.3.0 - Introdcued a performance benchmarking suite with profilers for execution and memory to verify and guide improvements. (THX: @r0ny123)
+ * 2026-06-10: v3.2.1 - minor fixes, dependency bumps.
+ * 2026-05-26: v3.2.0 - Several performance optimizations to reduce processing time. (THX: @r0ny123)
+ * 2026-05-26: v3.1.0 - Repository structure changed to src-style, modernized overall package and CI procedures. (THX: @r0ny123)
+ * 2026-05-20: v3.0.1 - Improved performance for string extraction by reducing type casts. (THX: @r0ny123)
+ * 2026-05-20: v3.0.0 - Support for Android Dalvik disassembly. (THX: @r0ny123)
+ * 2026-05-20: v2.6.0 - Use Pythia as drop-in replacement for current Delphi VMT parser. (THX: @r0ny123)
+ * 2026-05-20: v2.5.4 - Improve performance by precompiling regexes, doing additional prefix extraction and covering more GAP sequence NOPs. (THX: @r0ny123)
  * 2026-03-23: v2.5.3 - Added ELF ABI to SmdaReport info, upgraded DelphiReSym to handle Delphi 13, slight performance improvements by removing redundant label extraction. (THX: @r0ny123)
  * 2026-01-16: v2.5.2 - Fixed bug in IdaInterface where binary data was unproperly extracted.
  * 2026-01-16: v2.5.1 - Reducing calls to lief by caching the object. (THX: @r0ny123)
