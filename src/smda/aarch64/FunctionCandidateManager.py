@@ -46,6 +46,7 @@ from .definitions import (
     RET_MASK,
     RET_VALUE,
     adrp_page_value,
+    is_bti_landing_pad,
     is_conditional_branch,
     is_function_prologue,
 )
@@ -228,7 +229,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
     def locatePrologueCandidates(self):
         # AArch64 lacks a single dominant byte prologue (no push ebp). Scan the
         # image word-by-word for the recognized function-entry prologues
-        # (frame-record store, callee-saved pair save, link-register save, paciasp);
+        # (frame-record store, callee-saved pair save, link-register save, PAC/BTI);
         # see definitions.is_function_prologue for the exact encodings.
         binary = self.disassembly.binary_info.binary
         base = self.disassembly.binary_info.base_addr
@@ -237,6 +238,8 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             if not is_function_prologue(word):
                 continue
             addr = (base + offset) & self.getBitMask()
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
+                continue
             if not self._passesCodeFilter(addr):
                 continue
             self.addPrologueCandidate(addr)
@@ -284,6 +287,30 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             addr += INSTRUCTION_SIZE
         return False
 
+    def _isLikelyInteriorBtiCandidate(self, addr):
+        # BTI marks both real entries and indirect-branch landing pads. If the word
+        # sits inside already claimed code, or immediately follows ordinary code
+        # rather than padding / a terminator-like boundary, suppress it as an entry
+        # candidate so switch targets and guarded blocks do not fragment functions.
+        if addr in self.disassembly.code_map and addr not in self.getFunctionStartCandidates():
+            return True
+
+        base = self.disassembly.binary_info.base_addr
+        binary = self.disassembly.binary_info.binary
+        offset = addr - base
+        if offset < INSTRUCTION_SIZE or offset > len(binary):
+            return False
+
+        prev_word = int.from_bytes(binary[offset - INSTRUCTION_SIZE : offset], "little")
+        if prev_word in (0, NOP):
+            return False
+        return not (
+            (prev_word & RET_MASK) == RET_VALUE
+            or (prev_word & BR_MASK) == BR_VALUE
+            or (prev_word & B_MASK) == B_VALUE
+            or (prev_word & BL_MASK) == BL_VALUE
+        )
+
     def nextGapCandidate(self, start_gap_pointer=None):
         # AArch64 gap scan: a fixed-stride linear sweep of unanalyzed executable bytes
         # for functions that no prologue, call reference or stored pointer reached
@@ -325,6 +352,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 continue
             word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
             if word in (0, NOP):  # inter-function padding
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if is_conditional_branch(word):  # a function never opens with a cond branch
