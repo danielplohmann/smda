@@ -67,8 +67,8 @@ class SmdaInstruction:
 
     def getDetailed(self):
         arch = self.smda_function.smda_report.architecture
-        if arch is not None and arch != "intel":
-            raise NotImplementedError(f"getDetailed() is only available for Intel architecture, not '{arch}'")
+        if arch is not None and arch not in {"intel", "aarch64"}:
+            raise NotImplementedError(f"getDetailed() is only available for Intel and AArch64, not '{arch}'")
         if self.detailed is None:
             capstone = self.smda_function.smda_report.getCapstone()
             with_details = list(capstone.disasm(bytes.fromhex(self.bytes), self.offset))
