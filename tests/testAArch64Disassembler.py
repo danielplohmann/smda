@@ -21,13 +21,16 @@ import hashlib
 import struct
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import lief
 
 from smda.aarch64.AArch64Backend import AArch64Backend
 from smda.aarch64.definitions import adrp_page_value
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
+from smda.DisassemblyResult import DisassemblyResult
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.FileLoader import FileLoader
@@ -367,6 +370,86 @@ class TestAArch64BranchTarget(unittest.TestCase):
 
     def test_indirect_branch_has_no_immediate_target(self):
         self.assertIsNone(AArch64Backend._branchTarget("x8"))
+
+
+class TestAArch64PltResolution(unittest.TestCase):
+    def _build_disassembler(self):
+        base = 0x400000
+        plt = 0x402000
+        got_slot = 0x403018
+        mapped = bytearray(got_slot - base + 8)
+        plt_words = [
+            0xB0000010,  # adrp x16, #0x403000
+            0xF9400E11,  # ldr x17, [x16, #0x18]
+            0x91006210,  # add x16, x16, #0x18
+            0xD61F0220,  # br x17
+        ]
+        for index, word in enumerate(plt_words):
+            offset = plt - base + index * 4
+            mapped[offset : offset + 4] = word.to_bytes(4, "little")
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.raw_data = b""
+        binary_info._lief_binary = SimpleNamespace(
+            sections=[SimpleNamespace(name=".plt", virtual_address=plt, size=len(plt_words) * 4)]
+        )
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result):
+                self.disassembly = disassembly_result
+                self.api_targets = []
+                self.call_targets = []
+
+            def _handleApiTarget(self, from_addr, to_addr, dereferenced):
+                self.api_targets.append((from_addr, to_addr, dereferenced))
+                return ("GLIBC_2.2.5", "puts")
+
+            def _handleCallTarget(self, state, from_addr, to_addr):
+                self.call_targets.append((from_addr, to_addr))
+
+        return FakeDisassembler(disassembly), plt, got_slot
+
+    def test_elf_loader_reports_plt_ranges(self):
+        fake_elf = SimpleNamespace(
+            sections=[
+                SimpleNamespace(name=".text", virtual_address=0x401000, size=0x100),
+                SimpleNamespace(name=".plt", virtual_address=0x402000, size=0x40),
+            ]
+        )
+        self.assertEqual(ElfFileLoader.getPltRanges(b"", parsed=fake_elf), [(0x402000, 0x402040)])
+
+    def test_aarch64_plt_stub_resolves_got_slot(self):
+        fake_disassembler, plt, got_slot = self._build_disassembler()
+
+        self.assertEqual(AArch64Backend._resolvePltGotSlot(fake_disassembler, plt), got_slot)
+
+    def test_bl_to_plt_stub_records_api_reference(self):
+        fake_disassembler, plt, got_slot = self._build_disassembler()
+
+        class FakeState:
+            def __init__(self):
+                self.leaf = True
+                self.code_refs = []
+
+            def setLeaf(self, value):
+                self.leaf = value
+
+            def addCodeRef(self, from_addr, to_addr, by_jump=False):
+                self.code_refs.append((from_addr, to_addr, by_jump))
+
+        state = FakeState()
+        call_addr = BASE
+        backend = AArch64Backend()
+        backend.analyzeInstruction(fake_disassembler, (call_addr, 4, "bl", f"#0x{plt:x}"), state, None, call_addr)
+
+        self.assertFalse(state.leaf)
+        self.assertEqual(fake_disassembler.api_targets, [(call_addr, got_slot, got_slot)])
+        self.assertEqual(fake_disassembler.call_targets, [])
+        self.assertEqual(state.code_refs, [(call_addr, plt, False)])
 
 
 class TestAArch64PrologueDiscovery(unittest.TestCase):

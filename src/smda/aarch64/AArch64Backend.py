@@ -7,10 +7,17 @@ from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 
 from smda.common.arch.ArchBackend import ArchBackend
+from smda.utility.ElfFileLoader import ElfFileLoader
 
 from .analyzers import AArch64IndirectCallAnalyzer, AArch64JumpTableAnalyzer, AArch64TfIdf
 from .definitions import (
+    ADD_IMM64_MASK,
+    ADD_IMM64_VALUE,
+    ADRP_MASK,
+    ADRP_VALUE,
     ALWAYS_BRANCH_INS,
+    BR_MASK,
+    BR_VALUE,
     CALL_INS,
     COND_BRANCH_INS,
     END_INS,
@@ -20,6 +27,7 @@ from .definitions import (
     NOP,
     RET_INS,
     UNCOND_JUMP_INS,
+    adrp_page_value,
     is_function_prologue,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
@@ -29,6 +37,8 @@ LOGGER = logging.getLogger(__name__)
 
 # capstone renders AArch64 immediates as "#0x....": match the hex operands.
 _HEX_OPERAND = re.compile(r"0x[0-9a-fA-F]+")
+_LDR_UNSIGNED_64_MASK = 0xFFC00000
+_LDR_UNSIGNED_64_VALUE = 0xF9400000
 
 
 class AArch64Backend(ArchBackend):
@@ -220,6 +230,48 @@ class AArch64Backend(ArchBackend):
                 emitted.add(value)
                 state.addDataRef(i_address, value)
 
+    @staticmethod
+    def _getPltRanges(binary_info):
+        if not hasattr(binary_info, "_plt_ranges"):
+            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
+                binary_info.raw_data or binary_info.binary,
+                parsed=binary_info.getLiefBinary(),
+            )
+        return binary_info._plt_ranges
+
+    @classmethod
+    def _resolvePltGotSlot(cls, d, target):
+        binary_info = d.disassembly.binary_info
+        if not any(start <= target < end for start, end in cls._getPltRanges(binary_info)):
+            return None
+
+        registers = {}
+        for index in range(4):
+            addr = target + index * INSTRUCTION_SIZE
+            word = cls._wordAt(d, addr)
+            if word is None:
+                return None
+
+            rd = word & 0x1F
+            if (word & ADRP_MASK) == ADRP_VALUE:
+                registers[rd] = adrp_page_value(word, addr)
+            elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
+                rn = (word >> 5) & 0x1F
+                if rn not in registers:
+                    return None
+                registers[rd] = registers[rn] + ((word >> 10) & 0xFFF)
+            elif (word & _LDR_UNSIGNED_64_MASK) == _LDR_UNSIGNED_64_VALUE:
+                rn = (word >> 5) & 0x1F
+                if rn not in registers:
+                    return None
+                registers[rd] = registers[rn] + (((word >> 10) & 0xFFF) * 8)
+            elif (word & BR_MASK) == BR_VALUE:
+                rn = (word >> 5) & 0x1F
+                return registers.get(rn)
+            else:
+                return None
+        return None
+
     # --- engine entry point ----------------------------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):
         del start_addr
@@ -246,7 +298,11 @@ class AArch64Backend(ArchBackend):
             if i_mnemonic == "bl":
                 target = self._branchTarget(i_op_str)
                 if target is not None:
-                    d._handleCallTarget(state, i_address, target)
+                    got_slot = self._resolvePltGotSlot(d, target)
+                    if got_slot is not None and d._handleApiTarget(i_address, got_slot, got_slot):
+                        state.addCodeRef(i_address, target)
+                    else:
+                        d._handleCallTarget(state, i_address, target)
             else:
                 # blr and the PAC indirect calls (blraa/blrab/blraaz/blrabz): the
                 # target lives in a register, resolved by a future iterate-step.
