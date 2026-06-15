@@ -1,12 +1,16 @@
+import base64
 import datetime
+import io
 import json
 import logging
 import os
+import zipfile
 from typing import Iterator, Optional
 
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.common.BlockLocator import BlockLocator
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.DisassemblyStatistics import DisassemblyStatistics
 
 from .BinaryInfo import BinaryInfo
@@ -58,6 +62,11 @@ class SmdaReport:
     capstone = None
 
     def __init__(self, disassembly=None, config=None, buffer=None):
+        # caches owned by SmdaReport but populated lazily by StringExtractor; declared here so
+        # their lifecycle is explicit and every construction path (incl. fromDict via cls(None))
+        # starts with empty caches rather than relying on monkey-patched attributes.
+        self._string_cache = {}
+        self._derefs_cache = {}
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.abi = disassembly.binary_info.abi
@@ -194,19 +203,29 @@ class SmdaReport:
                     self._offset2ins[instruction.offset] = instruction
             self._has_codexrefs = True
 
-    def _packBuffer(self, buffer):
-        # TODO
-        # create zip
-        # XOR with some key
-        # base64
-        return b""
+    @staticmethod
+    def _packBuffer(buffer: bytes) -> str:
+        """Deflate-compress raw buffer bytes and base85-encode them into a JSON-safe string.
 
-    def _unpackBuffer(self, buffer):
-        # TODO
-        # de-base64
-        # XOR with some key
-        # read from zip
-        return b""
+        Mirrors the scheme used by MCRIT so reports can optionally carry a recoverable
+        copy of the analyzed buffer at a fraction of its on-disk footprint.
+        """
+        zip_buffer = io.BytesIO()
+        # write via a ZipInfo with its default fixed timestamp so packing the same bytes is
+        # reproducible across runs; writestr() with a plain str name would stamp the current
+        # time into the entry header and make the output non-deterministic.
+        entry = zipfile.ZipInfo("buffer")
+        entry.compress_type = zipfile.ZIP_DEFLATED
+        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+            zip_file.writestr(entry, buffer)
+        return base64.b85encode(zip_buffer.getvalue()).decode("ascii")
+
+    @staticmethod
+    def _unpackBuffer(packed: str) -> bytes:
+        """Inverse of :meth:`_packBuffer`: decode base85 and inflate the stored buffer bytes."""
+        zip_buffer = io.BytesIO(base64.b85decode(packed))
+        with zipfile.ZipFile(zip_buffer, "r") as zip_file:
+            return zip_file.read("buffer")
 
     @classmethod
     def fromFile(cls, file_path):
@@ -280,6 +299,16 @@ class SmdaReport:
         smda_report._num_instructions = sum(f.num_instructions for f in smda_report.xcfg.values())
         smda_report.xheader = bytes.fromhex(report_dict["xheader"]) if "xheader" in report_dict else None
         smda_report.xmetadata = report_dict.get("xmetadata", None)
+        # buffer is only present when the report was serialized with STORE_BUFFER enabled;
+        # older reports omit it and keep buffer == None for backward compatibility.
+        if report_dict.get("buffer") is not None:
+            try:
+                smda_report.buffer = cls._unpackBuffer(report_dict["buffer"])
+            except Exception as exc:
+                # re-raise genuine non-operational errors (MemoryError, etc.); a corrupt/tampered
+                # buffer field is operational and must not abort loading the rest of the report
+                reraise_non_operational_exception(exc)
+                LOGGER.warning("Failed to unpack stored buffer, leaving it unset: %s", exc)
         return smda_report
 
     def toDict(self) -> dict:
@@ -290,7 +319,7 @@ class SmdaReport:
                     transformed_code_sections.append(("", section[1], section[2]))
                 else:
                     transformed_code_sections.append(("", 0, 0))
-        return {
+        report_dict = {
             "architecture": self.architecture,
             "abi": self.abi,
             "base_addr": self.base_addr,
@@ -326,6 +355,12 @@ class SmdaReport:
             "xheader": self.xheader.hex() if self.xheader else "",
             "xmetadata": self.xmetadata,
         }
+        # only emit the (compressed) buffer when one was retained, e.g. via STORE_BUFFER;
+        # keeps serialized reports unchanged for the default file/memory analysis path.
+        # `is not None` so an intentionally stored empty buffer survives as b"" (not dropped).
+        if self.buffer is not None:
+            report_dict["buffer"] = self._packBuffer(self.buffer)
+        return report_dict
 
     def toFile(self, output_filepath) -> None:
         with open(output_filepath, "w") as fout:

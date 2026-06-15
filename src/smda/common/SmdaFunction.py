@@ -4,7 +4,7 @@ import hashlib
 import logging
 import re
 import struct
-from typing import Iterator
+from typing import Iterator, List
 
 from smda.common.CodeXref import CodeXref
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
@@ -111,6 +111,7 @@ class SmdaFunction:
         self.smda_report = smda_report
         self.nesting_depth = 0
         self._normalized_blockrefs = None
+        self._basic_blocks = None
         if disassembly is not None and function_offset is not None:
             self._escaper = IntelInstructionEscaper if disassembly.binary_info.architecture in ["intel"] else None
             self.offset = function_offset
@@ -204,9 +205,12 @@ class SmdaFunction:
     def isExported(self):
         return self.is_exported
 
-    def getBlocks(self) -> Iterator["SmdaBasicBlock"]:
-        for key in self._sorted_block_keys:
-            yield SmdaBasicBlock(self.blocks[key], smda_function=self)
+    def getBlocks(self) -> List["SmdaBasicBlock"]:
+        if self._basic_blocks is None:
+            self._basic_blocks = [
+                SmdaBasicBlock(self.blocks[key], smda_function=self) for key in self._sorted_block_keys
+            ]
+        return self._basic_blocks
 
     def getPicHashAsLong(self):
         return self.pic_hash
@@ -300,6 +304,8 @@ class SmdaFunction:
             self.blocks[int(offset)] = instructions
             self.binweight += sum(len(ins.bytes) / 2 for ins in instructions)
         self._sorted_block_keys = sorted(self.blocks.keys())
+        # invalidate any cached SmdaBasicBlock objects built from a previous block set
+        self._basic_blocks = None
 
     @staticmethod
     def _normalizeDalvikStringRefs(stringrefs):
@@ -435,6 +441,7 @@ class SmdaFunction:
         for addr, block in function_dict["blocks"].items():
             smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins, smda_function) for ins in block]
         smda_function._sorted_block_keys = sorted(smda_function.blocks.keys())
+        smda_function._basic_blocks = None
         smda_function.apirefs = LazyIntKeyDict(function_dict["apirefs"])
         smda_function.blockrefs = LazyIntKeyDict(function_dict["blockrefs"])
         smda_function.inrefs = function_dict["inrefs"]

@@ -21,6 +21,8 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
         self._relocations = {}
 
     def update(self, binary_info):
+        self._func_symbols = {}
+        self._relocations = {}
         binary = binary_info.binary
         if DelphiKbFileLoader.isCompatible(binary):
             self._func_symbols = self.parseKbBuffer(binary, binary_info.base_addr)

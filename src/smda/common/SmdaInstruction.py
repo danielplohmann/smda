@@ -16,6 +16,10 @@ class SmdaInstruction:
     operands = None
     detailed = None
     _data_refs = None
+    # x87 instructions have explicit-WAIT and no-WAIT encodings (e.g. FSTCW vs FNSTCW).
+    # For the WAIT-prefixed form Capstone decodes the 0x9b prefix as a standalone
+    # `wait`/`fwait` instruction, so it must be skipped when picking the operation detail.
+    _WAIT_PREFIX_MNEMONICS = frozenset({"wait", "fwait"})
 
     def __init__(self, ins_list=None, smda_function=None):
         self.smda_function = smda_function
@@ -68,28 +72,28 @@ class SmdaInstruction:
         if self.detailed is None:
             capstone = self.smda_function.smda_report.getCapstone()
             with_details = list(capstone.disasm(bytes.fromhex(self.bytes), self.offset))
-            # TODO
-            # this may diverge on instructions like
-            # 9bd93c24 -
-            # <CsInsn 0x4d3f1f0 [9b]: wait >
-            # 1 wait
-            # <CsInsn 0x4d3f1f1 [d93c24]: fnstcw word ptr [esp]>
-            # 3 fnstcw word ptr [esp]
-            # which is split by capstone but treated as one / prefix by IDA
-            # https://fragglet.github.io/dos-help-files/alang.hlp/FLDCW.html
-            # FSTCW has wait and no-wait versions. The wait version (FSTCW)
-            # checks for unmasked numeric errors; the no-wait version (FNSTCW)
-            # does not. When the .8087 directive is used, the assembler puts the
-            # WAIT instruction before the wait version and the NOP instruction
-            # before the no-wait version.
-            if len(with_details) > 1:
-                LOGGER.warning(
-                    f"Sequence {self.bytes} disassembles to {len(with_details)} instructions but expected one - taking the last instruction only!"
-                )
-                self.detailed = with_details[-1]
-            else:
-                assert len(with_details) == 1
+            if not with_details:
+                raise ValueError(f"Capstone could not disassemble stored bytes '{self.bytes}' at 0x{self.offset:x}")
+            if len(with_details) == 1:
                 self.detailed = with_details[0]
+            else:
+                # Capstone can split a single SMDA/IDA instruction whose bytes carry an x87
+                # WAIT prefix, e.g. `9bd93c24` -> `wait` + `fnstcw word ptr [esp]`. The trailing
+                # operation carries the operands and its (address + size) still reaches the end of
+                # the stored byte span, so it is the span-consistent detail to return. We drop any
+                # standalone WAIT/FWAIT prefix instruction(s) before selecting it.
+                # See https://fragglet.github.io/dos-help-files/alang.hlp/FLDCW.html
+                operation_insns = [insn for insn in with_details if insn.mnemonic not in self._WAIT_PREFIX_MNEMONICS]
+                self.detailed = (operation_insns or with_details)[-1]
+                if len(operation_insns) != 1:
+                    # not the known WAIT-prefix pattern - surface the unexpected split
+                    LOGGER.warning(
+                        "Sequence %s disassembled to %d instructions (%s) but expected one - using '%s'.",
+                        self.bytes,
+                        len(with_details),
+                        ", ".join(insn.mnemonic for insn in with_details),
+                        self.detailed.mnemonic,
+                    )
         return self.detailed
 
     def getMnemonicGroup(self, escaper):

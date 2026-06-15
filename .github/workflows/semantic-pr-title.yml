@@ -47,6 +47,7 @@ jobs:
             report
             ida
             cli
+            profiling
             tests
             ci
             build

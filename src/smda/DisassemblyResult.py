@@ -107,8 +107,7 @@ class DisassemblyResult:
 
     def _transformInstruction(self, ins_tuple):
         ins_addr, _, ins_mnem, ins_ops, ins_raw_bytes = ins_tuple
-        # python3  and python2 do handling differently...
-        ins_hexbytes = "".join([f"{c:02x}" for c in ins_tuple[4]])
+        ins_hexbytes = ins_raw_bytes.hex()
         return [ins_addr, ins_hexbytes, str(ins_mnem), str(ins_ops)]
 
     def getBlocksAsDict(self, function_addr):

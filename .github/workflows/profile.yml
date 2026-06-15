@@ -1,0 +1,146 @@
+name: On-Demand Profiling
+
+# CPU/memory profiling of SMDA disassembly. Heavier than the perf_benchmark
+# gate and artifact-producing, so it never runs automatically on every push —
+# only on manual dispatch or when a PR is given the `profile` label.
+#
+# Runs on Linux so py-spy --native and memray --native can descend into the
+# Capstone / LIEF C frames (neither is available on macOS).
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Fixture name (asprox, cutwail, bashlite, blockblast, komplex, njrat, pe_export) or a path"
+        type: string
+        default: "asprox"
+      profiler:
+        description: "Which profiler(s) to run"
+        type: choice
+        options: [all, cpu, mem, flame]
+        default: all
+      iterations:
+        description: "Disassembly passes per profiler"
+        type: string
+        default: "3"
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.label.name || github.event.inputs.profiler }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  profile:
+    name: Profile (${{ github.event.inputs.profiler || 'all' }})
+    # Manual dispatch always runs; label event runs only for the `profile` label.
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'profile'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      TARGET: ${{ github.event.inputs.target || 'asprox' }}
+      PROFILER: ${{ github.event.inputs.profiler || 'all' }}
+      ITERATIONS: ${{ github.event.inputs.iterations || '3' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,profile]"
+
+      - name: Enable ptrace for py-spy
+        if: env.PROFILER == 'all' || env.PROFILER == 'flame'
+        run: sudo sysctl kernel.yama.ptrace_scope=0 || true
+
+      - name: Run profiler(s)
+        run: |
+          set -euo pipefail
+          mkdir -p profiling/output
+          # Derive the output label with the exact same logic the CLI uses, so
+          # the .bin/.svg paths here always match what the tool wrote.
+          LABEL="$(python -c "from profiling._target import resolve_label; print(resolve_label('$TARGET'))")"
+          run_cpu() {
+            python -m profiling.profile_smda cpu --target "$TARGET" --iterations "$ITERATIONS" --line
+          }
+          run_mem() {
+            python -m profiling.profile_smda mem --target "$TARGET" --iterations "$ITERATIONS" --native
+            memray flamegraph "profiling/output/$LABEL.mem.bin" -o "profiling/output/$LABEL.mem.html"
+          }
+          run_flame() {
+            py-spy record --native -o "profiling/output/$LABEL.cpu.svg" -- \
+              python -m profiling.profile_smda run --target "$TARGET" --iterations "$ITERATIONS"
+          }
+          case "$PROFILER" in
+            cpu)   run_cpu ;;
+            mem)   run_mem ;;
+            flame) run_flame ;;
+            all)   run_cpu; run_mem; run_flame ;;
+            *) echo "Unknown profiler: $PROFILER" >&2; exit 1 ;;
+          esac
+
+      - name: Upload profiling artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smda-profile-${{ env.TARGET }}-${{ env.PROFILER }}
+          path: |
+            profiling/output/*.svg
+            profiling/output/*.html
+            profiling/output/*.prof
+            profiling/output/*.bin
+          if-no-files-found: warn
+
+      # Only on the PR-label path: post/refresh a single comment pointing to the
+      # run + downloadable artifacts (artifacts can't be embedded inline).
+      - name: Post PR comment with profiling links
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker="<!-- smda-profile-report -->"
+          comment_body="$(cat <<EOF
+          $marker
+          ### 🔥 SMDA Profiling Run
+
+          - **Target:** \`$TARGET\`
+          - **Profiler:** \`$PROFILER\` · **Iterations:** \`$ITERATIONS\`
+          - **Artifacts (flamegraphs / .prof / .bin):** [download from the run summary]($RUN_URL)
+
+          View locally: \`snakeviz <name>.cpu.prof\` for CPU, open \`<name>.mem.html\` for memory,
+          or open \`<name>.cpu.svg\` (py-spy native flamegraph) in a browser.
+          EOF
+          )"
+          existing_ids="$(
+            gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              --jq ".[] | select(.user.login == \"github-actions[bot]\" and ((.body // \"\") | contains(\"$marker\"))) | .id"
+          )"
+          comment_id="$(printf '%s\n' "$existing_ids" | tail -n 1)"
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$comment_id" \
+              --raw-field body="$comment_body" >/dev/null
+          else
+            gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              --raw-field body="$comment_body" >/dev/null
+          fi

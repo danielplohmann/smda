@@ -1,4 +1,5 @@
 # Full Version History
+ * 2026-06-01: v3.0.2 - Added safeguards against memory usage explosion during candidate identification on pathological/junk samples (issue #85): new SmdaConfig backstops `MAX_FUNCTION_CANDIDATES` (default 200000) and `MAX_CALL_REFS_PER_CANDIDATE` (default 2000), the high-volume reference/prologue locators now honor the existing wall-clock TIMEOUT, and high-value candidate locators run before the cap can be exhausted.
  * 2025-02-24: v1.14.3 - PicHashing can now be disabled via SmdaConfig to save some processing time. (THX to @Nalexander-hanel!)
  * 2025-02-24: v1.14.2 - We are Python 3.8+ compatible again (changed UTC usage) and (DWARF) PE symbols for PE files should be extracted again (THX to @N0fix for the update!)
  * 2025-02-21: v1.14.1 - Fixed changed field names in LIEF usage that broke ELF parsing, added tests for ELF+macOS parsing (THX to @N0fix for the update!)
