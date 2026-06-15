@@ -34,7 +34,7 @@ def _build_macho_cpu_types():
     return {
         cpu.X86_64: ("intel", 64, True),
         cpu.X86: ("intel", 32, True),
-        cpu.ARM64: ("arm", 64, False),
+        cpu.ARM64: ("aarch64", 64, True),
         cpu.ARM: ("arm", 32, False),
         cpu.POWERPC64: ("ppc", 64, False),
         cpu.POWERPC: ("ppc", 32, False),

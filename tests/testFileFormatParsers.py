@@ -2,6 +2,7 @@
 
 import logging
 import os
+import struct
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -231,7 +232,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             (cpu.X86_64, ("intel", 64, True)),
             # recognized but unsupported (no backend): metadata must stay accurate
             (cpu.ARM, ("arm", 32, False)),
-            (cpu.ARM64, ("arm", 64, False)),
+            (cpu.ARM64, ("aarch64", 64, True)),
             (cpu.POWERPC, ("ppc", 32, False)),
             (cpu.POWERPC64, ("ppc", 64, False)),
         ]
@@ -258,6 +259,24 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(_resolve_macho_cpu(fat_binary), ("", 0, False))
         self.assertEqual(MachoFileLoader.getArchitecture(b"", parsed=fat_binary), "")
         self.assertEqual(MachoFileLoader.getBitness(b"", parsed=fat_binary), 0)
+
+    def test_raw_arm64_macho_header_resolves_to_aarch64_backend(self):
+        macho_header = struct.pack(
+            "<IiiIIIII",
+            0xFEEDFACF,  # MH_MAGIC_64
+            0x0100000C,  # CPU_TYPE_ARM64
+            0,
+            2,  # MH_EXECUTE
+            0,
+            0,
+            0,
+            0,
+        )
+        parsed = lief.parse(macho_header)
+
+        self.assertEqual(_resolve_macho_cpu(parsed), ("aarch64", 64, True))
+        self.assertEqual(MachoFileLoader.getArchitecture(macho_header, parsed=parsed), "aarch64")
+        self.assertEqual(MachoFileLoader.getBitness(macho_header, parsed=parsed), 64)
 
     @staticmethod
     def _fake_elf(machine_type, identity_class):
