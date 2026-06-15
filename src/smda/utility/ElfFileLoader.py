@@ -42,6 +42,7 @@ _ELF_MACHINE_TYPES = {
 # NOTE: MicroBlaze (e_machine 189) is intentionally absent: lief has no
 # lief.ELF.ARCH enum value for it and reports the raw integer, so it resolves
 # through the unknown-machine-type fallback below.
+_PLT_SECTION_NAMES = frozenset({".plt", ".plt.sec", ".plt.got", ".iplt"})
 
 
 def _resolve_elf_machine(elffile):
@@ -343,3 +344,16 @@ class ElfFileLoader:
                 segment_end = segment_start + segment_size
                 code_areas.append([segment_start, segment_end])
         return ElfFileLoader.mergeCodeAreas(code_areas)
+
+    @staticmethod
+    def getPltRanges(binary, parsed=_NOT_PROVIDED):
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        if elffile is None:
+            return []
+
+        ranges = []
+        for section in getattr(elffile, "sections", []) or []:
+            if section.name not in _PLT_SECTION_NAMES or not section.virtual_address:
+                continue
+            ranges.append((section.virtual_address, section.virtual_address + section.size))
+        return ranges
