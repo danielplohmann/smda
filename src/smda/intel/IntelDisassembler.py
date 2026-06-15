@@ -27,3 +27,9 @@ class IntelDisassembler(RecursiveDisassembler):
 
     def __init__(self, config, forced_bitness=None):
         super().__init__(config, X86Backend(), forced_bitness=forced_bitness)
+
+    def _resolveSyscallNumber(self, preceding_instructions, bitness):
+        backend = getattr(self, "backend", None)
+        if backend is None:
+            backend = X86Backend()
+        return backend._resolveSyscallNumber(preceding_instructions, bitness)

@@ -25,6 +25,54 @@ from .MnemonicTfIdf import MnemonicTfIdf
 LOGGER = logging.getLogger(__name__)
 
 
+SYSCALL_BACKTRACK_BOUNDARY = (
+    set(CALL_INS)
+    | set(JMP_INS)
+    | set(CJMP_INS)
+    | set(LOOP_INS)
+    | set(RET_INS)
+    | {"syscall", "sysenter", "int", "int3", "hlt"}
+)
+
+SYSCALL_IMPLICIT_RAX_WRITERS = {
+    "cpuid",
+    "rdtsc",
+    "rdtscp",
+    "rdmsr",
+    "rdpmc",
+    "xgetbv",
+    "lodsb",
+    "lodsw",
+    "lodsd",
+    "lodsq",
+    "cbw",
+    "cwde",
+    "cdqe",
+    "lahf",
+    "xlat",
+    "xlatb",
+    "mul",
+    "div",
+    "idiv",
+    "in",
+    "ins",
+    "insb",
+    "insw",
+    "insd",
+    "cmpxchg",
+    "cmpxchg8b",
+    "cmpxchg16b",
+    "aaa",
+    "aas",
+    "aad",
+    "aam",
+    "daa",
+    "das",
+}
+
+SYSCALL_READ_ONLY_INS = {"cmp", "test", "push", "bt"}
+
+
 class X86Backend(ArchBackend):
     """x86/x64 backend: capstone setup, x86 collaborators and the x86 control-flow
     semantics (call/jmp/cond-jmp/loop/ret classification plus the push-ret,
@@ -186,6 +234,57 @@ class X86Backend(ArchBackend):
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
 
+    def _resolveSyscallNumber(self, preceding_instructions, bitness):
+        """Conservatively recover the syscall-number register (rax on 64-bit,
+        eax on 32-bit) by backtracking over the preceding block-local
+        instructions.
+        """
+        if bitness == 64:
+            # a 32-bit write (e.g. ``mov eax, 0x3c``) zero-extends into rax,
+            # so eax also carries the syscall number on 64-bit.
+            target_regs = ("rax", "eax")
+            clobber_regs = ("rax", "eax", "ax", "al", "ah")
+        else:
+            target_regs = ("eax",)
+            clobber_regs = ("eax", "ax", "al", "ah")
+        for instruction in reversed(preceding_instructions):
+            mnemonic = instruction[2].split(" ")[-1]
+            if mnemonic in SYSCALL_BACKTRACK_BOUNDARY or mnemonic.startswith("j"):
+                return None
+            # instructions that implicitly modify rax/eax (no explicit destination
+            # operand) must stop resolution, or a write could be silently skipped
+            if mnemonic in SYSCALL_IMPLICIT_RAX_WRITERS:
+                return None
+            operands = [operand.strip().lower() for operand in instruction[3].split(",") if operand.strip()]
+            # single-operand imul writes rdx:rax implicitly (the multi-operand
+            # forms write only their explicit destination, handled below)
+            if mnemonic == "imul" and len(operands) == 1:
+                return None
+            # xchg writes both operands, so the target register being written is
+            # not necessarily the first operand
+            if mnemonic == "xchg" and any(operand in clobber_regs for operand in operands):
+                return None
+            # read-only instructions whose first operand is a source do not clobber
+            if mnemonic in SYSCALL_READ_ONLY_INS:
+                continue
+            if not operands:
+                # operand-less and not a known implicit writer (nop, cld, leave, ...)
+                continue
+            destination = operands[0]
+            if destination not in clobber_regs:
+                # this instruction does not touch the syscall register; keep going
+                continue
+            if mnemonic in ("mov", "movabs") and len(operands) == 2 and destination in target_regs:
+                try:
+                    # base 0 handles capstone's 0x-prefixed hex as well as decimal
+                    return int(operands[1], 0)
+                except ValueError:
+                    # source is a register, memory operand, or expression -> unresolved
+                    return None
+            # any other write to the register family cannot be tracked conservatively
+            return None
+        return None
+
     # --- engine entry point ----------------------------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):
         d = disassembler
@@ -240,29 +339,13 @@ class X86Backend(ArchBackend):
                 i_address,
             )
         elif i_mnemonic_noprefix in ["syscall"]:
-            if previous_address is not None and previous_mnemonic == "mov":
-                prev_operands = previous_op_str.split(",")
-                if len(prev_operands) == 2:
-                    reg = prev_operands[0].strip().lower()
-                    if (d.disassembly.binary_info.bitness == 64 and reg == "rax") or (
-                        d.disassembly.binary_info.bitness == 32 and reg == "eax"
-                    ):
-                        try:
-                            syscall_number_str = int(prev_operands[1].strip(), 16)
-                        except ValueError:
-                            # TODO we should do backtracking on the basic block to resolve the value properly
-                            LOGGER.debug(
-                                "failed to extract syscall number from: %s at 0x%x",
-                                prev_operands,
-                                i_address,
-                            )
-                            syscall_number_str = None
-                        if syscall_number_str == 60:
-                            self._analyzeEndInstruction(state)
-                            LOGGER.debug(
-                                "  analyzeFunction() found program ending instruction @0x%08x",
-                                i_address,
-                            )
+            syscall_number = self._resolveSyscallNumber(state.current_block, d.disassembly.binary_info.bitness)
+            if syscall_number == 60:
+                self._analyzeEndInstruction(state)
+                LOGGER.debug(
+                    "  analyzeFunction() found program ending instruction @0x%08x",
+                    i_address,
+                )
         elif previous_address is not None and i_address != start_addr and previous_mnemonic == "call":
             instruction_sequence = list(d.capstone.disasm(d._getDisasmWindowBuffer(i_address), i_address))
             if (
