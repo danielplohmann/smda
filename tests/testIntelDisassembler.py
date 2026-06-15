@@ -97,6 +97,124 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(manager.resolvePointerReference(0x20), 0x1028)
 
+    def test_get_referenced_addr_preserves_sign(self):
+        disassembler = IntelDisassembler.__new__(IntelDisassembler)
+        self.assertEqual(disassembler.getReferencedAddr("qword ptr [rip - 0x20]"), -0x20)
+        self.assertEqual(disassembler.getReferencedAddr("qword ptr [rip + 0x20]"), 0x20)
+        self.assertEqual(disassembler.getReferencedAddr("dword ptr [0x401000]"), 0x401000)
+        self.assertEqual(disassembler.getReferencedAddr("0x401000"), 0x401000)
+        self.assertEqual(disassembler.getReferencedAddr("eax"), 0)
+
+    def test_rip_relative_call_negative_displacement_resolves_correct_slot(self):
+        # 8-byte import-like slot at 0x1000 (value outside the image), then a function
+        # at 0x1008 that calls through the slot with a negative RIP-relative displacement
+        buf = (
+            (0x7FFF12345678).to_bytes(8, "little")  # 0x1000: slot
+            + b"\x55"  # 0x1008: push rbp
+            + b"\x48\x89\xe5"  # 0x1009: mov rbp, rsp
+            + b"\xff\x15\xee\xff\xff\xff"  # 0x100c: call qword ptr [rip - 0x12] -> 0x1000
+            + b"\x5d"  # 0x1012: pop rbp
+            + b"\xc3"  # 0x1013: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x1008, result.functions)
+        # the call must reference the slot at 0x1000, not a bogus positive displacement target
+        self.assertIn(0x1000, result.code_refs_from.get(0x100C, set()))
+
+    def test_rip_relative_call_through_in_image_slot_reaches_target(self):
+        # the slot at 0x1000 points at a second function inside the image: the call must
+        # be booked against the dereferenced target so recursion reaches the real function
+        buf = (
+            (0x1028).to_bytes(8, "little")  # 0x1000: slot -> in-image function
+            + b"\x55"  # 0x1008: push rbp
+            + b"\x48\x89\xe5"  # 0x1009: mov rbp, rsp
+            + b"\xff\x15\xee\xff\xff\xff"  # 0x100c: call qword ptr [rip - 0x12] -> 0x1000
+            + b"\x5d"  # 0x1012: pop rbp
+            + b"\xc3"  # 0x1013: ret
+            + b"\xcc" * 20  # 0x1014: padding
+            + b"\x55"  # 0x1028: push rbp
+            + b"\x48\x89\xe5"  # 0x1029: mov rbp, rsp
+            + b"\x5d"  # 0x102c: pop rbp
+            + b"\xc3"  # 0x102d: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x1028, result.functions)
+        self.assertIn(0x1028, result.code_refs_from.get(0x100C, set()))
+
+    def test_loop_taken_edge_is_disassembled(self):
+        # a forward loop target is only reachable via the taken edge; it must end up
+        # as a block of the same function
+        buf = (
+            b"\x55"  # 0x1000: push ebp
+            + b"\x89\xe5"  # 0x1001: mov ebp, esp
+            + b"\xb9\x03\x00\x00\x00"  # 0x1003: mov ecx, 3
+            + b"\xe2\x04"  # 0x1008: loop 0x100e
+            + b"\x31\xc0"  # 0x100a: xor eax, eax
+            + b"\x5d"  # 0x100c: pop ebp
+            + b"\xc3"  # 0x100d: ret
+            + b"\x89\xc0"  # 0x100e: mov eax, eax (loop target)
+            + b"\xeb\xf8"  # 0x1010: jmp 0x100a
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertEqual(result.ins2fn.get(0x100E), 0x1000)
+
+    def test_resolve_indirect_switch_stops_at_image_end(self):
+        disassembler = IntelDisassembler.__new__(IntelDisassembler)
+        disassembler.disassembly = SimpleNamespace(
+            isAddrWithinMemoryImage=lambda addr: 0x1000 <= addr < 0x1008,
+            getByte=lambda addr: 0 if 0x1000 <= addr < 0x1008 else None,
+        )
+        disassembler.fc_manager = SimpleNamespace(getFunctionStartCandidates=lambda: set())
+
+        # walks from 0x1004 past the image end without raising on the None byte
+        self.assertEqual(
+            disassembler.resolveIndirectSwitch(0x1000, 1),
+            list(range(0x1004, 0x1008)),
+        )
+
+    def test_push_ret_obfuscation_detected_at_address_zero(self):
+        # a push at address 0 (base-0 buffer) must not disable push-ret detection;
+        # the stub at 0x0 becomes a candidate through the call in the second function
+        buf = (
+            b"\x68\x10\x00\x00\x00"  # 0x0: push 0x10
+            + b"\xc3"  # 0x5: ret
+            + b"\xcc" * 10  # 0x6: padding
+            + b"\x31\xc0"  # 0x10: xor eax, eax (push-ret destination)
+            + b"\xc3"  # 0x12: ret
+            + b"\x55"  # 0x13: push ebp
+            + b"\x89\xe5"  # 0x14: mov ebp, esp
+            + b"\xe8\xe5\xff\xff\xff"  # 0x16: call 0x0
+            + b"\x5d"  # 0x1b: pop ebp
+            + b"\xc3"  # 0x1c: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x0, result.functions)
+        self.assertEqual(result.ins2fn.get(0x10), 0x0)
+
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
         binary_info.base_addr = 0

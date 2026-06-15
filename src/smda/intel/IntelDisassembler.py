@@ -225,9 +225,12 @@ class IntelDisassembler:
         return list(symbol_offsets)
 
     def getReferencedAddr(self, op_str):
-        referenced_addr = re.search(r"0x[a-fA-F0-9]+", op_str)
+        # preserve a leading sign so that negative displacements (e.g. "qword ptr [rip - 0x20]")
+        # resolve to the correct address instead of being treated as positive
+        referenced_addr = re.search(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)", op_str)
         if referenced_addr:
-            return int(referenced_addr.group(), 16)
+            value = int(referenced_addr.group("value"), 16)
+            return -value if referenced_addr.group("sign") == "-" else value
         return 0
 
     def resolveIndirectSwitch(self, addr_switch_array, size):
@@ -242,7 +245,11 @@ class IntelDisassembler:
             current_byte = self.disassembly.getByte(current_offset)
             if isinstance(current_byte, str):
                 current_byte = ord(current_byte)
-            while current_byte < size and current_offset not in self.fc_manager.getFunctionStartCandidates():
+            while (
+                current_byte is not None
+                and current_byte < size
+                and current_offset not in self.fc_manager.getFunctionStartCandidates()
+            ):
                 indirect_switch_bytes.append(current_offset)
                 current_offset += 1
                 current_byte = self.disassembly.getByte(current_offset)
@@ -273,9 +280,17 @@ class IntelDisassembler:
             rip = i_address + i_size
             call_destination = rip + self.getReferencedAddr(i_op_str)
             dereferenced = self.disassembly.dereferenceQword(call_destination)
-            state.addCodeRef(i_address, call_destination)
-            if dereferenced is not None:
+            if dereferenced is not None and self.disassembly.isAddrWithinMemoryImage(dereferenced):
+                # the slot holds an in-image target (thunk/local function): book the call
+                # against the real destination, like the 32-bit dword-ptr path does
+                state.addCodeRef(i_address, dereferenced)
+                self._handleCallTarget(state, i_address, dereferenced)
                 self._handleApiTarget(i_address, call_destination, dereferenced)
+            else:
+                # import-like case: keep the reference on the slot itself
+                state.addCodeRef(i_address, call_destination)
+                if dereferenced is not None:
+                    self._handleApiTarget(i_address, call_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
             self._handleCallTarget(state, i_address, call_destination)
@@ -286,7 +301,8 @@ class IntelDisassembler:
             state.call_register_ins.append(i_address)
 
     def _handleCallTarget(self, state, from_addr, to_addr):
-        if to_addr and self.disassembly.isAddrWithinMemoryImage(to_addr):
+        # explicit None check: address 0 is valid in base-0 buffers
+        if to_addr is not None and self.disassembly.isAddrWithinMemoryImage(to_addr):
             state.addCodeRef(from_addr, to_addr)
         if state.start_addr == to_addr:
             state.setRecursion(True)
@@ -333,6 +349,8 @@ class IntelDisassembler:
         i_address, i_size, i_mnemonic, i_op_str = i
         jump_destination = self.getReferencedAddr(i_op_str)
         if jump_destination:
+            # loops are conditional branches: queue the taken edge as well
+            state.addBlockToQueue(jump_destination)
             state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
         # loops have two exits and should thus be handled as block ending instruction
         state.addBlockToQueue(i_address + i_size)
@@ -543,7 +561,7 @@ class IntelDisassembler:
                             "  analyzeFunction() found ending instruction @0x%08x",
                             i_address,
                         )
-                        if previous_address and previous_mnemonic == "push":
+                        if previous_address is not None and previous_mnemonic == "push":
                             push_ret_destination = self.getReferencedAddr(previous_op_str)
                             if self.disassembly.isAddrWithinMemoryImage(push_ret_destination):
                                 LOGGER.debug(
