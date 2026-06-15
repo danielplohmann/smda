@@ -133,18 +133,35 @@ STP_IMM7_NEGATIVE = 0x00200000  # imm7 sign bit (instr bit 21): stack-allocating
 STR_PREINDEX_MASK = 0xFFE00C00
 STR_PREINDEX_VALUE = 0xF8000C00
 STR_IMM9_NEGATIVE = 0x00100000  # imm9 sign bit (instr bit 20)
-# paciasp — pointer-auth sign LR, emitted at the top of PAC frames
+# pointer-auth sign LR, emitted at the top of PAC frames
+PACIAZ = 0xD503231F
 PACIASP = 0xD503233F
+PACIBZ = 0xD503235F
+PACIBSP = 0xD503237F
+PAC_PROLOGUES = frozenset({PACIAZ, PACIASP, PACIBZ, PACIBSP})
+
+# BTI landing pads, emitted at entries and indirect-branch targets.
+BTI = 0xD503241F
+BTI_C = 0xD503245F
+BTI_J = 0xD503249F
+BTI_JC = 0xD50324DF
+BTI_PROLOGUES = frozenset({BTI, BTI_C, BTI_J, BTI_JC})
 
 _SP = 31  # x31 in an Rn field denotes the stack pointer
 _CALLEE_SAVED_GPR = frozenset(range(19, 29))  # x19..x28
 _LINK_REGISTER = 30  # x30
 
 
+def is_bti_landing_pad(word):
+    """Whether a word is a BTI landing-pad instruction."""
+    return word in BTI_PROLOGUES
+
+
 def is_function_prologue(word):
     """Whether a 32-bit little-endian word is a recognized AArch64 entry prologue.
 
-    Covers ``paciasp``, the frame-record store ``stp x29,x30,[sp,#imm]!``, a
+    Covers PAC sign instructions, BTI landing pads, the frame-record store
+    ``stp x29,x30,[sp,#imm]!``, a
     callee-saved GPR-pair pre-index store ``stp x{19..28},x{19..28},[sp,#-imm]!``,
     and the link-register save ``str x30,[sp,#-imm]!``. The pair/LR-save forms
     require a *negative* (stack-allocating) immediate to an SP base — the
@@ -153,7 +170,7 @@ def is_function_prologue(word):
     function claims the bytes first, so no terminator-preceded guard is applied
     (such a guard would wrongly drop functions that follow a no-return call).
     """
-    if word == PACIASP:
+    if word in PAC_PROLOGUES or word in BTI_PROLOGUES:
         return True
     # frame-record store: stp x29, x30, [sp, #imm]!
     if (word & STP_FP_LR_PREINDEX_MASK) == STP_FP_LR_PREINDEX_VALUE:
