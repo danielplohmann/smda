@@ -33,7 +33,15 @@ _ELF_MACHINE_TYPES = {
     lief.ELF.ARCH.SPARC: ("sparc", 32, False),
     lief.ELF.ARCH.MIPS: ("mips", 0, False),
     lief.ELF.ARCH.RISCV: ("riscv", 0, False),
+    lief.ELF.ARCH.M68K: ("m68k", 0, False),
+    lief.ELF.ARCH.SH: ("sh", 0, False),
+    lief.ELF.ARCH.ALTERA_NIOS2: ("nios2", 0, False),
+    lief.ELF.ARCH.OPENRISC: ("openrisc", 0, False),
+    lief.ELF.ARCH.XTENSA: ("xtensa", 0, False),
 }
+# NOTE: MicroBlaze (e_machine 189) is intentionally absent: lief has no
+# lief.ELF.ARCH enum value for it and reports the raw integer, so it resolves
+# through the unknown-machine-type fallback below.
 
 
 def _resolve_elf_machine(elffile):
