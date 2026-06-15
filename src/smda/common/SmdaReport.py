@@ -7,7 +7,7 @@ import os
 import zipfile
 from typing import Iterator, Optional
 
-from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
+from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
 
 from smda.common.BlockLocator import BlockLocator
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -190,7 +190,10 @@ class SmdaReport:
 
     def getCapstone(self):
         if self.capstone is None:
-            self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
+            if self.architecture == "aarch64":
+                self.capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+            else:
+                self.capstone = Cs(CS_ARCH_X86, CS_MODE_64) if self.bitness == 64 else Cs(CS_ARCH_X86, CS_MODE_32)
             self.capstone.detail = True
         return self.capstone
 
