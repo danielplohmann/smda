@@ -627,6 +627,37 @@ class TestAArch64DataPointerRecovery(unittest.TestCase):
         self.assertIsNotNone(report.getFunction(ctor_va))
 
 
+class TestAArch64StringExtraction(unittest.TestCase):
+    def test_adr_data_reference_recovers_ascii_string(self):
+        config = SmdaConfig()
+        config.WITH_STRINGS = True
+        code = b"".join(
+            word.to_bytes(4, "little")
+            for word in [
+                0x10000080,  # adr x0, #0x401010
+                0xD65F03C0,  # ret
+            ]
+        )
+        blob = code + b"\x00" * 8 + b"hello-a64\x00"
+
+        report = Disassembler(config, backend="aarch64").disassembleBuffer(
+            blob,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=0,
+            architecture="aarch64",
+        )
+
+        self.assertEqual(report.status, "ok")
+        function = report.getFunction(BASE)
+        self.assertEqual(report.data_refs_from[BASE], [BASE + 0x10])
+        self.assertEqual(
+            function.stringrefs,
+            [{"string": "hello-a64", "ins_addr": BASE, "data_addr": BASE + 0x10, "type": "ascii"}],
+        )
+
+
 class TestAArch64AddressMaterialization(unittest.TestCase):
     """adrp page resolution used by the address-reference recovery pass."""
 

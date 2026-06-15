@@ -4,6 +4,7 @@ import logging
 import re
 
 from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 
 from smda.common.arch.ArchBackend import ArchBackend
 
@@ -47,7 +48,9 @@ class AArch64Backend(ArchBackend):
     # --- collaborator factories ------------------------------------------
     def createCapstone(self, bitness):
         del bitness  # AArch64 is always 64-bit; 32-bit ARM would be a separate backend
-        return Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+        return capstone
 
     def createTfIdf(self, bitness):
         return AArch64TfIdf(bitness=bitness)
@@ -187,12 +190,44 @@ class AArch64Backend(ArchBackend):
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
 
+    @staticmethod
+    def _recordDataRefs(d, instruction, state):
+        i_address, i_size, i_mnemonic, _i_op_str = instruction
+        if i_mnemonic in CALL_INS or i_mnemonic in RET_INS or i_mnemonic in EXCEPTION_RETURN_INS:
+            return
+        if i_mnemonic in END_INS or i_mnemonic in ALWAYS_BRANCH_INS or i_mnemonic in UNCOND_JUMP_INS:
+            return
+        if i_mnemonic.startswith("b.") or i_mnemonic in COND_BRANCH_INS or i_mnemonic in INDIRECT_JUMP_INS:
+            return
+
+        ins_bytes = d.disassembly.binary_info.binary[
+            i_address - d.disassembly.binary_info.base_addr : i_address - d.disassembly.binary_info.base_addr + i_size
+        ]
+        detailed = next(d.capstone.disasm(ins_bytes, i_address), None)
+        if detailed is None:
+            return
+        binary_info = d.disassembly.binary_info
+        emitted = set()
+        for operand in detailed.operands:
+            value = None
+            if operand.type == ARM64_OP_IMM:
+                value = operand.imm
+            elif operand.type == ARM64_OP_MEM and operand.mem.base == 0:
+                value = operand.mem.disp
+            if value is None or value in emitted:
+                continue
+            if d.disassembly.isAddrWithinMemoryImage(value) and not binary_info.isInCodeAreas(value):
+                emitted.add(value)
+                state.addDataRef(i_address, value)
+
     # --- engine entry point ----------------------------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):
         del start_addr
         d = disassembler
         i_address, _i_size, i_mnemonic, i_op_str = instruction
         # capstone arm64 mnemonics carry no prefixes, so the mnemonic is used as-is.
+
+        self._recordDataRefs(d, instruction, state)
 
         if previous_instruction and previous_instruction[2] == "bl":
             boundary = self._callFallthroughFunctionStart(d, i_address)
