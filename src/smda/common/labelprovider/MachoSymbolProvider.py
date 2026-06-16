@@ -4,7 +4,13 @@ import logging
 
 import lief
 
+from smda.utility.MachoBinary import (
+    get_active_macho_binary,
+    get_macho_address_adjustment,
+)
+
 from .AbstractLabelProvider import AbstractLabelProvider
+from .MachoDemangler import demangle_macho_symbol
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
@@ -33,43 +39,33 @@ class MachoSymbolProvider(AbstractLabelProvider):
         return (None, None)
 
     def _get_macho_binary(self, lief_binary):
-        if isinstance(lief_binary, lief.MachO.FatBinary):
-            if len(lief_binary) == 0:
-                return None
-            if hasattr(self, "_binary_info") and self._binary_info:
-                target_bitness = self._binary_info.bitness
-                target_arch = getattr(self._binary_info, "architecture", "")
-                for binary in lief_binary:
-                    binary_bitness = 64 if binary.header.is_64bit else 32
-                    if target_bitness and binary_bitness != target_bitness:
-                        continue
-                    if target_arch:
-                        cpu_type = getattr(binary.header, "cpu_type", None)
-                        is_intel = cpu_type in (lief.MachO.Header.CPU_TYPE.X86, lief.MachO.Header.CPU_TYPE.X86_64)
-                        is_arm = cpu_type in (lief.MachO.Header.CPU_TYPE.ARM, lief.MachO.Header.CPU_TYPE.ARM64)
-                        if target_arch == "intel" and not is_intel:
-                            continue
-                        if target_arch in ("arm", "aarch64") and not is_arm:
-                            continue
-                    return binary
-            return lief_binary[0]
-        return lief_binary
+        binary_info = getattr(self, "_binary_info", None)
+        return get_active_macho_binary(
+            lief_binary,
+            bitness=getattr(binary_info, "bitness", None) if binary_info else None,
+            architecture=getattr(binary_info, "architecture", "") if binary_info else "",
+        )
 
     def _get_address_adjustment(self, lief_binary):
-        lief_binary = self._get_macho_binary(lief_binary)
-        if not lief_binary:
-            return 0
-        candidates = []
-        if hasattr(lief_binary, "imagebase"):
-            candidates.append(lief_binary.imagebase)
-        for section in getattr(lief_binary, "sections", []):
-            if section.virtual_address:
-                candidates.append(section.virtual_address - section.offset)
-        lief_base = min(candidates) if candidates else 0
-        smda_base = lief_base
-        if hasattr(self, "_binary_info") and self._binary_info:
-            smda_base = self._binary_info.base_addr
-        return smda_base - lief_base
+        binary_info = getattr(self, "_binary_info", None)
+        return get_macho_address_adjustment(
+            lief_binary,
+            base_addr=getattr(binary_info, "base_addr", 0) if binary_info else 0,
+            bitness=getattr(binary_info, "bitness", None) if binary_info else None,
+            architecture=getattr(binary_info, "architecture", "") if binary_info else "",
+        )
+
+    def _format_symbol_name(self, symbol):
+        raw_name = symbol.name
+        demangled = getattr(symbol, "demangled_name", None)
+        if demangled and demangled != raw_name:
+            return demangled
+        return demangle_macho_symbol(raw_name)
+
+    def _filter_symbols_to_code(self, symbols, binary_info):
+        if not binary_info:
+            return symbols
+        return {addr: name for addr, name in symbols.items() if binary_info.isInCodeAreas(addr)}
 
     def update(self, binary_info):
         self._binary_info = binary_info
@@ -87,26 +83,26 @@ class MachoSymbolProvider(AbstractLabelProvider):
             if binary_info.isInCodeAreas(adjusted_entrypoint):
                 self._func_symbols[adjusted_entrypoint] = "original_entry_point"
 
-        # Parse export trie symbols
         for addr, name in self.parseExports(lief_binary).items():
             if binary_info.isInCodeAreas(addr):
                 self._func_symbols[addr] = name
 
-        # Parse general symtab symbols
         for addr, name in self.parseSymbols(lief_binary).items():
             if binary_info.isInCodeAreas(addr):
                 self._func_symbols[addr] = name
 
-        # Parse symbol stubs
         try:
             for stub in getattr(lief_binary, "symbol_stubs", []):
                 adjusted_stub_addr = stub.address + adjustment
-                if stub.address != 0 and binary_info.isInCodeAreas(adjusted_stub_addr):
+                if (
+                    stub.address != 0
+                    and binary_info.isInCodeAreas(adjusted_stub_addr)
+                    and adjusted_stub_addr not in self._func_symbols
+                ):
                     self._func_symbols[adjusted_stub_addr] = f"stub_{adjusted_stub_addr:x}"
         except Exception:
             pass
 
-        # Populate API map from imports/bindings
         self._api_map = self.parseImports(lief_binary)
 
     def parseExports(self, lief_binary):
@@ -119,7 +115,7 @@ class MachoSymbolProvider(AbstractLabelProvider):
             for symbol in getattr(lief_binary, "exported_symbols", []):
                 if symbol.value != 0 and symbol.name:
                     adjusted_val = symbol.value + adjustment
-                    exported[adjusted_val] = symbol.name
+                    exported[adjusted_val] = demangle_macho_symbol(symbol.name)
         except Exception as e:
             LOGGER.debug("Failed to parse Mach-O exports: %s", e)
         return exported
@@ -133,9 +129,8 @@ class MachoSymbolProvider(AbstractLabelProvider):
         try:
             for symbol in getattr(lief_binary, "symbols", []):
                 if symbol.value != 0 and symbol.name:
-                    func_name = getattr(symbol, "demangled_name", None) or symbol.name
                     adjusted_val = symbol.value + adjustment
-                    symbols[adjusted_val] = func_name
+                    symbols[adjusted_val] = self._format_symbol_name(symbol)
         except Exception as e:
             LOGGER.debug("Failed to parse Mach-O symbols: %s", e)
         return symbols

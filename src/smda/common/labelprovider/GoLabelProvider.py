@@ -7,6 +7,7 @@ from collections import OrderedDict
 import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.utility.MachoBinary import get_active_macho_binary
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
@@ -56,15 +57,21 @@ class GoSymbolProvider(AbstractLabelProvider):
             if lief_binary is None:
                 lief_binary = lief.parse(binary_bytes)
             if lief_binary is not None:
-                if lief_binary.format == lief.EXE_FORMATS.ELF:
+                if isinstance(lief_binary, lief.ELF.Binary):
                     section = lief_binary.get_section(".gopclntab")
                     if section is not None:
                         pclntab_offset = section.offset
-                elif lief_binary.format == lief.EXE_FORMATS.MACHO:
-                    section = lief_binary.get_section("__gopclntab")
-                    if section is not None:
-                        pclntab_offset = section.offset
-                elif lief_binary.format == lief.EXE_FORMATS.PE:
+                elif isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
+                    macho_binary = get_active_macho_binary(
+                        lief_binary,
+                        bitness=getattr(binary_info, "bitness", None) if binary_info is not None else None,
+                        architecture=getattr(binary_info, "architecture", "") if binary_info is not None else "",
+                    )
+                    if macho_binary is not None:
+                        section = macho_binary.get_section("__gopclntab")
+                        if section is not None:
+                            pclntab_offset = section.offset
+                elif isinstance(lief_binary, lief.PE.Binary):
                     section = lief_binary.get_section(".rdata")
                     symbol = lief_binary.get_symbol("runtime.pclntab")
                     if section is not None and symbol is not None:

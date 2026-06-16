@@ -122,7 +122,8 @@ class BinaryInfo:
             elif lief_type == "ELF":
                 self.symbols = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
             elif lief_type == "MACH_O":
-                self.symbols = self._symbol_provider.parseSymbols(lief_result)
+                symbols = self._symbol_provider.parseSymbols(lief_result)
+                self.symbols = self._symbol_provider._filter_symbols_to_code(symbols, self)
         return self.symbols
 
     def getSections(self):

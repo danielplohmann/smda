@@ -49,8 +49,19 @@ class DisassemblyResult:
         self.binary_info = binary_info
         exported = binary_info.getExportedFunctions()
         if exported is not None:
-            self.exported_functions = {key + binary_info.base_addr for key in exported}
+            self.exported_functions = self._normalize_export_addresses(exported, binary_info.base_addr)
         self.oep = binary_info.getOep()
+
+    @staticmethod
+    def _normalize_export_addresses(exported, base_addr):
+        if not exported:
+            return set()
+        addresses = set(exported.keys()) if isinstance(exported, dict) else set(exported)
+        if not addresses or not base_addr:
+            return addresses
+        if max(addresses) >= base_addr:
+            return addresses
+        return {address + base_addr for address in addresses}
 
     def getByte(self, addr):
         if self.isAddrWithinMemoryImage(addr):
