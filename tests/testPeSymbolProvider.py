@@ -132,6 +132,34 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
             imported = binary_info.getImportedFunctions()
         self.assertEqual(imported, {0x402000: ("kernel32.dll", "ExitProcess")})
 
+    def test_rebased_dump_xmetadata_and_api_parity(self):
+        pe_binary = _MockPeBinary(
+            imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
+            exported_functions=[_MockExport("exported_func", 0x1000)],
+            sections=[_MockSection(0x20000000, 0x1000)],
+            symbols=[_MockSymbol("local_func", 0x200)],
+            imagebase=0x140000000,
+        )
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x400000
+        resolver = WinApiResolver(SimpleNamespace(API_COLLECTION_FILES={}))
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=pe_binary),
+            mock.patch("lief.PE.Binary", _MockPeBinary),
+        ):
+            exported = binary_info.getExportedFunctions()
+            imported = binary_info.getImportedFunctions()
+            symbols = binary_info.getSymbols()
+            resolver.update(binary_info)
+
+        self.assertEqual(exported, {0x401000: "exported_func"})
+        self.assertEqual(imported, {0x403000: ("kernel32.dll", "CreateFileW")})
+        self.assertEqual(symbols[0x401000], "exported_func")
+        self.assertEqual(symbols[0x401200], "local_func")
+        self.assertNotIn(0x140001000, exported)
+        self.assertNotIn(0x140003000, imported)
+        self.assertEqual(resolver._api_map["lief"], imported)
+
     def test_binary_info_pe_symbols_merge_exports_and_coff(self):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
