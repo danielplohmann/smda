@@ -237,6 +237,23 @@ class TestRustSymbolProvider(unittest.TestCase):
         provider = RustSymbolProvider(None)
         self.assertTrue(provider.isSymbolProvider())
 
+    def test_pe_rust_symbols_use_base_addr_not_imagebase(self):
+        provider = RustSymbolProvider(None)
+        mock_binary = MockLiefBinary(
+            [MockSymbol("_ZN3foo3barE", 0x200)],
+            exported_functions=[MockExport("_RNvC6_123foo3bar", 0x1000)],
+        )
+        mock_binary.imagebase = 0x140000000
+        mock_binary.sections = [MockSection(0x20000000, 0x1000)]
+
+        with mock.patch("lief.PE.Binary", MockLiefBinary):
+            provider._update_pe(mock_binary, base_addr=0x400000)
+
+        self.assertEqual(provider.getSymbol(0x401000), "123foo::bar")
+        self.assertEqual(provider.getSymbol(0x401200), "foo::bar")
+        self.assertNotIn(0x140001000, provider.getFunctionSymbols())
+        self.assertNotIn(0x140001200, provider.getFunctionSymbols())
+
     def test_detection_logic(self):
         """Test Rust binary detection based on signatures."""
         provider = RustSymbolProvider(None)

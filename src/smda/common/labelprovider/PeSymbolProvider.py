@@ -5,9 +5,8 @@ import logging
 
 import lief
 
-from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
-
 from .AbstractLabelProvider import AbstractLabelProvider
+from .import_parsers import parse_pe_imports, resolve_pe_base_addr
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
@@ -31,9 +30,7 @@ class PeSymbolProvider(AbstractLabelProvider):
         return (None, None)
 
     def _resolve_base_addr(self, lief_binary, base_addr):
-        if base_addr is None:
-            return getattr(lief_binary, "imagebase", 0)
-        return base_addr
+        return resolve_pe_base_addr(lief_binary, base_addr)
 
     def _parseOep(self, lief_binary, base_addr=None):
         if lief_binary:
@@ -92,23 +89,7 @@ class PeSymbolProvider(AbstractLabelProvider):
         return function_symbols
 
     def parseImports(self, lief_binary, base_addr=None):
-        active_base = self._resolve_base_addr(lief_binary, base_addr)
-        import_symbols = {}
-        for imported_library in lief_binary.imports:
-            for func in imported_library.entries:
-                if func.name:
-                    import_symbols[func.iat_address + active_base] = (
-                        imported_library.name.lower(),
-                        func.name,
-                    )
-                elif func.is_ordinal:
-                    resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
-                    ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
-                    import_symbols[func.iat_address + active_base] = (
-                        imported_library.name.lower(),
-                        ordinal_name,
-                    )
-        return import_symbols
+        return parse_pe_imports(lief_binary, base_addr)
 
     def collectSymbols(self, lief_binary, base_addr=None):
         symbols = {}
