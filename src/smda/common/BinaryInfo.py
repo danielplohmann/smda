@@ -55,6 +55,7 @@ class BinaryInfo:
             elif isinstance(lief_result, (lief.MachO.Binary, lief.MachO.FatBinary)):
                 self._lief_type = "MACH_O"
                 self._symbol_provider = MachoSymbolProvider(None)
+                self._symbol_provider._binary_info = self
             else:
                 self._lief_type = "OTHER"
         return self._lief_type
@@ -86,10 +87,10 @@ class BinaryInfo:
             elif lief_type == "ELF":
                 self.oep = lief_result.header.entrypoint
             elif lief_type == "MACH_O":
-                if isinstance(lief_result, lief.MachO.FatBinary):
-                    lief_result = lief_result[0] if len(lief_result) > 0 else None
-                if lief_result and hasattr(lief_result, "entrypoint"):
-                    self.oep = lief_result.entrypoint - self.base_addr
+                macho_binary = self._symbol_provider._get_macho_binary(lief_result)
+                if macho_binary and hasattr(macho_binary, "entrypoint"):
+                    adjustment = self._symbol_provider._get_address_adjustment(macho_binary)
+                    self.oep = (macho_binary.entrypoint + adjustment) - self.base_addr
         return self.oep
 
     def getExportedFunctions(self):
@@ -150,13 +151,12 @@ class BinaryInfo:
                 section_size = section.size
                 yield section.name, section_start, section_start + section_size
         elif lief_type == "MACH_O":
-            if isinstance(parsed_binary, lief.MachO.FatBinary):
-                if len(parsed_binary) > 0:
-                    parsed_binary = parsed_binary[0]
-                else:
-                    return
-            for section in parsed_binary.sections:
-                section_start = section.virtual_address
+            macho_binary = self._symbol_provider._get_macho_binary(parsed_binary)
+            if not macho_binary:
+                return
+            adjustment = self._symbol_provider._get_address_adjustment(macho_binary)
+            for section in macho_binary.sections:
+                section_start = section.virtual_address + adjustment
                 section_size = section.size
                 yield section.name, section_start, section_start + section_size
 
