@@ -8,9 +8,8 @@ import lief
 
 lief.logging.disable()
 
-from smda.common.labelprovider.OrdinalHelper import OrdinalHelper  # noqa: E402
-
 from .AbstractLabelProvider import AbstractLabelProvider  # noqa: E402
+from .PeSymbolProvider import PeSymbolProvider  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,20 +40,7 @@ class WinApiResolver(AbstractLabelProvider):
             lief_binary = binary_info.getLiefBinary()
             if not isinstance(lief_binary, lief.PE.Binary):
                 return
-            for imported_library in lief_binary.imports:
-                for func in imported_library.entries:
-                    if func.name:
-                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (
-                            imported_library.name.lower(),
-                            func.name,
-                        )
-                    elif func.is_ordinal:
-                        resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
-                        ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
-                        self._api_map["lief"][func.iat_address + binary_info.base_addr] = (
-                            imported_library.name.lower(),
-                            ordinal_name,
-                        )
+            self._api_map["lief"] = PeSymbolProvider(None).parseImports(lief_binary, binary_info.base_addr)
 
     def setOsName(self, os_name):
         self._os_name = os_name
