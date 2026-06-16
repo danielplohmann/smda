@@ -87,11 +87,15 @@ class AArch64IndirectCallAnalyzer:
                     src_reg = norm_reg(cap_ins.reg_name(op1.reg))
                     if src_reg in constants:
                         constants[dest_reg] = constants[src_reg] + op2.imm
+                    else:
+                        constants.pop(dest_reg, None)
                 elif op1.type == 1 and op2.type == 1:  # REG + REG
                     reg1 = norm_reg(cap_ins.reg_name(op1.reg))
                     reg2 = norm_reg(cap_ins.reg_name(op2.reg))
                     if reg1 in constants and reg2 in constants:
                         constants[dest_reg] = constants[reg1] + constants[reg2]
+                    else:
+                        constants.pop(dest_reg, None)
             elif mnemonic in ("mov", "movz", "movk") and len(cap_ins.operands) >= 2:
                 op1 = cap_ins.operands[1]
                 if op1.type == 2:  # IMM
@@ -100,8 +104,11 @@ class AArch64IndirectCallAnalyzer:
                     src_reg = norm_reg(cap_ins.reg_name(op1.reg))
                     if src_reg in constants:
                         constants[dest_reg] = constants[src_reg]
+                    else:
+                        constants.pop(dest_reg, None)
             elif mnemonic in ("ldr", "ldur") and len(cap_ins.operands) >= 2:
                 op1 = cap_ins.operands[1]
+                resolved = False
                 if op1.type == 3:  # MEM
                     base_reg = norm_reg(cap_ins.reg_name(op1.mem.base))
                     if base_reg in constants and op1.mem.index == 0:
@@ -111,6 +118,9 @@ class AArch64IndirectCallAnalyzer:
                             if raw_val and len(raw_val) == 8:
                                 val = struct.unpack("<Q", raw_val)[0]
                                 constants[dest_reg] = val
+                                resolved = True
+                if not resolved:
+                    constants.pop(dest_reg, None)
 
         return constants.get(norm_reg(reg_name))
 
@@ -268,7 +278,7 @@ class AArch64JumpTableAnalyzer:
                     elif op1.type == 1 and op2.type == 2:  # REG + IMM
                         reg1 = norm_reg(ins.reg_name(op1.reg))
                         tracked_regs.add(reg1)
-                elif mnemonic in ("ldr", "ldsw", "ldrh", "ldrb", "ldrsh", "ldrsb") and len(ins.operands) >= 2:
+                elif mnemonic in ("ldr", "ldrsw", "ldrh", "ldrb", "ldrsh", "ldrsb") and len(ins.operands) >= 2:
                     op1 = ins.operands[1]
                     if op1.type == 3:  # MEM
                         base_reg = norm_reg(ins.reg_name(op1.mem.base))
@@ -277,7 +287,7 @@ class AArch64JumpTableAnalyzer:
                         if op1.mem.index:
                             index_reg = norm_reg(ins.reg_name(op1.mem.index))
 
-                        if mnemonic == "ldsw":
+                        if mnemonic == "ldrsw":
                             entry_size = 4
                             is_signed = True
                             is_relative = True
