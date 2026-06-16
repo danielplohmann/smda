@@ -3,6 +3,7 @@ import logging
 import lief
 
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -51,6 +52,9 @@ class BinaryInfo:
             elif isinstance(lief_result, lief.ELF.Binary):
                 self._lief_type = "ELF"
                 self._symbol_provider = ElfSymbolProvider(None)
+            elif isinstance(lief_result, (lief.MachO.Binary, lief.MachO.FatBinary)):
+                self._lief_type = "MACH_O"
+                self._symbol_provider = MachoSymbolProvider(None)
             else:
                 self._lief_type = "OTHER"
         return self._lief_type
@@ -81,13 +85,18 @@ class BinaryInfo:
                 self.oep = lief_result.optional_header.addressof_entrypoint
             elif lief_type == "ELF":
                 self.oep = lief_result.header.entrypoint
+            elif lief_type == "MACH_O":
+                if isinstance(lief_result, lief.MachO.FatBinary):
+                    lief_result = lief_result[0] if len(lief_result) > 0 else None
+                if lief_result and hasattr(lief_result, "entrypoint"):
+                    self.oep = lief_result.entrypoint - self.base_addr
         return self.oep
 
     def getExportedFunctions(self):
         if self.exported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type in ("PE", "ELF"):
+            if lief_type in ("PE", "ELF", "MACH_O"):
                 self.exported_functions = self._symbol_provider.parseExports(lief_result)
         return self.exported_functions
 
@@ -99,6 +108,8 @@ class BinaryInfo:
                 self.imported_functions = self._symbol_provider.parseImports(lief_result)
             elif lief_type == "ELF":
                 self.imported_functions = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
+            elif lief_type == "MACH_O":
+                self.imported_functions = self._symbol_provider.parseImports(lief_result)
         return self.imported_functions
 
     def getSymbols(self):
@@ -109,19 +120,21 @@ class BinaryInfo:
                 self.symbols = self._symbol_provider.parseSymbols(lief_result)
             elif lief_type == "ELF":
                 self.symbols = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
+            elif lief_type == "MACH_O":
+                self.symbols = self._symbol_provider.parseSymbols(lief_result)
         return self.symbols
 
     def getSections(self):
         """
         Generator that yields (name, start_addr, end_addr) for each section.
-        Supports PE and ELF binaries.
+        Supports PE, ELF, and Mach-O binaries.
         """
         parsed_binary = self.getLiefBinary()
         if not parsed_binary:
             return
 
         lief_type = self._getLiefType()
-        if lief_type not in ("PE", "ELF") or not parsed_binary.sections:
+        if lief_type not in ("PE", "ELF", "MACH_O") or not parsed_binary.sections:
             return
 
         if lief_type == "PE":
@@ -132,6 +145,16 @@ class BinaryInfo:
                     section_size += 0x1000 - (section_size % 0x1000)
                 yield section.name, section_start, section_start + section_size
         elif lief_type == "ELF":
+            for section in parsed_binary.sections:
+                section_start = section.virtual_address
+                section_size = section.size
+                yield section.name, section_start, section_start + section_size
+        elif lief_type == "MACH_O":
+            if isinstance(parsed_binary, lief.MachO.FatBinary):
+                if len(parsed_binary) > 0:
+                    parsed_binary = parsed_binary[0]
+                else:
+                    return
             for section in parsed_binary.sections:
                 section_start = section.virtual_address
                 section_size = section.size

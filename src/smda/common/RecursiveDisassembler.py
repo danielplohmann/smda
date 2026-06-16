@@ -10,6 +10,7 @@ from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
@@ -64,6 +65,7 @@ class RecursiveDisassembler:
         # Generic binary format providers (fallback)
         self._registerLabelProvider(ElfSymbolProvider(self.config))
         self._registerLabelProvider(PeSymbolProvider(self.config))
+        self._registerLabelProvider(MachoSymbolProvider(self.config))
         self._registerLabelProvider(PdbSymbolProvider(self.config))
 
     def _registerLabelProvider(self, provider):
