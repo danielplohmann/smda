@@ -10,6 +10,28 @@ lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
 
 
+def parse_relocation_imports(lief_binary):
+    """Build import map keyed by relocation slot address: addr -> (lib, name)."""
+    if not isinstance(lief_binary, lief.ELF.Binary):
+        return {}
+    import_symbols = {}
+    for relocation in lief_binary.relocations:
+        if not relocation.has_symbol:
+            continue
+        symbol = relocation.symbol
+        if symbol is None:
+            continue
+        if not symbol.imported or not symbol.is_function:
+            continue
+
+        lib = None
+        if symbol.has_version and symbol.symbol_version.has_auxiliary_version:
+            lib = symbol.symbol_version.symbol_version_auxiliary.name
+
+        import_symbols[relocation.address] = (lib, symbol.name)
+    return import_symbols
+
+
 class ElfSymbolProvider(AbstractLabelProvider):
     """Minimal resolver for ELF symbols"""
 
@@ -25,14 +47,14 @@ class ElfSymbolProvider(AbstractLabelProvider):
         return False
 
     def getApi(self, to_addr, absolute_addr=None):
-        return ("", "")
+        return (None, None)
 
     def _parseOep(self, lief_result):
+        # Symbol map keys use absolute VAs; BinaryInfo.getOep() stores a base-relative offset.
         if lief_result:
             self._func_symbols[lief_result.header.entrypoint] = "original_entry_point"
 
     def update(self, binary_info):
-        # works both for PE and ELF
         self._func_symbols = {}
 
         lief_binary = binary_info.getLiefBinary()
@@ -63,6 +85,20 @@ class ElfSymbolProvider(AbstractLabelProvider):
                 func_name = getattr(symbol, "demangled_name", None) or symbol.name
                 function_symbols[symbol.value] = func_name
         return function_symbols
+
+    def parseImports(self, lief_binary):
+        if not isinstance(lief_binary, lief.ELF.Binary):
+            return {}
+        return parse_relocation_imports(lief_binary)
+
+    def collectSymbols(self, lief_binary):
+        if not isinstance(lief_binary, lief.ELF.Binary):
+            return {}
+        symbols = {}
+        symbols.update(self.parseExports(lief_binary))
+        symbols.update(self.parseSymbols(lief_binary.symtab_symbols))
+        symbols.update(self.parseSymbols(lief_binary.dynamic_symbols))
+        return symbols
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")

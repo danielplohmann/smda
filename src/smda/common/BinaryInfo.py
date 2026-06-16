@@ -85,7 +85,7 @@ class BinaryInfo:
             if lief_type == "PE":
                 self.oep = lief_result.optional_header.addressof_entrypoint
             elif lief_type == "ELF":
-                self.oep = lief_result.header.entrypoint
+                self.oep = lief_result.header.entrypoint - self.base_addr
             elif lief_type == "MACH_O":
                 macho_binary = self._symbol_provider._get_macho_binary(lief_result)
                 if macho_binary and hasattr(macho_binary, "entrypoint"):
@@ -97,7 +97,9 @@ class BinaryInfo:
         if self.exported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type in ("PE", "ELF", "MACH_O"):
+            if lief_type == "PE":
+                self.exported_functions = self._symbol_provider.parseExports(lief_result, self.base_addr)
+            elif lief_type in ("ELF", "MACH_O"):
                 self.exported_functions = self._symbol_provider.parseExports(lief_result)
         return self.exported_functions
 
@@ -106,10 +108,8 @@ class BinaryInfo:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
             if lief_type == "PE":
-                self.imported_functions = self._symbol_provider.parseImports(lief_result)
-            elif lief_type == "ELF":
-                self.imported_functions = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
-            elif lief_type == "MACH_O":
+                self.imported_functions = self._symbol_provider.parseImports(lief_result, self.base_addr)
+            elif lief_type in ("ELF", "MACH_O"):
                 self.imported_functions = self._symbol_provider.parseImports(lief_result)
         return self.imported_functions
 
@@ -118,9 +118,9 @@ class BinaryInfo:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
             if lief_type == "PE":
-                self.symbols = self._symbol_provider.parseSymbols(lief_result)
+                self.symbols = self._symbol_provider.collectSymbols(lief_result, self.base_addr)
             elif lief_type == "ELF":
-                self.symbols = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
+                self.symbols = self._symbol_provider.collectSymbols(lief_result)
             elif lief_type == "MACH_O":
                 symbols = self._symbol_provider.parseSymbols(lief_result)
                 self.symbols = self._symbol_provider._filter_symbols_to_code(symbols, self)

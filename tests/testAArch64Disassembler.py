@@ -926,7 +926,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.architecture, "aarch64")
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
-        self.assertEqual(self.report.oep, 0x400534)
+        self.assertEqual(self.report.oep, 0x534)
         self.assertEqual(len(self.report.xcfg), 278)
         self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19881)
         self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3525)
@@ -978,7 +978,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.status, "ok")
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
-        self.assertEqual(roundtrip.oep, 0x400534)
+        self.assertEqual(roundtrip.oep, 0x534)
         self.assertEqual(len(roundtrip.xcfg), 278)
 
 

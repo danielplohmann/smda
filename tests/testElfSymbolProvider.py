@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 
@@ -107,11 +108,74 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
             resolver.update(SimpleNamespace(is_buffer=True, getLiefBinary=lambda: object()))
         self.assertFalse(resolver.is_active())
 
+    def test_api_resolver_clears_stale_imports_on_non_elf_update(self):
+        resolver = ElfApiResolver(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            resolver.update(_binary_info(MOCK_ELF))
+        self.assertEqual(resolver.getApi(0x4000), (None, "printf"))
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            resolver.update(SimpleNamespace(is_buffer=True, getLiefBinary=lambda: object()))
+        self.assertFalse(resolver.is_active())
+        self.assertEqual(resolver.getApi(0x4000), (None, None))
+
     def test_symbol_provider_inactive_for_non_elf(self):
         provider = ElfSymbolProvider(None)
         with mock.patch("lief.ELF.Binary", _MockElfBinary):
             provider.update(SimpleNamespace(is_buffer=False, getLiefBinary=lambda: object()))
         self.assertFalse(provider.is_active())
+
+    def test_parse_imports_matches_api_resolver_relocation_slots(self):
+        provider = ElfSymbolProvider(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            imports = provider.parseImports(MOCK_ELF)
+        self.assertEqual(imports, {0x4000: (None, "printf")})
+
+    def test_collect_symbols_merges_symtab_dynamic_and_exports(self):
+        provider = ElfSymbolProvider(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            symbols = provider.collectSymbols(MOCK_ELF)
+        self.assertEqual(symbols[0x1000], "exported_func")
+        self.assertEqual(symbols[0x2000], "local_func")
+        self.assertEqual(symbols[0x3000], "dyn_defined")
+        self.assertNotIn("printf", symbols.values())
+        self.assertNotIn(0x4000, symbols)
+
+    def test_binary_info_elf_imported_functions_use_relocation_slots(self):
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x400000
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=MOCK_ELF),
+            mock.patch("lief.ELF.Binary", _MockElfBinary),
+        ):
+            imported = binary_info.getImportedFunctions()
+        self.assertEqual(imported, {0x4000: (None, "printf")})
+
+    def test_binary_info_elf_symbols_merge_symtab_sources(self):
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x400000
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=MOCK_ELF),
+            mock.patch("lief.ELF.Binary", _MockElfBinary),
+        ):
+            symbols = binary_info.getSymbols()
+        self.assertEqual(symbols[0x2000], "local_func")
+        self.assertNotIn(0x4000, symbols)
+
+    def test_binary_info_elf_oep_is_base_relative_offset(self):
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[],
+            relocations=[],
+            entrypoint=0x400534,
+        )
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x400000
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=elf),
+            mock.patch("lief.ELF.Binary", _MockElfBinary),
+        ):
+            self.assertEqual(binary_info.getOep(), 0x534)
 
 
 if __name__ == "__main__":
