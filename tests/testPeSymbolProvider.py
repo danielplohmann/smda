@@ -70,13 +70,14 @@ class TestPeSymbolProviderImports(unittest.TestCase):
         self.assertEqual(imports, {0x403000: ("kernel32.dll", "CreateFileW")})
         self.assertNotIn(0x140003000, imports)
 
-    def test_parse_imports_defaults_to_zero_base(self):
+    def test_parse_imports_defaults_to_imagebase(self):
         provider = PeSymbolProvider(None)
         pe_binary = _MockPeBinary(
             imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("ExitProcess", 0x2000)])],
+            imagebase=0x140000000,
         )
         imports = provider.parseImports(pe_binary)
-        self.assertEqual(imports, {0x2000: ("kernel32.dll", "ExitProcess")})
+        self.assertEqual(imports, {0x140002000: ("kernel32.dll", "ExitProcess")})
 
     def test_win_api_resolver_matches_parse_imports(self):
         provider = PeSymbolProvider(None)

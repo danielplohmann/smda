@@ -91,19 +91,20 @@ class PeSymbolProvider(AbstractLabelProvider):
                         function_symbols[function_offset] = function_name
         return function_symbols
 
-    def parseImports(self, lief_binary, base_addr=0):
+    def parseImports(self, lief_binary, base_addr=None):
+        active_base = self._resolve_base_addr(lief_binary, base_addr)
         import_symbols = {}
         for imported_library in lief_binary.imports:
             for func in imported_library.entries:
                 if func.name:
-                    import_symbols[func.iat_address + base_addr] = (
+                    import_symbols[func.iat_address + active_base] = (
                         imported_library.name.lower(),
                         func.name,
                     )
                 elif func.is_ordinal:
                     resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
                     ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
-                    import_symbols[func.iat_address + base_addr] = (
+                    import_symbols[func.iat_address + active_base] = (
                         imported_library.name.lower(),
                         ordinal_name,
                     )
