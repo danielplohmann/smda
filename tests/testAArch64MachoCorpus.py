@@ -1,5 +1,5 @@
 #!/usr/bin/python
-"""AArch64 Mach-O corpus fixtures derived from Objective-See/Malware.
+"""AArch64 Mach-O corpus fixtures for loader and disassembly regression tests.
 
 Fixtures are committed only in the repository's XOR-obfuscated test-fixture
 format. Tests de-XOR bytes in memory, never write raw samples, and exercise the
@@ -68,18 +68,23 @@ def _dataref_count(report):
     return sum(len(targets) for targets in (report.data_refs_from or {}).values())
 
 
+def _fixtures_for_source(fixtures, source_id):
+    return [fixture for fixture in fixtures if fixture["source"] == source_id]
+
+
 class TestAArch64MachoCorpus(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads(MANIFEST_PATH.read_text())
         cls.fixtures = cls.manifest["fixtures"]
+        cls.sources = cls.manifest["sources"]
         cls._cases = {}
 
     @classmethod
     def _get_case(cls, fixture):
-        fixture_name = fixture["fixture"]
-        if fixture_name not in cls._cases:
-            fixture_path = CORPUS_DIR / fixture_name
+        fixture_id = fixture["id"]
+        if fixture_id not in cls._cases:
+            fixture_path = CORPUS_DIR / fixture["path"]
             xored = fixture_path.read_bytes()
             raw = _xor_fixture(xored)
             loader = MemoryFileLoader(raw, map_file=True)
@@ -90,31 +95,47 @@ class TestAArch64MachoCorpus(unittest.TestCase):
             config.STORE_BUFFER = False
             report = Disassembler(config).disassembleUnmappedBuffer(raw)
 
-            cls._cases[fixture_name] = {
+            cls._cases[fixture_id] = {
                 "path": fixture_path,
                 "xored": xored,
                 "raw": raw,
                 "loader": loader,
                 "report": report,
             }
-        return cls._cases[fixture_name]
+        return cls._cases[fixture_id]
 
-    def test_manifest_records_curated_objective_see_subset(self):
-        self.assertEqual(self.manifest["source"], "Objective-See/Malware")
+    def test_manifest_schema(self):
+        self.assertEqual(self.manifest["schema_version"], 1)
         self.assertEqual(self.manifest["xor_scheme"], "byte ^ (index % 256)")
-        self.assertEqual(len(self.fixtures), 6)
+        self.assertEqual(set(self.sources), {"objective-see", "malpedia"})
+        self.assertEqual(len(self.fixtures), 12)
         self.assertLessEqual(sum(fixture["size"] for fixture in self.fixtures), MAX_XORED_FIXTURE_BYTES)
-        self.assertEqual(len({fixture["zip_name"] for fixture in self.fixtures}), len(self.fixtures))
         for fixture in self.fixtures:
-            with self.subTest(fixture=fixture["fixture"]):
-                self.assertEqual(fixture["objective_see_commit"], self.manifest["objective_see_commit"])
+            with self.subTest(fixture=fixture["id"]):
+                self.assertIn(fixture["source"], self.sources)
+                self.assertTrue((CORPUS_DIR / fixture["path"]).exists())
                 self.assertEqual(fixture["architecture"], "aarch64")
                 self.assertEqual(fixture["bitness"], 64)
                 self.assertGreaterEqual(fixture["expected_min_functions"], 1)
 
+    def test_source_provenance(self):
+        objective_see = _fixtures_for_source(self.fixtures, "objective-see")
+        malpedia = _fixtures_for_source(self.fixtures, "malpedia")
+
+        self.assertEqual(self.sources["objective-see"]["label"], "Objective-See/Malware")
+        self.assertEqual(self.sources["malpedia"]["label"], "Malpedia")
+        self.assertEqual(len(objective_see), 6)
+        self.assertEqual(len(malpedia), 6)
+        self.assertEqual(len({fixture["provenance"]["zip_name"] for fixture in objective_see}), len(objective_see))
+        self.assertEqual(len({fixture["provenance"]["family"] for fixture in malpedia}), len(malpedia))
+
+        for fixture in malpedia:
+            with self.subTest(fixture=fixture["id"]):
+                self.assertTrue(fixture["provenance"]["inner_path"].endswith("_unpacked"))
+
     def test_fixtures_are_xored_and_hash_to_manifest(self):
         for fixture in self.fixtures:
-            with self.subTest(fixture=fixture["fixture"]):
+            with self.subTest(source=fixture["source"], fixture=fixture["id"]):
                 case = self._get_case(fixture)
                 self.assertNotIn(case["xored"][:4], MACHO_MAGICS)
                 self.assertEqual(hashlib.sha256(case["xored"]).hexdigest(), fixture["xor_sha256"])
@@ -124,7 +145,7 @@ class TestAArch64MachoCorpus(unittest.TestCase):
 
     def test_macho_loader_reports_aarch64_metadata(self):
         for fixture in self.fixtures:
-            with self.subTest(fixture=fixture["fixture"]):
+            with self.subTest(source=fixture["source"], fixture=fixture["id"]):
                 case = self._get_case(fixture)
                 parsed = MachoFileLoader.parseBinary(case["raw"])
                 self.assertTrue(MachoFileLoader.isCompatible(case["raw"]))
@@ -135,9 +156,9 @@ class TestAArch64MachoCorpus(unittest.TestCase):
                 self.assertEqual(case["loader"].getBitness(), 64)
                 self.assertTrue(case["loader"].getCodeAreas())
 
-    def test_selected_macho_fixtures_disassemble(self):
+    def test_selected_fixtures_disassemble(self):
         for fixture in self.fixtures:
-            with self.subTest(fixture=fixture["fixture"]):
+            with self.subTest(source=fixture["source"], fixture=fixture["id"]):
                 report = self._get_case(fixture)["report"]
                 self.assertEqual(report.status, "ok")
                 self.assertEqual(report.architecture, "aarch64")
@@ -147,7 +168,7 @@ class TestAArch64MachoCorpus(unittest.TestCase):
 
     def test_reports_roundtrip(self):
         for fixture in self.fixtures:
-            with self.subTest(fixture=fixture["fixture"]):
+            with self.subTest(source=fixture["source"], fixture=fixture["id"]):
                 report = self._get_case(fixture)["report"]
                 roundtrip = SmdaReport.fromDict(report.toDict())
                 self.assertEqual(roundtrip.status, "ok")
@@ -157,16 +178,17 @@ class TestAArch64MachoCorpus(unittest.TestCase):
 
     def test_feature_tagged_expectations(self):
         for fixture in self.fixtures:
-            with self.subTest(fixture=fixture["fixture"], tags=fixture["feature_tags"]):
+            stats = fixture["stats"]
+            with self.subTest(source=fixture["source"], fixture=fixture["id"], tags=fixture["feature_tags"]):
                 case = self._get_case(fixture)
                 report = case["report"]
                 if "stringrefs" in fixture["feature_tags"]:
                     self.assertGreater(_stringref_count(report), 0)
                 if "datarefs" in fixture["feature_tags"]:
                     self.assertGreater(_dataref_count(report), 0)
-                if "pac" in fixture["feature_tags"] or fixture["pac_count"]:
+                if "pac" in fixture["feature_tags"] or stats["pac_count"]:
                     self.assertGreater(_count_code_words(case["loader"], PAC_PROLOGUES), 0)
-                if "bti" in fixture["feature_tags"] or fixture["bti_count"]:
+                if "bti" in fixture["feature_tags"] or stats["bti_count"]:
                     self.assertGreater(_count_code_words(case["loader"], BTI_PROLOGUES), 0)
 
 
