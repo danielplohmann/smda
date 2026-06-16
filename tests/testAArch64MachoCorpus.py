@@ -192,12 +192,10 @@ class TestAArch64MachoCorpus(unittest.TestCase):
                     self.assertGreater(_count_code_words(case["loader"], BTI_PROLOGUES), 0)
 
     def test_macho_symbols_resolution(self):
-        # Find BlueNoroff fixture
-        bluenoroff_fixture = None
-        for fixture in self.fixtures:
-            if "BlueNoroff" in fixture["fixture"]:
-                bluenoroff_fixture = fixture
-                break
+        bluenoroff_fixture = next(
+            (fixture for fixture in self.fixtures if "BlueNoroff" in fixture["path"]),
+            None,
+        )
         self.assertIsNotNone(bluenoroff_fixture)
         case = self._get_case(bluenoroff_fixture)
         report = case["report"]
