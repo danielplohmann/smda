@@ -17,17 +17,18 @@ def parse_pe_imports(lief_binary, base_addr=None):
     active_base = resolve_pe_base_addr(lief_binary, base_addr)
     import_symbols = {}
     for imported_library in lief_binary.imports:
+        lib_name_lower = (getattr(imported_library, "name", "") or "").lower()
         for func in imported_library.entries:
             if func.name:
                 import_symbols[func.iat_address + active_base] = (
-                    imported_library.name.lower(),
+                    lib_name_lower,
                     func.name,
                 )
             elif func.is_ordinal:
-                resolved_ordinal = OrdinalHelper.resolveOrdinal(imported_library.name.lower(), func.ordinal)
+                resolved_ordinal = OrdinalHelper.resolveOrdinal(lib_name_lower, func.ordinal)
                 ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
                 import_symbols[func.iat_address + active_base] = (
-                    imported_library.name.lower(),
+                    lib_name_lower,
                     ordinal_name,
                 )
     return import_symbols
@@ -67,9 +68,9 @@ def parse_macho_bindings(lief_binary, adjustment=0):
                 and binding.symbol
                 and binding.symbol.name
             ):
-                lib_name = (
-                    binding.library.name.lower() if (getattr(binding, "has_library", False) and binding.library) else ""
-                )
+                lib_name = ""
+                if getattr(binding, "has_library", False) and binding.library:
+                    lib_name = (getattr(binding.library, "name", "") or "").lower()
                 adjusted_addr = binding.address + adjustment
                 imports[adjusted_addr] = (lib_name, binding.symbol.name)
         except Exception:
