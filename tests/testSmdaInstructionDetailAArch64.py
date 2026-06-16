@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
+from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
@@ -14,6 +15,10 @@ def _aarch64_instruction(offset, raw_bytes, mnemonic, operands):
     report = SmdaReport(None)
     report.architecture = "aarch64"
     report.bitness = 64
+    report.base_addr = BASE
+    report.binary_size = 0x100
+    report.code_areas = []
+    report.data_refs_from = {}
     smda_function = SimpleNamespace(smda_report=report)
     return SmdaInstruction([offset, raw_bytes, mnemonic, operands], smda_function=smda_function)
 
@@ -50,6 +55,23 @@ class TestAArch64InstructionEscaper(unittest.TestCase):
 
         self.assertEqual(ins.getEscapedOperands(AArch64InstructionEscaper), "REG, REG, PTR")
 
+    def test_vector_register_layout_qualifier_escapes_as_register(self):
+        ins = _aarch64_instruction(BASE, "0004204e", "dup", "v0.16b, w0")
+
+        self.assertEqual(ins.getEscapedOperands(AArch64InstructionEscaper), "REG, REG")
+
+    def test_opcode_only_masks_preserve_nibble_aligned_opcode_bits(self):
+        branch = _aarch64_instruction(BASE, "03000094", "bl", "#0x401010")
+        arithmetic = _aarch64_instruction(BASE, "200080d2", "mov", "x0, #1")
+
+        self.assertEqual(branch.getEscapedToOpcodeOnly(AArch64InstructionEscaper), "??????94")
+        self.assertEqual(arithmetic.getEscapedToOpcodeOnly(AArch64InstructionEscaper), "????8?d2")
+
+    def test_aarch64_control_flow_operands_are_not_data_refs(self):
+        ins = _aarch64_instruction(BASE, "03000094", "bl", "#0x401020")
+
+        self.assertEqual(list(ins.getDataRefs()), [])
+
     def test_aarch64_functions_use_escaper_for_similarity_hash_sequences(self):
         report_a = _disassemble_words(
             [
@@ -76,6 +98,21 @@ class TestAArch64InstructionEscaper(unittest.TestCase):
         self.assertEqual(function_a.getOpcHashSequence(), function_b.getOpcHashSequence())
         self.assertIn(b"?", function_a.getPicHashSequence(report_a))
         self.assertIn(b"?", function_a.getOpcHashSequence())
+
+    def test_aarch64_imported_function_without_binary_info_keeps_escaper(self):
+        report = _disassemble_words(
+            [
+                0xD503233F,  # paciasp
+                0xD2800020,  # mov x0, #1
+                0xD65F03C0,  # ret
+            ]
+        )
+        imported = SmdaFunction.fromDict(
+            report.getFunction(BASE).toDict(), version=report.smda_version, smda_report=report
+        )
+
+        self.assertIs(imported._escaper, AArch64InstructionEscaper)
+        self.assertEqual(imported.getOpcHashSequence(), report.getFunction(BASE).getOpcHashSequence())
 
 
 if __name__ == "__main__":

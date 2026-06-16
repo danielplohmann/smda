@@ -124,14 +124,14 @@ class PeFileLoader:
     @staticmethod
     def getPeOffset(binary):
         if len(binary) >= 0x40:
-            pe_offset = struct.unpack("H", binary[0x3C : 0x3C + 2])[0]
+            pe_offset = struct.unpack("I", binary[0x3C : 0x3C + 4])[0]
             return pe_offset
         return 0
 
     @staticmethod
     def getMachineType(binary):
         pe_offset = PeFileLoader.getPeOffset(binary)
-        if pe_offset and len(binary) >= pe_offset + 0x6:
+        if pe_offset and len(binary) >= pe_offset + 0x6 and binary[pe_offset : pe_offset + 4] == b"PE\x00\x00":
             return struct.unpack("H", binary[pe_offset + 0x4 : pe_offset + 0x6])[0]
         return 0
 
