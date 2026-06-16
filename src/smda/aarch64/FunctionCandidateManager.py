@@ -304,11 +304,19 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         prev_word = int.from_bytes(binary[offset - INSTRUCTION_SIZE : offset], "little")
         if prev_word in (0, NOP):
             return False
+        auth_or_exception_return = prev_word in {
+            0xD65F0BFF,  # retaa
+            0xD65F0FFF,  # retab
+            0xD69F03E0,  # eret
+            0xD69F0BFF,  # eretaa
+            0xD69F0FFF,  # eretab
+        }
         return not (
             (prev_word & RET_MASK) == RET_VALUE
             or (prev_word & BR_MASK) == BR_VALUE
             or (prev_word & B_MASK) == B_VALUE
             or (prev_word & BL_MASK) == BL_VALUE
+            or auth_or_exception_return
         )
 
     def nextGapCandidate(self, start_gap_pointer=None):

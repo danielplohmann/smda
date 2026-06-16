@@ -28,6 +28,7 @@ from .definitions import (
     RET_INS,
     UNCOND_JUMP_INS,
     adrp_page_value,
+    is_bti_landing_pad,
     is_function_prologue,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
@@ -210,9 +211,9 @@ class AArch64Backend(ArchBackend):
         if i_mnemonic.startswith("b.") or i_mnemonic in COND_BRANCH_INS or i_mnemonic in INDIRECT_JUMP_INS:
             return
 
-        ins_bytes = d.disassembly.binary_info.binary[
-            i_address - d.disassembly.binary_info.base_addr : i_address - d.disassembly.binary_info.base_addr + i_size
-        ]
+        ins_bytes = d.disassembly.getBytes(i_address, i_size)
+        if not ins_bytes or len(ins_bytes) != i_size:
+            return
         detailed = next(d.capstone.disasm(ins_bytes, i_address), None)
         if detailed is None:
             return
@@ -245,9 +246,19 @@ class AArch64Backend(ArchBackend):
         if not any(start <= target < end for start, end in cls._getPltRanges(binary_info)):
             return None
 
+        cursor = target
+        for _ in range(2):
+            prefix = cls._wordAt(d, cursor)
+            if prefix is None:
+                return None
+            if prefix == NOP or is_bti_landing_pad(prefix):
+                cursor += INSTRUCTION_SIZE
+                continue
+            break
+
         registers = {}
         for index in range(4):
-            addr = target + index * INSTRUCTION_SIZE
+            addr = cursor + index * INSTRUCTION_SIZE
             word = cls._wordAt(d, addr)
             if word is None:
                 return None

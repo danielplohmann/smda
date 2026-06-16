@@ -476,10 +476,15 @@ class SmdaFunction:
             smda_function.stringrefs = smda_function._normalizeDalvikStringRefs(stringrefs)
         else:
             smda_function.stringrefs = stringrefs
-        if binary_info and binary_info.architecture:
-            smda_function._escaper = cls._getInstructionEscaper(binary_info.architecture)
-        else:
-            smda_function._escaper = None
+        smda_function._escaper = cls._getInstructionEscaper(function_architecture)
+        hash_context = binary_info
+        if (
+            hash_context is None
+            and smda_report is not None
+            and smda_report.base_addr is not None
+            and smda_report.binary_size is not None
+        ):
+            hash_context = smda_report
         # sanitize MCRIT plugin generated version strings
         if version and version.startswith("MCRIT4IDA"):
             version = version.rsplit(" ", 1)[-1]
@@ -489,15 +494,15 @@ class SmdaFunction:
             version = [int(v) for v in version.split(".")]
             if version < [1, 3, 0]:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
-                if smda_function._escaper:
-                    smda_function.pic_hash = smda_function.getPicHash(binary_info)
+                if smda_function._escaper and hash_context:
+                    smda_function.pic_hash = smda_function.getPicHash(hash_context)
             else:
                 smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
         # if we don't have valid version information, always recalculate
         else:
             smda_function.nesting_depth = smda_function._calculateNestingDepth()
-            if smda_function._escaper:
-                smda_function.pic_hash = smda_function.getPicHash(binary_info)
+            if smda_function._escaper and hash_context:
+                smda_function.pic_hash = smda_function.getPicHash(hash_context)
             # as last resort, assume we analyze Intel
             elif binary_info and binary_info.architecture in (None, "intel"):
                 smda_function._escaper = IntelInstructionEscaper

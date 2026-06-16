@@ -27,6 +27,7 @@ import lief
 
 from smda.aarch64.AArch64Backend import AArch64Backend
 from smda.aarch64.definitions import adrp_page_value
+from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
@@ -373,12 +374,13 @@ class TestAArch64BranchTarget(unittest.TestCase):
 
 
 class TestAArch64PltResolution(unittest.TestCase):
-    def _build_disassembler(self):
+    def _build_disassembler(self, prefixes=None):
         base = 0x400000
         plt = 0x402000
         got_slot = 0x403018
         mapped = bytearray(got_slot - base + 8)
-        plt_words = [
+        prefixes = prefixes or []
+        plt_words = prefixes + [
             0xB0000010,  # adrp x16, #0x403000
             0xF9400E11,  # ldr x17, [x16, #0x18]
             0x91006210,  # add x16, x16, #0x18
@@ -424,6 +426,16 @@ class TestAArch64PltResolution(unittest.TestCase):
 
     def test_aarch64_plt_stub_resolves_got_slot(self):
         fake_disassembler, plt, got_slot = self._build_disassembler()
+
+        self.assertEqual(AArch64Backend._resolvePltGotSlot(fake_disassembler, plt), got_slot)
+
+    def test_aarch64_plt_stub_resolves_after_bti_and_nop_prefixes(self):
+        fake_disassembler, plt, got_slot = self._build_disassembler(
+            prefixes=[
+                0xD503245F,  # bti c
+                0xD503201F,  # nop
+            ]
+        )
 
         self.assertEqual(AArch64Backend._resolvePltGotSlot(fake_disassembler, plt), got_slot)
 
@@ -825,6 +837,22 @@ class TestAArch64GapScan(unittest.TestCase):
         )
         self.assertEqual(report.status, "ok")
         self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0x14})
+
+    def test_bti_after_authenticated_return_is_not_suppressed_as_interior(self):
+        binary = b"".join(
+            word.to_bytes(4, "little")
+            for word in [
+                0xD65F0BFF,  # retaa
+                0xD503245F,  # bti c
+            ]
+        )
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
+        manager._candidate_offsets = set()
+
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
 
 
 class TestAArch64StaticFixture(unittest.TestCase):
