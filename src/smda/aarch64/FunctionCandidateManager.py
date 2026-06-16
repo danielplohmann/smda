@@ -22,6 +22,7 @@ remain future iterate-steps; for a statically linked ELF there is no PLT to reco
 
 import contextlib
 import logging
+import struct
 
 import lief
 
@@ -193,6 +194,18 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                     if rn in pages:
                         seed(pages[rn] + ((word >> 10) & 0xFFF), addr)
                     pages.pop(word & 0x1F, None)
+                elif (word & 0xFFC00000) == 0xF9400000:  # ldr Xt, [Xn, #imm]
+                    rn = (word >> 5) & 0x1F
+                    rd = word & 0x1F
+                    if rn in pages:
+                        imm = ((word >> 10) & 0xFFF) * 8
+                        slot_addr = pages[rn] + imm
+                        if self.disassembly.isAddrWithinMemoryImage(slot_addr):
+                            raw_val = self.disassembly.getBytes(slot_addr, 8)
+                            if raw_val and len(raw_val) == 8:
+                                val = struct.unpack("<Q", raw_val)[0]
+                                seed(val, addr)
+                    pages.pop(rd, None)
                 elif (
                     (word & B_MASK) == B_VALUE
                     or (word & BL_MASK) == BL_VALUE
