@@ -9,7 +9,7 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         pe_offset = 0x80
         binary = bytearray(pe_offset + 0x40)
         binary[:2] = b"MZ"
-        binary[0x3C:0x3E] = pe_offset.to_bytes(2, "little")
+        binary[0x3C:0x40] = pe_offset.to_bytes(4, "little")
         binary[pe_offset : pe_offset + 4] = b"PE\x00\x00"
         binary[pe_offset + 4 : pe_offset + 6] = machine_type.to_bytes(2, "little")
         return bytes(binary)
@@ -21,6 +21,26 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         self.assertTrue(PeFileLoader.checkPe(binary))
         self.assertEqual(PeFileLoader.getArchitecture(binary, parsed=None), "aarch64")
         self.assertEqual(PeFileLoader.getBitness(binary), 64)
+
+    def test_machine_type_requires_valid_pe_signature(self):
+        binary = bytearray(self._minimal_pe_header(0xAA64))
+        binary[0x80:0x84] = b"PX\x00\x00"
+
+        self.assertEqual(PeFileLoader.getMachineType(bytes(binary)), 0)
+        self.assertFalse(PeFileLoader.checkPe(bytes(binary)))
+        self.assertEqual(PeFileLoader.getArchitecture(bytes(binary), parsed=None), "")
+        self.assertEqual(PeFileLoader.getBitness(bytes(binary)), 0)
+
+    def test_pe_offset_uses_full_four_byte_e_lfanew(self):
+        pe_offset = 0x180
+        binary = bytearray(pe_offset + 0x40)
+        binary[:2] = b"MZ"
+        binary[0x3C:0x40] = pe_offset.to_bytes(4, "little")
+        binary[pe_offset : pe_offset + 4] = b"PE\x00\x00"
+        binary[pe_offset + 4 : pe_offset + 6] = (0xAA64).to_bytes(2, "little")
+
+        self.assertEqual(PeFileLoader.getPeOffset(bytes(binary)), pe_offset)
+        self.assertEqual(PeFileLoader.getMachineType(bytes(binary)), 0xAA64)
 
     def test_mergeCodeAreas(self):
         test_cases = [

@@ -4,6 +4,7 @@ from typing import Optional
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
+from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 LOGGER = logging.getLogger(__name__)
@@ -63,6 +64,10 @@ class SmdaInstruction:
                         emitted.add(value)
                         data_refs.append(value)
         elif smda_report.architecture == "aarch64" and self.operands and "0x" in self.operands:
+            if self.getMnemonicGroup(AArch64InstructionEscaper) == "C":
+                self._data_refs = data_refs
+                yield from self._data_refs
+                return
             detailed = self.getDetailed()
             for operand in detailed.operands:
                 value = None

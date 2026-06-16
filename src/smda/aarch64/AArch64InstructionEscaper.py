@@ -168,7 +168,7 @@ class AArch64InstructionEscaper:
         "tbx",
     }
     _nop_group = {"hint", "nop"}
-    _register = re.compile(r"^(?:[wx][0-9]+|[sdqv][0-9]+|sp|wsp|xzr|wzr|fp|lr)(?:\\.[0-9]+[bhsd])?$")
+    _register = re.compile(r"^(?:[wx][0-9]+|[sdqv][0-9]+|sp|wsp|xzr|wzr|fp|lr)(?:\.[0-9]+[bhsd])?$")
     _condition = re.compile(r"^(?:eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al|nv)$")
 
     @staticmethod
@@ -282,8 +282,8 @@ class AArch64InstructionEscaper:
             return ins.bytes
         word = int.from_bytes(bytes.fromhex(ins.bytes), "little")
         if AArch64InstructionEscaper.escapeMnemonic(ins.mnemonic) == "C":
-            return AArch64InstructionEscaper._wordWithMaskToHex(word, 0xFC000000)
-        return AArch64InstructionEscaper._wordWithMaskToHex(word, 0xFFE00000)
+            return AArch64InstructionEscaper._wordWithMaskToHex(word, 0xFF000000)
+        return AArch64InstructionEscaper._wordWithMaskToHex(word, 0xFFF00000)
 
     @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
