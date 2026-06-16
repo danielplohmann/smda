@@ -135,7 +135,15 @@ class BinaryInfo:
             return
 
         lief_type = self._getLiefType()
-        if lief_type not in ("PE", "ELF", "MACH_O") or not parsed_binary.sections:
+        if lief_type == "MACH_O":
+            parsed_binary = self._symbol_provider._get_macho_binary(parsed_binary)
+
+        if (
+            not parsed_binary
+            or lief_type not in ("PE", "ELF", "MACH_O")
+            or not hasattr(parsed_binary, "sections")
+            or not parsed_binary.sections
+        ):
             return
 
         if lief_type == "PE":
@@ -151,11 +159,8 @@ class BinaryInfo:
                 section_size = section.size
                 yield section.name, section_start, section_start + section_size
         elif lief_type == "MACH_O":
-            macho_binary = self._symbol_provider._get_macho_binary(parsed_binary)
-            if not macho_binary:
-                return
-            adjustment = self._symbol_provider._get_address_adjustment(macho_binary)
-            for section in macho_binary.sections:
+            adjustment = self._symbol_provider._get_address_adjustment(parsed_binary)
+            for section in parsed_binary.sections:
                 section_start = section.virtual_address + adjustment
                 section_size = section.size
                 yield section.name, section_start, section_start + section_size

@@ -26,7 +26,11 @@ class MachoSymbolProvider(AbstractLabelProvider):
         return True
 
     def getApi(self, to_addr, absolute_addr=None):
-        return self._api_map.get(to_addr, ("", ""))
+        if to_addr in self._api_map:
+            return self._api_map[to_addr]
+        if absolute_addr is not None and absolute_addr in self._api_map:
+            return self._api_map[absolute_addr]
+        return (None, None)
 
     def _get_macho_binary(self, lief_binary):
         if isinstance(lief_binary, lief.MachO.FatBinary):
@@ -34,10 +38,19 @@ class MachoSymbolProvider(AbstractLabelProvider):
                 return None
             if hasattr(self, "_binary_info") and self._binary_info:
                 target_bitness = self._binary_info.bitness
+                target_arch = getattr(self._binary_info, "architecture", "")
                 for binary in lief_binary:
                     binary_bitness = 64 if binary.header.is_64bit else 32
                     if target_bitness and binary_bitness != target_bitness:
                         continue
+                    if target_arch:
+                        cpu_type = getattr(binary.header, "cpu_type", None)
+                        is_intel = cpu_type in (lief.MachO.Header.CPU_TYPE.X86, lief.MachO.Header.CPU_TYPE.X86_64)
+                        is_arm = cpu_type in (lief.MachO.Header.CPU_TYPE.ARM, lief.MachO.Header.CPU_TYPE.ARM64)
+                        if target_arch == "intel" and not is_intel:
+                            continue
+                        if target_arch in ("arm", "aarch64") and not is_arm:
+                            continue
                     return binary
             return lief_binary[0]
         return lief_binary
@@ -50,7 +63,7 @@ class MachoSymbolProvider(AbstractLabelProvider):
         if hasattr(lief_binary, "imagebase"):
             candidates.append(lief_binary.imagebase)
         for section in getattr(lief_binary, "sections", []):
-            if section.virtual_address and section.offset:
+            if section.virtual_address:
                 candidates.append(section.virtual_address - section.offset)
         lief_base = min(candidates) if candidates else 0
         smda_base = lief_base
@@ -86,7 +99,7 @@ class MachoSymbolProvider(AbstractLabelProvider):
 
         # Parse symbol stubs
         try:
-            for stub in lief_binary.symbol_stubs:
+            for stub in getattr(lief_binary, "symbol_stubs", []):
                 adjusted_stub_addr = stub.address + adjustment
                 if stub.address != 0 and binary_info.isInCodeAreas(adjusted_stub_addr):
                     self._func_symbols[adjusted_stub_addr] = f"stub_{adjusted_stub_addr:x}"
@@ -102,10 +115,13 @@ class MachoSymbolProvider(AbstractLabelProvider):
             return {}
         adjustment = self._get_address_adjustment(lief_binary)
         exported = {}
-        for symbol in lief_binary.exported_symbols:
-            if symbol.value != 0 and symbol.name:
-                adjusted_val = symbol.value + adjustment
-                exported[adjusted_val] = symbol.name
+        try:
+            for symbol in getattr(lief_binary, "exported_symbols", []):
+                if symbol.value != 0 and symbol.name:
+                    adjusted_val = symbol.value + adjustment
+                    exported[adjusted_val] = symbol.name
+        except Exception as e:
+            LOGGER.debug("Failed to parse Mach-O exports: %s", e)
         return exported
 
     def parseSymbols(self, lief_binary):
@@ -114,11 +130,14 @@ class MachoSymbolProvider(AbstractLabelProvider):
             return {}
         adjustment = self._get_address_adjustment(lief_binary)
         symbols = {}
-        for symbol in lief_binary.symbols:
-            if symbol.value != 0 and symbol.name:
-                func_name = getattr(symbol, "demangled_name", None) or symbol.name
-                adjusted_val = symbol.value + adjustment
-                symbols[adjusted_val] = func_name
+        try:
+            for symbol in getattr(lief_binary, "symbols", []):
+                if symbol.value != 0 and symbol.name:
+                    func_name = getattr(symbol, "demangled_name", None) or symbol.name
+                    adjusted_val = symbol.value + adjustment
+                    symbols[adjusted_val] = func_name
+        except Exception as e:
+            LOGGER.debug("Failed to parse Mach-O symbols: %s", e)
         return symbols
 
     def parseImports(self, lief_binary):
@@ -127,14 +146,23 @@ class MachoSymbolProvider(AbstractLabelProvider):
             return {}
         adjustment = self._get_address_adjustment(lief_binary)
         imports = {}
-        try:
-            for binding in lief_binary.bindings:
-                if binding.address != 0 and binding.symbol and binding.symbol.name:
-                    lib_name = binding.library.name.lower() if binding.has_library else ""
+        for binding in getattr(lief_binary, "bindings", []):
+            try:
+                if (
+                    binding.address != 0
+                    and getattr(binding, "has_symbol", False)
+                    and binding.symbol
+                    and binding.symbol.name
+                ):
+                    lib_name = (
+                        binding.library.name.lower()
+                        if (getattr(binding, "has_library", False) and binding.library)
+                        else ""
+                    )
                     adjusted_addr = binding.address + adjustment
                     imports[adjusted_addr] = (lib_name, binding.symbol.name)
-        except Exception as e:
-            LOGGER.debug("Failed to parse Mach-O bindings: %s", e)
+            except Exception as e:
+                LOGGER.debug("Failed to parse individual Mach-O binding: %s", e)
         return imports
 
     def getSymbol(self, address):
