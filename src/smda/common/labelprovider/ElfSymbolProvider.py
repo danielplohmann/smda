@@ -5,31 +5,13 @@ import logging
 import lief
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .import_parsers import parse_elf_relocation_imports
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
 
-
-def parse_relocation_imports(lief_binary):
-    """Build import map keyed by relocation slot address: addr -> (lib, name)."""
-    if not isinstance(lief_binary, lief.ELF.Binary):
-        return {}
-    import_symbols = {}
-    for relocation in lief_binary.relocations:
-        if not relocation.has_symbol:
-            continue
-        symbol = relocation.symbol
-        if symbol is None:
-            continue
-        if not symbol.imported or not symbol.is_function:
-            continue
-
-        lib = None
-        if symbol.has_version and symbol.symbol_version.has_auxiliary_version:
-            lib = symbol.symbol_version.symbol_version_auxiliary.name
-
-        import_symbols[relocation.address] = (lib, symbol.name)
-    return import_symbols
+# Backward-compatible alias for tests and callers that imported the old helper name.
+parse_relocation_imports = parse_elf_relocation_imports
 
 
 class ElfSymbolProvider(AbstractLabelProvider):
@@ -87,9 +69,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
         return function_symbols
 
     def parseImports(self, lief_binary):
-        if not isinstance(lief_binary, lief.ELF.Binary):
-            return {}
-        return parse_relocation_imports(lief_binary)
+        return parse_elf_relocation_imports(lief_binary)
 
     def collectSymbols(self, lief_binary):
         if not isinstance(lief_binary, lief.ELF.Binary):

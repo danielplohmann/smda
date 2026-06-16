@@ -10,7 +10,17 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BinaryInfo:
-    """simple DTO to contain most information related to the binary/buffer to be analyzed"""
+    """simple DTO to contain most information related to the binary/buffer to be analyzed
+
+    xmetadata address conventions (via getExportedFunctions/getImportedFunctions/getSymbols):
+    - PE: active ``base_addr`` (dump VA); falls back to LIEF imagebase when unset.
+    - ELF: absolute virtual addresses from LIEF (relocation import slots included).
+    - Mach-O: LIEF addresses adjusted to the active mapping via slice/base_addr offset.
+
+    ``exported_functions`` holds the export table; ``symbols`` merges exports with
+    symtab/COFF/defined function symbols. Overlap between the two dicts is expected
+    when an export also appears in the symbol table.
+    """
 
     architecture = ""
     base_addr = 0
@@ -122,7 +132,7 @@ class BinaryInfo:
             elif lief_type == "ELF":
                 self.symbols = self._symbol_provider.collectSymbols(lief_result)
             elif lief_type == "MACH_O":
-                symbols = self._symbol_provider.parseSymbols(lief_result)
+                symbols = self._symbol_provider.collectSymbols(lief_result)
                 self.symbols = self._symbol_provider._filter_symbols_to_code(symbols, self)
         return self.symbols
 
@@ -130,6 +140,10 @@ class BinaryInfo:
         """
         Generator that yields (name, start_addr, end_addr) for each section.
         Supports PE, ELF, and Mach-O binaries.
+
+        Section start addresses use the same VA convention as label metadata:
+        PE uses ``base_addr + section.virtual_address``; ELF uses LIEF absolute
+        ``section.virtual_address``; Mach-O applies the Mach-O base/adjustment offset.
         """
         parsed_binary = self.getLiefBinary()
         if not parsed_binary:
