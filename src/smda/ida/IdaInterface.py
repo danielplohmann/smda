@@ -262,7 +262,6 @@ class Ida73Interface(BackendInterface):
         return self._api_map
 
     def isExternalFunction(self, function_offset):
-        # TODO look up older function names to support this for IDA 7.3- as well
         return False
 
     def makeFunction(self, instruction):

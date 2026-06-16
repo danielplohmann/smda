@@ -128,7 +128,6 @@ COMMON_PROLOGUES = {
     },
 }
 
-# TODO: 2018-06-27 expand the coverage in this list
 # https://stackoverflow.com/questions/25545470/long-multi-byte-nops-commonly-understood-macros-or-other-notation
 GAP_SEQUENCES = {
     1: [
