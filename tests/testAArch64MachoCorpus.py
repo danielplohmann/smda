@@ -191,6 +191,33 @@ class TestAArch64MachoCorpus(unittest.TestCase):
                 if "bti" in fixture["feature_tags"] or stats["bti_count"]:
                     self.assertGreater(_count_code_words(case["loader"], BTI_PROLOGUES), 0)
 
+    def test_macho_symbols_resolution(self):
+        bluenoroff_fixture = next(
+            (fixture for fixture in self.fixtures if "BlueNoroff" in fixture["path"]),
+            None,
+        )
+        self.assertIsNotNone(bluenoroff_fixture)
+        case = self._get_case(bluenoroff_fixture)
+        report = case["report"]
+
+        # Verify symbols are resolved
+        self.assertIsNotNone(report.xmetadata)
+        symbols = report.xmetadata.get("symbols", {})
+        exported = report.xmetadata.get("exported_functions", {})
+        imported = report.xmetadata.get("imported_functions", {})
+
+        # We expect _main at 0x100003f08
+        self.assertIn(0x100003F08, symbols)
+        self.assertEqual(symbols[0x100003F08], "_main")
+
+        # We expect __mh_execute_header as an export at 0x100000000
+        self.assertIn(0x100000000, exported)
+        self.assertEqual(exported[0x100000000], "__mh_execute_header")
+
+        # We expect _getenv to be imported at 0x100004000
+        self.assertIn(0x100004000, imported)
+        self.assertEqual(imported[0x100004000][1], "_getenv")
+
 
 if __name__ == "__main__":
     unittest.main()

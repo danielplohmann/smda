@@ -3,6 +3,7 @@ import logging
 import lief
 
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
+from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -51,6 +52,10 @@ class BinaryInfo:
             elif isinstance(lief_result, lief.ELF.Binary):
                 self._lief_type = "ELF"
                 self._symbol_provider = ElfSymbolProvider(None)
+            elif isinstance(lief_result, (lief.MachO.Binary, lief.MachO.FatBinary)):
+                self._lief_type = "MACH_O"
+                self._symbol_provider = MachoSymbolProvider(None)
+                self._symbol_provider._binary_info = self
             else:
                 self._lief_type = "OTHER"
         return self._lief_type
@@ -81,13 +86,18 @@ class BinaryInfo:
                 self.oep = lief_result.optional_header.addressof_entrypoint
             elif lief_type == "ELF":
                 self.oep = lief_result.header.entrypoint
+            elif lief_type == "MACH_O":
+                macho_binary = self._symbol_provider._get_macho_binary(lief_result)
+                if macho_binary and hasattr(macho_binary, "entrypoint"):
+                    adjustment = self._symbol_provider._get_address_adjustment(macho_binary)
+                    self.oep = (macho_binary.entrypoint + adjustment) - self.base_addr
         return self.oep
 
     def getExportedFunctions(self):
         if self.exported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type in ("PE", "ELF"):
+            if lief_type in ("PE", "ELF", "MACH_O"):
                 self.exported_functions = self._symbol_provider.parseExports(lief_result)
         return self.exported_functions
 
@@ -99,6 +109,8 @@ class BinaryInfo:
                 self.imported_functions = self._symbol_provider.parseImports(lief_result)
             elif lief_type == "ELF":
                 self.imported_functions = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
+            elif lief_type == "MACH_O":
+                self.imported_functions = self._symbol_provider.parseImports(lief_result)
         return self.imported_functions
 
     def getSymbols(self):
@@ -109,19 +121,30 @@ class BinaryInfo:
                 self.symbols = self._symbol_provider.parseSymbols(lief_result)
             elif lief_type == "ELF":
                 self.symbols = self._symbol_provider.parseSymbols(lief_result.dynamic_symbols)
+            elif lief_type == "MACH_O":
+                symbols = self._symbol_provider.parseSymbols(lief_result)
+                self.symbols = self._symbol_provider._filter_symbols_to_code(symbols, self)
         return self.symbols
 
     def getSections(self):
         """
         Generator that yields (name, start_addr, end_addr) for each section.
-        Supports PE and ELF binaries.
+        Supports PE, ELF, and Mach-O binaries.
         """
         parsed_binary = self.getLiefBinary()
         if not parsed_binary:
             return
 
         lief_type = self._getLiefType()
-        if lief_type not in ("PE", "ELF") or not parsed_binary.sections:
+        if lief_type == "MACH_O":
+            parsed_binary = self._symbol_provider._get_macho_binary(parsed_binary)
+
+        if (
+            not parsed_binary
+            or lief_type not in ("PE", "ELF", "MACH_O")
+            or not hasattr(parsed_binary, "sections")
+            or not parsed_binary.sections
+        ):
             return
 
         if lief_type == "PE":
@@ -134,6 +157,12 @@ class BinaryInfo:
         elif lief_type == "ELF":
             for section in parsed_binary.sections:
                 section_start = section.virtual_address
+                section_size = section.size
+                yield section.name, section_start, section_start + section_size
+        elif lief_type == "MACH_O":
+            adjustment = self._symbol_provider._get_address_adjustment(parsed_binary)
+            for section in parsed_binary.sections:
+                section_start = section.virtual_address + adjustment
                 section_size = section.size
                 yield section.name, section_start, section_start + section_size
 
