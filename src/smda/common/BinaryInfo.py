@@ -95,7 +95,10 @@ class BinaryInfo:
             if lief_type == "PE":
                 self.oep = lief_result.optional_header.addressof_entrypoint
             elif lief_type == "ELF":
-                self.oep = lief_result.header.entrypoint - (self.base_addr or 0)
+                entrypoint = lief_result.header.entrypoint
+                if self.base_addr and entrypoint >= self.base_addr:
+                    entrypoint -= self.base_addr
+                self.oep = entrypoint
             elif lief_type == "MACH_O":
                 macho_binary = self._symbol_provider._get_macho_binary(lief_result)
                 if macho_binary and hasattr(macho_binary, "entrypoint"):
