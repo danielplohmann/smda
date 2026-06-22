@@ -130,6 +130,25 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
             imports = provider.parseImports(MOCK_ELF)
         self.assertEqual(imports, {0x4000: (None, "printf")})
 
+    def test_parse_imports_handles_missing_symbol_version_auxiliary(self):
+        imported = _MockSymbol("puts", value=0, imported=True)
+        imported.has_version = True
+        imported.symbol_version = SimpleNamespace(
+            has_auxiliary_version=True,
+            symbol_version_auxiliary=None,
+        )
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[imported],
+            relocations=[_MockReloc(0x5000, imported)],
+            entrypoint=0,
+        )
+        provider = ElfSymbolProvider(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            imports = provider.parseImports(elf)
+        self.assertEqual(imports, {0x5000: (None, "puts")})
+
     def test_collect_symbols_merges_symtab_dynamic_and_exports(self):
         provider = ElfSymbolProvider(None)
         with mock.patch("lief.ELF.Binary", _MockElfBinary):
@@ -176,6 +195,22 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
             mock.patch("lief.ELF.Binary", _MockElfBinary),
         ):
             self.assertEqual(binary_info.getOep(), 0x534)
+
+    def test_binary_info_elf_pie_oep_preserves_base_relative_offset(self):
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[],
+            relocations=[],
+            entrypoint=0x1050,
+        )
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x555555554000
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=elf),
+            mock.patch("lief.ELF.Binary", _MockElfBinary),
+        ):
+            self.assertEqual(binary_info.getOep(), 0x1050)
 
 
 if __name__ == "__main__":
