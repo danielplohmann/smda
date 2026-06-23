@@ -199,12 +199,56 @@ class RecursiveDisassembler:
         relative_end = relative_start + self.backend.max_instruction_size
         return self.disassembly.binary_info.binary[relative_start:relative_end]
 
+    def _revertGapFunction(self, colliding_addr, current_start_addr):
+        """When a tailcall-discovered candidate's analysis reaches bytes already
+        claimed by a gap function, the gap function is almost certainly part of
+        the candidate's body (the gap scan over-eagerly claimed the fall-through
+        before the tailcall candidate was known). Revert the gap function so the
+        current analysis can absorb its bytes as ordinary blocks.
+
+        Returns True if a gap function was reverted.
+        """
+        owner_fn = self.disassembly.ins2fn.get(colliding_addr)
+        if owner_fn is None or owner_fn == current_start_addr:
+            return False
+        candidate = self.fc_manager.candidates.get(owner_fn)
+        if candidate is None or not candidate.is_gap_candidate:
+            return False
+        if owner_fn not in self.disassembly.functions:
+            return False
+        owner_state = self.backend.createAnalysisState(owner_fn, self.disassembly)
+        # Rebuild a minimal state from the disassembly's stored instructions
+        # so revertAnalysis can undo code_map/ins2fn/function_borders entries.
+        fn_min, fn_max = self.disassembly.function_borders[owner_fn]
+        owner_state.instructions = []
+        for addr in sorted(self.disassembly.instructions.keys()):
+            if fn_min <= addr < fn_max:
+                mnemonic, size = self.disassembly.instructions[addr]
+                owner_state.instructions.append((addr, size, mnemonic, "", b""))
+        owner_state.code_refs = set()
+        owner_state.data_refs = set()
+        owner_state.revertAnalysis()
+        self.fc_manager.updateAnalysisAborted(owner_fn, "Reverted: absorbed by tailcall candidate 0x%08x" % current_start_addr)
+        LOGGER.debug(
+            "Reverted gap function 0x%08x (absorbed by tailcall candidate 0x%08x)",
+            owner_fn, current_start_addr,
+        )
+        return True
+
     def analyzeFunction(self, start_addr, as_gap=False):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         self.tailcall_analyzer.initFunction()
         i = None
         state = self.backend.createAnalysisState(start_addr, self.disassembly)
         if state.isProcessedFunction():
+            self.fc_manager.updateAnalysisAborted(
+                start_addr,
+                f"collision with existing code of function 0x{self.disassembly.ins2fn[start_addr]:08x}",
+            )
+            # return the (empty) state, not a bare list, so every caller path can safely call
+            # state.getBlocks(); this collision path is unreachable from the gap pass today, so
+            # the change is behavior-neutral (output stays byte-for-byte identical).
+            return state
             self.fc_manager.updateAnalysisAborted(
                 start_addr,
                 f"collision with existing code of function 0x{self.disassembly.ins2fn[start_addr]:08x}",
@@ -277,8 +321,16 @@ class RecursiveDisassembler:
                             i_mnemonic + " " + i_op_str,
                             self.disassembly.ins2fn[i_address],
                         )
-                        state.setBlockEndingInstruction(True)
-                        state.addCollision(i_address)
+                        # If the collision is with a gap function, revert it and
+                        # book this instruction so the current function absorbs it.
+                        # Only apply during the tailcall re-drain (as_gap=False),
+                        # not during the gap pass itself — gap candidates are
+                        # expected to have independent analysis there.
+                        if not as_gap and self._revertGapFunction(i_address, start_addr):
+                            state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
+                        else:
+                            state.setBlockEndingInstruction(True)
+                            state.addCollision(i_address)
                     else:
                         LOGGER.debug("  analyzeFunction() was already present in local function.")
                         state.setBlockEndingInstruction(True)
@@ -391,12 +443,23 @@ class RecursiveDisassembler:
             next_gap = self.fc_manager.getNextGap(dont_skip=True)
             gap_candidate = self.fc_manager.nextGapCandidate(next_gap)
         LOGGER.debug("Finished gap analysis, functions: %d", len(self.disassembly.functions))
+        # candidates may have been discovered during gap analysis (e.g. tailcall targets triggered
+        # by _analyzeUncondBranch); drain them before moving to the tailcall pass.
+        for candidate in self.fc_manager.getNextFunctionStartCandidate():
+            if cbAnalysisTimeout and cbAnalysisTimeout():
+                break
+            state = self.analyzeFunction(candidate.addr)
         # third pass, fix potential tailcall functions that were identified during analysis
         if self.config.RESOLVE_TAILCALLS:
             tailcalled_functions = self.tailcall_analyzer.resolveTailcalls(self)
             for addr in tailcalled_functions:
                 self.fc_manager.addTailcallCandidate(addr)
             LOGGER.debug("Finished tailcall analysis, functions.")
+            # drain any candidates that were added during tailcall resolution
+            for candidate in self.fc_manager.getNextFunctionStartCandidate():
+                if cbAnalysisTimeout and cbAnalysisTimeout():
+                    break
+                state = self.analyzeFunction(candidate.addr)
         self.disassembly.failed_analysis_addr = self.fc_manager.getAbortedCandidates()
         # package up and finish
         for addr, candidate in self.fc_manager.candidates.items():

@@ -139,10 +139,6 @@ class AArch64Backend(ArchBackend):
             cursor += INSTRUCTION_SIZE
         if skipped_nop and cursor in d.fc_manager.getFunctionStartCandidates():
             return cursor
-        if skipped_nop and cursor % 16 == 0:
-            word = cls._wordAt(d, cursor)
-            if word not in (None, 0, NOP):
-                return cursor
         return None
 
     def _analyzeCondBranch(self, d, instruction, state):
@@ -188,6 +184,7 @@ class AArch64Backend(ArchBackend):
                 # A direct branch to code before the current entry, or from a short
                 # no-frame stub, is a tailcall/shared thunk target, not a local block.
                 d.fc_manager.addTailcallCandidate(target)
+                d.fc_manager.candidates[target].addCallRef(i_address)
                 state.setSanelyEnding(True)
             elif target in d.fc_manager.getFunctionStartCandidates():
                 # case = "TAILCALL?" — leave for its own analysis
