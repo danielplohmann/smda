@@ -4,8 +4,8 @@ import logging
 import types
 import unittest
 
-from smda.SmdaConfig import SmdaConfig
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
+from smda.SmdaConfig import SmdaConfig
 
 logging.disable(logging.CRITICAL)
 
