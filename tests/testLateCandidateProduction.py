@@ -63,9 +63,9 @@ class LateCandidateTestBase:
 
         produced = [c.addr for c in gen]
         self.assertIn(
-            late_addr, produced,
-            f"Late candidate 0x{late_addr:x} was NOT yielded despite being "
-            f"new (is_new=True) [queue={self.queue_type}]"
+            late_addr,
+            produced,
+            f"Late candidate 0x{late_addr:x} was NOT yielded despite being new (is_new=True) [queue={self.queue_type}]",
         )
 
     # ------------------------------------------------------------------
@@ -84,9 +84,10 @@ class LateCandidateTestBase:
 
         produced = [c.addr for c in self.manager.getNextFunctionStartCandidate()]
         self.assertIn(
-            late_addr, produced,
+            late_addr,
+            produced,
             f"Candidate 0x{late_addr:x} should have been re-added to queue "
-            f"even when pre-existing [queue={self.queue_type}]"
+            f"even when pre-existing [queue={self.queue_type}]",
         )
 
     # ------------------------------------------------------------------
@@ -96,18 +97,17 @@ class LateCandidateTestBase:
         """Same as scenario 2, but the ensureCandidate + addTailcallCandidate
         happen mid-iteration — the candidate should still appear."""
         gen = self.manager.getNextFunctionStartCandidate()
-        first = next(gen)
 
         late_addr = 0x45E0
-        self.manager.ensureCandidate(late_addr)      # candidates only
+        self.manager.ensureCandidate(late_addr)  # candidates only
         self.manager.addTailcallCandidate(late_addr)  # re-adds to queue
         self.manager.candidates[late_addr].addCallRef(0x6000)
 
         produced = [c.addr for c in gen]
         self.assertIn(
-            late_addr, produced,
-            f"Candidate 0x{late_addr:x} should appear mid-iteration "
-            f"even when pre-existing [queue={self.queue_type}]"
+            late_addr,
+            produced,
+            f"Candidate 0x{late_addr:x} should appear mid-iteration even when pre-existing [queue={self.queue_type}]",
         )
 
     # ------------------------------------------------------------------
@@ -123,9 +123,10 @@ class LateCandidateTestBase:
 
         produced = [c.addr for c in self.manager.getNextFunctionStartCandidate()]
         self.assertIn(
-            late_addr, produced,
+            late_addr,
+            produced,
             f"Candidate 0x{late_addr:x} should be produced when "
-            f"addCandidate is used (always queues) [queue={self.queue_type}]"
+            f"addCandidate is used (always queues) [queue={self.queue_type}]",
         )
 
     # ------------------------------------------------------------------
@@ -141,9 +142,9 @@ class LateCandidateTestBase:
 
         produced = [c.addr for c in self.manager.getNextFunctionStartCandidate()]
         self.assertNotIn(
-            late_addr, produced,
-            f"Candidate 0x{late_addr:x} with score=0 should be filtered out "
-            f"[queue={self.queue_type}]"
+            late_addr,
+            produced,
+            f"Candidate 0x{late_addr:x} with score=0 should be filtered out [queue={self.queue_type}]",
         )
 
     # ------------------------------------------------------------------
@@ -153,7 +154,6 @@ class LateCandidateTestBase:
         """All candidates added during one analyzeFunction call should
         eventually be yielded."""
         gen = self.manager.getNextFunctionStartCandidate()
-        first = next(gen)
 
         late_a = 0x75E0
         late_b = 0x85E0
@@ -178,9 +178,9 @@ class LateCandidateTestBase:
         gen = self.manager.getNextFunctionStartCandidate()
         produced = [c.addr for c in gen]
         self.assertIn(
-            late_addr, produced,
-            f"Candidate 0x{late_addr:x} with upcoming addCallRef should be "
-            f"produced [queue={self.queue_type}]"
+            late_addr,
+            produced,
+            f"Candidate 0x{late_addr:x} with upcoming addCallRef should be produced [queue={self.queue_type}]",
         )
 
 

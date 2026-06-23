@@ -228,10 +228,13 @@ class RecursiveDisassembler:
         owner_state.code_refs = set()
         owner_state.data_refs = set()
         owner_state.revertAnalysis()
-        self.fc_manager.updateAnalysisAborted(owner_fn, "Reverted: absorbed by tailcall candidate 0x%08x" % current_start_addr)
+        self.fc_manager.updateAnalysisAborted(
+            owner_fn, f"Reverted: absorbed by tailcall candidate 0x{current_start_addr:08x}"
+        )
         LOGGER.debug(
             "Reverted gap function 0x%08x (absorbed by tailcall candidate 0x%08x)",
-            owner_fn, current_start_addr,
+            owner_fn,
+            current_start_addr,
         )
         return True
 
