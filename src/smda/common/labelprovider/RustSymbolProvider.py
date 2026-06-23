@@ -7,6 +7,7 @@ import lief
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .import_parsers import resolve_pe_base_addr
 from .rust_demangler import demangle
 from .rust_demangler.rust import TypeNotFoundError
 from .rust_demangler.rust_legacy import UnableToLegacyDemangle
@@ -53,7 +54,7 @@ class RustSymbolProvider(AbstractLabelProvider):
         if isinstance(lief_binary, lief.ELF.Binary):
             self._update_elf(lief_binary)
         elif isinstance(lief_binary, lief.PE.Binary):
-            self._update_pe(lief_binary)
+            self._update_pe(lief_binary, binary_info.base_addr)
 
     def is_rust_binary(self, binary_info):
         """
@@ -138,8 +139,9 @@ class RustSymbolProvider(AbstractLabelProvider):
         self._func_symbols.update(self._parse_lief_symbols(lief_binary.symtab_symbols))
         self._func_symbols.update(self._parse_lief_symbols(lief_binary.dynamic_symbols))
 
-    def _update_pe(self, lief_binary):
+    def _update_pe(self, lief_binary, base_addr=None):
         """Process PE binary symbols for Rust demangling."""
+        active_base = resolve_pe_base_addr(lief_binary, base_addr)
         # Parse PE exports
         for function in lief_binary.exported_functions:
             try:
@@ -152,14 +154,14 @@ class RustSymbolProvider(AbstractLabelProvider):
                     demangled = demangle(raw_name)
                     if demangled:
                         demangled = remove_bad_spaces(demangled)
-                        self._func_symbols[lief_binary.imagebase + function.address] = demangled
+                        self._func_symbols[active_base + function.address] = demangled
             except _DEMANGLE_ERRORS as exc:
                 LOGGER.debug("Failed to demangle Rust symbol %s: %s", function.name, exc)
 
         code_base_address = None
         for section in lief_binary.sections:
             if section.characteristics & 0x20000000:
-                code_base_address = lief_binary.imagebase + section.virtual_address
+                code_base_address = active_base + section.virtual_address
                 break
         if code_base_address is None:
             return

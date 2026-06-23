@@ -10,6 +10,7 @@ from smda.utility.MachoBinary import (
 )
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .import_parsers import parse_macho_bindings
 from .MachoDemangler import demangle_macho_symbol
 
 lief.logging.disable()
@@ -140,25 +141,16 @@ class MachoSymbolProvider(AbstractLabelProvider):
         if not lief_binary or not isinstance(lief_binary, lief.MachO.Binary):
             return {}
         adjustment = self._get_address_adjustment(lief_binary)
-        imports = {}
-        for binding in getattr(lief_binary, "bindings", []):
-            try:
-                if (
-                    binding.address != 0
-                    and getattr(binding, "has_symbol", False)
-                    and binding.symbol
-                    and binding.symbol.name
-                ):
-                    lib_name = (
-                        binding.library.name.lower()
-                        if (getattr(binding, "has_library", False) and binding.library)
-                        else ""
-                    )
-                    adjusted_addr = binding.address + adjustment
-                    imports[adjusted_addr] = (lib_name, binding.symbol.name)
-            except Exception as e:
-                LOGGER.debug("Failed to parse individual Mach-O binding: %s", e)
-        return imports
+        return parse_macho_bindings(lief_binary, adjustment)
+
+    def collectSymbols(self, lief_binary):
+        lief_binary = self._get_macho_binary(lief_binary)
+        if not lief_binary or not isinstance(lief_binary, lief.MachO.Binary):
+            return {}
+        symbols = {}
+        symbols.update(self.parseExports(lief_binary))
+        symbols.update(self.parseSymbols(lief_binary))
+        return symbols
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")

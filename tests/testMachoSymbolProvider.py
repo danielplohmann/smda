@@ -80,6 +80,18 @@ class TestMachoDemangler(unittest.TestCase):
 
 
 class TestMachoSymbolProviderBehavior(unittest.TestCase):
+    def test_collect_symbols_merges_exports_and_symtab(self):
+        _, raw, loader = _load_fixture("objective-see/bluenoroff")
+        binary_info = _binary_info(raw, loader)
+        provider = MachoSymbolProvider(None)
+        provider._binary_info = binary_info
+        symbols = provider.collectSymbols(binary_info.getLiefBinary())
+        exported = provider.parseExports(binary_info.getLiefBinary())
+        self.assertIn(0x100003F08, symbols)
+        self.assertEqual(symbols[0x100003F08], "_main")
+        for addr, name in exported.items():
+            self.assertEqual(symbols.get(addr), name)
+
     def test_xmetadata_symbols_are_filtered_to_code_areas(self):
         _, raw, loader = _load_fixture("objective-see/turtle")
         binary_info = _binary_info(raw, loader)
