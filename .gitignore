@@ -27,3 +27,8 @@ coverage-html/
 profiling/output/
 # Benchmark results
 *results.json
+
+# Local dev container config (not for upstream)
+.devcontainer/
+.dockerignore
+validation

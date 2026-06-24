@@ -261,12 +261,11 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
     def addTailcallCandidate(self, addr):
         if not self._passesCodeFilter(addr):
             return False
-        is_new = self.ensureCandidate(addr)
+        self.ensureCandidate(addr)
         self.candidates[addr].setIsTailcallCandidate(True)
         self._candidate_offsets.add(addr)
-        if is_new and self.candidate_queue:
-            self.candidate_queue.add(self.candidates[addr])
-            self.candidate_queue.update()
+        self.candidate_queue.add(self.candidates[addr])
+        self.candidate_queue.update()
         return True
 
     def _cachedExecutableSectionRanges(self):

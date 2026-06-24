@@ -105,6 +105,8 @@ make test
 
 ## Version History
 
+ * 2026-06-23: v4.0.2 - Improvements to Aarch64 function recovery, adressing tailcalls and gap function cornercases.
+ * 2026-06-23: v4.0.1 - Refactoring: improved and streamlined symbol parsing and metadata handling. (THX: @r0ny123)
  * 2026-06-12: v4.0.0 - Support for Aarch64! (THX: @r0ny123)
  * 2026-06-12: v3.4.2 - Minor bugfixes regarding corner case offset extraction and calculations. (THX: @r0ny123)
  * 2026-06-12: v3.4.1 - Added test payloads for various additional architectures. (THX: @r0ny123)
