@@ -105,6 +105,8 @@ make test
 
 ## Version History
 
+ * 2026-06-24: v4.2.0 - Further improvements for inter-procedural operand escaping (closer to x86_x64 and traditional PIC hashing).
+ * 2026-06-23: v4.1.0 - Significantly extended Aarch64 mnemonic escapes and improved PIC/OPC hashing. (THX: @r0ny123)
  * 2026-06-23: v4.0.2 - Improvements to Aarch64 function recovery, adressing tailcalls and gap function cornercases.
  * 2026-06-23: v4.0.1 - Refactoring: improved and streamlined symbol parsing and metadata handling. (THX: @r0ny123)
  * 2026-06-12: v4.0.0 - Support for Aarch64! (THX: @r0ny123)

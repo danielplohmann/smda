@@ -222,7 +222,7 @@ class TestAArch64InstructionEscaper(unittest.TestCase):
         stored_pic_hash = 0x0123456789ABCDEF
         function_dict["metadata"]["pic_hash"] = stored_pic_hash
 
-        imported = SmdaFunction.fromDict(function_dict, version="4.1.0", smda_report=report)
+        imported = SmdaFunction.fromDict(function_dict, version="4.2.0", smda_report=report)
 
         self.assertEqual(imported.pic_hash, stored_pic_hash)
 

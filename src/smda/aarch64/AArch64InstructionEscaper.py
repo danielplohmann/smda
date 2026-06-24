@@ -493,11 +493,163 @@ class AArch64InstructionEscaper:
         return "".join(result)
 
     @staticmethod
+    def _wordWithNibbleKeepMaskToHex(word, keep_mask):
+        """Render `word` (32-bit) as 8 hex chars in little-endian byte order
+        (byte 0 first, low nibble of each byte first), replacing nibbles
+        whose corresponding bit in `keep_mask` is 0 with "?". `keep_mask`
+        is 8 bits, bit n (LSB-first nibble index) = 1 means "keep this
+        nibble from the original word".
+
+        The output order matches the format of `ins.bytes` in SMDA (which
+        stores raw instruction bytes in LE order) and matches the
+        convention used by the older `_wordWithMaskToHex` helper, so
+        consumers can compare escape output against the original byte
+        string nibble-by-nibble.
+
+        Nibble-granular wildcards give finer PIC-hash signal than byte-level
+        wildcards and match aarch64's 4-bit-aligned instruction fields.
+        """
+        result = []
+        # Iterate byte 0 (low) -> byte 3 (high), and within each byte the
+        # low nibble first. This matches `ins.bytes` (LE) and the OLD
+        # `_wordWithMaskToHex` convention.
+        for byte_index in range(4):
+            byte = (word >> (byte_index * 8)) & 0xFF
+            for shift in (4, 0):
+                nibble_index = byte_index * 2 + (1 if shift == 4 else 0)
+                keep = (keep_mask >> nibble_index) & 1
+                if keep:
+                    result.append(f"{(byte >> shift) & 0xF:x}")
+                else:
+                    result.append("?")
+        return "".join(result)
+
+    @staticmethod
     def _hasExplicitOperands(ins):
         try:
             return bool(ins.getDetailed().operands)
         except (AttributeError, NotImplementedError, ValueError):
             return bool(ins.operands)
+
+    @staticmethod
+    def _hasImmediateOperand(ins):
+        """Return True only if the instruction has an *immediate* operand
+        that we want to wildcard. We treat shift/extend modifiers like
+        `lsl #3` and `sxtw #0` as not being immediates, because they
+        describe the addressing mode, not a data value that gets
+        relocated.
+
+        The check is purely text-based (we look at `ins.operands`) so it
+        is independent of capstone's detailed disassembly.
+        """
+        operands = (ins.operands or "").strip()
+        if not operands:
+            return False
+        # Strip shift/extend modifiers (e.g. "lsl #3", "sxtw #0") so they
+        # don't count as immediates.
+        #
+        # Capstone renders extend modifiers with a leading space: "lsl #3"
+        # or "sxtw #0". We replace these with "" before searching for a
+        # real "#".
+        #
+        # Note: the regex below mirrors `_shift_extend` (defined above)
+        # so any future additions to that pattern should be mirrored here.
+        cleaned = re.sub(
+            r"\b(?:lsl|lsr|asr|ror|sxtw|uxtw|sxtb|uxtb|sxth|uxth|sxtx|uxtx)\s*#-?(?:0x[0-9a-fA-F]+|\d+)",
+            "",
+            operands,
+            flags=re.IGNORECASE,
+        )
+        return "#" in cleaned
+
+    # Per-mnemonic immediate-field masks. Each entry maps a base mnemonic
+    # (after stripping condition codes such as "b.eq" -> "b") to an 8-bit
+    # keep_mask: bit n (LSB-first nibble index) = 1 means "keep the original
+    # nibble at output position n", 0 means "wildcard it".
+    #
+    # The masks cover word-bit ranges per the ARMv8 encodings. We wildcard
+    # every nibble that overlaps an immediate field, which means we may
+    # also wildcard a few bits of an adjacent register/opcode field. This
+    # is the right trade-off: it makes the escape position-invariant
+    # under relocation (the whole point of the pic_hash), at the cost of
+    # losing a couple of bits of entropy per instruction. Wildcarding
+    # partial fields would require byte-level granularity (intel's
+    # approach); the nibble-granular approach is strictly finer.
+    #
+    # Most entries use mask 0xC1 (nibbles 0, 6, 7):
+    #   nibble 0 : low 4 bits of Rd/Rt (preserves most register info)
+    #   nibble 1 : wildcarded -- overlaps imm[5..7] for adr/adrp/cbz/cbnz/ldr/str/add/sub
+    #   nibble 6 : high nibble of op byte
+    #   nibble 7 : top nibble of op byte
+    # The exception is unconditional `b`/`bl` (imm26 spans bits 0..25),
+    # which uses mask 0xC0 (nibbles 6, 7 only) to keep the branch fully
+    # position-invariant; for `b.cond` (cond in bits 0..3) we use 0xC1
+    # via `_AARCH64_CONDITIONAL_KEEP_MASKS` to preserve the condition code.
+    #
+    # Mnemonics not in this table have no fixed-position immediate field that we
+    # can wildcard without losing entropy, so they are returned as raw bytes
+    # (matching the OLD `escapeBinary` for register-only instructions).
+    _AARCH64_IMMEDIATE_KEEP_MASKS = {
+        "adrp": 0xC1,
+        "adr": 0xC1,
+        "b": 0xC0,  # imm26 covers nibble 0 -> wildcard it for position-invariance
+        "bl": 0xC0,
+        "cbz": 0xC1,
+        "cbnz": 0xC1,
+        "tbz": 0xC1,
+        "tbnz": 0xC1,
+        "ldr": 0xC1,
+        "ldrsw": 0xC1,
+        "str": 0xC1,
+        "ldp": 0xC1,
+        "stp": 0xC1,
+        "ldur": 0xC1,
+        "stur": 0xC1,
+        "ldrb": 0xC1,
+        "ldrh": 0xC1,
+        "ldrsb": 0xC1,
+        "ldrsh": 0xC1,
+        "strb": 0xC1,
+        "strh": 0xC1,
+        "ldnp": 0xC1,
+        "stnp": 0xC1,
+        "ldpsw": 0xC1,
+        "add": 0xC1,
+        "sub": 0xC1,
+        "adds": 0xC1,
+        "subs": 0xC1,
+        "movz": 0xC1,
+        "movk": 0xC1,
+        "movn": 0xC1,
+        "mov": 0xC1,
+    }
+
+    # Mnemonic prefix -> keep-mask for conditional variants. Currently just
+    # b.cond; other conditional mnemonics use their base entry.
+    _AARCH64_CONDITIONAL_KEEP_MASKS = {
+        "b.": 0xC1,
+    }
+
+    @staticmethod
+    def _baseMnemonic(mnemonic):
+        """Strip condition codes (e.g. 'b.eq' -> 'b') for table lookup."""
+        return mnemonic.split(".")[0]
+
+    @classmethod
+    def _keepMaskFor(cls, mnemonic):
+        """Look up the keep-mask for `mnemonic`. Tries the full mnemonic
+        first (so that special entries like 'b.cond' are picked up), then
+        conditional prefixes (e.g. 'b.' for 'b.eq' / 'b.ne' / ...), then
+        the base mnemonic (so that 'b.eq' resolves via 'b' when no cond
+        special case applies).
+        """
+        keep = cls._AARCH64_IMMEDIATE_KEEP_MASKS.get(mnemonic)
+        if keep is not None:
+            return keep
+        for prefix, mask in cls._AARCH64_CONDITIONAL_KEEP_MASKS.items():
+            if mnemonic.startswith(prefix):
+                return mask
+        return cls._AARCH64_IMMEDIATE_KEEP_MASKS.get(cls._baseMnemonic(mnemonic))
 
     @staticmethod
     def escapeToOpcodeOnly(ins):
@@ -512,9 +664,25 @@ class AArch64InstructionEscaper:
 
     @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
-        del escape_intraprocedural_jumps, lower_addr, upper_addr
-        if AArch64InstructionEscaper.escapeMnemonicForInstruction(
-            ins
-        ) == "C" or AArch64InstructionEscaper._hasExplicitOperands(ins):
-            return AArch64InstructionEscaper.escapeToOpcodeOnly(ins)
-        return ins.bytes
+        # aarch64 has only one branch encoding (4 bytes, imm26/imm19/imm14),
+        # so the intel-style `escape_intraprocedural_jumps` distinction has no
+        # additional effect here; we accept the parameter for API compatibility
+        # with the intel escaper but do not use it.
+        del escape_intraprocedural_jumps
+        # Similarly, aarch64's escape is position-based (per-mnemonic bit
+        # layout) rather than operand-text based, so the address bounds
+        # `lower_addr` / `upper_addr` are unused.
+        del lower_addr, upper_addr
+        if len(ins.bytes) != 8:
+            return ins.bytes
+        # Only instructions with an *immediate* operand are eligible for
+        # wildcarding. Register-form operations (e.g. `add x0, x0, x0`,
+        # `mov x0, x1` as an alias of `orr`) must keep their raw bytes to
+        # avoid losing hash signal.
+        if not AArch64InstructionEscaper._hasImmediateOperand(ins):
+            return ins.bytes
+        keep_mask = AArch64InstructionEscaper._keepMaskFor(ins.mnemonic)
+        if keep_mask is None:
+            return ins.bytes
+        word = int.from_bytes(bytes.fromhex(ins.bytes), "little")
+        return AArch64InstructionEscaper._wordWithNibbleKeepMaskToHex(word, keep_mask)

@@ -49,8 +49,10 @@ def parse_elf_relocation_imports(lief_binary):
             continue
 
         lib = None
-        if symbol.has_version and symbol.symbol_version.has_auxiliary_version:
-            lib = symbol.symbol_version.symbol_version_auxiliary.name
+        symbol_version = getattr(symbol, "symbol_version", None)
+        if symbol.has_version and symbol_version and symbol_version.has_auxiliary_version:
+            aux = symbol_version.symbol_version_auxiliary
+            lib = aux.name if aux else None
 
         import_symbols[relocation.address] = (lib, symbol.name)
     return import_symbols

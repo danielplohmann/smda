@@ -18,8 +18,10 @@ from .SmdaInstruction import SmdaInstruction
 
 LOGGER = logging.getLogger(__name__)
 
-# AArch64 PIC hashing changed in 4.1.0 when control-flow opcode masking was unified.
-AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 1, 0]
+# AArch64 PIC hashing changed in 4.1.0 when control-flow opcode masking was unified,
+# and again in 4.2.0 when `escapeBinary` was made per-mnemonic immediate-aware
+# (nibble-keep-mask) so that relocated instructions produce the same pic_hash.
+AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 2, 0]
 
 
 class LazyIntKeyDict(dict):
