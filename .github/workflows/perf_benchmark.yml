@@ -30,12 +30,12 @@ jobs:
       password_available: ${{ steps.check_password.outputs.available }}
     steps:
       - name: Checkout PR code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Checkout base code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
           path: base-repo
@@ -100,13 +100,13 @@ jobs:
       RUNS: 3
     steps:
       - name: Checkout PR code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Checkout base code
         if: matrix.side == 'base'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
           path: base-repo
@@ -181,7 +181,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout PR code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
