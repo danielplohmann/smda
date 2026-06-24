@@ -119,6 +119,8 @@ class SmdaInstruction:
 
     def getMnemonicGroup(self, escaper):
         if escaper:
+            if escaper is AArch64InstructionEscaper:
+                return escaper.escapeMnemonicForInstruction(self)
             return escaper.escapeMnemonic(self.mnemonic)
         return self.bytes
 

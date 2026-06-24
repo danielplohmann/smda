@@ -18,6 +18,11 @@ from .SmdaInstruction import SmdaInstruction
 
 LOGGER = logging.getLogger(__name__)
 
+# AArch64 PIC hashing changed in 4.1.0 when control-flow opcode masking was unified,
+# and again in 4.2.0 when `escapeBinary` was made per-mnemonic immediate-aware
+# (nibble-keep-mask) so that relocated instructions produce the same pic_hash.
+AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 2, 0]
+
 
 class LazyIntKeyDict(dict):
     def __init__(self, data=None):
@@ -492,7 +497,14 @@ class SmdaFunction:
         if version and re.match(r"(v)?\d+(.\d+)*", version):
             version = version.replace("v", "")
             version = [int(v) for v in version.split(".")]
-            if version < [1, 3, 0]:
+            recalculate_pic_hash = version < [1, 3, 0]
+            if (
+                not recalculate_pic_hash
+                and function_architecture == "aarch64"
+                and version < AARCH64_PIC_HASH_ESCAPE_VERSION
+            ):
+                recalculate_pic_hash = True
+            if recalculate_pic_hash:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
                 if smda_function._escaper and hash_context:
                     smda_function.pic_hash = smda_function.getPicHash(hash_context)

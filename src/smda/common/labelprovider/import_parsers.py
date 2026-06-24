@@ -6,8 +6,7 @@ from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 
 
 def resolve_pe_base_addr(lief_binary, base_addr=None):
-    # BinaryInfo defaults base_addr to 0 when unset; treat falsy as "use imagebase".
-    if not base_addr:
+    if base_addr is None:
         return getattr(lief_binary, "imagebase", 0)
     return base_addr
 

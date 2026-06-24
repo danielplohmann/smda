@@ -79,6 +79,16 @@ class TestPeSymbolProviderImports(unittest.TestCase):
         imports = provider.parseImports(pe_binary)
         self.assertEqual(imports, {0x140002000: ("kernel32.dll", "ExitProcess")})
 
+    def test_parse_imports_preserves_explicit_zero_base_addr(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("ExitProcess", 0x2000)])],
+            imagebase=0x140000000,
+        )
+        imports = provider.parseImports(pe_binary, base_addr=0)
+        self.assertEqual(imports, {0x2000: ("kernel32.dll", "ExitProcess")})
+        self.assertNotIn(0x140002000, imports)
+
     def test_win_api_resolver_matches_parse_imports(self):
         provider = PeSymbolProvider(None)
         pe_binary = _MockPeBinary(
@@ -111,6 +121,19 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         symbols = provider.collectSymbols(pe_binary, base_addr=0x400000)
         self.assertEqual(symbols[0x401000], "exported_func")
         self.assertEqual(symbols[0x401200], "local_func")
+
+    def test_collect_symbols_preserves_explicit_zero_base_addr(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            exported_functions=[_MockExport("exported_func", 0x1000)],
+            sections=[_MockSection(0x20000000, 0x1000)],
+            symbols=[_MockSymbol("local_func", 0x200)],
+            imagebase=0x140000000,
+        )
+        symbols = provider.collectSymbols(pe_binary, base_addr=0)
+        self.assertEqual(symbols[0x1000], "exported_func")
+        self.assertEqual(symbols[0x1200], "local_func")
+        self.assertNotIn(0x140001000, symbols)
 
     def test_parse_oep_uses_base_addr_plus_rva(self):
         provider = PeSymbolProvider(None)
