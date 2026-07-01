@@ -226,11 +226,12 @@ class FunctionAnalysisState:
             block = []
             for i in range(ins[start], len(self.instructions)):
                 current = self.instructions[i]
+                current_mnemonic = current[2].split(" ")[-1]
                 block.append(current)
                 # if one code reference is to another address than the next
                 if (
                     current[0] in self.code_refs_from
-                    and current[2] not in self.CALL_MNEMONICS
+                    and current_mnemonic not in self.CALL_MNEMONICS
                     and i != len(self.instructions) - 1
                     and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
                 ):
@@ -252,7 +253,7 @@ class FunctionAnalysisState:
                     )
                 ):
                     break
-                if current[2] in self.END_MNEMONICS:
+                if current_mnemonic in self.END_MNEMONICS:
                     break
             if block:
                 blocks.append(block)
