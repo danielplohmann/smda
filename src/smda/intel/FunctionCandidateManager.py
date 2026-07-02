@@ -217,7 +217,7 @@ class FunctionCandidateManager:
                     break
         if len(instruction_sequence) > instructions_analyzed and instruction_sequence[
             instructions_analyzed
-        ].mnemonic in [
+        ].mnemonic.split(" ")[-1] in [
             "leave",
             "ret",
             "retn",
