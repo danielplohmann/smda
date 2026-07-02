@@ -303,6 +303,28 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual([[ins[0] for ins in block] for block in state.getBlocks()], [[0x1000, 0x1006, 0x1008]])
 
+    def test_alignment_sequence_recognizes_prefixed_ret(self):
+        # a bnd-prefixed ret right after a run of alignment padding is still real code, not
+        # more padding - isAlignmentSequence() must recognize it like a plain "ret".
+        manager = FunctionCandidateManager(SmdaConfig())
+        instruction_sequence = [
+            SimpleNamespace(address=0x100F, bytes=b"\x90", mnemonic="nop"),
+            SimpleNamespace(address=0x1010, bytes=b"\xf2\xc3", mnemonic="bnd ret"),
+        ]
+
+        self.assertFalse(manager.isAlignmentSequence(instruction_sequence))
+
+    def test_gap_stub_with_prefixed_jmp_is_accepted(self):
+        # a single bnd-prefixed jmp stub discovered via gap-scanning (e.g. a misaligned
+        # import-jmp thunk) must still be accepted as a legitimate function, matching the
+        # plain "jmp" case.
+        state = FunctionAnalysisState(0x1000, SimpleNamespace(getByte=lambda addr: 0xF2))
+        state.is_sanely_ending = False
+        state.num_blocks_analyzed = 0
+        state.instructions = [(0x1000, 6, "bnd jmp", "dword ptr [0x2000]", b"")]
+
+        self.assertTrue(state.finalizeAnalysis(as_gap=True))
+
     @staticmethod
     def _ins(mnemonic, op_str, address=0x1000, size=0):
         # (address, size, mnemonic, op_str) as produced by capstone disasm_lite

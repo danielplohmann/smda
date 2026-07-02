@@ -215,6 +215,19 @@ class DisassemblyTestSuite(unittest.TestCase):
                 data["expected_opc"],
             )
 
+    def testIntelEscapeOperandsHandlesPrefixedMnemonic(self):
+        # capstone reports a bnd-prefixed call as mnemonic "bnd call"; offsets_only mode must
+        # still recognize it as a call and collapse the operand to OFFSET, not escape "0x1010"
+        # as a bare constant.
+        smda_ins = SmdaInstruction((0, "f2e80b100000", "bnd call", "0x1010"))
+        self.assertEqual(IntelInstructionEscaper.escapeOperands(smda_ins, offsets_only=True), "OFFSET")
+
+    def testIntelEscapeBinaryHandlesPrefixedMnemonic(self):
+        # the relative displacement of a bnd-prefixed call must still be wildcarded like a
+        # plain call, not left as raw, un-escaped bytes.
+        smda_ins = SmdaInstruction((0, "f2e80b100000", "bnd call", "0x1010"))
+        self.assertEqual(IntelInstructionEscaper.escapeBinary(smda_ins), "f2e8????????")
+
     def testCilInstructionWildcarding(self):
         test_data = [
             # call MemberRef

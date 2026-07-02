@@ -199,20 +199,25 @@ class SmdaFunction:
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
             return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("invoke-"))
-        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic == "call")
+        # capstone prepends mandatory prefixes (bnd/rep/lock/...) to the mnemonic string
+        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.split(" ")[-1] == "call")
 
     @property
     def num_returns(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
             return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("return"))
-        return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic in ("ret", "retn"))
+        # capstone prepends mandatory prefixes (bnd/rep/lock/...) to the mnemonic string
+        return sum(
+            1 for block in self.blocks.values() for ins in block if ins.mnemonic.split(" ")[-1] in ("ret", "retn")
+        )
 
     def isApiThunk(self):
         if self.num_instructions != 1:
             return False
         first_ins = self.blocks[self.offset][0]
-        if first_ins.mnemonic not in ["jmp", "call"]:
+        # capstone prepends mandatory prefixes (bnd/rep/lock/...) to the mnemonic string
+        if first_ins.mnemonic.split(" ")[-1] not in ["jmp", "call"]:
             return False
         return len(self.apirefs) != 0
 
