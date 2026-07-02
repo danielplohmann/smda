@@ -147,7 +147,18 @@ class FunctionCandidateManager:
         prev_ins = 0
         min_code = min(self.disassembly.code_map) if self.disassembly.code_map else self.getBitMask()
         max_code = max(self.disassembly.code_map) if self.disassembly.code_map else 0
-        for code_area in self._code_areas:
+        # Raw memory dumps are loaded without section info, so self._code_areas is empty; fall back to
+        # the full mapped image so the head (before the first instruction) and tail (after the last
+        # instruction) still get gap-scanned. Without this, functions that lie entirely before the
+        # first or after the last already-discovered instruction (e.g. trailing jmp/thunk tables) are
+        # never reached by the gap pass.
+        code_areas = self._code_areas or [
+            [
+                self.disassembly.binary_info.base_addr,
+                self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size,
+            ]
+        ]
+        for code_area in code_areas:
             if code_area[0] < min_code < code_area[1] and min_code != code_area[0]:
                 gaps.append([code_area[0], min_code, min_code - code_area[0]])
             if code_area[0] < max_code < code_area[1] and max_code != code_area[1]:

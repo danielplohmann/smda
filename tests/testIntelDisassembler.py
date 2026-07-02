@@ -269,6 +269,26 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(manager.candidates[0x1010].call_ref_sources, {0x1000})
 
+    def test_function_gaps_cover_head_and_tail_without_code_areas(self):
+        # Raw memory dumps are loaded without section info (_code_areas is empty). The gap scan
+        # must still cover the head (before the first instruction) and tail (after the last
+        # instruction) of the mapped image, otherwise functions that lie entirely before the first
+        # or after the last already-discovered instruction (e.g. trailing jmp/thunk tables) are
+        # never reached by the gap pass.
+        manager = FunctionCandidateManager(SmdaConfig())
+        binary_info = BinaryInfo(b"\x00" * 0x100)
+        binary_info.base_addr = 0x1000
+        binary_info.binary_size = 0x100
+        manager._code_areas = []
+        # only one already-discovered instruction, in the middle of the image
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={0x1080: 1})
+
+        manager.updateFunctionGaps()
+
+        # a head gap [base_addr, first_instruction) and a tail gap [last_instruction, image_end)
+        self.assertIn([0x1000, 0x1080, 0x80], manager.function_gaps)
+        self.assertIn([0x1080, 0x1100, 0x80], manager.function_gaps)
+
     @staticmethod
     def _ins(mnemonic, op_str, address=0x1000, size=0):
         # (address, size, mnemonic, op_str) as produced by capstone disasm_lite
