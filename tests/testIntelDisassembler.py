@@ -285,9 +285,12 @@ class TestIntelDisassembler(unittest.TestCase):
 
         manager.updateFunctionGaps()
 
-        # a head gap [base_addr, first_instruction) and a tail gap [last_instruction, image_end)
+        # a head gap [base_addr, first_instruction) and a tail gap that starts AFTER the last
+        # instruction's address (max_code + 1, mirroring the interior-hole branch). Starting the
+        # tail gap at max_code itself would leave the gap-pointer on a code_map address, which
+        # getNextGap() cannot advance past -- the tail would never be scanned.
         self.assertIn([0x1000, 0x1080, 0x80], manager.function_gaps)
-        self.assertIn([0x1080, 0x1100, 0x80], manager.function_gaps)
+        self.assertIn([0x1081, 0x1100, 0x7F], manager.function_gaps)
 
     @staticmethod
     def _ins(mnemonic, op_str, address=0x1000, size=0):
