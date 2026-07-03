@@ -8,7 +8,7 @@ from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.utility.BracketQueue import BracketQueue
 from smda.utility.PriorityQueue import PriorityQueue
 
-from .definitions import DEFAULT_PROLOGUES, GAP_SEQUENCES
+from .definitions import COMMON_PROLOGUES, DEFAULT_PROLOGUES, GAP_SEQUENCES
 from .FunctionCandidate import FunctionCandidate
 from .LanguageAnalyzer import LanguageAnalyzer
 
@@ -197,6 +197,13 @@ class FunctionCandidateManager:
     def isEffectiveNop(self, byte_sequence):
         return byte_sequence in GAP_SEQUENCES[len(byte_sequence)]
 
+    def isHotpatchPrologue(self, byte_window):
+        # An MSVC hotpatch stub (`mov edi, edi; push ebp; mov ebp, esp`) opens with a
+        # `mov edi, edi` that is byte-identical to a 2-byte effective NOP, yet it IS the
+        # function's true entry. Recognizing the 5-byte prologue lets callers avoid
+        # skipping/rounding past that leading NOP and mislocating the start two bytes late.
+        return byte_window in COMMON_PROLOGUES["5"].get(self.bitness, {})
+
     def isAlignmentSequence(self, instruction_sequence):
         is_alignment_sequence = False
         instructions_analyzed = 0
@@ -285,6 +292,11 @@ class FunctionCandidateManager:
             found_multi_byte_nop = False
             for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
                 if get_window_slice(gap_offset, gap_length) in GAP_SEQUENCES[gap_length]:
+                    # Do not skip a `mov edi, edi` effective NOP when it is the landing pad of
+                    # a hotpatch stub: that byte pair is the function's true start, and skipping
+                    # it would mislocate the function two bytes late (at the `push ebp`).
+                    if self.isHotpatchPrologue(get_window_slice(gap_offset, 5)):
+                        break
                     LOGGER.debug(
                         "nextGapCandidate() found %d byte effective nop - gap_ptr += %d: 0x%08x",
                         gap_length,

@@ -269,6 +269,56 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(manager.candidates[0x1010].call_ref_sources, {0x1000})
 
+    def _first_gap_candidate(self, stub, base=0x1000, stub_off=0x10):
+        # Build a buffer with a gap (between two mapped instructions at base and base+0x100),
+        # int3-padded up to `stub` at base+stub_off, then drive the gap scanner once.
+        from capstone import CS_ARCH_X86, CS_MODE_32, Cs
+
+        buf = bytearray(b"\x90")  # base+0x00: a mapped instruction bounding the gap
+        buf += b"\xcc" * (stub_off - len(buf))  # int3 padding leading into the gap
+        buf += stub  # base+stub_off: the candidate bytes under test
+        buf += b"\xcc" * (0x200 - len(buf))  # trailing fill
+
+        binary_info = BinaryInfo(bytes(buf))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(buf)
+        binary_info.bitness = 32
+        disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            code_map={base: 1, base + 0x100: 1},
+            data_map={},
+            getRawBytes=lambda offset, n: bytes(buf)[offset : offset + n],
+        )
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = disassembly
+        manager.bitness = 32
+        manager.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
+        return manager.nextGapCandidate()
+
+    def test_hotpatch_prologue_not_skipped_as_effective_nop(self):
+        # `mov edi, edi; push ebp; mov ebp, esp` is an MSVC hotpatch stub whose leading
+        # `mov edi, edi` (0x8bff) is an effective NOP but IS the true function start. The
+        # gap scanner must return the stub start, not skip it to the `push ebp` two bytes
+        # later (which would mislocate the function and drop its true entry).
+        self.assertEqual(self._first_gap_candidate(b"\x8b\xff\x55\x8b\xec"), 0x1010)
+        # control: a bare `mov edi, edi` not followed by a real prologue is still treated
+        # as an effective NOP and skipped, so it is never returned as the candidate start.
+        self.assertNotEqual(self._first_gap_candidate(b"\x8b\xff\x90\x90\x90"), 0x1010)
+
+    def test_is_hotpatch_prologue_predicate(self):
+        # The shared predicate backs both the gap scanner and the post-call alignment-cut
+        # path, so lock its contract directly: both `mov edi, edi` encodings of the MSVC
+        # hotpatch stub match in 32-bit, non-hotpatch windows do not, and 64-bit never
+        # matches (the stub is a 32-bit convention; COMMON_PROLOGUES["5"][64] is empty).
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.bitness = 32
+        self.assertTrue(manager.isHotpatchPrologue(b"\x8b\xff\x55\x8b\xec"))
+        self.assertTrue(manager.isHotpatchPrologue(b"\x89\xff\x55\x8b\xec"))
+        self.assertFalse(manager.isHotpatchPrologue(b"\x8b\xff\x90\x90\x90"))
+        self.assertFalse(manager.isHotpatchPrologue(b"\x55\x8b\xec\x83\xec"))  # bare prologue, no NOP
+        manager.bitness = 64
+        self.assertFalse(manager.isHotpatchPrologue(b"\x8b\xff\x55\x8b\xec"))
+
     @staticmethod
     def _ins(mnemonic, op_str, address=0x1000, size=0):
         # (address, size, mnemonic, op_str) as produced by capstone disasm_lite

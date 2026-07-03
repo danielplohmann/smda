@@ -367,12 +367,19 @@ class X86Backend(ArchBackend):
                     state.endBlock()
                     state.setSanelyEnding(True)
                     if d.fc_manager.isAlignmentSequence(instruction_sequence):
-                        next_aligned_address = previous_address + (16 - previous_address % 16)
+                        # A hotpatch stub right after a call can look like alignment padding
+                        # (its leading `mov edi, edi` is an effective NOP), but that byte pair
+                        # is the next function's true entry. Seed it directly rather than the
+                        # 16-byte-rounded address, which would land two bytes late.
+                        if d.fc_manager.isHotpatchPrologue(d._getDisasmWindowBuffer(i_address)[:5]):
+                            next_candidate_address = i_address
+                        else:
+                            next_candidate_address = previous_address + (16 - previous_address % 16)
                         LOGGER.debug(
                             "  Adding: 0x%x as candidate.",
-                            next_aligned_address,
+                            next_candidate_address,
                         )
-                        d.fc_manager.addCandidate(next_aligned_address, is_gap=True)
+                        d.fc_manager.addCandidate(next_candidate_address, is_gap=True)
                     return True
                 else:
                     LOGGER.debug(
