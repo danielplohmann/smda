@@ -8,4 +8,4 @@ ruff
 pre-commit
 build
 twine
-tqdm>=4.68.3
+tqdm>=4.68.4
