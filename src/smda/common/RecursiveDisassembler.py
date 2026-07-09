@@ -275,6 +275,7 @@ class RecursiveDisassembler:
             while True:
                 for i in cache:
                     i_address, i_size, i_mnemonic, i_op_str = i
+
                     i_op_str = i_op_str.strip()
                     i_relative_address = i_address - self.disassembly.binary_info.base_addr
                     i_bytes = self.disassembly.binary_info.binary[i_relative_address : i_relative_address + i_size]

@@ -25,7 +25,7 @@ if __name__ == "__main__":
         binary = ida_interface.getBinary()
         base_addr = ida_interface.getBaseAddr()
         DISASSEMBLER = Disassembler(backend=BACKEND)
-        REPORT = DISASSEMBLER.disassembleBuffer(binary, base_addr)
+        REPORT = DISASSEMBLER.disassembleBuffer(binary, base_addr, architecture="aarch64")
         output_path = ida_interface.getIdbDir()
         output_filepath = output_path + "ConvertedFromIdb.smda"
         with open(output_filepath, "w") as fout:

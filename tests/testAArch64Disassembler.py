@@ -927,8 +927,8 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x534)
-        self.assertEqual(len(self.report.xcfg), 277)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19882)
+        self.assertEqual(len(self.report.xcfg), 278)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19881)
         self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3525)
         self.assertIsNotNone(self.report.getFunction(0x400534))
 
@@ -979,7 +979,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
         self.assertEqual(roundtrip.oep, 0x534)
-        self.assertEqual(len(roundtrip.xcfg), 277)
+        self.assertEqual(len(roundtrip.xcfg), 278)
 
 
 class TestAArch64Analyzers(unittest.TestCase):
@@ -1271,6 +1271,73 @@ class TestAArch64Analyzers(unittest.TestCase):
 
         targets = analyzer.getJumpTargets(instructions[-1], fake_state)
         self.assertEqual(targets[:3], [0x411120, 0x411140, 0x4110E0])
+
+
+class TestAArch64MovMacroSplit(unittest.TestCase):
+    """IDA's MOV-macro feature collapses MOVZ+MOVK pairs (materialising a 32-bit
+    constant in a Wn register across two 4-byte AArch64 instructions) into one
+    logical "head" whose reported size is 8 bytes.  Without splitting,
+    IdaExporter._convertIdaInsToSmda would feed all 8 bytes to capstone and
+    take only ``cache[0]`` (the MOVZ), silently dropping the MOVK and producing
+    an exported report that drifted from SMDA's own per-instruction AArch64 output.
+
+    These tests exercise IdaExporter._splitInstructionBytes directly (no IDA
+    mocking required), verifying that an 8-byte macro head from IDA is correctly
+    unpacked into two 4-byte sub-instructions.
+    """
+
+    def _split(self, offset, instruction_bytes):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.ida.IdaExporter import IdaExporter
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        errors = {}
+        return (
+            IdaExporter._splitInstructionBytes(capstone, offset, instruction_bytes, "aarch64", errors),
+            errors,
+        )
+
+    def test_movz_movk_macro_splits_into_two_4_byte_instructions(self):
+        # The IDA export example:
+        #   03 20 80 52   MOVZ W3, #0x100 -> capstone: 'mov' w3, #0x100
+        #   03 00 A1 72   MOVK W3, #0x800, LSL #16 -> capstone: 'movk' w3, #0x800, lsl #16
+        # originally shown by IDA as one 8-byte "MOV W3, #0x8000100" macro at 0x100004838.
+        macro_bytes = bytes.fromhex("032080520300A172")
+        insns, errors = self._split(0x100004838, macro_bytes)
+
+        self.assertEqual(errors, {})
+        self.assertEqual(len(insns), 2)
+
+        addr, size, mnem, ops, raw = insns[0]
+        self.assertEqual(addr, 0x100004838)
+        self.assertEqual(size, 4)
+        self.assertEqual(mnem, "mov")
+        self.assertEqual(ops, "w3, #0x100")
+        self.assertEqual(raw, bytes.fromhex("03208052"))
+
+        addr, size, mnem, ops, raw = insns[1]
+        self.assertEqual(addr, 0x10000483C)
+        self.assertEqual(size, 4)
+        self.assertEqual(mnem, "movk")
+        self.assertEqual(ops, "w3, #0x800, lsl #16")
+        self.assertEqual(raw, bytes.fromhex("0300A172"))
+
+    def test_single_4_byte_instruction_still_returns_one_tuple(self):
+        # Non-macro AArch64 instructions return exactly 4 bytes from
+        # IdaInterface.getInstructionBytes; the split helper must preserve
+        # the single-instruction output shape (a one-element list).
+        single = bytes.fromhex("200080D2")  # mov x0, #1
+        insns, errors = self._split(0x401000, single)
+
+        self.assertEqual(errors, {})
+        self.assertEqual(len(insns), 1)
+        addr, size, mnem, ops, raw = insns[0]
+        self.assertEqual(addr, 0x401000)
+        self.assertEqual(size, 4)
+        self.assertEqual(mnem, "mov")
+        self.assertEqual(ops, "x0, #1")
+        self.assertEqual(raw, single)
 
 
 if __name__ == "__main__":
