@@ -81,6 +81,34 @@ class PdataExtractionTestSuite(unittest.TestCase):
         self.assertNotIn(BASE_ADDR, candidates)
         self.assertEqual(len(candidates), 1)
 
+    def test_pdata_chained_unwind_info_excluded(self):
+        config = SmdaConfig()
+        fcm = FunctionCandidateManager(config)
+
+        # Entry format: Start RVA, End RVA, Unwind RVA
+        entries = [
+            (0x2000, 0x2040, 0x3000),  # primary entry, unwind info at 0x3000 (Flags=0)
+            (0x2050, 0x2090, 0x3010),  # chained entry, unwind info at 0x3010 (UNW_FLAG_CHAININFO set)
+        ]
+
+        pdata_bytes = b"".join(struct.pack("III", *entry) for entry in entries)
+
+        binary = bytearray(BINARY_SIZE)
+        binary[PDATA_OFFSET : PDATA_OFFSET + len(pdata_bytes)] = pdata_bytes
+        # UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7); 0x20 sets
+        # UNW_FLAG_CHAININFO (0x4) with Version 0.
+        binary[0x3010] = 0x20
+
+        disasm = DisassemblyResult()
+        disasm.binary_info = MockBinaryInfo(64, BASE_ADDR, bytes(binary), pdata_size=len(pdata_bytes))
+
+        fcm.init(disasm)
+
+        candidates = fcm.candidates
+        self.assertIn(BASE_ADDR + 0x2000, candidates)
+        self.assertNotIn(BASE_ADDR + 0x2050, candidates)
+        self.assertEqual(len(candidates), 1)
+
     def test_pdata_misaligned_size(self):
         config = SmdaConfig()
         fcm = FunctionCandidateManager(config)

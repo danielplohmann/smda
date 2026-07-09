@@ -53,7 +53,14 @@ class PeSymbolProvider(AbstractLabelProvider):
     def parseExports(self, lief_binary, base_addr=None):
         active_base = self._resolve_base_addr(lief_binary, base_addr)
         function_symbols = {}
-        for function in lief_binary.exported_functions:
+        export = lief_binary.get_export()
+        if export is None:
+            return function_symbols
+        for function in export.entries:
+            if function.is_extern or function.is_forwarded:
+                # forwarder/extern entries redirect to another module's export and have no
+                # local address (LIEF sets .address to 0 for them) - not a local function.
+                continue
             function_name = ""
             with contextlib.suppress(UnicodeDecodeError, AttributeError):
                 # here may occur a LIEF exception that we want to skip ->
@@ -65,25 +72,20 @@ class PeSymbolProvider(AbstractLabelProvider):
 
     def parseSymbols(self, lief_binary, base_addr=None):
         active_base = self._resolve_base_addr(lief_binary, base_addr)
-        # find VA of first code section
         function_symbols = {}
-        code_base_address = None
-        for section in lief_binary.sections:
-            if section.characteristics & 0x20000000:
-                code_base_address = active_base + section.virtual_address
-                break
-        if code_base_address is None:
-            return function_symbols
         for symbol in lief_binary.symbols:
             if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
+                if symbol.section is None:
+                    # section_idx 0/-1/-2 (undefined-external/absolute/debug): not a locally
+                    # defined function, its value is not a usable in-image offset.
+                    continue
                 function_name = ""
                 with contextlib.suppress(UnicodeDecodeError, AttributeError):
                     # here may occur a LIEF exception that we want to skip ->
                     # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
                     function_name = symbol.name
                 if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
-                    # for some reason, we need to add the section_offset of .text here
-                    function_offset = code_base_address + symbol.value
+                    function_offset = active_base + symbol.section.virtual_address + symbol.value
                     if function_offset not in function_symbols:
                         function_symbols[function_offset] = function_name
         return function_symbols

@@ -744,12 +744,26 @@ class FunctionCandidateManager:
                 if section_name == ".pdata":
                     rva_start = section_va_start - self.disassembly.binary_info.base_addr
                     rva_end = section_va_end - self.disassembly.binary_info.base_addr
-                    # .pdata entries are 12 bytes long (3 DWORDs)
+                    # .pdata entries are 12 bytes long (3 DWORDs): BeginAddress, EndAddress, UnwindInfoAddress
                     for offset in range(rva_start, rva_end - 11, 12):
-                        packed_dword = self.disassembly.binary_info.binary[offset : offset + 4]
-                        if len(packed_dword) < 4:
+                        packed_entry = self.disassembly.getRawBytes(offset, 12)
+                        if len(packed_entry) < 12:
                             break
-                        rva_function_candidate = struct.unpack("I", packed_dword)[0]
+                        rva_function_candidate, _rva_function_end, rva_unwind_info = struct.unpack("<III", packed_entry)
                         if rva_function_candidate == 0:
                             break
+                        if self._isChainedUnwindInfo(rva_unwind_info):
+                            # UNW_FLAG_CHAININFO: this entry is a secondary fragment (e.g. a
+                            # split-off cold/epilogue chunk) chained to another function's
+                            # primary RUNTIME_FUNCTION entry, not an independent function start.
+                            continue
                         self.addExceptionCandidate(self.disassembly.binary_info.base_addr + rva_function_candidate)
+
+    def _isChainedUnwindInfo(self, rva_unwind_info):
+        # x64 UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7);
+        # UNW_FLAG_CHAININFO (0x4) means this RUNTIME_FUNCTION entry chains to another
+        # function's primary entry instead of describing an independent function.
+        header_byte = self.disassembly.getRawBytes(rva_unwind_info, 1)
+        if not header_byte:
+            return False
+        return bool((header_byte[0] >> 3) & 0x4)
