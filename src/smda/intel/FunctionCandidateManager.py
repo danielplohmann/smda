@@ -14,6 +14,10 @@ from .LanguageAnalyzer import LanguageAnalyzer
 
 LOGGER = logging.getLogger(__name__)
 
+# bytes.lstrip() can skip long runs of one-byte padding in C instead of
+# crawling them byte-by-byte in the gap scanner.
+_PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
+
 
 class FunctionCandidateManager:
     def __init__(self, config):
@@ -233,7 +237,7 @@ class FunctionCandidateManager:
                     break
         if len(instruction_sequence) > instructions_analyzed and instruction_sequence[
             instructions_analyzed
-        ].mnemonic in [
+        ].mnemonic.split(" ")[-1] in [
             "leave",
             "ret",
             "retn",
@@ -280,11 +284,15 @@ class FunctionCandidateManager:
                 LOGGER.warning("could not fetch raw byte for gap pointer.")
             # try to find padding symbols and skip them
             if byte in GAP_SEQUENCES[1]:
+                window = get_window_slice(gap_offset, 256)
+                run = len(window) - len(window.lstrip(_PADDING_STRIP_BYTES))
                 LOGGER.debug(
-                    "nextGapCandidate() found 0xCC / 0x00 - gap_ptr += 1: 0x%08x",
+                    "nextGapCandidate() found %d-byte padding run - gap_ptr += %d: 0x%08x",
+                    run,
+                    run,
                     self.gap_pointer,
                 )
-                self.gap_pointer += 1
+                self.gap_pointer += run if run else 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
             ins_buf = list(self.capstone.disasm_lite(get_window_slice(gap_offset, 15), gap_offset))

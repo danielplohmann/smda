@@ -167,14 +167,15 @@ class FunctionAnalysisState:
             # for instruction in sorted(self.instructions):
             #    print("0x%08x: %s %s" % (instruction[0], instruction[2], instruction[3]))
         if as_gap and not self.is_sanely_ending:
-            if len(self.instructions) == 1 and self.instructions[0][2] == "jmp":
+            # capstone prepends mandatory prefixes (bnd/rep/lock/...) to the mnemonic string
+            if len(self.instructions) == 1 and self.instructions[0][2].split(" ")[-1] == "jmp":
                 byte = self.disassembly.getByte(self.instructions[0][0])
                 if isinstance(byte, int):
                     byte = chr(byte)
                 if byte == "\xeb":
                     return False
                 # sane case, stub found that just jumps to a referenced function
-            elif self.num_blocks_analyzed == 1 and self.instructions[-1][2] in [
+            elif self.num_blocks_analyzed == 1 and self.instructions[-1][2].split(" ")[-1] in [
                 "jmp",
                 "call",
             ]:
@@ -226,11 +227,12 @@ class FunctionAnalysisState:
             block = []
             for i in range(ins[start], len(self.instructions)):
                 current = self.instructions[i]
+                current_mnemonic = current[2].split(" ")[-1]
                 block.append(current)
                 # if one code reference is to another address than the next
                 if (
                     current[0] in self.code_refs_from
-                    and current[2] not in self.CALL_MNEMONICS
+                    and current_mnemonic not in self.CALL_MNEMONICS
                     and i != len(self.instructions) - 1
                     and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
                 ):
@@ -252,7 +254,7 @@ class FunctionAnalysisState:
                     )
                 ):
                     break
-                if current[2] in self.END_MNEMONICS:
+                if current_mnemonic in self.END_MNEMONICS:
                     break
             if block:
                 blocks.append(block)

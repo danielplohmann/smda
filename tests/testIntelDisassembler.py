@@ -291,6 +291,61 @@ class TestIntelDisassembler(unittest.TestCase):
         # getNextGap() cannot advance past -- the tail would never be scanned.
         self.assertIn([0x1000, 0x1080, 0x80], manager.function_gaps)
         self.assertIn([0x1081, 0x1100, 0x7F], manager.function_gaps)
+    def test_gap_scan_skips_single_byte_padding_run(self):
+        config = SmdaConfig()
+        binary_info = BinaryInfo(b"\x00\x90\xcc\x55\xc3")
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = len(binary_info.binary)
+
+        manager = FunctionCandidateManager(config)
+        manager.disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            code_map={},
+            data_map={},
+            getRawBytes=lambda offset, size: binary_info.binary[offset : offset + size],
+        )
+        manager.bitness = 32
+        manager.capstone = SimpleNamespace(disasm_lite=lambda data, offset: [(offset, 1, "push", "ebp")])
+        manager.function_gaps = [[0x1000, 0x1005, 5]]
+        manager.gap_pointer = 0x1000
+
+        self.assertEqual(manager.nextGapCandidate(), 0x1003)
+
+    def test_prefixed_call_keeps_fallthrough_in_same_block(self):
+        state = FunctionAnalysisState(0x1000, SimpleNamespace())
+        state.instructions = [
+            (0x1000, 6, "bnd call", "0x1010", b""),
+            (0x1006, 2, "xor", "eax, eax", b""),
+            (0x1008, 1, "ret", "", b""),
+        ]
+        state.instruction_start_bytes = {0x1000, 0x1006, 0x1008}
+        state.addCodeRef(0x1000, 0x1010, by_jump=False)
+        state.addCodeRef(0x1000, 0x1006, by_jump=False)
+
+        self.assertEqual([[ins[0] for ins in block] for block in state.getBlocks()], [[0x1000, 0x1006, 0x1008]])
+
+    def test_alignment_sequence_recognizes_prefixed_ret(self):
+        # a bnd-prefixed ret right after a run of alignment padding is still real code, not
+        # more padding - isAlignmentSequence() must recognize it like a plain "ret".
+        manager = FunctionCandidateManager(SmdaConfig())
+        instruction_sequence = [
+            SimpleNamespace(address=0x100F, bytes=b"\x90", mnemonic="nop"),
+            SimpleNamespace(address=0x1010, bytes=b"\xf2\xc3", mnemonic="bnd ret"),
+        ]
+
+        self.assertFalse(manager.isAlignmentSequence(instruction_sequence))
+
+    def test_gap_stub_with_prefixed_jmp_is_accepted(self):
+        # a single bnd-prefixed jmp stub discovered via gap-scanning (e.g. a misaligned
+        # import-jmp thunk) must still be accepted as a legitimate function, matching the
+        # plain "jmp" case.
+        state = FunctionAnalysisState(0x1000, SimpleNamespace(getByte=lambda addr: 0xF2))
+        state.is_sanely_ending = False
+        state.num_blocks_analyzed = 0
+        state.instructions = [(0x1000, 6, "bnd jmp", "dword ptr [0x2000]", b"")]
+
+        self.assertTrue(state.finalizeAnalysis(as_gap=True))
 
     @staticmethod
     def _ins(mnemonic, op_str, address=0x1000, size=0):
