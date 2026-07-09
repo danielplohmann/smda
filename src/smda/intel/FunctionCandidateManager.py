@@ -14,6 +14,10 @@ from .LanguageAnalyzer import LanguageAnalyzer
 
 LOGGER = logging.getLogger(__name__)
 
+# bytes.lstrip() can skip long runs of one-byte padding in C instead of
+# crawling them byte-by-byte in the gap scanner.
+_PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
+
 
 class FunctionCandidateManager:
     def __init__(self, config):
@@ -147,11 +151,31 @@ class FunctionCandidateManager:
         prev_ins = 0
         min_code = min(self.disassembly.code_map) if self.disassembly.code_map else self.getBitMask()
         max_code = max(self.disassembly.code_map) if self.disassembly.code_map else 0
-        for code_area in self._code_areas:
+        # Raw memory dumps are loaded without section info, so self._code_areas is empty; fall back to
+        # the full mapped image so the head (before the first instruction) and tail (after the last
+        # instruction) still get gap-scanned. Without this, functions that lie entirely before the
+        # first or after the last already-discovered instruction (e.g. trailing jmp/thunk tables) are
+        # never reached by the gap pass.
+        using_synthetic_area = not self._code_areas
+        code_areas = self._code_areas or [
+            [
+                self.disassembly.binary_info.base_addr,
+                self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size,
+            ]
+        ]
+        for code_area in code_areas:
             if code_area[0] < min_code < code_area[1] and min_code != code_area[0]:
                 gaps.append([code_area[0], min_code, min_code - code_area[0]])
             if code_area[0] < max_code < code_area[1] and max_code != code_area[1]:
-                gaps.append([max_code, code_area[1], code_area[1] - max_code])
+                # For the synthetic full-image fallback (raw memory dumps with no section info),
+                # the tail gap must start AFTER the last instruction's address, mirroring the
+                # interior-hole branch's prev_ins + 1 below. max_code is itself in code_map, so a
+                # gap starting at max_code leaves the gap-pointer on a code_map address;
+                # getNextGap()'s strict "gap[0] > gap_pointer" test then finds no further gap,
+                # returns the bitmask sentinel, and the scan terminates -- abandoning the whole tail
+                # region unscanned. Section-derived code areas keep the legacy start (behavior-neutral).
+                tail_start = max_code + 1 if using_synthetic_area else max_code
+                gaps.append([tail_start, code_area[1], code_area[1] - tail_start])
         for ins in sorted(self.disassembly.code_map.keys()):
             if prev_ins != 0 and ins - prev_ins > 1:
                 gaps.append([prev_ins + 1, ins, ins - prev_ins])
@@ -220,7 +244,7 @@ class FunctionCandidateManager:
                     break
         if len(instruction_sequence) > instructions_analyzed and instruction_sequence[
             instructions_analyzed
-        ].mnemonic in [
+        ].mnemonic.split(" ")[-1] in [
             "leave",
             "ret",
             "retn",
@@ -267,11 +291,15 @@ class FunctionCandidateManager:
                 LOGGER.warning("could not fetch raw byte for gap pointer.")
             # try to find padding symbols and skip them
             if byte in GAP_SEQUENCES[1]:
+                window = get_window_slice(gap_offset, 256)
+                run = len(window) - len(window.lstrip(_PADDING_STRIP_BYTES))
                 LOGGER.debug(
-                    "nextGapCandidate() found 0xCC / 0x00 - gap_ptr += 1: 0x%08x",
+                    "nextGapCandidate() found %d-byte padding run - gap_ptr += %d: 0x%08x",
+                    run,
+                    run,
                     self.gap_pointer,
                 )
-                self.gap_pointer += 1
+                self.gap_pointer += run if run else 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
             ins_buf = list(self.capstone.disasm_lite(get_window_slice(gap_offset, 15), gap_offset))

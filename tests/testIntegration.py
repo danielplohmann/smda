@@ -62,7 +62,9 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         cls.cutwail_unmapped_disassembly = disasm.disassembleUnmappedBuffer(cls.cutwail_binary)
 
     def testAsproxDisassemblyCoverage(self):
-        assert len(list(self.asprox_disassembly.getFunctions())) == 105
+        # 106 (was 105): scanning the tail of the mapped image (past the last already-discovered
+        # instruction) recovers one additional gap-candidate function.
+        assert len(list(self.asprox_disassembly.getFunctions())) == 106
 
     def testOep(self):
         # PE header from buffers are not parsed, so we don't get header infos
@@ -108,7 +110,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         report_as_dict = self.asprox_disassembly.toDict()
         assert report_as_dict["status"] == "ok"
         assert report_as_dict["base_addr"] == 0x8D0000
-        assert report_as_dict["statistics"]["num_instructions"] == 15706
+        assert report_as_dict["statistics"]["num_instructions"] == 15714
         assert report_as_dict["sha256"] == "db8a133fed1b706608a4492079b702ded6b70369a980d2b5ae355a6adc78ef00"
         SmdaReport.fromDict(report_as_dict)
 

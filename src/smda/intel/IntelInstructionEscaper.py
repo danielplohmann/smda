@@ -2114,7 +2114,7 @@ class IntelInstructionEscaper:
         esc_regs = True
         esc_consts = True
         if offsets_only:
-            if ins.mnemonic in [
+            if ins.mnemonic.split(" ")[-1] in [
                 "call",
                 "lcall",
                 "jmp",
@@ -2191,11 +2191,12 @@ class IntelInstructionEscaper:
     @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
         escaped_sequence = ins.bytes
+        mnemonic = ins.mnemonic.split(" ")[-1]
         # remove segment, operand, address, repeat override prefixes
-        if ins.mnemonic in ["call", "lcall", "jmp", "ljmp", "loop", "loopne", "loope"]:
+        if mnemonic in ["call", "lcall", "jmp", "ljmp", "loop", "loopne", "loope"]:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
             return escaped_sequence
-        if ins.mnemonic in [
+        if mnemonic in [
             "je",
             "jne",
             "js",
