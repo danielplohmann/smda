@@ -31,4 +31,5 @@ profiling/output/
 # Local dev container config (not for upstream)
 .devcontainer/
 .dockerignore
-validation
+# Validation scripts and data
+/validation
