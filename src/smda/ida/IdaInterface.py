@@ -52,7 +52,7 @@ class IdaInterface:
 class Ida74Interface(BackendInterface):
     def __init__(self):
         self.version = "IDA Pro 7.4 - 8.4"
-        self._processor_map = {"metapc": "intel"}
+        self._processor_map = {"metapc": "intel", "ARM": "aarch64"}
         self._api_map = {}
         self._import_module_name = ""
 
@@ -60,6 +60,10 @@ class Ida74Interface(BackendInterface):
         # https://reverseengineering.stackexchange.com/a/11398
         info = ida_idaapi.get_inf_structure()
         procname = info.procname if idaapi.IDA_SDK_VERSION >= 800 else info.procName
+        if procname == "ARM":
+            if self.getBitness() != 64:
+                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
+            return "aarch64"
         if procname in self._processor_map:
             return self._processor_map[procname]
         else:
@@ -177,6 +181,10 @@ class Ida73Interface(BackendInterface):
         # https://reverseengineering.stackexchange.com/a/11398
         info = idaapi.get_inf_structure()
         procname = info.procName
+        if procname == "ARM":
+            if self.getBitness() != 64:
+                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
+            return "aarch64"
         if procname in self._processor_map:
             return self._processor_map[procname]
         else:
@@ -290,6 +298,10 @@ class Ida85Interface(BackendInterface):
 
     def getArchitecture(self):
         procname = idaapi.inf_get_procname()
+        if procname == "ARM":
+            if self.getBitness() != 64:
+                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
+            return "aarch64"
         if procname in self._processor_map:
             return self._processor_map[procname]
         else:

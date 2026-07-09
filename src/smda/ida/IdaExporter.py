@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
+from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
 
 from smda.DisassemblyResult import DisassemblyResult
 
@@ -15,37 +15,63 @@ class IdaExporter:
         self.config = config
         self.ida_interface = IdaInterface()
         self.bitness = bitness if bitness else self.ida_interface.getBitness()
+        self.architecture = self.ida_interface.getArchitecture()
         self.capstone = None
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
         self._initCapstone()
 
     def _initCapstone(self):
-        self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
-        if self.bitness == 64:
+        if self.architecture == "aarch64":
+            self.capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        elif self.bitness == 64:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
+        else:
+            self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
+
+    @staticmethod
+    def _splitInstructionBytes(capstone, offset, instruction_bytes, architecture, errors=None):
+        """Split *instruction_bytes* (which IDA may report as N×4 bytes for an AArch64
+        MOV-macro head) into one ``(addr, size, mnemonic, op_str, bytes)`` tuple per
+        decoded 4-byte instruction.
+
+        Background
+        ----------
+        IDA's MOV-macro feature collapses a ``MOVZ+MOVK`` pair (materialising a 32-bit
+        constant in a Wn register across two 4-byte AArch64 instructions) into one
+        logical "head" whose reported size is 8 bytes.  Without splitting,
+        :meth:`analyzeBuffer` would pass the whole 8-byte buffer to
+        :meth:`capstone.disasm_lite` and then take only ``cache[0]`` (the MOVZ),
+        silently dropping the MOVK and producing an exported report that drifted from
+        SMDA's own per-instruction AArch64 output.
+
+        This static helper iterates every instruction capstone decoded from the buffer
+        and emits one tuple per sub-instruction with correctly sliced 4-byte payloads,
+        so both the MOVZ (head) and the MOVK (head+4) appear as their own records.
+        """
+        cache = list(capstone.disasm_lite(instruction_bytes, offset))
+        out = []
+        consumed = 0
+        for i_address, i_size, i_mnemonic, i_op_str in cache:
+            sub_bytes = bytes(instruction_bytes[consumed : consumed + i_size])
+            out.append((i_address, i_size, i_mnemonic, i_op_str, sub_bytes))
+            consumed += i_size
+        while consumed < len(instruction_bytes):
+            chunk = 4 if architecture == "aarch64" else (len(instruction_bytes) - consumed)
+            chunk = min(chunk, len(instruction_bytes) - consumed)
+            sub_bytes = bytes(instruction_bytes[consumed : consumed + chunk])
+            bytes_hex = sub_bytes.hex()
+            LOGGER.warning("missing capstone disassembly output at 0x%x (%s)", offset + consumed, bytes_hex)
+            if errors is not None:
+                errors[offset + consumed] = {"type": "capstone disassembly failure", "instruction_bytes": bytes_hex}
+            out.append((offset + consumed, chunk, "error", "error", sub_bytes))
+            consumed += chunk
+        return out
 
     def _convertIdaInsToSmda(self, offset, instruction_bytes):
-        cache = list(self.capstone.disasm_lite(instruction_bytes, offset))
-        if cache:
-            i_address, i_size, i_mnemonic, i_op_str = cache[0]
-            smda_ins = (i_address, i_size, i_mnemonic, i_op_str, instruction_bytes)
-        else:
-            # record error and emit placeholder instruction
-            bytes_as_hex = "".join([f"{c:02x}" for c in bytearray(instruction_bytes)])
-            LOGGER.warning("missing capstone disassembly output at 0x%x (%s)", offset, bytes_as_hex)
-            self.disassembly.errors[offset] = {
-                "type": "capstone disassembly failure",
-                "instruction_bytes": bytes_as_hex,
-            }
-            smda_ins = (
-                offset,
-                len(instruction_bytes),
-                "error",
-                "error",
-                bytearray(instruction_bytes),
-            )
-        return smda_ins
+        return self._splitInstructionBytes(
+            self.capstone, offset, instruction_bytes, self.architecture, self.disassembly.errors
+        )
 
     def analyzeBuffer(self, binary_info, cb_analysis_timeout=None):
         """instead of performing a full analysis, simply collect all data from IDA and convert it into a report"""
@@ -68,20 +94,25 @@ class IdaExporter:
                 converted_block = []
                 for instruction_offset in block:
                     instruction_bytes = self.ida_interface.getInstructionBytes(instruction_offset)
-                    smda_instruction = self._convertIdaInsToSmda(instruction_offset, instruction_bytes)
-                    converted_block.append(smda_instruction)
-                    self.disassembly.instructions[smda_instruction[0]] = (
-                        smda_instruction[2],
-                        smda_instruction[1],
-                    )
-                    in_refs = self.ida_interface.getCodeInRefs(smda_instruction[0])
-                    for in_ref in in_refs:
-                        self.disassembly.addCodeRefs(in_ref[0], in_ref[1])
-                    out_refs = self.ida_interface.getCodeOutRefs(smda_instruction[0])
-                    for out_ref in out_refs:
-                        self.disassembly.addCodeRefs(out_ref[0], out_ref[1])
-                        if out_ref[1] in api_map:
-                            self.disassembly.addr_to_api[instruction_offset] = api_map[out_ref[1]]
+                    smda_instructions = self._convertIdaInsToSmda(instruction_offset, instruction_bytes)
+                    num_subs = len(smda_instructions)
+                    for idx, smda_instruction in enumerate(smda_instructions):
+                        converted_block.append(smda_instruction)
+                        self.disassembly.instructions[smda_instruction[0]] = (
+                            smda_instruction[2],
+                            smda_instruction[1],
+                        )
+                        # IDA tracks code refs at the macro-head level only; for split
+                        # macro heads, attach in-refs to the first sub-instruction (entry)
+                        # and out-refs to the last sub-instruction (exit).
+                        if idx == 0:
+                            for in_ref in self.ida_interface.getCodeInRefs(instruction_offset):
+                                self.disassembly.addCodeRefs(in_ref[0], in_ref[1])
+                        if idx == num_subs - 1:
+                            for out_ref in self.ida_interface.getCodeOutRefs(instruction_offset):
+                                self.disassembly.addCodeRefs(out_ref[0], out_ref[1])
+                                if out_ref[1] in api_map:
+                                    self.disassembly.addr_to_api[smda_instruction[0]] = api_map[out_ref[1]]
                 converted_function.append(converted_block)
             self.disassembly.functions[function_offset] = converted_function
             if self.disassembly.isRecursiveFunction(function_offset):

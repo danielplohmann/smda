@@ -130,6 +130,7 @@ class AArch64Backend(ArchBackend):
     @classmethod
     def _callFallthroughFunctionStart(cls, d, addr):
         if addr in d.fc_manager.getFunctionStartCandidates():
+            print(f"found candidate at call fallthrough 0x{addr:08x}")
             return addr
 
         cursor = addr
@@ -138,7 +139,13 @@ class AArch64Backend(ArchBackend):
             skipped_nop = True
             cursor += INSTRUCTION_SIZE
         if skipped_nop and cursor in d.fc_manager.getFunctionStartCandidates():
+            print(f"skipped NOPs, found candidate at 0x{cursor:08x}")
             return cursor
+        if skipped_nop and cursor % 16 == 0:
+            word = cls._wordAt(d, cursor)
+            if word not in (None, 0, NOP):
+                print(f"skipped NOPs, found non-NOP at 0x{cursor:08x}: 0x{word:08x}")
+                return cursor
         return None
 
     def _analyzeCondBranch(self, d, instruction, state):
