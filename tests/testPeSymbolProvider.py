@@ -36,9 +36,11 @@ class _MockDelayImport:
 
 
 class _MockExport:
-    def __init__(self, name, address):
+    def __init__(self, name, address, *, is_extern=False, is_forwarded=False):
         self.name = name
         self.address = address
+        self.is_extern = is_extern
+        self.is_forwarded = is_forwarded
 
 
 class _MockSection:
@@ -48,10 +50,11 @@ class _MockSection:
 
 
 class _MockSymbol:
-    def __init__(self, name, value):
+    def __init__(self, name, value, *, section=None):
         self.name = name
         self.value = value
         self.complex_type = SimpleNamespace(name="FUNCTION")
+        self.section = section
 
 
 class _MockPeBinary:
@@ -75,6 +78,11 @@ class _MockPeBinary:
         self.delay_imports = delay_imports or []
         self.has_delay_imports = bool(self.delay_imports)
         self.has_imports = bool(self.imports)
+
+    def get_export(self):
+        if not self.exported_functions:
+            return None
+        return SimpleNamespace(entries=self.exported_functions)
 
 
 class TestPeSymbolProviderImports(unittest.TestCase):
@@ -182,7 +190,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200)],
+            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
             imagebase=0x140000000,
         )
         symbols = provider.collectSymbols(pe_binary, base_addr=0x400000)
@@ -194,7 +202,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200)],
+            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
             imagebase=0x140000000,
         )
         symbols = provider.collectSymbols(pe_binary, base_addr=0)
@@ -227,7 +235,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
             imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200)],
+            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
             imagebase=0x140000000,
         )
         binary_info = BinaryInfo(b"")
@@ -254,7 +262,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200)],
+            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
             imagebase=0x140000000,
         )
         binary_info = BinaryInfo(b"")
@@ -266,6 +274,32 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
             symbols = binary_info.getSymbols()
         self.assertEqual(symbols[0x401000], "exported_func")
         self.assertEqual(symbols[0x401200], "local_func")
+
+    def test_parse_exports_skips_forwarded_and_extern_entries(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            exported_functions=[
+                _MockExport("real_func", 0x1000),
+                _MockExport("forwarded_func", 0, is_forwarded=True),
+                _MockExport("extern_func", 0, is_extern=True),
+            ],
+            imagebase=0x140000000,
+        )
+        symbols = provider.parseExports(pe_binary, base_addr=0x400000)
+        self.assertEqual(symbols, {0x401000: "real_func"})
+
+    def test_parse_symbols_skips_entries_with_no_section(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            sections=[_MockSection(0x20000000, 0x1000)],
+            symbols=[
+                _MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000)),
+                _MockSymbol("undefined_func", 0, section=None),
+            ],
+            imagebase=0x140000000,
+        )
+        symbols = provider.parseSymbols(pe_binary, base_addr=0x400000)
+        self.assertEqual(symbols, {0x401200: "local_func"})
 
 
 if __name__ == "__main__":
