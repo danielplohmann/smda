@@ -6,7 +6,7 @@ import logging
 import lief
 
 from .AbstractLabelProvider import AbstractLabelProvider
-from .import_parsers import parse_pe_imports, resolve_pe_base_addr
+from .import_parsers import parse_pe_delay_imports, parse_pe_imports, resolve_pe_base_addr
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
@@ -89,7 +89,9 @@ class PeSymbolProvider(AbstractLabelProvider):
         return function_symbols
 
     def parseImports(self, lief_binary, base_addr=None):
-        return parse_pe_imports(lief_binary, base_addr)
+        import_symbols = parse_pe_imports(lief_binary, base_addr)
+        import_symbols.update(parse_pe_delay_imports(lief_binary, base_addr))
+        return import_symbols
 
     def collectSymbols(self, lief_binary, base_addr=None):
         symbols = {}

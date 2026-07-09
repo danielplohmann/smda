@@ -9,7 +9,7 @@ import lief
 lief.logging.disable()
 
 from .AbstractLabelProvider import AbstractLabelProvider  # noqa: E402
-from .import_parsers import parse_pe_imports  # noqa: E402
+from .import_parsers import parse_pe_delay_imports, parse_pe_imports  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class WinApiResolver(AbstractLabelProvider):
             if not isinstance(lief_binary, lief.PE.Binary):
                 return
             self._api_map["lief"] = parse_pe_imports(lief_binary, binary_info.base_addr)
+            self._api_map["lief"].update(parse_pe_delay_imports(lief_binary, binary_info.base_addr))
 
     def setOsName(self, os_name):
         self._os_name = os_name

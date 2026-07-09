@@ -34,6 +34,28 @@ def parse_pe_imports(lief_binary, base_addr=None):
     return import_symbols
 
 
+def parse_pe_delay_imports(lief_binary, base_addr=None):
+    if not hasattr(lief_binary, "delay_imports"):
+        return {}
+    if not lief_binary.has_delay_imports:
+        return {}
+    active_base = resolve_pe_base_addr(lief_binary, base_addr)
+    magic = getattr(lief_binary.optional_header, "magic", None)
+    ptr_size = 8 if magic is not None and magic == lief.PE.PE_TYPE.PE32_PLUS else 4
+    import_symbols = {}
+    for delay_import in lief_binary.delay_imports:
+        lib_name_lower = (getattr(delay_import, "name", "") or "").lower()
+        for index, func in enumerate(delay_import.entries):
+            slot_addr = active_base + delay_import.iat + index * ptr_size
+            if func.name:
+                import_symbols[slot_addr] = (lib_name_lower, func.name)
+            elif func.is_ordinal:
+                resolved_ordinal = OrdinalHelper.resolveOrdinal(lib_name_lower, func.ordinal)
+                ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
+                import_symbols[slot_addr] = (lib_name_lower, ordinal_name)
+    return import_symbols
+
+
 def parse_elf_relocation_imports(lief_binary):
     """Build import map keyed by relocation slot address: addr -> (lib, name)."""
     if not isinstance(lief_binary, lief.ELF.Binary):

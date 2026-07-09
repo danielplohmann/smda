@@ -21,6 +21,20 @@ class _MockImportLibrary:
         self.entries = entries
 
 
+class _MockDelayImportEntry:
+    def __init__(self, name, *, is_ordinal=False, ordinal=0):
+        self.name = name
+        self.is_ordinal = is_ordinal
+        self.ordinal = ordinal
+
+
+class _MockDelayImport:
+    def __init__(self, name, iat, entries):
+        self.name = name
+        self.iat = iat
+        self.entries = entries
+
+
 class _MockExport:
     def __init__(self, name, address):
         self.name = name
@@ -48,6 +62,7 @@ class _MockPeBinary:
         exported_functions=None,
         sections=None,
         symbols=None,
+        delay_imports=None,
         imagebase=0x140000000,
         addressof_entrypoint=0x1000,
     ):
@@ -57,6 +72,9 @@ class _MockPeBinary:
         self.symbols = symbols or []
         self.imagebase = imagebase
         self.optional_header = SimpleNamespace(addressof_entrypoint=addressof_entrypoint)
+        self.delay_imports = delay_imports or []
+        self.has_delay_imports = bool(self.delay_imports)
+        self.has_imports = bool(self.imports)
 
 
 class TestPeSymbolProviderImports(unittest.TestCase):
@@ -93,6 +111,55 @@ class TestPeSymbolProviderImports(unittest.TestCase):
         provider = PeSymbolProvider(None)
         pe_binary = _MockPeBinary(
             imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
+            imagebase=0x140000000,
+        )
+        expected = provider.parseImports(pe_binary, base_addr=0x400000)
+
+        resolver = WinApiResolver(SimpleNamespace(API_COLLECTION_FILES={}))
+        with mock.patch("lief.PE.Binary", _MockPeBinary):
+            resolver.update(
+                SimpleNamespace(
+                    is_buffer=False,
+                    base_addr=0x400000,
+                    getLiefBinary=lambda: pe_binary,
+                )
+            )
+        self.assertEqual(resolver._api_map["lief"], expected)
+
+    def test_parse_imports_includes_delay_imports(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
+            delay_imports=[
+                _MockDelayImport(
+                    "PSAPI.DLL",
+                    0x4000,
+                    [_MockDelayImportEntry("GetMappedFileNameA"), _MockDelayImportEntry("EnumProcessModules")],
+                )
+            ],
+            imagebase=0x140000000,
+        )
+        imports = provider.parseImports(pe_binary, base_addr=0x400000)
+        self.assertEqual(imports[0x403000], ("kernel32.dll", "CreateFileW"))
+        self.assertEqual(imports[0x404000], ("psapi.dll", "GetMappedFileNameA"))
+        self.assertEqual(imports[0x404004], ("psapi.dll", "EnumProcessModules"))
+
+    def test_parse_imports_resolves_delay_import_ordinals(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            delay_imports=[
+                _MockDelayImport("SHELL32.dll", 0x5000, [_MockDelayImportEntry(None, is_ordinal=True, ordinal=123)])
+            ],
+            imagebase=0x140000000,
+        )
+        imports = provider.parseImports(pe_binary, base_addr=0x400000)
+        self.assertEqual(imports[0x405000], ("shell32.dll", "#123"))
+
+    def test_win_api_resolver_includes_delay_imports(self):
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
+            delay_imports=[_MockDelayImport("PSAPI.DLL", 0x4000, [_MockDelayImportEntry("GetMappedFileNameA")])],
             imagebase=0x140000000,
         )
         expected = provider.parseImports(pe_binary, base_addr=0x400000)
