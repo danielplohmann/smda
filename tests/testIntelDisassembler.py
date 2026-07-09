@@ -318,7 +318,7 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertFalse(manager.isHotpatchPrologue(b"\x55\x8b\xec\x83\xec"))  # bare prologue, no NOP
         manager.bitness = 64
         self.assertFalse(manager.isHotpatchPrologue(b"\x8b\xff\x55\x8b\xec"))
-        
+
     def test_function_gaps_cover_head_and_tail_without_code_areas(self):
         # Raw memory dumps are loaded without section info (_code_areas is empty). The gap scan
         # must still cover the head (before the first instruction) and tail (after the last
@@ -341,6 +341,7 @@ class TestIntelDisassembler(unittest.TestCase):
         # getNextGap() cannot advance past -- the tail would never be scanned.
         self.assertIn([0x1000, 0x1080, 0x80], manager.function_gaps)
         self.assertIn([0x1081, 0x1100, 0x7F], manager.function_gaps)
+
     def test_gap_scan_skips_single_byte_padding_run(self):
         config = SmdaConfig()
         binary_info = BinaryInfo(b"\x00\x90\xcc\x55\xc3")
