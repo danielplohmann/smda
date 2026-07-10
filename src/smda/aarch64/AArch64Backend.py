@@ -7,8 +7,6 @@ from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 
 from smda.common.arch.ArchBackend import ArchBackend
-from smda.utility.ElfFileLoader import ElfFileLoader
-from smda.utility.MachoBinary import get_macho_stub_ranges
 
 from .analyzers import AArch64IndirectCallAnalyzer, AArch64JumpTableAnalyzer, AArch64TfIdf
 from .definitions import (
@@ -241,30 +239,6 @@ class AArch64Backend(ArchBackend):
             if d.disassembly.isAddrWithinMemoryImage(value) and not binary_info.isInCodeAreas(value):
                 emitted.add(value)
                 state.addDataRef(i_address, value)
-
-    @staticmethod
-    def _getPltRanges(binary_info):
-        if not hasattr(binary_info, "_plt_ranges"):
-            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
-                binary_info.raw_data or binary_info.binary,
-                parsed=binary_info.getLiefBinary(),
-            )
-        return binary_info._plt_ranges
-
-    @staticmethod
-    def _getMachoStubRanges(binary_info):
-        if not hasattr(binary_info, "_macho_stub_ranges"):
-            binary_info._macho_stub_ranges = get_macho_stub_ranges(
-                binary_info.getLiefBinary(),
-                base_addr=binary_info.base_addr,
-                bitness=binary_info.bitness,
-                architecture=getattr(binary_info, "architecture", ""),
-            )
-        return binary_info._macho_stub_ranges
-
-    @classmethod
-    def _getImportStubRanges(cls, binary_info):
-        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
 
     @classmethod
     def _resolvePltGotSlot(cls, d, target):
