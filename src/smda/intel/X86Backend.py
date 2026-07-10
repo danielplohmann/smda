@@ -6,7 +6,6 @@ from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.common.arch.ArchBackend import ArchBackend
 from smda.utility.ElfFileLoader import ElfFileLoader
-from smda.utility.MachoBinary import get_macho_stub_ranges
 
 from .BitnessAnalyzer import BitnessAnalyzer
 from .definitions import (
@@ -107,26 +106,6 @@ class X86Backend(ArchBackend):
         return BitnessAnalyzer().determineBitnessFromDisassembly(disassembly)
 
     @staticmethod
-    def _getPltRanges(binary_info):
-        if not hasattr(binary_info, "_plt_ranges"):
-            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
-                binary_info.raw_data or binary_info.binary,
-                parsed=binary_info.getLiefBinary(),
-            )
-        return binary_info._plt_ranges
-
-    @staticmethod
-    def _getMachoStubRanges(binary_info):
-        if not hasattr(binary_info, "_macho_stub_ranges"):
-            binary_info._macho_stub_ranges = get_macho_stub_ranges(
-                binary_info.getLiefBinary(),
-                base_addr=binary_info.base_addr,
-                bitness=binary_info.bitness,
-                architecture=getattr(binary_info, "architecture", ""),
-            )
-        return binary_info._macho_stub_ranges
-
-    @staticmethod
     def _getElfGotBases(binary_info):
         if not hasattr(binary_info, "_elf_got_bases"):
             binary_info._elf_got_bases = ElfFileLoader.getGotBases(
@@ -134,10 +113,6 @@ class X86Backend(ArchBackend):
                 parsed=binary_info.getLiefBinary(),
             )
         return binary_info._elf_got_bases
-
-    @classmethod
-    def _getImportStubRanges(cls, binary_info):
-        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
 
     @classmethod
     def _resolveImportSlot(cls, d, target):
