@@ -197,11 +197,16 @@ class AArch64Backend(ArchBackend):
             elif target in d.fc_manager.getFunctionStartCandidates():
                 # case = "TAILCALL?" — leave for its own analysis
                 pass
-            elif state.isFirstInstruction():
-                # case = "STUB-TAILCALL!" — a lone branch stub to another function
-                pass
             else:
-                state.addBlockToQueue(target)
+                got_slot = self._resolvePltGotSlot(d, target)
+                if got_slot is not None and d._handleApiTarget(i_address, got_slot, got_slot):
+                    # case = "STUB-TAILCALL-API!"
+                    state.setSanelyEnding(True)
+                elif state.isFirstInstruction():
+                    # case = "STUB-TAILCALL!" — a lone branch stub to another function
+                    pass
+                else:
+                    state.addBlockToQueue(target)
             state.addCodeRef(i_address, target, by_jump=True)
         # an unconditional branch does not fall through
         state.setNextInstructionReachable(False)

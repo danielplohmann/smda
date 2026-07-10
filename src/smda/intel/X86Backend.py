@@ -276,7 +276,11 @@ class X86Backend(ArchBackend):
                 # case = "TAILCALL?"
                 pass
             else:
-                if state.isFirstInstruction():
+                import_slot = self._resolveImportSlot(d, jump_destination)
+                if import_slot is not None and d._handleApiTarget(i_address, import_slot, import_slot):
+                    # case = "STUB-TAILCALL-API!"
+                    state.setSanelyEnding(True)
+                elif state.isFirstInstruction():
                     # case = "STUB-TAILCALL!"
                     pass
                 else:
