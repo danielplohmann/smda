@@ -19,12 +19,13 @@ from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
 
 class MockSymbol:
-    def __init__(self, name, value, is_function=True, demangled_name=None):
+    def __init__(self, name, value, is_function=True, demangled_name=None, section=None):
         self.name = name
         self.value = value
         self.is_function = is_function
         self._demangled_name = demangled_name
         self.complex_type = type("obj", (object,), {"name": "FUNCTION"})
+        self.section = section
 
     @property
     def demangled_name(self):
@@ -45,6 +46,11 @@ class MockLiefBinary:
         self.symbols = symbols
         self.imports = []
 
+    def get_export(self):
+        if not self.exported_functions:
+            return None
+        return type("obj", (object,), {"entries": self.exported_functions})()
+
 
 class MockSection:
     def __init__(self, characteristics, virtual_address):
@@ -53,9 +59,11 @@ class MockSection:
 
 
 class MockExport:
-    def __init__(self, name, address):
+    def __init__(self, name, address, is_extern=False, is_forwarded=False):
         self.name = name
         self.address = address
+        self.is_extern = is_extern
+        self.is_forwarded = is_forwarded
 
 
 class TestRustDemangler(unittest.TestCase):
@@ -241,7 +249,7 @@ class TestRustSymbolProvider(unittest.TestCase):
     def test_pe_rust_symbols_use_base_addr_not_imagebase(self):
         provider = RustSymbolProvider(None)
         mock_binary = MockLiefBinary(
-            [MockSymbol("_ZN3foo3barE", 0x200)],
+            [MockSymbol("_ZN3foo3barE", 0x200, section=MockSection(0x20000000, 0x1000))],
             exported_functions=[MockExport("_RNvC6_123foo3bar", 0x1000)],
         )
         mock_binary.imagebase = 0x140000000
@@ -355,6 +363,29 @@ class TestRustSymbolProvider(unittest.TestCase):
         self.assertFalse(provider.is_rust_binary(binary_info))
         provider.update(binary_info)
         self.assertFalse(provider.is_active())
+
+    def test_pe_rust_symbols_skip_forwarded_exports_and_sectionless_symbols(self):
+        provider = RustSymbolProvider(None)
+        mock_binary = MockLiefBinary(
+            [
+                MockSymbol("_ZN3foo3barE", 0x200, section=MockSection(0x20000000, 0x1000)),
+                MockSymbol("_ZN3foo3bazE", 0, section=None),
+            ],
+            exported_functions=[
+                MockExport("_RNvC6_123foo3bar", 0x1000),
+                MockExport("_RNvC6_123foo3qux", 0, is_forwarded=True),
+            ],
+        )
+        mock_binary.imagebase = 0x140000000
+        mock_binary.sections = [MockSection(0x20000000, 0x1000)]
+
+        with mock.patch("lief.PE.Binary", MockLiefBinary):
+            provider._update_pe(mock_binary, base_addr=0x400000)
+
+        self.assertEqual(provider.getSymbol(0x401000), "123foo::bar")
+        self.assertEqual(provider.getSymbol(0x401200), "foo::bar")
+        self.assertNotIn(0x400000, provider.getFunctionSymbols())
+        self.assertEqual(len(provider.getFunctionSymbols()), 2)
 
     def test_detection_logic(self):
         """Test Rust binary detection based on signatures."""

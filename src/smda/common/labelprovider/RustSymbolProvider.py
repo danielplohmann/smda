@@ -178,7 +178,12 @@ class RustSymbolProvider(AbstractLabelProvider):
         """Process PE binary symbols for Rust demangling."""
         active_base = resolve_pe_base_addr(lief_binary, base_addr)
         # Parse PE exports
-        for function in lief_binary.exported_functions:
+        export = lief_binary.get_export()
+        for function in export.entries if export is not None else []:
+            if function.is_extern or function.is_forwarded:
+                # forwarder/extern entries redirect to another module's export and have no
+                # local address (LIEF sets .address to 0 for them) - not a local function.
+                continue
             try:
                 try:
                     raw_name = function.name
@@ -193,21 +198,16 @@ class RustSymbolProvider(AbstractLabelProvider):
             except _DEMANGLE_ERRORS as exc:
                 LOGGER.debug("Failed to demangle Rust symbol %s: %s", function.name, exc)
 
-        code_base_address = None
-        for section in lief_binary.sections:
-            if section.characteristics & 0x20000000:
-                code_base_address = active_base + section.virtual_address
-                break
-        if code_base_address is None:
-            return
         # working example: 3969e1a88a063155a6f61b0ca1ac33114c1a39151f3c7dd019084abd30553eab
         # Parse PE symbols (COFF) if available and LIEF extracted them
         # (Similar logic to PeSymbolProvider but focusing on Rust)
         for symbol in lief_binary.symbols:
             # Check if it is a function symbol and has a section
-            if (
-                hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION"
-            ):  # and symbol.has_section:
+            if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
+                if symbol.section is None:
+                    # section_idx 0/-1/-2 (undefined-external/absolute/debug): not a locally
+                    # defined function, its value is not a usable in-image offset.
+                    continue
                 try:
                     try:
                         raw_name = symbol.name
@@ -217,7 +217,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                         demangled = demangle(raw_name)
                         if demangled:
                             demangled = remove_bad_spaces(demangled)
-                            function_offset = code_base_address + symbol.value
+                            function_offset = active_base + symbol.section.virtual_address + symbol.value
                             if function_offset not in self._func_symbols:
                                 self._func_symbols[function_offset] = demangled
                 except _DEMANGLE_ERRORS as exc:

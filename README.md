@@ -105,6 +105,7 @@ make test
 
 ## Version History
 
+ * 2026-07-10: v4.2.3 - Fix: function promotion bug caused by missing symbol type evaluation (THX: @r0ny123).
  * 2026-07-09: v4.2.2 - Now also parsing delay import tables from Windows PEs.
  * 2026-07-09: v4.2.1 - Better detection of CFG instructions with prefixes, improved accuracy of gap search. (THX: @r0ny123) IDA ARM64 export.
  * 2026-06-24: v4.2.0 - Further improvements for inter-procedural operand escaping (closer to x86_x64 and traditional PIC hashing).
