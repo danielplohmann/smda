@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import mergeCodeAreas
+from smda.utility.MachoBinary import get_active_macho_binary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -116,6 +117,11 @@ def _calculate_boundaries(macho_file):
 
 class MachoFileLoader:
     @staticmethod
+    def _getMachoBinary(binary, parsed):
+        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        return get_active_macho_binary(macho_file)
+
+    @staticmethod
     def isCompatible(data):
         if not LIEF_AVAILABLE:
             return False
@@ -130,7 +136,7 @@ class MachoFileLoader:
 
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):
-        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        macho_file = MachoFileLoader._getMachoBinary(binary, parsed)
         if not macho_file:
             return 0
         return _calculate_base_address(macho_file)
@@ -141,7 +147,7 @@ class MachoFileLoader:
         map the MachO file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
-        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        macho_file = MachoFileLoader._getMachoBinary(binary, parsed)
         if not macho_file:
             return b""
         base_addr = MachoFileLoader.getBaseAddress(binary, parsed=macho_file)
@@ -216,12 +222,12 @@ class MachoFileLoader:
 
     @staticmethod
     def getArchitecture(binary, parsed=_NOT_PROVIDED):
-        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        macho_file = MachoFileLoader._getMachoBinary(binary, parsed)
         return _resolve_macho_cpu(macho_file)[0]
 
     @staticmethod
     def getBitness(binary, parsed=_NOT_PROVIDED):
-        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        macho_file = MachoFileLoader._getMachoBinary(binary, parsed)
         return _resolve_macho_cpu(macho_file)[1]
 
     @staticmethod
@@ -230,7 +236,7 @@ class MachoFileLoader:
 
     @staticmethod
     def getCodeAreas(binary, parsed=_NOT_PROVIDED):
-        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        macho_file = MachoFileLoader._getMachoBinary(binary, parsed)
         if not macho_file:
             return []
         ins_flags = (
