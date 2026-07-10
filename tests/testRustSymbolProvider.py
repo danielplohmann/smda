@@ -1,5 +1,6 @@
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from unittest import mock
 
 from smda.common.BinaryInfo import BinaryInfo
@@ -253,6 +254,107 @@ class TestRustSymbolProvider(unittest.TestCase):
         self.assertEqual(provider.getSymbol(0x401200), "foo::bar")
         self.assertNotIn(0x140001000, provider.getFunctionSymbols())
         self.assertNotIn(0x140001200, provider.getFunctionSymbols())
+
+    def test_macho_rust_path_demangles_and_adjusts_addresses(self):
+        class FakeMacho:
+            symbols = [
+                MockSymbol("__ZN3foo3barE", 0x100001000),
+                MockSymbol("_main", 0x100002000),
+            ]
+            exported_symbols = [MockSymbol("__RNvC6_123foo3bar", 0x100003000)]
+            imagebase = 0x100000000
+            sections = [SimpleNamespace(virtual_address=0x100001000, offset=0x1000)]
+
+        fake = FakeMacho()
+        binary_info = BinaryInfo(b"/rustc/")
+        binary_info.base_addr = 0x200000000
+        binary_info.bitness = 64
+        binary_info.architecture = "intel"
+        binary_info.code_areas = [[0x200001000, 0x200004000]]
+        provider = RustSymbolProvider(None)
+
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=fake),
+            mock.patch("lief.MachO.Binary", FakeMacho),
+            mock.patch(
+                "smda.common.labelprovider.RustSymbolProvider.get_active_macho_binary",
+                return_value=fake,
+            ),
+            mock.patch(
+                "smda.common.labelprovider.RustSymbolProvider.get_macho_address_adjustment",
+                return_value=0x100000000,
+            ),
+        ):
+            provider.update(binary_info)
+
+        self.assertEqual(provider.getSymbol(0x200001000), "foo::bar")
+        self.assertEqual(provider.getSymbol(0x200003000), "123foo::bar")
+        self.assertNotIn(0x200002000, provider.getFunctionSymbols())
+        self.assertTrue(provider.is_active())
+
+    def test_macho_cpp_symbols_alone_do_not_activate_rust(self):
+        class FakeMacho:
+            symbols = [MockSymbol("__ZN12FileExplorerC2Ev", 0x1000012B0)]
+            exported_symbols = []
+            imagebase = 0x100000000
+            sections = []
+
+        fake = FakeMacho()
+        binary_info = BinaryInfo(b"objective-c++ binary without rust markers")
+        binary_info.base_addr = 0x100000000
+        binary_info.code_areas = [[0x100001000, 0x100008000]]
+        provider = RustSymbolProvider(None)
+
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=fake),
+            mock.patch("lief.MachO.Binary", FakeMacho),
+        ):
+            self.assertFalse(provider.is_rust_binary(binary_info))
+            provider.update(binary_info)
+
+        self.assertFalse(provider.is_active())
+        self.assertEqual(provider.getFunctionSymbols(), {})
+
+    def test_fat_macho_detection_checks_active_slice_symbols(self):
+        class FakeMacho:
+            symbols = [MockSymbol("__RNvC6_123foo3bar", 0x100001000)]
+            exported_symbols = []
+
+        class FakeFat:
+            pass
+
+        active_slice = FakeMacho()
+        fat_binary = FakeFat()
+        binary_info = BinaryInfo(b"binary without fallback markers")
+        binary_info.bitness = 64
+        binary_info.architecture = "aarch64"
+        provider = RustSymbolProvider(None)
+
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=fat_binary),
+            mock.patch("lief.MachO.FatBinary", FakeFat),
+            mock.patch(
+                "smda.common.labelprovider.RustSymbolProvider.get_active_macho_binary",
+                return_value=active_slice,
+            ) as get_active,
+        ):
+            self.assertTrue(provider.is_rust_binary(binary_info))
+
+        get_active.assert_called_once_with(fat_binary, bitness=64, architecture="aarch64")
+
+    def test_komplex_cpp_macho_does_not_activate_rust_provider(self):
+        from pathlib import Path
+
+        xored = (Path(__file__).resolve().parent / "komplex_xored").read_bytes()
+        raw = bytes(byte ^ (index % 256) for index, byte in enumerate(xored))
+        binary_info = BinaryInfo(raw)
+        binary_info.raw_data = raw
+        binary_info.base_addr = 0x100000000
+        binary_info.code_areas = [[0x100000000, 0x100008000]]
+        provider = RustSymbolProvider(None)
+        self.assertFalse(provider.is_rust_binary(binary_info))
+        provider.update(binary_info)
+        self.assertFalse(provider.is_active())
 
     def test_detection_logic(self):
         """Test Rust binary detection based on signatures."""
