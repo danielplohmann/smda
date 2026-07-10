@@ -159,6 +159,10 @@ class PeFileLoader:
         return architecture
 
     @staticmethod
+    def getHasBackend(binary, parsed=_NOT_PROVIDED):
+        return PeFileLoader.getArchitecture(binary, parsed=parsed) in ("intel", "cil", "aarch64")
+
+    @staticmethod
     def checkPe(binary):
         return PeFileLoader.getMachineType(binary) in PeFileLoader.BITNESS_MAP
 

@@ -309,6 +309,11 @@ class ElfFileLoader:
         return _resolve_elf_machine(elffile)[1]
 
     @staticmethod
+    def getHasBackend(binary, parsed=_NOT_PROVIDED):
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        return _resolve_elf_machine(elffile)[2]
+
+    @staticmethod
     def mergeCodeAreas(code_areas):
         return mergeCodeAreas(code_areas)
 

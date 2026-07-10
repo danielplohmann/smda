@@ -128,6 +128,7 @@ class Disassembler:
         binary_info.architecture = loader.getArchitecture()
         binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
+        binary_info.has_backend = loader.getHasBackend()
         return binary_info
 
     def _ensureHashes(self, binary_info):

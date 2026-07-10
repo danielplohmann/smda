@@ -10,7 +10,11 @@ def get_active_macho_binary(lief_binary, *, bitness=None, architecture=""):
     if isinstance(lief_binary, lief.MachO.FatBinary):
         if len(lief_binary) == 0:
             return None
-        for binary in lief_binary:
+        # Use explicit indexed access (fat_binary.at()/[]) so slice selection
+        # doesn't depend on holding onto a live iterator across the loop.
+        get_slice = lief_binary.at if hasattr(lief_binary, "at") else lief_binary.__getitem__
+        for index in range(len(lief_binary)):
+            binary = get_slice(index)
             binary_bitness = 64 if binary.header.is_64bit else 32
             if bitness and binary_bitness != bitness:
                 continue
@@ -23,7 +27,7 @@ def get_active_macho_binary(lief_binary, *, bitness=None, architecture=""):
                 if architecture in ("arm", "aarch64") and not is_arm:
                     continue
             return binary
-        return lief_binary[0]
+        return get_slice(0)
     return lief_binary
 
 

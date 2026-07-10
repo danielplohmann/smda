@@ -1,4 +1,5 @@
 import logging
+import struct
 from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
@@ -19,6 +20,25 @@ except ImportError:
 # call, do your own lief.parse) from "caller already tried to parse and
 # got None" (e.g. FileLoader saw lief.parse fail; do NOT retry).
 _NOT_PROVIDED = object()
+
+# Thin Mach-O: LE 32/64 and BE 32/64. Fat/universal: both endiannesses and 32/64 fat headers.
+_THIN_MACHO_MAGICS = frozenset(
+    {
+        b"\xce\xfa\xed\xfe",  # MH_CIGAM (LE 32)
+        b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64 (LE 64)
+        b"\xfe\xed\xfa\xce",  # MH_MAGIC (BE 32)
+        b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64 (BE 64)
+    }
+)
+_FAT_MACHO_MAGICS = frozenset(
+    {
+        b"\xca\xfe\xba\xbe",  # FAT_MAGIC
+        b"\xbe\xba\xfe\xca",  # FAT_CIGAM
+        b"\xca\xfe\xba\xbf",  # FAT_MAGIC_64
+        b"\xbf\xba\xfe\xca",  # FAT_CIGAM_64
+    }
+)
+_SLICE_MACHO_MAGICS = _THIN_MACHO_MAGICS
 
 
 def _build_macho_cpu_types():
@@ -118,21 +138,64 @@ def _calculate_boundaries(macho_file):
 class MachoFileLoader:
     @staticmethod
     def _getMachoBinary(binary, parsed):
+        # A slice returned from a temporary FatBinary does not retain its native
+        # parent in some LIEF versions. Direct one-off accessor calls therefore
+        # use LIEF's owned active Binary result; FileLoader/BinaryInfo pass a
+        # retained FatBinary through ``parsed`` for explicit slice selection.
         macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
         return get_active_macho_binary(macho_file)
 
     @staticmethod
-    def isCompatible(data):
-        if not LIEF_AVAILABLE:
+    def _looks_like_fat_macho(data):
+        """True for universal/fat Mach-O; rejects Java class files that share 0xcafebabe."""
+        if len(data) < 8:
             return False
-        # check for MachO magic
-        return data[:4] == b"\xce\xfa\xed\xfe" or data[:4] == b"\xcf\xfa\xed\xfe"
+        magic = data[:4]
+        if magic not in _FAT_MACHO_MAGICS:
+            return False
+        big_endian = magic in (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf")
+        is_64 = magic in (b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca")
+        endian = ">" if big_endian else "<"
+        nfat_arch = struct.unpack(endian + "I", data[4:8])[0]
+        if nfat_arch == 0 or nfat_arch > 32:
+            return False
+        arch_size = 32 if is_64 else 20
+        header_end = 8 + nfat_arch * arch_size
+        if len(data) < header_end:
+            return False
+        offset = 8
+        for _ in range(nfat_arch):
+            if is_64:
+                _cputype, _cpusub, slice_off, slice_size, _align, _reserved = struct.unpack(
+                    endian + "IIQQII", data[offset : offset + 32]
+                )
+                offset += 32
+            else:
+                _cputype, _cpusub, slice_off, slice_size, _align = struct.unpack(
+                    endian + "IIIII", data[offset : offset + 20]
+                )
+                offset += 20
+            if slice_off < header_end or slice_off + slice_size > len(data):
+                return False
+            if data[slice_off : slice_off + 4] not in _SLICE_MACHO_MAGICS:
+                return False
+        return True
+
+    @staticmethod
+    def isCompatible(data):
+        if not LIEF_AVAILABLE or not data or len(data) < 4:
+            return False
+        magic = data[:4]
+        if magic in _THIN_MACHO_MAGICS:
+            return True
+        return MachoFileLoader._looks_like_fat_macho(data)
 
     @staticmethod
     def parseBinary(binary):
-        # Single lief.parse entry point so FileLoader can share one parse
-        # across all accessors instead of each accessor re-parsing.
-        return lief.parse(binary)
+        # Preserve the FatBinary container so every accessor and provider can
+        # select the same active slice instead of accepting lief.parse()'s
+        # implicit first-slice conversion.
+        return lief.MachO.parse(binary)
 
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):
@@ -244,9 +307,9 @@ class MachoFileLoader:
             + lief.MachO.Section.FLAGS.SELF_MODIFYING_CODE.value
             + lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS.value
         )
+        exec_prot = int(lief.MachO.SegmentCommand.VM_PROTECTIONS.X)
         code_areas = []
         for section in macho_file.sections:
-            # SHF_EXECINSTR = 4
             if section.flags.value & ins_flags:
                 section_start = section.virtual_address
                 section_size = section.size
@@ -254,4 +317,23 @@ class MachoFileLoader:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
                 code_areas.append([section_start, section_end])
+        # Mach-O commonly marks the whole __TEXT segment executable even though
+        # it also contains constants and strings. Prefer precise instruction
+        # sections when present; use executable segments only as a fallback for
+        # binaries whose sections do not carry instruction flags.
+        if code_areas:
+            return MachoFileLoader.mergeCodeAreas(code_areas)
+        for segment in macho_file.segments:
+            if not segment.virtual_address:
+                continue
+            if not (int(segment.init_protection) & exec_prot):
+                continue
+            segment_start = segment.virtual_address
+            segment_size = segment.virtual_size
+            code_areas.append([segment_start, segment_start + segment_size])
         return MachoFileLoader.mergeCodeAreas(code_areas)
+
+    @staticmethod
+    def getHasBackend(binary, parsed=_NOT_PROVIDED):
+        macho_file = MachoFileLoader._getMachoBinary(binary, parsed)
+        return _resolve_macho_cpu(macho_file)[2]

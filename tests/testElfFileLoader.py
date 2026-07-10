@@ -18,6 +18,8 @@ class TestElfFileLoader(unittest.TestCase):
         self.assertTrue(ElfFileLoader.isCompatible(raw))
         self.assertEqual(loader.getArchitecture(), "intel")
         self.assertEqual(loader.getBitness(), 64)
+        self.assertTrue(loader.getHasBackend())
+        self.assertTrue(ElfFileLoader.getHasBackend(raw))
         self.assertTrue(loader.getCodeAreas())
         self.assertTrue(loader.getData())
 

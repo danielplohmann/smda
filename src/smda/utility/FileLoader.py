@@ -16,6 +16,7 @@ class FileLoader:
     _bitness = 0
     _abi = ""
     _architecture = ""
+    _has_backend = False
     _code_areas = None
     file_loaders = [PeFileLoader, ElfFileLoader, MachoFileLoader, DelphiKbFileLoader, DexFileLoader]
 
@@ -23,6 +24,7 @@ class FileLoader:
         self._file_path = file_path
         self._map_file = map_file
         self._code_areas = []
+        self._has_backend = False
         if load_file:
             self._loadFile()
 
@@ -34,6 +36,16 @@ class FileLoader:
         return binary
 
     def _loadFile(self, buffer=None):
+        # A loader instance can be reused by tests and callers. Clear every
+        # format-derived field before dispatch so an unrecognized or failed
+        # subsequent load cannot expose metadata from the previous binary.
+        self._data = b""
+        self._base_addr = 0
+        self._bitness = 0
+        self._abi = ""
+        self._architecture = ""
+        self._has_backend = False
+        self._code_areas = []
         self._raw_data = buffer if buffer is not None else self._loadRawFileContent()
         if self._map_file:
             for loader in self.file_loaders:
@@ -54,6 +66,10 @@ class FileLoader:
                     self._code_areas = loader.getCodeAreas(self._raw_data, **kw)
                     self._architecture = loader.getArchitecture(self._raw_data, **kw)
                     self._abi = loader.getAbi(self._raw_data, **kw)
+                    if hasattr(loader, "getHasBackend"):
+                        self._has_backend = loader.getHasBackend(self._raw_data, **kw)
+                    else:
+                        self._has_backend = bool(self._architecture)
                     break
         else:
             self._data = self._raw_data
@@ -72,6 +88,9 @@ class FileLoader:
 
     def getArchitecture(self):
         return self._architecture
+
+    def getHasBackend(self):
+        return self._has_backend
 
     def getBitness(self):
         return self._bitness
