@@ -35,6 +35,22 @@ class DummyProvider:
     def getFunctionSymbols(self):
         return self._symbols
 
+    def is_active(self):
+        return self._is_api or self._is_symbol
+
+
+class ImportSlotProvider(DummyProvider):
+    def __init__(self, slot, dll_name, api_name):
+        super().__init__(is_api=True)
+        self.slot = slot
+        self.dll_name = dll_name
+        self.api_name = api_name
+
+    def getApi(self, to_address, api_address=None):
+        if to_address == self.slot:
+            return (self.dll_name, self.api_name)
+        return ("", "")
+
 
 class TestIntelDisassembler(unittest.TestCase):
     def _create_disassembler(self):
@@ -152,6 +168,70 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertIn(0x1028, result.functions)
         self.assertIn(0x1028, result.code_refs_from.get(0x100C, set()))
+
+    def test_direct_import_stub_calls_resolve_at_original_caller(self):
+        base = 0x1000
+        import_slot = 0x2000
+        caller = (
+            b"\x55"  # 0x1000: push rbp
+            + b"\x48\x89\xe5"  # 0x1001: mov rbp, rsp
+            + b"\xe8\x17\x00\x00\x00"  # 0x1004: call 0x1020
+            + b"\x5d"  # 0x1009: pop rbp
+            + b"\xc3"  # 0x100a: ret
+        )
+        stub = b"\xff\x25\xda\x0f\x00\x00"  # 0x1020: jmp qword ptr [rip + 0xfda] -> 0x2000
+        buf = caller + b"\xcc" * (0x20 - len(caller)) + stub
+
+        for stub_kind in ("elf", "macho"):
+            with self.subTest(stub_kind=stub_kind):
+                binary_info = BinaryInfo(buf)
+                binary_info.base_addr = base
+                binary_info.bitness = 64
+                binary_info.architecture = "intel"
+                binary_info._plt_ranges = [(0x1020, 0x1020 + len(stub))] if stub_kind == "elf" else []
+                binary_info._macho_stub_ranges = [(0x1020, 0x1020 + len(stub))] if stub_kind == "macho" else []
+
+                disassembler = IntelDisassembler(SmdaConfig())
+                disassembler._registerLabelProvider(ImportSlotProvider(import_slot, "libsystem", "puts"))
+                result = disassembler.analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+                self.assertIn(0x1000, result.functions)
+                self.assertIn(0x1020, result.code_refs_from[0x1004])
+                self.assertEqual(result.getApiRefs(0x1000), {0x1004: "libsystem!puts"})
+                self.assertIn(0x1004, result.apis[import_slot]["referencing_addr"])
+
+    def test_32bit_pic_plt_call_resolves_ebx_relative_import_slot(self):
+        base = 0x1000
+        import_slot = 0x200C
+        caller = (
+            b"\x55"  # 0x1000: push ebp
+            + b"\x89\xe5"  # 0x1001: mov ebp, esp
+            + b"\xe8\x18\x00\x00\x00"  # 0x1003: call 0x1020
+            + b"\x5d"  # 0x1008: pop ebp
+            + b"\xc3"  # 0x1009: ret
+        )
+        stub = (
+            b"\xf3\x0f\x1e\xfb"  # 0x1020: endbr32
+            + b"\xf2\xff\xa3\x0c\x00\x00\x00"  # 0x1024: bnd jmp dword ptr [ebx + 0xc]
+        )
+        buf = caller + b"\xcc" * (0x20 - len(caller)) + stub
+
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = base
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+        binary_info._plt_ranges = [(0x1020, 0x1020 + len(stub))]
+        binary_info._macho_stub_ranges = []
+        binary_info._elf_got_bases = [0x2000]
+        binary_info.imported_functions = {import_slot: ("libc.so.6", "puts")}
+
+        disassembler = IntelDisassembler(SmdaConfig())
+        disassembler._registerLabelProvider(ImportSlotProvider(import_slot, "libc.so.6", "puts"))
+        result = disassembler.analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x1020, result.code_refs_from[0x1003])
+        self.assertEqual(result.getApiRefs(0x1000), {0x1003: "libc.so.6!puts"})
+        self.assertIn(0x1003, result.apis[import_slot]["referencing_addr"])
 
     def test_loop_taken_edge_is_disassembled(self):
         # a forward loop target is only reachable via the taken edge; it must end up
