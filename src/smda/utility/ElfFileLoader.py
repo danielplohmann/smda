@@ -43,6 +43,7 @@ _ELF_MACHINE_TYPES = {
 # lief.ELF.ARCH enum value for it and reports the raw integer, so it resolves
 # through the unknown-machine-type fallback below.
 _PLT_SECTION_NAMES = frozenset({".plt", ".plt.sec", ".plt.got", ".iplt"})
+_GOT_SECTION_NAMES = (".got.plt", ".got")
 
 
 def _resolve_elf_machine(elffile):
@@ -308,6 +309,11 @@ class ElfFileLoader:
         return _resolve_elf_machine(elffile)[1]
 
     @staticmethod
+    def getHasBackend(binary, parsed=_NOT_PROVIDED):
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        return _resolve_elf_machine(elffile)[2]
+
+    @staticmethod
     def mergeCodeAreas(code_areas):
         return mergeCodeAreas(code_areas)
 
@@ -357,3 +363,17 @@ class ElfFileLoader:
                 continue
             ranges.append((section.virtual_address, section.virtual_address + section.size))
         return ranges
+
+    @staticmethod
+    def getGotBases(binary, parsed=_NOT_PROVIDED):
+        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        if elffile is None:
+            return []
+
+        sections = getattr(elffile, "sections", []) or []
+        return [
+            section.virtual_address
+            for section_name in _GOT_SECTION_NAMES
+            for section in sections
+            if section.name == section_name and section.virtual_address
+        ]

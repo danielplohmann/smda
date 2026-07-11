@@ -5,6 +5,7 @@ import logging
 import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import resolve_pe_base_addr
@@ -55,6 +56,8 @@ class RustSymbolProvider(AbstractLabelProvider):
             self._update_elf(lief_binary)
         elif isinstance(lief_binary, lief.PE.Binary):
             self._update_pe(lief_binary, binary_info.base_addr)
+        elif isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
+            self._update_macho(lief_binary, binary_info)
 
     def is_rust_binary(self, binary_info):
         """
@@ -67,46 +70,37 @@ class RustSymbolProvider(AbstractLabelProvider):
         try:
             lief_binary = binary_info.getLiefBinary()
             if lief_binary:
-                # 1. Check exported functions
-                if hasattr(lief_binary, "exported_functions"):
-                    for func in lief_binary.exported_functions:
-                        try:
-                            func_name = func.name
-                            if func_name and func_name.startswith(("_ZN", "_R", "__ZN", "__R")):
-                                binary_info._is_rust = True
-                                return True
-                        except (UnicodeDecodeError, AttributeError):
-                            continue
-                # 2. Check symbols
-                if hasattr(lief_binary, "symbols"):
-                    for sym in lief_binary.symbols:
-                        try:
-                            sym_name = sym.name
-                            if sym_name and sym_name.startswith(("_ZN", "_R", "__ZN", "__R")):
-                                binary_info._is_rust = True
-                                return True
-                        except (UnicodeDecodeError, AttributeError):
-                            continue
-                # 3. Check symtab_symbols
-                if hasattr(lief_binary, "symtab_symbols"):
-                    for sym in lief_binary.symtab_symbols:
-                        try:
-                            sym_name = sym.name
-                            if sym_name and sym_name.startswith(("_ZN", "_R", "__ZN", "__R")):
-                                binary_info._is_rust = True
-                                return True
-                        except (UnicodeDecodeError, AttributeError):
-                            continue
-                # 4. Check dynamic_symbols
-                if hasattr(lief_binary, "dynamic_symbols"):
-                    for sym in lief_binary.dynamic_symbols:
+                # Mach-O Itanium C++ also uses __ZN; only treat Rust v0 (_R/__R) as
+                # symbol-table evidence there. ELF/PE keep legacy _ZN as well.
+                is_macho = isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary))
+                symbol_binary = lief_binary
+                if isinstance(lief_binary, lief.MachO.FatBinary):
+                    symbol_binary = get_active_macho_binary(
+                        lief_binary,
+                        bitness=getattr(binary_info, "bitness", None),
+                        architecture=getattr(binary_info, "architecture", "") or "",
+                    )
+                rust_prefixes = ("_R", "__R") if is_macho else ("_ZN", "_R", "__ZN", "__R")
+                symbol_lists = []
+                if hasattr(symbol_binary, "exported_functions"):
+                    symbol_lists.append(symbol_binary.exported_functions)
+                if hasattr(symbol_binary, "symbols"):
+                    symbol_lists.append(symbol_binary.symbols)
+                if hasattr(symbol_binary, "exported_symbols"):
+                    symbol_lists.append(symbol_binary.exported_symbols)
+                if hasattr(symbol_binary, "symtab_symbols"):
+                    symbol_lists.append(symbol_binary.symtab_symbols)
+                if hasattr(symbol_binary, "dynamic_symbols"):
+                    symbol_lists.append(symbol_binary.dynamic_symbols)
+                for symbols in symbol_lists:
+                    for sym in symbols or []:
                         try:
                             sym_name = sym.name
-                            if sym_name and sym_name.startswith(("_ZN", "_R", "__ZN", "__R")):
-                                binary_info._is_rust = True
-                                return True
                         except (UnicodeDecodeError, AttributeError):
                             continue
+                        if sym_name and sym_name.startswith(rust_prefixes):
+                            binary_info._is_rust = True
+                            return True
         except Exception as exc:
             reraise_non_operational_exception(exc)
 
@@ -138,6 +132,47 @@ class RustSymbolProvider(AbstractLabelProvider):
         """Process ELF binary symbols for Rust demangling."""
         self._func_symbols.update(self._parse_lief_symbols(lief_binary.symtab_symbols))
         self._func_symbols.update(self._parse_lief_symbols(lief_binary.dynamic_symbols))
+
+    def _update_macho(self, lief_binary, binary_info):
+        """Process Mach-O binary symbols for Rust demangling."""
+        macho_binary = get_active_macho_binary(
+            lief_binary,
+            bitness=getattr(binary_info, "bitness", None),
+            architecture=getattr(binary_info, "architecture", "") or "",
+        )
+        if not macho_binary or not isinstance(macho_binary, lief.MachO.Binary):
+            return
+        adjustment = get_macho_address_adjustment(
+            macho_binary,
+            base_addr=getattr(binary_info, "base_addr", 0) or 0,
+            bitness=getattr(binary_info, "bitness", None),
+            architecture=getattr(binary_info, "architecture", "") or "",
+        )
+        for symbol_list in (
+            getattr(macho_binary, "symbols", None),
+            getattr(macho_binary, "exported_symbols", None),
+        ):
+            if not symbol_list:
+                continue
+            for symbol in symbol_list:
+                try:
+                    raw_name = symbol.name
+                except (UnicodeDecodeError, AttributeError):
+                    continue
+                if not raw_name or not getattr(symbol, "value", 0):
+                    continue
+                if not self._is_rust_symbol(raw_name):
+                    continue
+                adjusted = symbol.value + adjustment
+                if binary_info and not binary_info.isInCodeAreas(adjusted):
+                    continue
+                try:
+                    demangled = demangle(raw_name)
+                    if demangled:
+                        demangled = remove_bad_spaces(demangled)
+                        self._func_symbols[adjusted] = demangled
+                except _DEMANGLE_ERRORS as exc:
+                    LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
 
     def _update_pe(self, lief_binary, base_addr=None):
         """Process PE binary symbols for Rust demangling."""

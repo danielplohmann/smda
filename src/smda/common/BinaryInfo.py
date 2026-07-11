@@ -5,12 +5,26 @@ import lief
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.utility.MachoFileLoader import MachoFileLoader
 
 LOGGER = logging.getLogger(__name__)
 
 
 class BinaryInfo:
     """simple DTO to contain most information related to the binary/buffer to be analyzed
+
+    Two label views (do not conflate them):
+
+    1. **xmetadata** (``SmdaReport.xmetadata``) — static format tables only:
+       ``exported_functions``, ``imported_functions``, and ``symbols`` from the
+       PE/ELF/Mach-O providers. Addresses follow the conventions below. This is
+       the dump of import/export/symbol tables, not the final CFG labels.
+
+    2. **function_name** (``SmdaFunction.function_name``) — resolved names after
+       disassembly merges all active label providers (format symbols, API
+       resolvers, Go pclntab, Rust demangling, PDB, Delphi, …). A function may
+       have a non-empty ``function_name`` that does not appear in xmetadata
+       (e.g. Go/Rust), and xmetadata may list symbols that never became FEPs.
 
     xmetadata address conventions (via getExportedFunctions/getImportedFunctions/getSymbols):
     - PE: active ``base_addr`` (dump VA); falls back to LIEF imagebase when unset.
@@ -34,6 +48,7 @@ class BinaryInfo:
     file_path = ""
     is_library = False
     is_buffer = False
+    has_backend = False
     sha256 = ""
     sha1 = ""
     md5 = ""
@@ -48,6 +63,7 @@ class BinaryInfo:
         self.raw_data = binary
         self.binary_size = len(binary)
         self.code_areas = []
+        self.has_backend = False
         self._lief_binary = None
         self._lief_type = None
         self._symbol_provider = None
@@ -85,7 +101,10 @@ class BinaryInfo:
     def getLiefBinary(self):
         binary_data = self.getBinaryData()
         if self._lief_binary is None and binary_data:
-            self._lief_binary = lief.parse(binary_data)
+            if MachoFileLoader.isCompatible(binary_data):
+                self._lief_binary = MachoFileLoader.parseBinary(binary_data)
+            else:
+                self._lief_binary = lief.parse(binary_data)
         return self._lief_binary
 
     def getOep(self):

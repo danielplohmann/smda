@@ -478,6 +478,42 @@ class TestAArch64PltResolution(unittest.TestCase):
         self.assertEqual(fake_disassembler.call_targets, [])
         self.assertEqual(state.code_refs, [(call_addr, plt, False)])
 
+    def test_uncond_branch_tailcall_to_plt_stub_records_api_reference(self):
+        # A thin wrapper that tail-calls an import via a bare unconditional branch
+        # (instead of "bl") must resolve through the same PLT/Mach-O-stub decode as
+        # the bl-call case (sibling of PAT-SMDA-004, caught by the mandatory sweep).
+        fake_disassembler, plt, got_slot = self._build_disassembler()
+        fake_disassembler.tailcall_analyzer = SimpleNamespace(addJump=lambda *args, **kwargs: None)
+        fake_disassembler.fc_manager = SimpleNamespace(getFunctionStartCandidates=lambda: set())
+
+        class FakeState:
+            def __init__(self, start_addr):
+                self.start_addr = start_addr
+                self.num_blocks_analyzed = 1
+                self.sanely_ending = False
+                self.code_refs = []
+
+            def setSanelyEnding(self, value):
+                self.sanely_ending = value
+
+            def setNextInstructionReachable(self, value):
+                pass
+
+            def setBlockEndingInstruction(self, value):
+                pass
+
+            def addCodeRef(self, from_addr, to_addr, by_jump=False):
+                self.code_refs.append((from_addr, to_addr, by_jump))
+
+        branch_addr = BASE
+        state = FakeState(branch_addr)
+        backend = AArch64Backend()
+        backend.analyzeInstruction(fake_disassembler, (branch_addr, 4, "b", f"#0x{plt:x}"), state, None, branch_addr)
+
+        self.assertTrue(state.sanely_ending)
+        self.assertEqual(fake_disassembler.api_targets, [(branch_addr, got_slot, got_slot)])
+        self.assertEqual(state.code_refs, [(branch_addr, plt, True)])
+
 
 class TestAArch64PrologueDiscovery(unittest.TestCase):
     """Frame-less prologues are discovered with no inbound call reference.

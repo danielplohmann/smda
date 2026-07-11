@@ -5,6 +5,8 @@ import logging
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.common.arch.ArchBackend import ArchBackend
+from smda.utility.ElfFileLoader import ElfFileLoader
+from smda.utility.MachoBinary import get_macho_stub_ranges
 
 from .BitnessAnalyzer import BitnessAnalyzer
 from .definitions import (
@@ -104,6 +106,63 @@ class X86Backend(ArchBackend):
     def probeBitness(self, disassembly):
         return BitnessAnalyzer().determineBitnessFromDisassembly(disassembly)
 
+    @staticmethod
+    def _getPltRanges(binary_info):
+        if not hasattr(binary_info, "_plt_ranges"):
+            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
+                binary_info.raw_data or binary_info.binary,
+                parsed=binary_info.getLiefBinary(),
+            )
+        return binary_info._plt_ranges
+
+    @staticmethod
+    def _getMachoStubRanges(binary_info):
+        if not hasattr(binary_info, "_macho_stub_ranges"):
+            binary_info._macho_stub_ranges = get_macho_stub_ranges(
+                binary_info.getLiefBinary(),
+                base_addr=binary_info.base_addr,
+                bitness=binary_info.bitness,
+                architecture=getattr(binary_info, "architecture", ""),
+            )
+        return binary_info._macho_stub_ranges
+
+    @staticmethod
+    def _getElfGotBases(binary_info):
+        if not hasattr(binary_info, "_elf_got_bases"):
+            binary_info._elf_got_bases = ElfFileLoader.getGotBases(
+                binary_info.raw_data or binary_info.binary,
+                parsed=binary_info.getLiefBinary(),
+            )
+        return binary_info._elf_got_bases
+
+    @classmethod
+    def _getImportStubRanges(cls, binary_info):
+        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
+
+    @classmethod
+    def _resolveImportSlot(cls, d, target):
+        binary_info = d.disassembly.binary_info
+        if not any(start <= target < end for start, end in cls._getImportStubRanges(binary_info)):
+            return None
+
+        for address, size, mnemonic, op_str in d.capstone.disasm_lite(d._getDisasmWindowBuffer(target), target):
+            mnemonic = mnemonic.split(" ")[-1]
+            if mnemonic in ("endbr32", "endbr64", "nop"):
+                continue
+            if mnemonic != "jmp":
+                return None
+            if op_str.startswith("qword ptr [rip"):
+                return address + size + d.getReferencedAddr(op_str)
+            if op_str.startswith("dword ptr [0x"):
+                return d.getReferencedAddr(op_str)
+            if op_str.startswith("dword ptr [ebx"):
+                displacement = d.getReferencedAddr(op_str)
+                candidates = [base + displacement for base in cls._getElfGotBases(binary_info)]
+                imported_functions = binary_info.getImportedFunctions() or {}
+                return next((candidate for candidate in candidates if candidate in imported_functions), None)
+            return None
+        return None
+
     # --- per-kind instruction analysis -----------------------------------
     def _analyzeCallInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
@@ -140,8 +199,12 @@ class X86Backend(ArchBackend):
                     d._handleApiTarget(i_address, call_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
-            d._handleCallTarget(state, i_address, call_destination)
-            d._handleApiTarget(i_address, call_destination, call_destination)
+            import_slot = self._resolveImportSlot(d, call_destination)
+            if import_slot is not None and d._handleApiTarget(i_address, import_slot, import_slot):
+                state.addCodeRef(i_address, call_destination)
+            else:
+                d._handleCallTarget(state, i_address, call_destination)
+                d._handleApiTarget(i_address, call_destination, call_destination)
         elif i_op_str.lower() in REGS_32BIT or i_op_str.lower() in REGS_64BIT:
             # case = "REG"
             # this is resolved by backtracking at the end of function analysis.
@@ -213,7 +276,11 @@ class X86Backend(ArchBackend):
                 # case = "TAILCALL?"
                 pass
             else:
-                if state.isFirstInstruction():
+                import_slot = self._resolveImportSlot(d, jump_destination)
+                if import_slot is not None and d._handleApiTarget(i_address, import_slot, import_slot):
+                    # case = "STUB-TAILCALL-API!"
+                    state.setSanelyEnding(True)
+                elif state.isFirstInstruction():
                     # case = "STUB-TAILCALL!"
                     pass
                 else:

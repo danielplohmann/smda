@@ -31,5 +31,9 @@ class DelphiKbFileLoader:
         return "intel"
 
     @staticmethod
+    def getHasBackend(binary, parsed=None, **_):
+        return True
+
+    @staticmethod
     def getAbi(binary):
         return ""

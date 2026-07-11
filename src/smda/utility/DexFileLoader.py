@@ -74,6 +74,10 @@ class DexFileLoader:
         return "dalvik"
 
     @staticmethod
+    def getHasBackend(data, parsed=None):
+        return True
+
+    @staticmethod
     def getAbi(data, parsed=None):
         return ""
 
