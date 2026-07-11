@@ -55,6 +55,27 @@ DEFAULT_PROLOGUES = [
     b"\x55\x48\x89\xe5",
 ]
 
+# CET landing pad emitted first by modern GCC/Clang AMD64 toolchains; scanned separately since
+# it precedes (not replaces) a function's real prologue.
+ENDBR64_BYTES = b"\xf3\x0f\x1e\xfa"
+
+# exact 64-bit-only prologues not otherwise covered by DEFAULT_PROLOGUES/COMMON_PROLOGUES
+DEFAULT_PROLOGUES_64 = [
+    b"\x41\x57\x41\x56",  # push r15, push r14
+]
+
+# 64-bit-only prologues carrying one wildcard byte (an 8-bit immediate). Each entry is
+# (byte-value template with None marking the wildcard position, function-start score, is_seedable).
+# is_seedable gates whether the pattern is specific enough to scan for across the whole binary
+# as an independent FEP candidate (locatePrologueCandidates): "sub rsp, imm8" alone is not -- it is
+# a common mid-function idiom (e.g. "sub rsp, 8; call X; add rsp, 8; ret") and seeding it
+# unconditionally manufactures false function starts inside real functions. It is still used for
+# *scoring* a candidate already found by other means (call ref, gap, symbol).
+MASKED_PROLOGUES_64 = [
+    ((0x48, 0x89, 0x5C, 0x24, None), 40, True),  # mov [rsp+imm8], rbx
+    ((0x48, 0x83, 0xEC, None), 40, False),  # sub rsp, imm8
+]
+
 # these cover 99% of confirmed function starts in the reference data set
 COMMON_PROLOGUES = {
     "5": {
@@ -63,6 +84,12 @@ COMMON_PROLOGUES = {
             b"\x89\xff\x55\x8b\xec": 50,  # mov edi, edi, push ebp, mov ebp, esp
         },
         64: {},
+    },
+    "4": {
+        32: {},
+        64: {
+            b"\x41\x57\x41\x56": 40,  # push r15, push r14
+        },
     },
     "3": {
         32: {

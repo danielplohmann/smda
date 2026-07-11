@@ -100,6 +100,36 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertEqual(candidate.alignment, 16)
         self.assertIsNone(candidate.getTfIdf())
 
+    def _candidate(self, buf, bitness=64, addr=0x1000, base_addr=0x1000):
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = base_addr
+        binary_info.bitness = bitness
+        return FunctionCandidate(binary_info, addr)
+
+    def test_extended_amd64_prologues_score_as_common_start(self):
+        # endbr64; push rbp; mov rbp, rsp
+        self.assertTrue(self._candidate(bytes.fromhex("f30f1efa554889e5")).hasCommonFunctionStart())
+        # endbr64; sub rsp, 0x10
+        self.assertTrue(self._candidate(bytes.fromhex("f30f1efa4883ec10")).hasCommonFunctionStart())
+        # push r15; push r14
+        self.assertTrue(self._candidate(bytes.fromhex("41574156")).hasCommonFunctionStart())
+        # mov [rsp+8], rbx
+        self.assertTrue(self._candidate(bytes.fromhex("48895c2408")).hasCommonFunctionStart())
+        # sub rsp, 0x20
+        candidate = self._candidate(bytes.fromhex("4883ec20"))
+        self.assertTrue(candidate.hasCommonFunctionStart())
+        self.assertGreater(candidate.getFunctionStartScore(), 0)
+
+    def test_bare_endbr64_without_recognized_continuation_scores_zero(self):
+        candidate = self._candidate(bytes.fromhex("f30f1efa9090909090"))
+        self.assertFalse(candidate.hasCommonFunctionStart())
+        self.assertEqual(candidate.getFunctionStartScore(), 0)
+
+    def test_extended_amd64_prologues_are_64bit_only(self):
+        # the masked sub-rsp/mov-rsp patterns are REX-prefixed and must not match in 32-bit mode
+        candidate = self._candidate(bytes.fromhex("4883ec20"), bitness=32)
+        self.assertFalse(candidate.hasCommonFunctionStart())
+
     def test_mnemonic_tfidf_empty_counts_returns_zero(self):
         self.assertEqual(MnemonicTfIdf().tfidf({}), 0.0)
 
@@ -477,6 +507,60 @@ class TestIntelDisassembler(unittest.TestCase):
         manager.gap_pointer = 0x1000
 
         self.assertEqual(manager.nextGapCandidate(), 0x1003)
+
+    def test_locate_prologue_candidates_seeds_extended_amd64_prologues(self):
+        buf = bytes.fromhex(
+            "f30f1efa554889e5"  # 0x1000: endbr64; push rbp; mov rbp, rsp
+            "41574156"  # 0x1008: push r15; push r14
+            "48895c2408"  # 0x100c: mov [rsp+8], rbx
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.binary_size = len(buf)
+
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        manager.bitness = 64
+
+        manager.locatePrologueCandidates()
+
+        self.assertEqual(
+            {0x1000, 0x1008, 0x100C} & manager.candidates.keys(),
+            {0x1000, 0x1008, 0x100C},
+        )
+
+    def test_locate_prologue_candidates_does_not_seed_generic_sub_rsp(self):
+        # "sub rsp, imm8" alone is a common mid-function idiom (e.g. a call-alignment stub), not
+        # a reliable independent function-start signal; it must not be raw-scanned as a FEP.
+        buf = bytes.fromhex("4883ec20")
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.binary_size = len(buf)
+
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        manager.bitness = 64
+
+        manager.locatePrologueCandidates()
+
+        self.assertEqual(manager.candidates, {})
+
+    def test_locate_prologue_candidates_skips_extended_amd64_prologues_for_32bit(self):
+        buf = bytes.fromhex("4883ec20")
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = len(buf)
+
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        manager.bitness = 32
+
+        manager.locatePrologueCandidates()
+
+        self.assertEqual(manager.candidates, {})
 
     def test_prefixed_call_keeps_fallthrough_in_same_block(self):
         state = FunctionAnalysisState(0x1000, SimpleNamespace())
