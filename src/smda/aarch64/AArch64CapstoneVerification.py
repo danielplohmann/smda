@@ -27,6 +27,7 @@ from smda.aarch64.definitions import (
     ALWAYS_BRANCH_INS,
     CALL_INS,
     COND_BRANCH_INS,
+    COND_BRANCH_PREFIXES,
     END_INS,
     EXCEPTION_RETURN_INS,
     INDIRECT_JUMP_INS,
@@ -158,7 +159,7 @@ def operands_use_vector_layout(operands: str) -> bool:
 def is_control_flow_mnemonic(mnemonic: str) -> bool:
     if mnemonic in _TRAP_MNEMONICS:
         return False
-    if mnemonic.startswith("b."):
+    if mnemonic.startswith(COND_BRANCH_PREFIXES):
         return True
     return mnemonic in _CONTROL_FLOW_MNEMONICS
 

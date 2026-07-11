@@ -26,7 +26,9 @@ from types import SimpleNamespace
 import lief
 
 from smda.aarch64.AArch64Backend import AArch64Backend
-from smda.aarch64.definitions import adrp_page_value
+from smda.aarch64.AArch64CapstoneVerification import is_control_flow_mnemonic
+from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
+from smda.aarch64.definitions import EXCEPTION_RETURN_INS, adrp_page_value, is_conditional_branch
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
@@ -369,6 +371,148 @@ class TestAArch64PacAndAlwaysBranches(unittest.TestCase):
         self.assertEqual(
             [ins.mnemonic for ins in report.getFunction(BASE).getInstructions()],
             ["paciasp", "mov", "eret"],
+        )
+
+
+class TestAArch64HintedConditionalBranch(unittest.TestCase):
+    """FEAT_HBC's hinted conditional branch bc.<cond> (ARMv8.8/9.3).
+
+    Capstone decodes bc.eq/bc.ne/... distinctly from b.eq/b.ne/... (mnemonic
+    prefix "bc." instead of "b."), with the encoding differing only in bit 4
+    (o1/hint bit). Every "is this a conditional branch" check in the AArch64
+    backend must recognize both prefixes, and the raw-encoding gap-scan mask
+    must match bit 4 set or unset. Verified live against capstone 5.0.7:
+    bytes 10 00 00 54 decode to mnemonic 'bc.eq', op_str '#0x401000', groups [].
+    """
+
+    @staticmethod
+    def _encode_bc_cond(source, target, cond, hint=1):
+        imm19 = ((target - source) // 4) & 0x7FFFF
+        return 0x54000000 | (imm19 << 5) | (hint << 4) | cond
+
+    def _disassemble_words(self, words, oep=None):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=oep,
+            architecture="aarch64",
+        )
+
+    def test_is_control_flow_mnemonic_recognizes_bc_cond_forms(self):
+        for mnemonic in ("bc.eq", "bc.ne", "bc.al", "bc.nv", "bc.gt"):
+            self.assertTrue(is_control_flow_mnemonic(mnemonic), mnemonic)
+
+    def test_is_conditional_branch_matches_hinted_encoding(self):
+        # bc.eq: bit 4 (hint/o1) is set, distinguishing it from plain b.eq.
+        word = self._encode_bc_cond(BASE, BASE + 0xC, cond=0x0, hint=1)
+        self.assertEqual(word, 0x54000070)
+        self.assertTrue(is_conditional_branch(word))
+        # This is exactly the bit-4-set case the pre-fix BCOND_MASK (0xFF000010,
+        # which required bit 4 clear) excluded: confirm the bit really is set,
+        # i.e. the old mask would have missed this word.
+        self.assertNotEqual(word & 0xFF000010, 0x54000000)
+        self.assertEqual(word & 0x10, 0x10)
+
+    def test_conditional_branch_has_two_successors(self):
+        # mirrors TestAArch64Disassembler.test_conditional_branch_has_two_successors,
+        # substituting bc.eq (hinted) for cbz.
+        target = BASE + 0xC
+        report = self._disassemble_words(
+            [
+                self._encode_bc_cond(BASE, target, cond=0x0),  # bc.eq 0x40100c
+                0xD2800020,  # 0x401004 mov x0, #1
+                0xD65F03C0,  # 0x401008 ret
+                0xD65F03C0,  # 0x40100c ret
+            ],
+            oep=0,
+        )
+        self.assertEqual(report.status, "ok")
+        function = report.getFunction(BASE)
+        self.assertEqual(function.num_blocks, 3)
+        blocks = {b.offset: b for b in function.getBlocks()}
+        self.assertEqual(set(blocks), {BASE, BASE + 0x4, target})
+        # bc.eq #0x40100c -> taken (target) + fall-through (BASE + 0x4)
+        self.assertEqual(set(blocks[BASE].getSuccessors()), {BASE + 0x4, target})
+
+    def test_bc_always_branch_has_no_fallthrough(self):
+        # bc.al always branches (like b.al): the skipped-over fall-through
+        # instruction must NOT be booked into the function.
+        report = self._disassemble_words(
+            [
+                0xD503233F,  # 0x401000 paciasp
+                self._encode_bc_cond(BASE + 0x4, BASE + 0xC, cond=0xE),  # 0x401004 bc.al 0x40100c
+                0xD2800060,  # 0x401008 mov x0, #3  (unreachable fall-through)
+                0xD65F03C0,  # 0x40100c ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        instruction_offsets = [ins.offset for ins in report.getFunction(BASE).getInstructions()]
+        self.assertEqual(instruction_offsets, [BASE, BASE + 0x4, BASE + 0xC])
+        self.assertNotIn(BASE + 0x8, instruction_offsets)
+
+    def test_escaper_classifies_bc_cond_as_control_flow(self):
+        target = BASE + 0xC
+        report = self._disassemble_words(
+            [
+                self._encode_bc_cond(BASE, target, cond=0x0),  # bc.eq 0x40100c
+                0xD2800020,  # mov x0, #1
+                0xD65F03C0,  # ret
+                0xD65F03C0,  # ret
+            ],
+            oep=0,
+        )
+        self.assertEqual(report.status, "ok")
+        instruction = next(iter(report.getFunction(BASE).getInstructions()))
+        self.assertEqual(instruction.mnemonic, "bc.eq")
+        self.assertEqual(AArch64InstructionEscaper.escapeMnemonicForInstruction(instruction), "C")
+
+
+class TestAArch64DrpsExceptionReturn(unittest.TestCase):
+    """drps (Debug Restore PState) carries no capstone groups and 0 operands,
+    same class as eret/brk/hlt/udf: it must be special-cased by mnemonic since
+    capstone gives no group signal, and it transfers control to ELR_ELx."""
+
+    def _disassemble_words(self, words):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            architecture="aarch64",
+        )
+
+    def test_drps_in_exception_return_ins(self):
+        self.assertIn("drps", EXCEPTION_RETURN_INS)
+
+    def test_is_control_flow_mnemonic_recognizes_drps(self):
+        self.assertTrue(is_control_flow_mnemonic("drps"))
+
+    def test_drps_terminates_block(self):
+        # mirrors TestAArch64PacAndAlwaysBranches.test_exception_return_terminates_block,
+        # substituting drps for eret.
+        report = self._disassemble_words(
+            [
+                0xD503233F,  # paciasp
+                0xD2800020,  # mov x0, #1
+                0xD6BF03E0,  # drps
+                0xD503233F,  # paciasp
+                0xD2800040,  # mov x0, #2
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0xC})
+        self.assertEqual(
+            [ins.mnemonic for ins in report.getFunction(BASE).getInstructions()],
+            ["paciasp", "mov", "drps"],
         )
 
 
@@ -916,6 +1060,24 @@ class TestAArch64GapScan(unittest.TestCase):
             word.to_bytes(4, "little")
             for word in [
                 0xD65F0BFF,  # retaa
+                0xD503245F,  # bti c
+            ]
+        )
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
+        manager._candidate_offsets = set()
+
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+
+    def test_bti_after_drps_is_not_suppressed_as_interior(self):
+        # drps (Debug Restore PState) transfers control to ELR_ELx like eret*, so a BTI
+        # right after it is a legitimate landing pad, not fragmentation of straight-line code.
+        binary = b"".join(
+            word.to_bytes(4, "little")
+            for word in [
+                0xD6BF03E0,  # drps
                 0xD503245F,  # bti c
             ]
         )

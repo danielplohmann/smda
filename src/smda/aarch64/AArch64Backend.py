@@ -19,6 +19,7 @@ from .definitions import (
     BR_VALUE,
     CALL_INS,
     COND_BRANCH_INS,
+    COND_BRANCH_PREFIXES,
     END_INS,
     EXCEPTION_RETURN_INS,
     INDIRECT_JUMP_INS,
@@ -217,7 +218,11 @@ class AArch64Backend(ArchBackend):
             return
         if i_mnemonic in END_INS or i_mnemonic in ALWAYS_BRANCH_INS or i_mnemonic in UNCOND_JUMP_INS:
             return
-        if i_mnemonic.startswith("b.") or i_mnemonic in COND_BRANCH_INS or i_mnemonic in INDIRECT_JUMP_INS:
+        if (
+            i_mnemonic.startswith(COND_BRANCH_PREFIXES)
+            or i_mnemonic in COND_BRANCH_INS
+            or i_mnemonic in INDIRECT_JUMP_INS
+        ):
             return
 
         ins_bytes = d.disassembly.getBytes(i_address, i_size)
@@ -323,10 +328,11 @@ class AArch64Backend(ArchBackend):
             self._endFunction(state)
             LOGGER.debug("  analyzeFunction() found trap terminator @0x%08x", i_address)
         elif i_mnemonic in ALWAYS_BRANCH_INS:
-            # b.al / b.nv are spelled b.<cond> but always branch (no fall-through),
-            # so they are unconditional. Must precede the generic "b." test below.
+            # b.al/b.nv and FEAT_HBC's bc.al/bc.nv are spelled b.<cond>/bc.<cond> but
+            # always branch (no fall-through), so they are unconditional. Must precede
+            # the generic "b."/"bc." test below.
             self._analyzeUncondBranch(d, instruction, state)
-        elif i_mnemonic.startswith("b.") or i_mnemonic in COND_BRANCH_INS:
+        elif i_mnemonic.startswith(COND_BRANCH_PREFIXES) or i_mnemonic in COND_BRANCH_INS:
             self._analyzeCondBranch(d, instruction, state)
         elif i_mnemonic in UNCOND_JUMP_INS:
             self._analyzeUncondBranch(d, instruction, state)
