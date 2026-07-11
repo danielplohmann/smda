@@ -7,6 +7,7 @@ from smda.intel.FunctionCandidate import FunctionCandidate
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.intel.MnemonicTfIdf import MnemonicTfIdf
+from smda.intel.X86Backend import X86Backend
 from smda.SmdaConfig import SmdaConfig
 
 
@@ -552,6 +553,48 @@ class TestIntelDisassembler(unittest.TestCase):
         # multi-operand imul to an unrelated register does not clobber rax
         imul_other = [self._ins("mov", "rax, 0x3c"), self._ins("imul", "rbx, rcx, 2")]
         self.assertEqual(disassembler._resolveSyscallNumber(imul_other, 64), 60)
+
+    def _analyze(self, backend, mnemonic, op_str, preceding_ins, bitness=64):
+        state = FunctionAnalysisState(0x1000, SimpleNamespace())
+        state.current_block = preceding_ins
+        d = SimpleNamespace(disassembly=SimpleNamespace(binary_info=SimpleNamespace(bitness=bitness)))
+        i = self._ins(mnemonic, op_str, address=0x1010, size=2)
+        backend.analyzeInstruction(d, i, state, previous_instruction=None, start_addr=0x1000)
+        return state
+
+    def test_exit_group_syscall_ends_function(self):
+        backend = X86Backend()
+        state = self._analyze(backend, "syscall", "", [self._ins("mov", "eax, 231")])
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(state.is_block_ending_instruction)
+
+    def test_int0x80_exit_and_exit_group_end_function(self):
+        backend = X86Backend()
+        for eax_value in (1, 252):
+            state = self._analyze(backend, "int", "0x80", [self._ins("mov", f"eax, {eax_value}")])
+            self.assertTrue(state.is_sanely_ending, f"eax={eax_value}")
+            self.assertTrue(state.is_block_ending_instruction, f"eax={eax_value}")
+
+    def test_int0x80_resolves_full_width_rax_write(self):
+        # a 64-bit binary may still write the syscall number via the full "rax" spelling before
+        # dropping into the 32-bit int 0x80 gate; backtracking must not drop "rax" from the
+        # clobber set (that would silently walk past the real write and misresolve/miss the exit)
+        backend = X86Backend()
+        state = self._analyze(backend, "int", "0x80", [self._ins("mov", "rax, 1")])
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(state.is_block_ending_instruction)
+
+    def test_syscall_and_int0x80_other_numbers_do_not_end_function(self):
+        backend = X86Backend()
+        # syscall 39 (getpid) must not be treated as a program-ending syscall
+        state = self._analyze(backend, "syscall", "", [self._ins("mov", "eax, 39")])
+        self.assertFalse(state.is_sanely_ending)
+        # int 0x80 with eax=4 (write) must not end the function
+        state = self._analyze(backend, "int", "0x80", [self._ins("mov", "eax, 4")])
+        self.assertFalse(state.is_sanely_ending)
+        # other int vectors are unaffected (not treated as a syscall gate at all)
+        state = self._analyze(backend, "int", "0x3", [self._ins("mov", "eax, 1")])
+        self.assertFalse(state.is_sanely_ending)
 
 
 if __name__ == "__main__":
