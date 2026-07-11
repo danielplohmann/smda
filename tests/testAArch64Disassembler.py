@@ -659,6 +659,93 @@ class TestAArch64PltResolution(unittest.TestCase):
         self.assertEqual(state.code_refs, [(branch_addr, plt, True)])
 
 
+class TestAArch64ApiThunkDetection(unittest.TestCase):
+    """danielplohmann/smda#172: a function whose entire body is the canonical
+    adrp; [add;] ldr; br GOT/API-import thunk (optionally nop/bti-prefixed) is
+    flagged via state.setThunkCall(True), landing in disassembly.thunk_functions."""
+
+    def _disassemble_words(self, words, oep=0):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        disassembler = Disassembler(config, backend="aarch64")
+        report = disassembler.disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=oep,
+            architecture="aarch64",
+        )
+        return report, disassembler.disassembly
+
+    def test_walk_got_thunk_three_instructions(self):
+        words = [
+            0x90000010,  # adrp x16, #0
+            0xF9400210,  # ldr x16, [x16]
+            0xD61F0200,  # br x16
+        ]
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        binary_info = BinaryInfo(code)
+        binary_info.base_addr = BASE
+        fake_disassembler = SimpleNamespace(disassembly=SimpleNamespace(binary_info=binary_info))
+        fake_disassembler.disassembly.isAddrWithinMemoryImage = lambda addr: BASE <= addr < BASE + len(code)
+
+        result = AArch64Backend._walkGotThunk(fake_disassembler, BASE)
+
+        self.assertIsNotNone(result)
+        end_addr, _target = result
+        self.assertEqual(end_addr, BASE + len(words) * 4)
+
+    def test_three_instruction_thunk_is_flagged(self):
+        report, disassembly = self._disassemble_words(
+            [
+                0x90000010,  # adrp x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(BASE, disassembly.thunk_functions)
+
+    def test_four_instruction_thunk_with_add_is_flagged(self):
+        report, disassembly = self._disassemble_words(
+            [
+                0x90000010,  # adrp x16, #0
+                0x91000210,  # add x16, x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(BASE, disassembly.thunk_functions)
+
+    def test_bti_prefixed_thunk_is_flagged(self):
+        report, disassembly = self._disassemble_words(
+            [
+                0xD503245F,  # bti c
+                0x90000010,  # adrp x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(BASE, disassembly.thunk_functions)
+
+    def test_normal_function_with_more_than_thunk_body_is_not_flagged(self):
+        # a real prologue precedes the adrp/ldr/br shape: not a thunk.
+        report, disassembly = self._disassemble_words(
+            [
+                0xA9BF7BFD,  # stp x29, x30, [sp, #-16]!
+                0x90000010,  # adrp x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertNotIn(BASE, disassembly.thunk_functions)
+
+
 class TestAArch64PrologueDiscovery(unittest.TestCase):
     """Frame-less prologues are discovered with no inbound call reference.
 

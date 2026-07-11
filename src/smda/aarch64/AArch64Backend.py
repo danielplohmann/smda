@@ -272,12 +272,16 @@ class AArch64Backend(ArchBackend):
         return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
 
     @classmethod
-    def _resolvePltGotSlot(cls, d, target):
-        binary_info = d.disassembly.binary_info
-        if not any(start <= target < end for start, end in cls._getImportStubRanges(binary_info)):
-            return None
+    def _walkGotThunk(cls, d, addr):
+        """Walk an optional nop/bti prefix, then adrp; [add;] ldr; br from addr.
 
-        cursor = target
+        Returns (end_addr, target_register_value) if the raw words starting at
+        addr decode to EXACTLY that shape (nothing interleaved) before hitting an
+        unrecognized word, else None. end_addr is the address right after the
+        terminating br — callers compare it against a specific instruction's end
+        to confirm nothing else follows (used by both PLT/GOT slot resolution and
+        API-thunk-body detection, which share this decode)."""
+        cursor = addr
         for _ in range(2):
             prefix = cls._wordAt(d, cursor)
             if prefix is None:
@@ -289,14 +293,14 @@ class AArch64Backend(ArchBackend):
 
         registers = {}
         for index in range(4):
-            addr = cursor + index * INSTRUCTION_SIZE
-            word = cls._wordAt(d, addr)
+            word_addr = cursor + index * INSTRUCTION_SIZE
+            word = cls._wordAt(d, word_addr)
             if word is None:
                 return None
 
             rd = word & 0x1F
             if (word & ADRP_MASK) == ADRP_VALUE:
-                registers[rd] = adrp_page_value(word, addr)
+                registers[rd] = adrp_page_value(word, word_addr)
             elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
                 rn = (word >> 5) & 0x1F
                 if rn not in registers:
@@ -309,16 +313,24 @@ class AArch64Backend(ArchBackend):
                 registers[rd] = registers[rn] + (((word >> 10) & 0xFFF) * 8)
             elif (word & BR_MASK) == BR_VALUE:
                 rn = (word >> 5) & 0x1F
-                return registers.get(rn)
+                return word_addr + INSTRUCTION_SIZE, registers.get(rn)
             else:
                 return None
         return None
+
+    @classmethod
+    def _resolvePltGotSlot(cls, d, target):
+        binary_info = d.disassembly.binary_info
+        if not any(start <= target < end for start, end in cls._getImportStubRanges(binary_info)):
+            return None
+        walk = cls._walkGotThunk(d, target)
+        return walk[1] if walk is not None else None
 
     # --- engine entry point ----------------------------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):
         del start_addr
         d = disassembler
-        i_address, _i_size, i_mnemonic, i_op_str = instruction
+        i_address, i_size, i_mnemonic, i_op_str = instruction
         # capstone arm64 mnemonics carry no prefixes, so the mnemonic is used as-is.
 
         self._recordDataRefs(d, instruction, state)
@@ -363,6 +375,13 @@ class AArch64Backend(ArchBackend):
         elif i_mnemonic in UNCOND_JUMP_INS:
             self._analyzeUncondBranch(d, instruction, state)
         elif i_mnemonic in INDIRECT_JUMP_INS:
+            if i_mnemonic == "br":
+                # a function whose ENTIRE body is the canonical GOT/API-import thunk
+                # (optional nop/bti landing pad, then adrp; [add;] ldr; br) is a thunk,
+                # not a real routine — same decode _resolvePltGotSlot uses for callers.
+                thunk_walk = self._walkGotThunk(d, state.start_addr)
+                if thunk_walk is not None and thunk_walk[0] == i_address + i_size:
+                    state.setThunkCall(True)
             # br and the PAC indirect jumps (braa/brab/braaz/brabz): indirect branch
             jumptable_targets = d.jumptable_analyzer.getJumpTargets(instruction, state)
             for target in jumptable_targets:
