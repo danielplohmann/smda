@@ -87,21 +87,36 @@ class Disassembler:
         finally:
             smda_report.buffer = previous_buffer
 
+    #: backends that record non-buffer-backed strings via disassembly.addStringRef
+    #: (the string only exists as a runtime/decode-time side effect, e.g. CIL's
+    #: ldstr token or an AArch64 stack-built string — there are no corresponding
+    #: bytes anywhere in the file for the generic StringExtractor to find).
+    _ANALYZER_STRINGREF_TYPES = {"dalvik": "dex", "cil": "cil", "aarch64": "stack"}
+
     def _extractStrings(self, smda_report, mode=None):
+        architecture = smda_report.architecture
+        analyzer_type = self._ANALYZER_STRINGREF_TYPES.get(architecture, "analyzer")
         for smda_function in smda_report.getFunctions():
-            if smda_report.architecture == "dalvik":
-                if smda_function.stringrefs and isinstance(smda_function.stringrefs, dict):
-                    smda_function.stringrefs = [
-                        {
-                            "string": string_value,
-                            "ins_addr": referencing_addr,
-                            "data_addr": None,
-                            "type": "dex",
-                        }
-                        for referencing_addr, string_value in sorted(smda_function.stringrefs.items())
-                    ]
+            # SmdaFunction.__init__ sets stringrefs to the raw addStringRef dict
+            # (ref_addr -> string) for every architecture when WITH_STRINGS is set;
+            # normalize it into the same shape the generic extractor below produces.
+            analyzer_provided = []
+            if isinstance(smda_function.stringrefs, dict):
+                analyzer_provided = [
+                    {
+                        "string": string_value,
+                        "ins_addr": referencing_addr,
+                        "data_addr": None,
+                        "type": analyzer_type,
+                    }
+                    for referencing_addr, string_value in sorted(smda_function.stringrefs.items())
+                ]
+            if architecture == "dalvik":
+                # DEX strings are part of the parsed file structure, not the raw
+                # buffer bytes: the generic StringExtractor cannot see them either.
+                smda_function.stringrefs = analyzer_provided
                 continue
-            function_strings = []
+            function_strings = analyzer_provided
             for string_result in extract_strings(smda_function, mode=mode):
                 string, referencing_addr, string_addr, string_type = string_result
                 function_strings.append(

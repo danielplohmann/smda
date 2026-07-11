@@ -1073,6 +1073,119 @@ class TestAArch64StringExtraction(unittest.TestCase):
         )
 
 
+class TestAArch64StackStringRecovery(unittest.TestCase):
+    """danielplohmann/smda#173: strings built byte-by-byte on the stack via
+    tracked-register stores (str/strb/strh/stur* and stp) are reconstructed and
+    recorded into disassembly.stringrefs / SmdaFunction.stringrefs, same as
+    dalvik/cil's own addStringRef-backed (non-buffer) strings."""
+
+    def _disassemble_words(self, words, with_strings=True):
+        config = SmdaConfig()
+        config.WITH_STRINGS = with_strings
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=0,
+            architecture="aarch64",
+        )
+
+    def test_string_built_byte_by_byte_via_strb_is_recovered(self):
+        report = self._disassemble_words(
+            [
+                0x52800908,  # mov w8, #0x48 ('H')
+                0x390003E8,  # strb w8, [sp]
+                0x52800CA8,  # mov w8, #0x65 ('e')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0x52800DE8,  # mov w8, #0x6f ('o')
+                0x390013E8,  # strb w8, [sp, #4]
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(
+            {"string": "Hello", "ins_addr": BASE + 4, "data_addr": None, "type": "stack"},
+            report.getFunction(BASE).stringrefs,
+        )
+
+    def test_string_built_via_stp_register_pair_is_recovered(self):
+        report = self._disassemble_words(
+            [
+                0x528CA908,  # mov w8, #0x6548
+                0x72AD8D88,  # movk w8, #0x6c6c, lsl #16   (w8 = 0x6C6C6548 = "Hell", little-endian)
+                0x52842DE9,  # mov w9, #0x216f
+                0x72A00009,  # movk w9, #0, lsl #16        (w9 = 0x0000216F = "o!\0\0", little-endian)
+                0x290027E8,  # stp w8, w9, [sp]
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(
+            {"string": "Hello!", "ins_addr": BASE + 0x10, "data_addr": None, "type": "stack"},
+            report.getFunction(BASE).stringrefs,
+        )
+
+    def test_gated_by_with_strings_config(self):
+        report = self._disassemble_words(
+            [
+                0x52800908,  # mov w8, #0x48 ('H')
+                0x390003E8,  # strb w8, [sp]
+                0x52800CA8,  # mov w8, #0x65 ('e')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0x52800DE8,  # mov w8, #0x6f ('o')
+                0x390013E8,  # strb w8, [sp, #4]
+                0xD65F03C0,  # ret
+            ],
+            with_strings=False,
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertFalse(report.getFunction(BASE).stringrefs)
+
+    def test_stack_pointer_mutation_resets_stale_offsets(self):
+        # "Test" is written at offsets 0-3 relative to the ORIGINAL sp; "sub sp,
+        # sp, #16" then moves sp, so "Data" at offsets 0-3 afterwards is a
+        # PHYSICALLY DIFFERENT stack slot even though the numeric offsets repeat.
+        # Without resetting tracked offsets on the sp mutation, "Data"'s writes
+        # would silently overwrite the same dict keys "Test" used, losing "Test"
+        # entirely (never flushed) instead of producing two separate strings.
+        report = self._disassemble_words(
+            [
+                0x52800A88,  # mov w8, #0x54 ('T')
+                0x390003E8,  # strb w8, [sp]
+                0x52800CA8,  # mov w8, #0x65 ('e')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800E68,  # mov w8, #0x73 ('s')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800E88,  # mov w8, #0x74 ('t')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0xD10043FF,  # sub sp, sp, #0x10
+                0x52800888,  # mov w8, #0x44 ('D')
+                0x390003E8,  # strb w8, [sp]
+                0x52800C28,  # mov w8, #0x61 ('a')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800E88,  # mov w8, #0x74 ('t')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800C28,  # mov w8, #0x61 ('a')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        stringrefs = report.getFunction(BASE).stringrefs
+        self.assertIn({"string": "Test", "ins_addr": BASE + 4, "data_addr": None, "type": "stack"}, stringrefs)
+        self.assertIn({"string": "Data", "ins_addr": BASE + 0x28, "data_addr": None, "type": "stack"}, stringrefs)
+
+
 class TestAArch64AddressMaterialization(unittest.TestCase):
     """adrp page resolution used by the address-reference recovery pass."""
 
@@ -1369,6 +1482,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def __init__(self, disassembly_result, capstone):
                 self.disassembly = disassembly_result
                 self.capstone = capstone
+                self.config = SimpleNamespace(WITH_STRINGS=False)
 
             def resolveApi(self, to_addr, api_addr):
                 if to_addr == 0x401020:
@@ -1448,6 +1562,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def __init__(self, disassembly_result, capstone):
                 self.disassembly = disassembly_result
                 self.capstone = capstone
+                self.config = SimpleNamespace(WITH_STRINGS=False)
 
             def resolveApi(self, to_addr, api_addr):
                 if to_addr == 0x401020:
