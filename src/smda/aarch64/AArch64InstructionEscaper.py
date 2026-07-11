@@ -624,10 +624,13 @@ class AArch64InstructionEscaper:
         "mov": 0xC1,
     }
 
-    # Mnemonic prefix -> keep-mask for conditional variants. Currently just
-    # b.cond; other conditional mnemonics use their base entry.
+    # Mnemonic prefix -> keep-mask for conditional variants: b.cond and FEAT_HBC's
+    # hinted bc.cond share the same imm19 branch-offset layout (differing only in
+    # bit 4), so both get the same keep-mask. Other conditional mnemonics use their
+    # base entry.
     _AARCH64_CONDITIONAL_KEEP_MASKS = {
         "b.": 0xC1,
+        "bc.": 0xC1,
     }
 
     @staticmethod
