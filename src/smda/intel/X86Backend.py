@@ -401,7 +401,9 @@ class X86Backend(ArchBackend):
             # write that a 64-bit binary may still use before dropping into int 0x80 -- forcing
             # 32 here would drop "rax" from the clobber set and silently walk past that write.
             syscall_number = self._resolveSyscallNumber(state.current_block, 64)
-            if syscall_number in INT80_EXIT_NUMBERS:
+            # int 0x80 only reads the low 32 bits (eax); truncate in case a full-width
+            # "mov rax, N" write resolved a value wider than that (e.g. mov rax, 0x100000001).
+            if syscall_number is not None and (syscall_number & 0xFFFFFFFF) in INT80_EXIT_NUMBERS:
                 self._analyzeEndInstruction(state)
                 LOGGER.debug(
                     "  analyzeFunction() found program ending instruction @0x%08x",

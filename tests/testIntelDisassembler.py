@@ -699,6 +699,14 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertTrue(state.is_sanely_ending)
         self.assertTrue(state.is_block_ending_instruction)
 
+    def test_int0x80_truncates_wider_than_32bit_resolution(self):
+        # int 0x80 only reads the low 32 bits (eax); a resolved value wider than that must
+        # still be recognized by its low 32 bits, not compared against the raw wide integer
+        backend = X86Backend()
+        state = self._analyze(backend, "int", "0x80", [self._ins("mov", "rax, 0x100000001")])
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(state.is_block_ending_instruction)
+
     def test_syscall_and_int0x80_other_numbers_do_not_end_function(self):
         backend = X86Backend()
         # syscall 39 (getpid) must not be treated as a program-ending syscall
@@ -708,7 +716,7 @@ class TestIntelDisassembler(unittest.TestCase):
         state = self._analyze(backend, "int", "0x80", [self._ins("mov", "eax, 4")])
         self.assertFalse(state.is_sanely_ending)
         # other int vectors are unaffected (not treated as a syscall gate at all)
-        state = self._analyze(backend, "int", "0x3", [self._ins("mov", "eax, 1")])
+        state = self._analyze(backend, "int", "0x2e", [self._ins("mov", "eax, 1")])
         self.assertFalse(state.is_sanely_ending)
 
 
