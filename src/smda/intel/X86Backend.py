@@ -73,6 +73,12 @@ SYSCALL_IMPLICIT_RAX_WRITERS = {
 
 SYSCALL_READ_ONLY_INS = {"cmp", "test", "push", "bt"}
 
+# process-terminating syscall numbers (Linux x86_64 syscall convention: rax/eax)
+SYSCALL_EXIT_NUMBERS = {60, 231}  # exit, exit_group
+# process-terminating syscall numbers via the 32-bit ABI int 0x80 gate (always eax, even
+# from a 64-bit process)
+INT80_EXIT_NUMBERS = {1, 252}  # exit, exit_group
+
 
 class X86Backend(ArchBackend):
     """x86/x64 backend: capstone setup, x86 collaborators and the x86 control-flow
@@ -382,7 +388,20 @@ class X86Backend(ArchBackend):
             )
         elif i_mnemonic_noprefix in ["syscall"]:
             syscall_number = self._resolveSyscallNumber(state.current_block, d.disassembly.binary_info.bitness)
-            if syscall_number == 60:
+            if syscall_number in SYSCALL_EXIT_NUMBERS:
+                self._analyzeEndInstruction(state)
+                LOGGER.debug(
+                    "  analyzeFunction() found program ending instruction @0x%08x",
+                    i_address,
+                )
+        elif i_mnemonic_noprefix == "int" and i_op_str == "0x80":
+            # int 0x80 is always the 32-bit ABI syscall gate (eax), even from a 64-bit process.
+            # Backtrack with bitness=64 regardless: its register set (rax/eax/ax/al/ah) is a
+            # strict superset of the 32-bit one, so it also catches a full-width "mov rax, N"
+            # write that a 64-bit binary may still use before dropping into int 0x80 -- forcing
+            # 32 here would drop "rax" from the clobber set and silently walk past that write.
+            syscall_number = self._resolveSyscallNumber(state.current_block, 64)
+            if syscall_number in INT80_EXIT_NUMBERS:
                 self._analyzeEndInstruction(state)
                 LOGGER.debug(
                     "  analyzeFunction() found program ending instruction @0x%08x",
