@@ -146,6 +146,24 @@ class TestCommonModels(unittest.TestCase):
         function.apirefs = {0x402004: ("libc.so", "puts")}
         self.assertFalse(function.isApiThunk())
 
+    def test_aarch64_is_api_thunk_rejects_argument_setting_wrapper(self):
+        # A wrapper that sets up an argument before tail-branching to an import
+        # is a real function, not an import stub - mov/movz/movk/movn/ldp never
+        # appear in a genuine ELF/Mach-O import-stub body.
+        report = SmdaReport()
+        report.architecture = "aarch64"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {
+            0x1000: [
+                SmdaInstruction((0x1000, "52800020", "mov", "w0, #1")),
+                SmdaInstruction((0x1004, "14000000", "b", "#0x1004")),
+            ]
+        }
+        function.apirefs = {0x1004: ("libc.so", "exit")}
+
+        self.assertFalse(function.isApiThunk())
+
     def test_cil_num_calls_counts_callvirt_and_calli(self):
         report = SmdaReport()
         report.architecture = "cil"
@@ -162,6 +180,26 @@ class TestCommonModels(unittest.TestCase):
 
         self.assertEqual(function.num_calls, 3)
         self.assertEqual(function.num_returns, 1)
+
+    def test_cil_is_api_thunk_recognizes_callvirt(self):
+        report = SmdaReport()
+        report.architecture = "cil"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {0x1000: [SmdaInstruction((0x1000, "6f", "callvirt", "0x0a000002"))]}
+        function.apirefs = {0x1000: ("mscorlib.dll", "WriteLine")}
+
+        self.assertTrue(function.isApiThunk())
+
+    def test_dalvik_is_api_thunk_recognizes_invoke(self):
+        report = SmdaReport()
+        report.architecture = "dalvik"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {0x1000: [SmdaInstruction((0x1000, "6e10", "invoke-virtual", "{v0}, Ljava/io/PrintStream;"))]}
+        function.apirefs = {0x1000: ("Ljava/io/PrintStream;", "println")}
+
+        self.assertTrue(function.isApiThunk())
 
 
 if __name__ == "__main__":

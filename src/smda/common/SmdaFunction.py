@@ -241,12 +241,7 @@ class SmdaFunction:
             "adr",
             "add",
             "ldr",
-            "ldp",
             "nop",
-            "mov",
-            "movz",
-            "movk",
-            "movn",
             "bti",
             "autia1716",
             "autib1716",
@@ -263,7 +258,12 @@ class SmdaFunction:
         if self.num_instructions != 1:
             return False
         first_ins = self.blocks[self.offset][0]
-        return self._baseMnemonic(first_ins.mnemonic) in ("jmp", "call")
+        if architecture == "dalvik":
+            return first_ins.mnemonic.startswith("invoke-")
+        mnemonic = self._baseMnemonic(first_ins.mnemonic)
+        if architecture == "cil":
+            return mnemonic in ("call", "calli", "callvirt", "jmp")
+        return mnemonic in ("jmp", "call")
 
     def _isAArch64ApiThunk(self):
         # Import stubs are a single straight-line block ending in a transfer that
