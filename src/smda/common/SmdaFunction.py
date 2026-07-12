@@ -257,7 +257,10 @@ class SmdaFunction:
             return self._isAArch64ApiThunk()
         if self.num_instructions != 1:
             return False
-        first_ins = self.blocks[self.offset][0]
+        block = self.blocks.get(self.offset)
+        if not block:
+            return False
+        first_ins = block[0]
         if architecture == "dalvik":
             return first_ins.mnemonic.startswith("invoke-")
         mnemonic = self._baseMnemonic(first_ins.mnemonic)
