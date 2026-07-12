@@ -71,6 +71,98 @@ class TestCommonModels(unittest.TestCase):
 
         self.assertTrue(function.isApiThunk())
 
+    def test_aarch64_num_calls_and_returns(self):
+        report = SmdaReport()
+        report.architecture = "aarch64"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {
+            0x1000: [
+                SmdaInstruction((0x1000, "94000001", "bl", "#0x1004")),
+                SmdaInstruction((0x1004, "d63f0000", "blr", "x0")),
+                SmdaInstruction((0x1008, "d65f0bff", "retaa", "")),
+            ]
+        }
+
+        self.assertEqual(function.num_calls, 2)
+        self.assertEqual(function.num_returns, 1)
+
+    def test_aarch64_num_returns_counts_pac_and_exception_returns(self):
+        report = SmdaReport()
+        report.architecture = "aarch64"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {
+            0x1000: [
+                SmdaInstruction((0x1000, "d65f0fff", "retab", "")),
+            ],
+            0x1004: [
+                SmdaInstruction((0x1004, "d69f0bff", "eretaa", "")),
+            ],
+        }
+
+        self.assertEqual(function.num_returns, 2)
+
+    def test_aarch64_is_api_thunk_recognizes_branch(self):
+        report = SmdaReport()
+        report.architecture = "aarch64"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {0x1000: [SmdaInstruction((0x1000, "d61f0200", "br", "x16"))]}
+        function.apirefs = {0x1000: ("libc.so", "printf")}
+
+        self.assertTrue(function.isApiThunk())
+
+        function.blocks = {0x1000: [SmdaInstruction((0x1000, "14000000", "b", "#0x1000"))]}
+        self.assertTrue(function.isApiThunk())
+
+    def test_aarch64_is_api_thunk_recognizes_multi_insn_plt(self):
+        # ELF/Mach-O import stubs are adrp+ldr(+add)+br, optionally prefixed with bti/nop.
+        report = SmdaReport()
+        report.architecture = "aarch64"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x402000
+        function.blocks = {
+            0x402000: [
+                SmdaInstruction((0x402000, "d503245f", "bti", "c")),
+                SmdaInstruction((0x402004, "b0000010", "adrp", "x16, #0x403000")),
+                SmdaInstruction((0x402008, "f9400e11", "ldr", "x17, [x16, #0x18]")),
+                SmdaInstruction((0x40200C, "91006210", "add", "x16, x16, #0x18")),
+                SmdaInstruction((0x402010, "d61f0220", "br", "x17")),
+            ]
+        }
+        function.apirefs = {0x402010: ("libc.so", "puts")}
+
+        self.assertTrue(function.isApiThunk())
+
+        # A real function body (stp frame + bl) with an API ref is not a thunk.
+        function.blocks = {
+            0x402000: [
+                SmdaInstruction((0x402000, "a9bf7bfd", "stp", "x29, x30, [sp, #-0x10]!")),
+                SmdaInstruction((0x402004, "94000001", "bl", "#0x402008")),
+                SmdaInstruction((0x402008, "d65f03c0", "ret", "")),
+            ]
+        }
+        function.apirefs = {0x402004: ("libc.so", "puts")}
+        self.assertFalse(function.isApiThunk())
+
+    def test_cil_num_calls_counts_callvirt_and_calli(self):
+        report = SmdaReport()
+        report.architecture = "cil"
+        function = SmdaFunction(smda_report=report)
+        function.offset = 0x1000
+        function.blocks = {
+            0x1000: [
+                SmdaInstruction((0x1000, "28", "call", "0x06000001")),
+                SmdaInstruction((0x1005, "6f", "callvirt", "0x0a000002")),
+                SmdaInstruction((0x100A, "29", "calli", "0x11000003")),
+                SmdaInstruction((0x100F, "2a", "ret", "")),
+            ]
+        }
+
+        self.assertEqual(function.num_calls, 3)
+        self.assertEqual(function.num_returns, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

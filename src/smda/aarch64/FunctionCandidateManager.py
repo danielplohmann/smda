@@ -71,10 +71,20 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # The x86-only PLT/stub-chain and PE .pdata passes do not apply and are
         # omitted; the NOP-based gap scan is disabled (see nextGapCandidate).
         self.locateSymbolCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locateReferenceCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locateAddressRefCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locateDataPointerCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locatePrologueCandidates()
+        if self._candidateTimeoutTripped():
+            return
         self.locateLangSpecCandidates()
         self.identified_alignment = self._identifyAlignment()
 
@@ -128,7 +138,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             # naturally aligned, so an unaligned section start would otherwise
             # stride past every aligned pointer in the section.
             scan_start = (section_start + (pointer_size - 1)) & ~(pointer_size - 1)
-            for pointer_va in range(scan_start, section_end - (pointer_size - 1), pointer_size):
+            for match_count, pointer_va in enumerate(range(scan_start, section_end - (pointer_size - 1), pointer_size)):
+                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                    return
                 raw = self.disassembly.getBytes(pointer_va, pointer_size)
                 if raw is None or len(raw) != pointer_size:
                     continue
@@ -173,7 +185,11 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         for low, high in exec_ranges:
             pages = {}  # Xd -> adrp page base currently held in that register
             addr = low
+            match_count = 0
             while addr + INSTRUCTION_SIZE <= high:
+                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                    return
+                match_count += 1
                 offset = addr - base
                 if offset < 0 or offset + INSTRUCTION_SIZE > len(binary):
                     addr += INSTRUCTION_SIZE
@@ -224,7 +240,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # call-reference candidate — the AArch64 analogue of the base 0xE8 scan.
         binary = self.disassembly.binary_info.binary
         base = self.disassembly.binary_info.base_addr
-        for offset in range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE):
+        for match_count, offset in enumerate(range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE)):
+            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                return
             word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
             if (word & BL_MASK) != BL_VALUE:
                 continue
@@ -246,7 +264,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # see definitions.is_function_prologue for the exact encodings.
         binary = self.disassembly.binary_info.binary
         base = self.disassembly.binary_info.base_addr
-        for offset in range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE):
+        for match_count, offset in enumerate(range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE)):
+            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                return
             word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
             if not is_function_prologue(word):
                 continue

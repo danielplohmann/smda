@@ -130,7 +130,6 @@ class AArch64Backend(ArchBackend):
     @classmethod
     def _callFallthroughFunctionStart(cls, d, addr):
         if addr in d.fc_manager.getFunctionStartCandidates():
-            print(f"found candidate at call fallthrough 0x{addr:08x}")
             return addr
 
         cursor = addr
@@ -139,12 +138,10 @@ class AArch64Backend(ArchBackend):
             skipped_nop = True
             cursor += INSTRUCTION_SIZE
         if skipped_nop and cursor in d.fc_manager.getFunctionStartCandidates():
-            print(f"skipped NOPs, found candidate at 0x{cursor:08x}")
             return cursor
         if skipped_nop and cursor % 16 == 0:
             word = cls._wordAt(d, cursor)
             if word not in (None, 0, NOP):
-                print(f"skipped NOPs, found non-NOP at 0x{cursor:08x}: 0x{word:08x}")
                 return cursor
         return None
 
@@ -357,12 +354,18 @@ class AArch64Backend(ArchBackend):
         elif i_mnemonic in UNCOND_JUMP_INS:
             self._analyzeUncondBranch(d, instruction, state)
         elif i_mnemonic in INDIRECT_JUMP_INS:
-            # br and the PAC indirect jumps (braa/brab/braaz/brabz): indirect branch
-            jumptable_targets = d.jumptable_analyzer.getJumpTargets(instruction, state)
-            for target in jumptable_targets:
-                if d.disassembly.isAddrWithinMemoryImage(target):
-                    state.addBlockToQueue(target)
-                    state.addCodeRef(i_address, target, by_jump=True)
+            # br / bra*: import stubs (PLT/Mach-O) are multi-insn adrp+ldr+br sequences
+            # whose entry is in a stub range — resolve the GOT slot and attribute the API
+            # to this branch (mirrors x86 jmp [iat] thunk analysis).
+            got_slot = self._resolvePltGotSlot(d, state.start_addr)
+            if got_slot is not None and d._handleApiTarget(i_address, got_slot, got_slot):
+                state.setSanelyEnding(True)
+            else:
+                jumptable_targets = d.jumptable_analyzer.getJumpTargets(instruction, state)
+                for target in jumptable_targets:
+                    if d.disassembly.isAddrWithinMemoryImage(target):
+                        state.addBlockToQueue(target)
+                        state.addCodeRef(i_address, target, by_jump=True)
             state.setNextInstructionReachable(False)
             state.setBlockEndingInstruction(True)
         # else: SEQUENTIAL — engine books it and continues to the next instruction.
