@@ -4,6 +4,7 @@ import logging
 import types
 import unittest
 
+from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
 
@@ -16,6 +17,22 @@ def _make_manager(config, binary=b"\x55\x8b\xec" * 1024, base_addr=0x1000, bitne
     binary_info = types.SimpleNamespace(bitness=bitness, base_addr=base_addr, binary=binary)
     manager.disassembly = types.SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
     manager.bitness = bitness
+    return manager
+
+
+def _make_aarch64_manager(config, binary, base_addr=0x1000):
+    manager = AArch64FunctionCandidateManager(config)
+    binary_info = types.SimpleNamespace(bitness=64, base_addr=base_addr, binary=binary)
+    manager.disassembly = types.SimpleNamespace(
+        binary_info=binary_info,
+        analysis_timeout=False,
+        isAddrWithinMemoryImage=lambda addr: base_addr <= addr < base_addr + len(binary),
+        getBytes=lambda addr, size: (
+            binary[addr - base_addr : addr - base_addr + size] if 0 <= addr - base_addr < len(binary) else None
+        ),
+    )
+    manager.bitness = 64
+    manager._code_areas = []
     return manager
 
 
@@ -75,6 +92,36 @@ class CandidateSafeguardsTestSuite(unittest.TestCase):
         config = SmdaConfig()
         self.assertEqual(config.MAX_FUNCTION_CANDIDATES, 200000)
         self.assertEqual(config.MAX_CALL_REFS_PER_CANDIDATE, 2000)
+
+    def test_aarch64_reference_scan_honors_analysis_timeout(self):
+        # BL imm26=1 targets base+4; without timeout this seeds a reference candidate.
+        bl_to_next = (0x94000000 | 1).to_bytes(4, "little")
+        ret = (0xD65F03C0).to_bytes(4, "little")
+        binary = bl_to_next + ret + b"\x00" * 0x100
+        config = SmdaConfig()
+        config.MAX_FUNCTION_CANDIDATES = 0
+        manager = _make_aarch64_manager(config, binary)
+        manager.locateReferenceCandidates()
+        self.assertIn(0x1004, manager.candidates)
+
+        manager_timeout = _make_aarch64_manager(config, binary)
+        manager_timeout.disassembly.analysis_timeout = True
+        manager_timeout.locateReferenceCandidates()
+        self.assertEqual(manager_timeout.candidates, {})
+
+    def test_aarch64_locate_candidates_aborts_between_passes(self):
+        # stp x29, x30, [sp, #-16]! is a recognized prologue; timeout after symbols
+        # must skip the prologue pass entirely.
+        stp_fp_lr = (0xA9BF7BFD).to_bytes(4, "little")
+        ret = (0xD65F03C0).to_bytes(4, "little")
+        binary = stp_fp_lr + ret
+        config = SmdaConfig()
+        config.MAX_FUNCTION_CANDIDATES = 0
+        manager = _make_aarch64_manager(config, binary)
+        manager.symbol_addresses = []
+        manager.disassembly.analysis_timeout = True
+        manager.locateCandidates()
+        self.assertEqual(manager.candidates, {})
 
 
 if __name__ == "__main__":

@@ -622,6 +622,47 @@ class TestAArch64PltResolution(unittest.TestCase):
         self.assertEqual(fake_disassembler.call_targets, [])
         self.assertEqual(state.code_refs, [(call_addr, plt, False)])
 
+    def test_analyzing_plt_stub_as_function_records_api_on_br(self):
+        # When the PLT entry itself is recovered as a function, the terminal br
+        # must attribute the GOT import (so isApiThunk can see the apiref).
+        fake_disassembler, plt, got_slot = self._build_disassembler()
+        br_addr = plt + 12  # adrp; ldr; add; br
+
+        class FakeState:
+            def __init__(self, start_addr):
+                self.start_addr = start_addr
+                self.sanely_ending = False
+                self.next_reachable = True
+                self.block_ending = False
+                self.queue = []
+                self.code_refs = []
+
+            def setSanelyEnding(self, value=True):
+                self.sanely_ending = value
+
+            def setNextInstructionReachable(self, value):
+                self.next_reachable = value
+
+            def setBlockEndingInstruction(self, value=True):
+                self.block_ending = value
+
+            def addBlockToQueue(self, addr):
+                self.queue.append(addr)
+
+            def addCodeRef(self, from_addr, to_addr, by_jump=False):
+                self.code_refs.append((from_addr, to_addr, by_jump))
+
+        state = FakeState(plt)
+        backend = AArch64Backend()
+        backend.analyzeInstruction(fake_disassembler, (br_addr, 4, "br", "x17"), state, None, plt)
+
+        self.assertEqual(fake_disassembler.api_targets, [(br_addr, got_slot, got_slot)])
+        self.assertTrue(state.sanely_ending)
+        self.assertFalse(state.next_reachable)
+        self.assertTrue(state.block_ending)
+        self.assertEqual(state.queue, [])
+        self.assertEqual(state.code_refs, [])
+
     def test_uncond_branch_tailcall_to_plt_stub_records_api_reference(self):
         # A thin wrapper that tail-calls an import via a bare unconditional branch
         # (instead of "bl") must resolve through the same PLT/Mach-O-stub decode as
