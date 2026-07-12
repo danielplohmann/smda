@@ -45,6 +45,7 @@ def run_benchmark(iterations, output_file):
         {"name": "komplex", "filename": "komplex_xored", "base_addr": 0, "backend": "intel"},
         {"name": "njrat", "filename": "njrat_xored", "base_addr": 0, "backend": "cil"},
         {"name": "pe_export", "filename": "pe_export_label_test_xored", "base_addr": 0, "backend": "intel"},
+        {"name": "aarch64_static", "filename": "aarch64_static_xored", "base_addr": 0, "backend": "aarch64"},
     ]
 
     results = {}
