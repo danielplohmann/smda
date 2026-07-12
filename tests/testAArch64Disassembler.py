@@ -1349,6 +1349,314 @@ class TestAArch64Analyzers(unittest.TestCase):
         targets = analyzer.getJumpTargets(instructions[-1], fake_state)
         self.assertEqual(targets[:3], [0x411120, 0x411140, 0x4110E0])
 
+    def _buildIndirectCallCrossBlockFixture(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        base = 0x400000
+        # Block B0 (predecessor): resolves x8 -> 0x401020, then unconditionally
+        # branches into B1. Block B1: the register call itself, in an entirely
+        # different block from the adrp/add that defines its target.
+        words = [
+            (0x401000, 0x90000008),  # adrp x8, #0x401000
+            (0x401004, 0x91008108),  # add x8, x8, #0x20   (x8 = 0x401020)
+            (0x401008, 0x14000002),  # b 0x401010
+            (0x401010, 0xD63F0100),  # blr x8
+            (0x401014, 0xD65F03C0),  # ret
+        ]
+
+        mapped = bytearray(0x5000)
+        for addr, w in words:
+            mapped[addr - base : addr - base + 4] = w.to_bytes(4, "little")
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(mapped)
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+        disassembly.apis = {}
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+
+        added_candidates = []
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result, capstone):
+                self.disassembly = disassembly_result
+                self.capstone = capstone
+
+            def resolveApi(self, to_addr, api_addr):
+                del to_addr, api_addr
+                return ("", "")
+
+            @property
+            def fc_manager(self):
+                class FakeFC:
+                    def addCandidate(self, addr, reference_source=None):
+                        del reference_source
+                        added_candidates.append(addr)
+
+                return FakeFC()
+
+        fake_disassembler = FakeDisassembler(disassembly, capstone)
+
+        instructions = [(addr, 4, "", "", b"") for addr, _w in words]
+        block0 = instructions[:3]
+        block1 = instructions[3:]
+
+        class FakeState:
+            def __init__(self):
+                self.call_register_ins = [0x401010]
+                self.start_addr = 0x401000
+                self.code_refs_to = {0x401010: {0x401008}}
+                self.leaf = True
+
+            def getBlocks(self):
+                return [block0, block1]
+
+            def setLeaf(self, leaf):
+                self.leaf = leaf
+
+        return fake_disassembler, FakeState(), added_candidates
+
+    def test_aarch64_indirect_call_resolves_across_predecessor_block(self):
+        from smda.aarch64.analyzers import AArch64IndirectCallAnalyzer
+
+        fake_disassembler, fake_state, added_candidates = self._buildIndirectCallCrossBlockFixture()
+        analyzer = AArch64IndirectCallAnalyzer(fake_disassembler)
+
+        analyzer.resolveRegisterCalls(fake_state, block_depth=3)
+        self.assertEqual(added_candidates, [0x401020])
+        self.assertFalse(fake_state.leaf)
+
+    def test_aarch64_indirect_call_depth_cap_prevents_resolution(self):
+        from smda.aarch64.analyzers import AArch64IndirectCallAnalyzer
+
+        fake_disassembler, fake_state, added_candidates = self._buildIndirectCallCrossBlockFixture()
+        analyzer = AArch64IndirectCallAnalyzer(fake_disassembler)
+
+        # the target's definition lives exactly one predecessor block away; a depth
+        # of 0 must not cross into that block, so the register call stays unresolved.
+        analyzer.resolveRegisterCalls(fake_state, block_depth=0)
+        self.assertEqual(added_candidates, [])
+        self.assertTrue(fake_state.leaf)
+
+    def test_aarch64_jump_table_resolves_base_from_predecessor_block(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.aarch64.analyzers import AArch64JumpTableAnalyzer
+
+        base = 0x400000
+        # Block B0 computes the table base and unconditionally branches into B1;
+        # B1 (the ldr + br) never itself contains the adrp/add - only reachable via
+        # the predecessor-block hop through code_refs_to/jump_targets.
+        words = [
+            (0x401000, 0x90000093),  # adrp x19, #0x411000
+            (0x401004, 0x91040273),  # add x19, x19, #0x100 (x19 = 0x411100)
+            (0x401008, 0x14000002),  # b 0x401010
+            (0x401010, 0xF8617A73),  # ldr x19, [x19, x1, lsl #3]
+            (0x401014, 0xD61F0260),  # br x19
+        ]
+
+        mapped = bytearray(0x15000)
+        for addr, w in words:
+            mapped[addr - base : addr - base + 4] = w.to_bytes(4, "little")
+
+        struct.pack_into("<Q", mapped, 0x411100 - base, 0x411120)
+        struct.pack_into("<Q", mapped, 0x411108 - base, 0x411140)
+        struct.pack_into("<Q", mapped, 0x411110 - base, 0x4110E0)
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(mapped)
+        binary_info.isInCodeAreas = lambda addr: 0x400000 <= addr < 0x415000
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result, capstone):
+                self.disassembly = disassembly_result
+                self.capstone = capstone
+
+            def getBitMask(self):
+                return 0xFFFFFFFFFFFFFFFF
+
+        fake_disassembler = FakeDisassembler(disassembly, capstone)
+
+        instructions = [(addr, 4, "", "", b"") for addr, _w in words]
+
+        class FakeState:
+            def __init__(self, instructions):
+                self.instructions = instructions
+                self.start_addr = 0x401000
+                self.jump_targets = {0x401010}
+                self.code_refs_to = {0x401010: {0x401008}}
+                self.data_refs = []
+
+            def backtrackInstructions(self, addr_from, num_instructions):
+                del num_instructions
+                return [ins for ins in self.instructions if ins[0] < addr_from]
+
+            def addDataRef(self, from_addr, to_addr, size=1):
+                self.data_refs.append((from_addr, to_addr, size))
+
+        fake_state = FakeState(instructions)
+        analyzer = AArch64JumpTableAnalyzer(fake_disassembler)
+
+        targets = analyzer.getJumpTargets(instructions[-1], fake_state)
+        self.assertEqual(targets[:3], [0x411120, 0x411140, 0x4110E0])
+
+    def test_aarch64_jump_table_sxtw_extend_chain_resolution(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.aarch64.analyzers import AArch64JumpTableAnalyzer
+
+        base = 0x400000
+        # A plain (unsigned) ldr of a raw 32-bit table entry, explicitly sign-extended
+        # via a standalone `sxtw` rather than folded into a `ldrsw` - a compiler
+        # pattern the old flat forward-pass couldn't chase through at all, since it had
+        # no notion of sxtw/uxtw as a continuation of the tracked register chain.
+        words = [
+            0x90000089,  # adrp x9, #0x411000
+            0x91040129,  # add x9, x9, #0x100      (x9 = table_base = 0x411100)
+            0x8B01092B,  # add x11, x9, x1, lsl #2  (x11 = &entry, x1 = runtime index)
+            0xB940016A,  # ldr w10, [x11]           (w10 = raw entry)
+            0x93407D4A,  # sxtw x10, w10            (x10 = sign-extended entry)
+            0x8B0A0120,  # add x0, x9, x10          (x0 = table_base + entry)
+            0xD61F0000,  # br x0
+        ]
+
+        mapped = bytearray(0x15000)
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            mapped[addr - base : addr - base + 4] = w.to_bytes(4, "little")
+
+        struct.pack_into("<i", mapped, 0x411100 - base, 0x20)
+        struct.pack_into("<i", mapped, 0x411104 - base, 0x40)
+        struct.pack_into("<i", mapped, 0x411108 - base, -0x20)
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(mapped)
+        binary_info.isInCodeAreas = lambda addr: 0x400000 <= addr < 0x415000
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result, capstone):
+                self.disassembly = disassembly_result
+                self.capstone = capstone
+
+            def getBitMask(self):
+                return 0xFFFFFFFFFFFFFFFF
+
+        fake_disassembler = FakeDisassembler(disassembly, capstone)
+
+        class FakeState:
+            def __init__(self, instructions):
+                self.instructions = instructions
+                self.data_refs = []
+
+            def backtrackInstructions(self, addr_from, num_instructions):
+                del num_instructions
+                return [ins for ins in self.instructions if ins[0] < addr_from]
+
+            def addDataRef(self, from_addr, to_addr, size=1):
+                self.data_refs.append((from_addr, to_addr, size))
+
+        instructions = []
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            inst = next(capstone.disasm(w.to_bytes(4, "little"), addr))
+            instructions.append((addr, 4, inst.mnemonic, inst.op_str, inst.bytes))
+
+        fake_state = FakeState(instructions)
+        analyzer = AArch64JumpTableAnalyzer(fake_disassembler)
+
+        targets = analyzer.getJumpTargets(instructions[-1], fake_state)
+        self.assertEqual(targets[:3], [0x411120, 0x411140, 0x4110E0])
+
+    def test_aarch64_jump_table_size_inferred_from_subs_bounds_check(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.aarch64.analyzers import AArch64JumpTableAnalyzer
+
+        base = 0x400000
+        words = [
+            0x90000093,  # adrp x19, #0x411000
+            0x91040273,  # add x19, x19, #0x100 (x19 = 0x411100)
+            0x71000C22,  # subs w2, w1, #3   (bounds check on the index register w1)
+            0xF8617A73,  # ldr x19, [x19, x1, lsl #3]
+            0xD61F0260,  # br x19
+        ]
+
+        mapped = bytearray(0x15000)
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            mapped[addr - base : addr - base + 4] = w.to_bytes(4, "little")
+
+        # only 4 (subs imm #3 + 1) entries should be read; a 5th, garbage entry sits
+        # right after to prove the subs-derived table_size actually bounded the loop.
+        struct.pack_into("<Q", mapped, 0x411100 - base, 0x411120)
+        struct.pack_into("<Q", mapped, 0x411108 - base, 0x411140)
+        struct.pack_into("<Q", mapped, 0x411110 - base, 0x4110E0)
+        struct.pack_into("<Q", mapped, 0x411118 - base, 0x411160)
+        struct.pack_into("<Q", mapped, 0x411120 - base, 0x411180)
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(mapped)
+        binary_info.isInCodeAreas = lambda addr: 0x400000 <= addr < 0x415000
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result, capstone):
+                self.disassembly = disassembly_result
+                self.capstone = capstone
+
+            def getBitMask(self):
+                return 0xFFFFFFFFFFFFFFFF
+
+        fake_disassembler = FakeDisassembler(disassembly, capstone)
+
+        class FakeState:
+            def __init__(self, instructions):
+                self.instructions = instructions
+                self.data_refs = []
+
+            def backtrackInstructions(self, addr_from, num_instructions):
+                del num_instructions
+                return [ins for ins in self.instructions if ins[0] < addr_from]
+
+            def addDataRef(self, from_addr, to_addr, size=1):
+                self.data_refs.append((from_addr, to_addr, size))
+
+        instructions = []
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            inst = next(capstone.disasm(w.to_bytes(4, "little"), addr))
+            instructions.append((addr, 4, inst.mnemonic, inst.op_str, inst.bytes))
+
+        fake_state = FakeState(instructions)
+        analyzer = AArch64JumpTableAnalyzer(fake_disassembler)
+
+        targets = analyzer.getJumpTargets(instructions[-1], fake_state)
+        self.assertEqual(targets, [0x411120, 0x411140, 0x4110E0, 0x411160])
+
 
 class TestAArch64MovMacroSplit(unittest.TestCase):
     """IDA's MOV-macro feature collapses MOVZ+MOVK pairs (materialising a 32-bit
