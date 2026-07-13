@@ -634,6 +634,7 @@ class TestAArch64PltResolution(unittest.TestCase):
                 self.sanely_ending = False
                 self.next_reachable = True
                 self.block_ending = False
+                self.thunk_call = False
                 self.queue = []
                 self.code_refs = []
 
@@ -645,6 +646,9 @@ class TestAArch64PltResolution(unittest.TestCase):
 
             def setBlockEndingInstruction(self, value=True):
                 self.block_ending = value
+
+            def setThunkCall(self, value=True):
+                self.thunk_call = value
 
             def addBlockToQueue(self, addr):
                 self.queue.append(addr)
@@ -660,6 +664,9 @@ class TestAArch64PltResolution(unittest.TestCase):
         self.assertTrue(state.sanely_ending)
         self.assertFalse(state.next_reachable)
         self.assertTrue(state.block_ending)
+        # the whole function body is exactly the adrp/ldr/add/br thunk shape, so
+        # the merged upstream thunk_functions classification must also fire here.
+        self.assertTrue(state.thunk_call)
         self.assertEqual(state.queue, [])
         self.assertEqual(state.code_refs, [])
 
