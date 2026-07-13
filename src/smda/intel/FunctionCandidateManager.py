@@ -14,7 +14,6 @@ from .definitions import (
     DEFAULT_PROLOGUES_64,
     ENDBR64_BYTES,
     GAP_SEQUENCES,
-    MASKED_PROLOGUES_64,
 )
 from .FunctionCandidate import FunctionCandidate
 from .LanguageAnalyzer import LanguageAnalyzer
@@ -24,16 +23,6 @@ LOGGER = logging.getLogger(__name__)
 # bytes.lstrip() can skip long runs of one-byte padding in C instead of
 # crawling them byte-by-byte in the gap scanner.
 _PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
-
-# regex byte patterns for the is_seedable subset of MASKED_PROLOGUES_64, wildcard positions
-# rendered as "." (re.DOTALL so a wildcard byte of 0x0a still matches). Non-seedable entries
-# (e.g. the generic "sub rsp, imm8" mid-function idiom) are scoring-only and must not be
-# whole-binary-scanned for new FEP candidates.
-_MASKED_PROLOGUE_REGEXES_64 = [
-    re.compile(b"".join(re.escape(bytes([b])) if b is not None else b"." for b in template), re.DOTALL)
-    for template, _score, is_seedable in MASKED_PROLOGUES_64
-    if is_seedable
-]
 
 
 class FunctionCandidateManager:
@@ -642,15 +631,12 @@ class FunctionCandidateManager:
             if self._seedPrologueMatches(re.escape(re_prologue)):
                 return
         if self.bitness == 64:
-            # extended GCC/Clang AMD64 prologue family: a CET landing pad (endbr64) that may
-            # prefix the real prologue, plus exact and immediate-wildcarded stack-frame openers.
+            # extended GCC/Clang/MSVC AMD64 prologue family: a CET landing pad (endbr64) that may
+            # prefix the real prologue, plus exact stack-frame openers.
             if self._seedPrologueMatches(re.escape(ENDBR64_BYTES)):
                 return
             for re_prologue in DEFAULT_PROLOGUES_64:
                 if self._seedPrologueMatches(re.escape(re_prologue)):
-                    return
-            for masked_regex in _MASKED_PROLOGUE_REGEXES_64:
-                if self._seedPrologueMatches(masked_regex):
                     return
 
     def locateLangSpecCandidates(self):

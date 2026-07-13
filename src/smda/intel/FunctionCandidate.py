@@ -1,34 +1,14 @@
 from binascii import hexlify
 
-from .definitions import COMMON_PROLOGUES, ENDBR64_BYTES, MASKED_PROLOGUES_64
+from .definitions import COMMON_PROLOGUES, ENDBR64_BYTES
 
 # Hoisted: prologue lengths are checked longest-first on every candidate scoring call.
 # Pre-sort once at import time instead of re-sorting per call (hot path during CFG recovery).
 _COMMON_PROLOGUE_LENGTHS = sorted((int(k) for k in COMMON_PROLOGUES), reverse=True)
-
-
-def _buildMaskedPrologueTable(templates):
-    # scoring applies regardless of is_seedable: a candidate already found by other means
-    # (call ref, gap, symbol) still deserves credit for looking like a prologue.
-    table = []
-    for template, score, _is_seedable in templates:
-        mask = int.from_bytes(bytes(0xFF if b is not None else 0x00 for b in template), "big")
-        value = int.from_bytes(bytes(b if b is not None else 0x00 for b in template), "big")
-        table.append((len(template), mask, value, score))
-    return table
-
-
-# (length, mask, value, score) tuples, matched via (window_as_int & mask) == value.
-_MASKED_PROLOGUES_64 = _buildMaskedPrologueTable(MASKED_PROLOGUES_64)
 _ENDBR64_LEN = len(ENDBR64_BYTES)
-# lengths to probe longest-first, so a specific multi-byte match always wins over a weak
-# single-byte fallback, regardless of whether it comes from COMMON_PROLOGUES or a masked entry.
-_ALL_PROLOGUE_LENGTHS = sorted(
-    {*_COMMON_PROLOGUE_LENGTHS, *(length for length, *_ in _MASKED_PROLOGUES_64)}, reverse=True
-)
 # longest byte window a candidate ever needs to see: the widest prologue match, plus a
 # potential leading endbr64 to strip before re-matching the remainder.
-_PROLOGUE_WINDOW_SIZE = _ALL_PROLOGUE_LENGTHS[0] + _ENDBR64_LEN
+_PROLOGUE_WINDOW_SIZE = _COMMON_PROLOGUE_LENGTHS[0] + _ENDBR64_LEN
 
 
 class FunctionCandidate:
@@ -91,20 +71,14 @@ class FunctionCandidate:
         return self._confidence
 
     def _lookupPrologueScore(self, byte_window):
-        # longest-first, and masked entries checked alongside exact ones at the same length,
-        # so a specific multi-byte match always wins over a weak single-byte fallback.
-        for length in _ALL_PROLOGUE_LENGTHS:
+        # longest-first, so a specific multi-byte match always wins over a weak single-byte fallback.
+        for length in _COMMON_PROLOGUE_LENGTHS:
             window_slice = byte_window[:length]
             if len(window_slice) < length:
                 continue
             prologue_score = COMMON_PROLOGUES.get(f"{length}", {}).get(self.bitness, {}).get(window_slice)
             if prologue_score is not None:
                 return prologue_score
-            if self.bitness == 64:
-                window_int = int.from_bytes(window_slice, "big")
-                for masked_length, mask, value, score in _MASKED_PROLOGUES_64:
-                    if masked_length == length and (window_int & mask) == value:
-                        return score
         return None
 
     def hasCommonFunctionStart(self):

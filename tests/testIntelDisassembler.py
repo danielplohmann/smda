@@ -91,19 +91,35 @@ class TestIntelDisassembler(unittest.TestCase):
         binary_info.bitness = bitness
         return FunctionCandidate(binary_info, addr)
 
-    def test_extended_amd64_prologues_score_as_common_start(self):
-        # endbr64; push rbp; mov rbp, rsp
-        self.assertTrue(self._candidate(bytes.fromhex("f30f1efa554889e5")).hasCommonFunctionStart())
-        # endbr64; sub rsp, 0x10
-        self.assertTrue(self._candidate(bytes.fromhex("f30f1efa4883ec10")).hasCommonFunctionStart())
-        # push r15; push r14
-        self.assertTrue(self._candidate(bytes.fromhex("41574156")).hasCommonFunctionStart())
-        # mov [rsp+8], rbx
-        self.assertTrue(self._candidate(bytes.fromhex("48895c2408")).hasCommonFunctionStart())
-        # sub rsp, 0x20
-        candidate = self._candidate(bytes.fromhex("4883ec20"))
-        self.assertTrue(candidate.hasCommonFunctionStart())
-        self.assertGreater(candidate.getFunctionStartScore(), 0)
+    def test_extended_amd64_prologues_score_exact_tiers(self):
+        # endbr64; push rbp; mov rbp, rsp -- DEFAULT_PROLOGUES entry, falls back to the
+        # single-byte 0x55 tier (33) since "554889e5" itself isn't a COMMON_PROLOGUES key.
+        self.assertEqual(self._candidate(bytes.fromhex("f30f1efa554889e5")).getFunctionStartScore(), 33)
+        # push r15; push r14 -- exact 4-byte match, tier 40
+        self.assertEqual(self._candidate(bytes.fromhex("41574156")).getFunctionStartScore(), 40)
+        # push rbx; sub rsp, imm8 -- exact 5-byte match, tier 40
+        self.assertEqual(self._candidate(bytes.fromhex("40534883ec20")).getFunctionStartScore(), 40)
+        # push rbp; sub rsp, imm8 -- exact 5-byte match, tier 40
+        self.assertEqual(self._candidate(bytes.fromhex("40554883ec18")).getFunctionStartScore(), 40)
+        # endbr64 stripped, then push rbx; sub rsp, imm8 underneath -- still tier 40
+        self.assertEqual(self._candidate(bytes.fromhex("f30f1efa40534883ec20")).getFunctionStartScore(), 40)
+        # mov [rsp+disp8], rbx -- exact 4-byte match, tier 30 (below push;sub, above the
+        # single-byte 0x48 REX.W fallback, per the maintainer's lower MSVC precision for this pattern)
+        self.assertEqual(self._candidate(bytes.fromhex("48895c2408")).getFunctionStartScore(), 30)
+        # bare "sub rsp, imm8" -- no longer an independent pattern at any length; falls back
+        # to the single-byte 0x48 (REX.W) tier (21)
+        self.assertEqual(self._candidate(bytes.fromhex("4883ec20")).getFunctionStartScore(), 21)
+
+    def test_extended_amd64_prologues_negative_guards(self):
+        # push rbx; sub rsp, imm8 WITHOUT the leading bare REX (0x40) byte does not hit the
+        # tier-40 pattern -- it falls back to the single-byte 0x53 tier (6)
+        self.assertEqual(self._candidate(bytes.fromhex("534883ec20")).getFunctionStartScore(), 6)
+        # mov [rsp+disp8], rax (ModRM reg=000, not rbx's reg=011) does not alias the
+        # rbx-specific mov-spill pattern -- falls back to the single-byte 0x48 tier (21)
+        self.assertEqual(self._candidate(bytes.fromhex("4889442408")).getFunctionStartScore(), 21)
+        # mov [rsp+disp32], rbx (mod=10, ModRM 0x9c) must not alias the disp8 form (mod=01,
+        # ModRM 0x5c) -- falls back to the single-byte 0x48 tier (21)
+        self.assertEqual(self._candidate(bytes.fromhex("48899c2408000000")).getFunctionStartScore(), 21)
 
     def test_bare_endbr64_without_recognized_continuation_scores_zero(self):
         candidate = self._candidate(bytes.fromhex("f30f1efa9090909090"))
@@ -111,9 +127,11 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertEqual(candidate.getFunctionStartScore(), 0)
 
     def test_extended_amd64_prologues_are_64bit_only(self):
-        # the masked sub-rsp/mov-rsp patterns are REX-prefixed and must not match in 32-bit mode
-        candidate = self._candidate(bytes.fromhex("4883ec20"), bitness=32)
-        self.assertFalse(candidate.hasCommonFunctionStart())
+        # the exact push;sub/mov-spill patterns are REX-prefixed and must not match in 32-bit mode
+        for hexbytes in ("4883ec20", "40534883ec20", "40554883ec18", "48895c2408"):
+            with self.subTest(hexbytes=hexbytes):
+                candidate = self._candidate(bytes.fromhex(hexbytes), bitness=32)
+                self.assertFalse(candidate.hasCommonFunctionStart())
 
     def test_mnemonic_tfidf_empty_counts_returns_zero(self):
         self.assertEqual(MnemonicTfIdf().tfidf({}), 0.0)
@@ -398,7 +416,8 @@ class TestIntelDisassembler(unittest.TestCase):
         buf = bytes.fromhex(
             "f30f1efa554889e5"  # 0x1000: endbr64; push rbp; mov rbp, rsp
             "41574156"  # 0x1008: push r15; push r14
-            "48895c2408"  # 0x100c: mov [rsp+8], rbx
+            "40534883ec20"  # 0x100c: push rbx; sub rsp, imm8
+            "40554883ec18"  # 0x1012: push rbp; sub rsp, imm8
         )
         binary_info = BinaryInfo(buf)
         binary_info.base_addr = 0x1000
@@ -411,42 +430,50 @@ class TestIntelDisassembler(unittest.TestCase):
 
         manager.locatePrologueCandidates()
 
-        self.assertEqual(
-            {0x1000, 0x1008, 0x100C} & manager.candidates.keys(),
-            {0x1000, 0x1008, 0x100C},
-        )
+        expected = {0x1000, 0x1008, 0x100C, 0x1012}
+        self.assertEqual(expected & manager.candidates.keys(), expected)
 
-    def test_locate_prologue_candidates_does_not_seed_generic_sub_rsp(self):
-        # "sub rsp, imm8" alone is a common mid-function idiom (e.g. a call-alignment stub), not
-        # a reliable independent function-start signal; it must not be raw-scanned as a FEP.
-        buf = bytes.fromhex("4883ec20")
-        binary_info = BinaryInfo(buf)
-        binary_info.base_addr = 0x1000
-        binary_info.bitness = 64
-        binary_info.binary_size = len(buf)
+    def test_locate_prologue_candidates_does_not_seed_common_mid_function_idioms(self):
+        # "sub rsp, imm8" alone (no leading push) and "mov [rsp+disp8], rbx" (a shadow-space
+        # register spill) are both common MID-FUNCTION idioms, not reliable independent
+        # function-start signals on their own (measured: seeding the mov-spill pattern across the
+        # Bao x64 MSVC corpus added 537 false positives corpus-wide for zero recovered true
+        # positives) -- neither must be raw-scanned as a FEP, though both are still scored via
+        # COMMON_PROLOGUES when a candidate already exists by other means. Same for a push;sub
+        # missing the leading bare-REX byte and a non-rbx register spill -- neither is one of the
+        # exact seeded patterns either.
+        for hexbytes in ("4883ec20", "534883ec20", "4889442408", "48895c2408"):
+            with self.subTest(hexbytes=hexbytes):
+                buf = bytes.fromhex(hexbytes)
+                binary_info = BinaryInfo(buf)
+                binary_info.base_addr = 0x1000
+                binary_info.bitness = 64
+                binary_info.binary_size = len(buf)
 
-        manager = FunctionCandidateManager(SmdaConfig())
-        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
-        manager.bitness = 64
+                manager = FunctionCandidateManager(SmdaConfig())
+                manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+                manager.bitness = 64
 
-        manager.locatePrologueCandidates()
+                manager.locatePrologueCandidates()
 
-        self.assertEqual(manager.candidates, {})
+                self.assertEqual(manager.candidates, {})
 
     def test_locate_prologue_candidates_skips_extended_amd64_prologues_for_32bit(self):
-        buf = bytes.fromhex("4883ec20")
-        binary_info = BinaryInfo(buf)
-        binary_info.base_addr = 0x1000
-        binary_info.bitness = 32
-        binary_info.binary_size = len(buf)
+        for hexbytes in ("4883ec20", "40534883ec20", "48895c2408"):
+            with self.subTest(hexbytes=hexbytes):
+                buf = bytes.fromhex(hexbytes)
+                binary_info = BinaryInfo(buf)
+                binary_info.base_addr = 0x1000
+                binary_info.bitness = 32
+                binary_info.binary_size = len(buf)
 
-        manager = FunctionCandidateManager(SmdaConfig())
-        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
-        manager.bitness = 32
+                manager = FunctionCandidateManager(SmdaConfig())
+                manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+                manager.bitness = 32
 
-        manager.locatePrologueCandidates()
+                manager.locatePrologueCandidates()
 
-        self.assertEqual(manager.candidates, {})
+                self.assertEqual(manager.candidates, {})
 
     def test_prefixed_call_keeps_fallthrough_in_same_block(self):
         state = FunctionAnalysisState(0x1000, SimpleNamespace())
