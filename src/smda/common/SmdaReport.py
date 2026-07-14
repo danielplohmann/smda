@@ -190,6 +190,10 @@ class SmdaReport:
 
     def getCapstone(self):
         if self.capstone is None:
+            if self.architecture is not None and self.architecture not in ("intel", "aarch64"):
+                raise NotImplementedError(
+                    f"getCapstone() is only available for Intel and AArch64, not '{self.architecture}'"
+                )
             if self.architecture == "aarch64":
                 self.capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
             else:
