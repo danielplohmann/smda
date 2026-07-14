@@ -16,8 +16,13 @@ x86 byte-level scans with AArch64-aware ones:
   unanalyzed executable bytes, recovering unreferenced / indirect-only functions
   that none of the above reaches.
 
-x86-only passes (PLT/stub chains, PE ``.pdata`` exception tables) do not apply and
-remain future iterate-steps; for a statically linked ELF there is no PLT to recover.
+* PE ARM64 exception-directory discovery (opt-in via
+  ``USE_PE_ARM64_PDATA_CANDIDATES``) seeds guaranteed function starts from the
+  image's ``.pdata`` RUNTIME_FUNCTION records, in place of the x86-shaped
+  12-byte-record pass.
+
+The x86-only PLT/stub-chain pass does not apply and remains a future
+iterate-step; for a statically linked ELF there is no PLT to recover.
 """
 
 import contextlib
@@ -66,11 +71,15 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         self._exec_ranges = None
 
     def locateCandidates(self):
-        # AArch64 candidate discovery: symbols, BL call references, stored function
-        # pointers (.init_array/.fini_array + data tables), then entry prologues.
-        # The x86-only PLT/stub-chain and PE .pdata passes do not apply and are
-        # omitted; the NOP-based gap scan is disabled (see nextGapCandidate).
+        # AArch64 candidate discovery: symbols, PE ARM64 exception-directory entries
+        # (opt-in), BL call references, stored function pointers (.init_array/
+        # .fini_array + data tables), then entry prologues. The x86-only PLT/
+        # stub-chain pass does not apply and is omitted; the NOP-based gap scan is
+        # disabled (see nextGapCandidate).
         self.locateSymbolCandidates()
+        if self._candidateTimeoutTripped():
+            return
+        self.locatePeExceptionCandidates()
         if self._candidateTimeoutTripped():
             return
         self.locateReferenceCandidates()
@@ -102,6 +111,86 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             if section.virtual_address and (flags & exec_flag):
                 ranges.append((section.virtual_address, section.virtual_address + section.size))
         return ranges
+
+    @staticmethod
+    def _peExecutableSectionRanges(lief_binary, base_addr):
+        # Absolute [start, end) VAs of executable PE sections (IMAGE_SCN_MEM_EXECUTE).
+        ranges = []
+        for section in lief_binary.sections:
+            if section.characteristics & 0x20000000 and section.virtual_size:
+                section_start = base_addr + section.virtual_address
+                ranges.append((section_start, section_start + section.virtual_size))
+        return ranges
+
+    def _isValidArm64UnwindInfo(self, xdata_rva):
+        # ARM64 .xdata header word: FunctionLength[17:0] (in words, must be nonzero),
+        # Vers[19:18] (only version 0 is defined), X[20], E[21], EpilogCount[26:22],
+        # CodeWords[31:27]. Records are 4-byte aligned and must lie inside the image.
+        if xdata_rva == 0 or xdata_rva % 4 != 0:
+            return False
+        header = self.disassembly.getRawBytes(xdata_rva, 4)
+        if header is None or len(header) < 4:
+            return False
+        header_word = int.from_bytes(header, "little")
+        function_length = header_word & 0x3FFFF
+        version = (header_word >> 18) & 0x3
+        return version == 0 and function_length > 0
+
+    def locatePeExceptionCandidates(self):
+        # PE ARM64 exception directory: every RUNTIME_FUNCTION record names a
+        # guaranteed function (or fragment) start, so accepted entries go through
+        # the high-confidence exception-candidate path. Classic ARM64 (0xAA64)
+        # images only; ARM64X/ARM64EC hybrids interleave x64 code and metadata
+        # and are skipped. Bounds come from the Exception Directory data
+        # directory's exact RVA/size, not page-rounded .pdata section bounds.
+        if not self.config.USE_PE_ARM64_PDATA_CANDIDATES:
+            return
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.PE.Binary):
+            return
+        if lief_binary.header.machine != lief.PE.Header.MACHINE_TYPES.ARM64:
+            return
+        # is_arm64x/is_arm64ec and chpe_metadata need lief >= 0.17; on older lief an
+        # ARM64X hybrid cannot be told apart, so absence of the accessors means skip.
+        if getattr(lief_binary, "is_arm64x", True) or getattr(lief_binary, "is_arm64ec", True):
+            return
+        load_config = getattr(lief_binary, "load_configuration", None)
+        if load_config is not None and getattr(load_config, "chpe_metadata", None) is not None:
+            return
+        exception_dir = lief_binary.data_directory(lief.PE.DataDirectory.TYPES.EXCEPTION_TABLE)
+        if exception_dir is None or not exception_dir.rva or not exception_dir.size:
+            return
+        base_addr = binary_info.base_addr
+        exec_ranges = self._peExecutableSectionRanges(lief_binary, base_addr)
+        if not exec_ranges:
+            return
+        # 8-byte records: <BeginRVA, UnwindData>; UnwindData bits 0-1 select the format
+        for record_index, record_rva in enumerate(
+            range(exception_dir.rva, exception_dir.rva + exception_dir.size - 7, 8)
+        ):
+            if record_index % 4096 == 0 and self._candidateTimeoutTripped():
+                return
+            packed_entry = self.disassembly.getRawBytes(record_rva, 8)
+            if packed_entry is None or len(packed_entry) < 8:
+                break
+            begin_rva, unwind_data = struct.unpack("<II", packed_entry)
+            if begin_rva == 0:
+                break
+            flag = unwind_data & 0x3
+            if flag == 0:
+                # UnwindData is the RVA of a full .xdata record; validate its header
+                if not self._isValidArm64UnwindInfo(unwind_data):
+                    continue
+            elif flag != 1:
+                # flag 2: packed fragment of another function's body; flag 3: reserved
+                continue
+            if begin_rva % INSTRUCTION_SIZE != 0:
+                continue
+            addr = base_addr + begin_rva
+            if not any(start <= addr < end for start, end in exec_ranges):
+                continue
+            self.addExceptionCandidate(addr)
 
     def locateDataPointerCandidates(self):
         # Seed candidates from stored function pointers. ELF .init_array/.fini_array
