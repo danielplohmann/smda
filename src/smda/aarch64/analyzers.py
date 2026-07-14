@@ -10,6 +10,15 @@ import struct
 
 from .dataflow import gatherContextInstructions, norm_reg, propagateConstants, propagateConstantsHistory
 
+
+def _movImmediateValue(op):
+    """The value an IMM operand of mov/movz/movk contributes, with its lsl
+    shift applied — capstone leaves op.imm as the raw unshifted 16-bit field
+    (e.g. `movk w8, #0x6c6c, lsl #16` reports imm=0x6c6c, not 0x6c6c0000)."""
+    shift = op.shift.value if op.shift.type == ARM64_SFT_LSL else 0
+    return op.imm << shift, shift
+
+
 LOGGER = logging.getLogger(__name__)
 
 # Bounded predecessor-block hops fed into gatherContextInstructions when the seed
@@ -18,6 +27,183 @@ LOGGER = logging.getLogger(__name__)
 # mid-function, so code_refs_to is only partially populated and deep chases would
 # just burn time chasing edges that don't exist yet.
 JUMPTABLE_PREDECESSOR_DEPTH = 2
+
+
+def _updateConstantTracking(d, cap_ins, constants):
+    """Extend `constants` (normalized register name -> tracked immediate value)
+    from a single decoded instruction, in place. Shared by indirect-call target
+    resolution (_resolveRegister) and stack-string recovery (recoverStackStrings) —
+    both need the identical adrp/adr/add/mov/movz/movk/ldr/ldur dataflow."""
+    if not cap_ins.operands:
+        return
+    mnemonic = cap_ins.mnemonic.lower()
+    dest_op = cap_ins.operands[0]
+    if dest_op.type != 1:  # REG
+        return
+    dest_reg = norm_reg(cap_ins.reg_name(dest_op.reg))
+
+    if mnemonic == "adrp" and len(cap_ins.operands) >= 2:
+        word = int.from_bytes(cap_ins.bytes, "little")
+        constants[dest_reg] = adrp_page_value(word, cap_ins.address)
+    elif mnemonic == "adr" and len(cap_ins.operands) >= 2:
+        if cap_ins.operands[1].type == 2:  # IMM
+            constants[dest_reg] = cap_ins.operands[1].imm
+    elif mnemonic == "add" and len(cap_ins.operands) >= 3:
+        op1 = cap_ins.operands[1]
+        op2 = cap_ins.operands[2]
+        if op1.type == 1 and op2.type == 2:  # REG + IMM
+            src_reg = norm_reg(cap_ins.reg_name(op1.reg))
+            if src_reg in constants:
+                constants[dest_reg] = constants[src_reg] + op2.imm
+            else:
+                constants.pop(dest_reg, None)
+        elif op1.type == 1 and op2.type == 1:  # REG + REG
+            reg1 = norm_reg(cap_ins.reg_name(op1.reg))
+            reg2 = norm_reg(cap_ins.reg_name(op2.reg))
+            if reg1 in constants and reg2 in constants:
+                constants[dest_reg] = constants[reg1] + constants[reg2]
+            else:
+                constants.pop(dest_reg, None)
+    elif mnemonic in ("mov", "movz", "movk") and len(cap_ins.operands) >= 2:
+        op1 = cap_ins.operands[1]
+        if op1.type == 2:  # IMM
+            imm_value, shift = _movImmediateValue(op1)
+            if mnemonic == "movk" and dest_reg in constants:
+                # movk only replaces a 16-bit slice, leaving the rest of the
+                # register's previously-tracked bits intact (unlike movz, which
+                # zero-fills everything else).
+                constants[dest_reg] = (constants[dest_reg] & ~(0xFFFF << shift)) | imm_value
+            elif mnemonic == "movk":
+                constants.pop(dest_reg, None)
+            else:
+                constants[dest_reg] = imm_value
+        elif op1.type == 1:  # REG
+            src_reg = norm_reg(cap_ins.reg_name(op1.reg))
+            if src_reg in constants:
+                constants[dest_reg] = constants[src_reg]
+            else:
+                constants.pop(dest_reg, None)
+    elif mnemonic in ("ldr", "ldur") and len(cap_ins.operands) >= 2:
+        op1 = cap_ins.operands[1]
+        resolved = False
+        if op1.type == 3:  # MEM
+            base_reg = norm_reg(cap_ins.reg_name(op1.mem.base))
+            if base_reg in constants and op1.mem.index == 0:
+                slot_addr = constants[base_reg] + op1.mem.disp
+                if d.disassembly.isAddrWithinMemoryImage(slot_addr):
+                    raw_val = d.disassembly.getBytes(slot_addr, 8)
+                    if raw_val and len(raw_val) == 8:
+                        val = struct.unpack("<Q", raw_val)[0]
+                        constants[dest_reg] = val
+                        resolved = True
+        if not resolved:
+            constants.pop(dest_reg, None)
+
+
+def _registerValue(reg_name, constants):
+    """Look up a register's tracked constant, treating wzr/xzr as literal 0."""
+    normalized = norm_reg(reg_name)
+    if normalized == "xzr":
+        return 0
+    return constants.get(normalized)
+
+
+def _isSpWriteback(op_str):
+    """Whether op_str shows an sp-based pre/post-index writeback (mutates sp).
+
+    Capstone's python binding exposes no `.writeback` flag on this build, so this
+    matches its op_str syntax directly: pre-index ends the operand string with a
+    trailing `!` (e.g. "x29, x30, [sp, #-16]!"); post-index appends an immediate
+    after the closing bracket (e.g. "x29, x30, [sp], #16").
+    """
+    if "[sp" not in op_str:
+        return False
+    return op_str.rstrip().endswith("!") or "], #" in op_str or "],#" in op_str
+
+
+def _mutatesStackPointer(cap_ins):
+    """Whether this instruction changes sp's value: explicit dest-is-sp arithmetic
+    (sub/add/mov) or an sp-based pre/post-index writeback. Any earlier tracked
+    stack-relative offsets become meaningless once sp moves."""
+    if cap_ins.operands and cap_ins.operands[0].type == 1 and cap_ins.reg_name(cap_ins.operands[0].reg) == "sp":
+        return True
+    return _isSpWriteback(cap_ins.op_str)
+
+
+_SINGLE_STORE_WIDTH = {"strb": 1, "sturb": 1, "strh": 2, "sturh": 2}
+_SINGLE_STORE_MNEMONICS = frozenset({"str", "stur", "strb", "sturb", "strh", "sturh"})
+#: minimum/maximum length of a reconstructed stack string (avoid single-byte
+#: noise and pathological runs from misclassified constants)
+_MIN_STACK_STRING_LEN = 4
+_MAX_STACK_STRING_LEN = 128
+
+
+def _recordStackStore(cap_ins, mnemonic, constants, stack_bytes):
+    """Record the byte(s) an sp-relative store writes into `stack_bytes`
+    (offset -> (byte_value, instruction_addr)), if the stored value is a
+    currently-tracked constant. Handles single-register str/strb/strh/stur*
+    and the two-register stp (frame-adjacent stack-string writes)."""
+    operands = cap_ins.operands
+    if mnemonic in _SINGLE_STORE_MNEMONICS and len(operands) == 2:
+        src_op, mem_op = operands
+        if src_op.type != 1 or mem_op.type != 3:  # REG, MEM
+            return
+        if not mem_op.mem.base or cap_ins.reg_name(mem_op.mem.base) != "sp" or mem_op.mem.index != 0:
+            return
+        src_name = cap_ins.reg_name(src_op.reg)
+        value = _registerValue(src_name, constants)
+        if value is None:
+            return
+        width = _SINGLE_STORE_WIDTH.get(mnemonic, 4 if src_name.lower().startswith("w") else 8)
+        offset = mem_op.mem.disp
+        for b in range(width):
+            stack_bytes[offset + b] = ((value >> (8 * b)) & 0xFF, cap_ins.address)
+    elif mnemonic == "stp" and len(operands) == 3:
+        reg1_op, reg2_op, mem_op = operands
+        if reg1_op.type != 1 or reg2_op.type != 1 or mem_op.type != 3:
+            return
+        if not mem_op.mem.base or cap_ins.reg_name(mem_op.mem.base) != "sp" or mem_op.mem.index != 0:
+            return
+        reg1_name = cap_ins.reg_name(reg1_op.reg)
+        reg2_name = cap_ins.reg_name(reg2_op.reg)
+        width = 4 if reg1_name.lower().startswith("w") else 8
+        offset = mem_op.mem.disp
+        for reg_name, base_offset in ((reg1_name, offset), (reg2_name, offset + width)):
+            value = _registerValue(reg_name, constants)
+            if value is None:
+                continue
+            for b in range(width):
+                stack_bytes[base_offset + b] = ((value >> (8 * b)) & 0xFF, cap_ins.address)
+
+
+def _emitStackStrings(d, analysis_state, stack_bytes):
+    """Reconstruct contiguous printable-ASCII runs from `stack_bytes` and record
+    each as a stringref anchored at the store that wrote the run's first byte."""
+    if not stack_bytes:
+        return
+
+    def flush(run):
+        if len(run) < _MIN_STACK_STRING_LEN:
+            return
+        run = run[:_MAX_STACK_STRING_LEN]
+        first_addr = run[0][1]
+        string = "".join(chr(byte_val) for byte_val, _addr in run)
+        d.disassembly.addStringRef(analysis_state.start_addr, first_addr, string)
+
+    run = []
+    prev_offset = None
+    for offset in sorted(stack_bytes):
+        byte_val, addr = stack_bytes[offset]
+        is_printable = 0x20 <= byte_val <= 0x7E
+        if not is_printable or (prev_offset is not None and offset != prev_offset + 1):
+            flush(run)
+            run = []
+        if is_printable:
+            run.append((byte_val, addr))
+            prev_offset = offset
+        else:
+            prev_offset = None
+    flush(run)
 
 
 class AArch64TfIdf:
@@ -74,6 +260,45 @@ class AArch64IndirectCallAnalyzer:
         )
         constants = propagateConstants(cap_insns, self.disassembler)
         return constants.get(norm_reg(reg_name))
+
+    def recoverStackStrings(self, analysis_state):
+        """danielplohmann/smda#173: reconstruct strings built byte-by-byte on the
+        stack (mov <reg>, #imm; strb <reg>, [sp, #off]; ... or stp with tracked
+        register values) into disassembly.stringrefs, mirroring what dalvik/cil
+        already do for their single-instruction string literals. Runs once per
+        finalized function block, after the whole function's instructions and
+        block structure are known (unlike analyzeInstruction's streaming pass,
+        this needs no speculative-candidate rollback).
+
+        Known limitation (v1): only tracks str/strb/strh/stur*/stp with an sp
+        base; a SIMD-register stack-string materialization (e.g. `ldr q0, <lit>;
+        str q0, [sp]`) is not decomposed into constant bytes and is silently
+        skipped, same as any other value this backend's constant tracker can't
+        resolve.
+        """
+        d = self.disassembler
+        if not d.config.WITH_STRINGS:
+            return
+        for block in analysis_state.getBlocks():
+            constants = {}
+            stack_bytes = {}
+            for ins in block:
+                bytes_ins = d.disassembly.getBytes(ins[0], ins[1])
+                if not bytes_ins:
+                    continue
+                cap_ins = next(d.capstone.disasm(bytes_ins, ins[0]), None)
+                if not cap_ins:
+                    continue
+                mnemonic = cap_ins.mnemonic.lower()
+
+                if _mutatesStackPointer(cap_ins):
+                    _emitStackStrings(d, analysis_state, stack_bytes)
+                    stack_bytes = {}
+                else:
+                    _recordStackStore(cap_ins, mnemonic, constants, stack_bytes)
+
+                _updateConstantTracking(d, cap_ins, constants)
+            _emitStackStrings(d, analysis_state, stack_bytes)
 
     def resolveRegisterCalls(self, analysis_state, block_depth=3):
         if not analysis_state.call_register_ins:

@@ -7,8 +7,6 @@ from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 
 from smda.common.arch.ArchBackend import ArchBackend
-from smda.utility.ElfFileLoader import ElfFileLoader
-from smda.utility.MachoBinary import get_macho_stub_ranges
 
 from .analyzers import AArch64IndirectCallAnalyzer, AArch64JumpTableAnalyzer, AArch64TfIdf
 from .definitions import (
@@ -21,6 +19,7 @@ from .definitions import (
     BR_VALUE,
     CALL_INS,
     COND_BRANCH_INS,
+    COND_BRANCH_PREFIXES,
     END_INS,
     EXCEPTION_RETURN_INS,
     INDIRECT_JUMP_INS,
@@ -216,7 +215,11 @@ class AArch64Backend(ArchBackend):
             return
         if i_mnemonic in END_INS or i_mnemonic in ALWAYS_BRANCH_INS or i_mnemonic in UNCOND_JUMP_INS:
             return
-        if i_mnemonic.startswith("b.") or i_mnemonic in COND_BRANCH_INS or i_mnemonic in INDIRECT_JUMP_INS:
+        if (
+            i_mnemonic.startswith(COND_BRANCH_PREFIXES)
+            or i_mnemonic in COND_BRANCH_INS
+            or i_mnemonic in INDIRECT_JUMP_INS
+        ):
             return
 
         ins_bytes = d.disassembly.getBytes(i_address, i_size)
@@ -239,37 +242,17 @@ class AArch64Backend(ArchBackend):
                 emitted.add(value)
                 state.addDataRef(i_address, value)
 
-    @staticmethod
-    def _getPltRanges(binary_info):
-        if not hasattr(binary_info, "_plt_ranges"):
-            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
-                binary_info.raw_data or binary_info.binary,
-                parsed=binary_info.getLiefBinary(),
-            )
-        return binary_info._plt_ranges
-
-    @staticmethod
-    def _getMachoStubRanges(binary_info):
-        if not hasattr(binary_info, "_macho_stub_ranges"):
-            binary_info._macho_stub_ranges = get_macho_stub_ranges(
-                binary_info.getLiefBinary(),
-                base_addr=binary_info.base_addr,
-                bitness=binary_info.bitness,
-                architecture=getattr(binary_info, "architecture", ""),
-            )
-        return binary_info._macho_stub_ranges
-
     @classmethod
-    def _getImportStubRanges(cls, binary_info):
-        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
+    def _walkGotThunk(cls, d, addr):
+        """Walk an optional nop/bti prefix, then adrp; [add;] ldr; br from addr.
 
-    @classmethod
-    def _resolvePltGotSlot(cls, d, target):
-        binary_info = d.disassembly.binary_info
-        if not any(start <= target < end for start, end in cls._getImportStubRanges(binary_info)):
-            return None
-
-        cursor = target
+        Returns (end_addr, target_register_value) if the raw words starting at
+        addr decode to EXACTLY that shape (nothing interleaved) before hitting an
+        unrecognized word, else None. end_addr is the address right after the
+        terminating br — callers compare it against a specific instruction's end
+        to confirm nothing else follows (used by both PLT/GOT slot resolution and
+        API-thunk-body detection, which share this decode)."""
+        cursor = addr
         for _ in range(2):
             prefix = cls._wordAt(d, cursor)
             if prefix is None:
@@ -281,14 +264,14 @@ class AArch64Backend(ArchBackend):
 
         registers = {}
         for index in range(4):
-            addr = cursor + index * INSTRUCTION_SIZE
-            word = cls._wordAt(d, addr)
+            word_addr = cursor + index * INSTRUCTION_SIZE
+            word = cls._wordAt(d, word_addr)
             if word is None:
                 return None
 
             rd = word & 0x1F
             if (word & ADRP_MASK) == ADRP_VALUE:
-                registers[rd] = adrp_page_value(word, addr)
+                registers[rd] = adrp_page_value(word, word_addr)
             elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
                 rn = (word >> 5) & 0x1F
                 if rn not in registers:
@@ -301,16 +284,24 @@ class AArch64Backend(ArchBackend):
                 registers[rd] = registers[rn] + (((word >> 10) & 0xFFF) * 8)
             elif (word & BR_MASK) == BR_VALUE:
                 rn = (word >> 5) & 0x1F
-                return registers.get(rn)
+                return word_addr + INSTRUCTION_SIZE, registers.get(rn)
             else:
                 return None
         return None
+
+    @classmethod
+    def _resolvePltGotSlot(cls, d, target):
+        binary_info = d.disassembly.binary_info
+        if not any(start <= target < end for start, end in cls._getImportStubRanges(binary_info)):
+            return None
+        walk = cls._walkGotThunk(d, target)
+        return walk[1] if walk is not None else None
 
     # --- engine entry point ----------------------------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):
         del start_addr
         d = disassembler
-        i_address, _i_size, i_mnemonic, i_op_str = instruction
+        i_address, i_size, i_mnemonic, i_op_str = instruction
         # capstone arm64 mnemonics carry no prefixes, so the mnemonic is used as-is.
 
         self._recordDataRefs(d, instruction, state)
@@ -346,10 +337,11 @@ class AArch64Backend(ArchBackend):
             self._endFunction(state)
             LOGGER.debug("  analyzeFunction() found trap terminator @0x%08x", i_address)
         elif i_mnemonic in ALWAYS_BRANCH_INS:
-            # b.al / b.nv are spelled b.<cond> but always branch (no fall-through),
-            # so they are unconditional. Must precede the generic "b." test below.
+            # b.al/b.nv and FEAT_HBC's bc.al/bc.nv are spelled b.<cond>/bc.<cond> but
+            # always branch (no fall-through), so they are unconditional. Must precede
+            # the generic "b."/"bc." test below.
             self._analyzeUncondBranch(d, instruction, state)
-        elif i_mnemonic.startswith("b.") or i_mnemonic in COND_BRANCH_INS:
+        elif i_mnemonic.startswith(COND_BRANCH_PREFIXES) or i_mnemonic in COND_BRANCH_INS:
             self._analyzeCondBranch(d, instruction, state)
         elif i_mnemonic in UNCOND_JUMP_INS:
             self._analyzeUncondBranch(d, instruction, state)

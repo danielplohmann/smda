@@ -23,6 +23,15 @@ do not "simplify" away):
   they are classified as unconditional and checked before the generic ``b.`` test.
 - ``eret``/``eretaa``/``eretab`` return from an exception level with *no* capstone
   groups at all, so they too must be matched by mnemonic (kernel/firmware code).
+- ``drps`` (Debug Restore PState, Debug-state only) also carries *no* capstone groups
+  and 0 operands; it transfers control to ``ELR_ELx`` like an exception return, so it
+  is folded into ``EXCEPTION_RETURN_INS`` rather than falling through as sequential.
+- FEAT_HBC's hinted conditional branch ``bc.<cond>`` (ARMv8.8/9.3, e.g. LLVM ``+hbc``)
+  shares the b.<cond> encoding with bit 4 set and, like the trap/return instructions
+  above, carries *no* capstone groups either. It is a distinct mnemonic prefix
+  (``bc.`` not ``b.``), so every ``b.``-prefix test in this backend must also test
+  ``bc.`` or it silently drops the taken-branch edge; ``bc.al``/``bc.nv`` are its
+  always-taken aliases, mirroring ``b.al``/``b.nv``.
 """
 
 # fixed AArch64 instruction width (bytes); also the recursion stride
@@ -32,16 +41,22 @@ NOP = 0xD503201F
 # --- control-flow mnemonic classes (capstone arm64) ----------------------
 #: function-return terminators, incl. pointer-auth variants (retaa/retab)
 RET_INS = {"ret", "retaa", "retab"}
-#: exception-level returns, incl. pointer-auth variants (kernel/firmware code)
-EXCEPTION_RETURN_INS = {"eret", "eretaa", "eretab"}
+#: exception-level returns, incl. pointer-auth variants (kernel/firmware code),
+#: and drps (Debug Restore PState: transfers control to ELR_ELx, no operands)
+EXCEPTION_RETURN_INS = {"eret", "eretaa", "eretab", "drps"}
 #: direct (bl) and indirect (blr + pointer-auth blra*) calls — none terminate a block
 CALL_INS = {"bl", "blr", "blraa", "blrab", "blraaz", "blrabz"}
 #: trap / undefined-instruction terminators (verified: empty capstone groups)
 END_INS = {"brk", "hlt", "udf"}
 #: compare-and-branch / test-and-branch conditionals (fall-through + target)
 COND_BRANCH_INS = {"cbz", "cbnz", "tbz", "tbnz"}
-#: always-true conditional branches (b.al/b.nv): single successor, no fall-through
-ALWAYS_BRANCH_INS = {"b.al", "b.nv"}
+#: always-true conditional branches (b.al/b.nv and FEAT_HBC's bc.al/bc.nv):
+#: single successor, no fall-through
+ALWAYS_BRANCH_INS = {"b.al", "b.nv", "bc.al", "bc.nv"}
+#: mnemonic prefixes covering every plain and FEAT_HBC-hinted conditional branch
+#: (b.eq/b.ne/... and bc.eq/bc.ne/...); ALWAYS_BRANCH_INS above must be checked
+#: first since b.al/b.nv/bc.al/bc.nv also match these prefixes but never fall through
+COND_BRANCH_PREFIXES = ("b.", "bc.")
 #: unconditional direct branch (single successor; may be a tailcall)
 UNCOND_JUMP_INS = {"b"}
 #: indirect branch through a register, incl. pointer-auth variants (bra*)
@@ -75,8 +90,11 @@ CBZ_CBNZ_MASK = 0x7E000000
 CBZ_CBNZ_VALUE = 0x34000000
 TBZ_TBNZ_MASK = 0x7E000000
 TBZ_TBNZ_VALUE = 0x36000000
-BCOND_MASK = 0xFF000010
-BCOND_VALUE = 0x54000000  # b.<cond> (also matches the always-branches b.al/b.nv)
+BCOND_MASK = 0xFF000000
+BCOND_VALUE = 0x54000000  # b.<cond> and FEAT_HBC's hinted bc.<cond> (bit 4 = o1,
+# unset for b.<cond>, set for bc.<cond>) share this encoding; also matches the
+# always-branches b.al/b.nv/bc.al/bc.nv. Bit 4 is deliberately left unmasked so
+# both hinted and unhinted forms match.
 
 # --- PC-relative address materialization (reference recovery) -------------
 # adrp Xd, #page and adr Xd, #imm share the mask; bit 31 selects adrp vs adr.
@@ -103,11 +121,13 @@ def adrp_page_value(word, pc):
 
 
 def is_conditional_branch(word):
-    """True for cbz/cbnz, tbz/tbnz and b.<cond> (compare/test/condition branches).
+    """True for cbz/cbnz, tbz/tbnz, b.<cond> and FEAT_HBC's bc.<cond>
+    (compare/test/condition branches, hinted or not).
 
     A function never opens with one of these, so the gap scan treats a leading
-    conditional branch as a stray block tail (not an entry) and skips it. b.al/b.nv
-    also match the b.<cond> mask; they are never valid entries, so skipping is benign.
+    conditional branch as a stray block tail (not an entry) and skips it. b.al/b.nv/
+    bc.al/bc.nv also match the b.<cond>/bc.<cond> mask; they are never valid entries,
+    so skipping is benign.
     """
     return (
         (word & CBZ_CBNZ_MASK) == CBZ_CBNZ_VALUE

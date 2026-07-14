@@ -55,6 +55,25 @@ DEFAULT_PROLOGUES = [
     b"\x55\x48\x89\xe5",
 ]
 
+# CET landing pad emitted first by modern GCC/Clang AMD64 toolchains; scanned separately since
+# it precedes (not replaces) a function's real prologue.
+ENDBR64_BYTES = b"\xf3\x0f\x1e\xfa"
+
+# exact 64-bit-only prologues not otherwise covered by DEFAULT_PROLOGUES: seeded as independent
+# FEP candidates (locatePrologueCandidates) and scored via COMMON_PROLOGUES. Fixed-length exact
+# byte sequences only -- their trailing imm8 byte falls outside the match window, so "sub rsp,
+# imm8" never needs a wildcard. "mov [rsp+disp8], rbx" is intentionally NOT in this seeded list --
+# like the generic "sub rsp, imm8" idiom it replaces, it is common enough mid-function (register
+# spill to the shadow space, ~73.3% MSVC precision per maintainer stats) that whole-binary-seeding
+# it measurably increases false positives with zero recall gain (measured on the Bao x64 MSVC
+# corpus: seeding it added 537 FPs corpus-wide and recovered 0 additional true positives). It is
+# still scored via COMMON_PROLOGUES for candidates already found by other means.
+DEFAULT_PROLOGUES_64 = [
+    b"\x41\x57\x41\x56",  # push r15, push r14
+    b"\x40\x53\x48\x83\xec",  # push rbx; sub rsp, imm8
+    b"\x40\x55\x48\x83\xec",  # push rbp; sub rsp, imm8
+]
+
 # these cover 99% of confirmed function starts in the reference data set
 COMMON_PROLOGUES = {
     "5": {
@@ -62,7 +81,20 @@ COMMON_PROLOGUES = {
             b"\x8b\xff\x55\x8b\xec": 50,  # mov edi, edi, push ebp, mov ebp, esp
             b"\x89\xff\x55\x8b\xec": 50,  # mov edi, edi, push ebp, mov ebp, esp
         },
-        64: {},
+        64: {
+            b"\x40\x53\x48\x83\xec": 40,  # push rbx; sub rsp, imm8
+            b"\x40\x55\x48\x83\xec": 40,  # push rbp; sub rsp, imm8
+        },
+    },
+    "4": {
+        32: {},
+        64: {
+            b"\x41\x57\x41\x56": 40,  # push r15, push r14
+            # mov [rsp+disp8], rbx: scored below the push;sub tier (40) since it is a lower-precision
+            # signal on its own (~73.3% vs 100% per maintainer MSVC stats), but above the bare REX.W
+            # single-byte fallback (21) so it isn't a regression versus not recognizing it at all.
+            b"\x48\x89\x5c\x24": 30,
+        },
     },
     "3": {
         32: {

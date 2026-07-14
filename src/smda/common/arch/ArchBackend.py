@@ -13,6 +13,9 @@ engine treats all of these abstractly, so new architectures (ARM, MIPS, ...)
 can be added by implementing this interface without touching the engine.
 """
 
+from smda.utility.ElfFileLoader import ElfFileLoader
+from smda.utility.MachoBinary import get_macho_stub_ranges
+
 
 class ArchBackend:
     #: short architecture identifier, written to ``binary_info.architecture``
@@ -67,3 +70,31 @@ class ArchBackend:
         block-ending flag set on ``state``.
         """
         raise NotImplementedError
+
+    # --- shared import-stub range resolution (concrete, not abstract) -----
+    # Every native backend that resolves a direct call/jmp/branch target
+    # against ELF PLT or Mach-O stub ranges needs the same range lookup;
+    # this lives here once instead of being duplicated per backend.
+    @staticmethod
+    def _getPltRanges(binary_info):
+        if not hasattr(binary_info, "_plt_ranges"):
+            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
+                binary_info.raw_data or binary_info.binary,
+                parsed=binary_info.getLiefBinary(),
+            )
+        return binary_info._plt_ranges
+
+    @staticmethod
+    def _getMachoStubRanges(binary_info):
+        if not hasattr(binary_info, "_macho_stub_ranges"):
+            binary_info._macho_stub_ranges = get_macho_stub_ranges(
+                binary_info.getLiefBinary(),
+                base_addr=binary_info.base_addr,
+                bitness=binary_info.bitness,
+                architecture=getattr(binary_info, "architecture", ""),
+            )
+        return binary_info._macho_stub_ranges
+
+    @classmethod
+    def _getImportStubRanges(cls, binary_info):
+        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)

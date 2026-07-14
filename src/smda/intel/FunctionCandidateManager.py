@@ -8,7 +8,13 @@ from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.utility.BracketQueue import BracketQueue
 from smda.utility.PriorityQueue import PriorityQueue
 
-from .definitions import COMMON_PROLOGUES, DEFAULT_PROLOGUES, GAP_SEQUENCES
+from .definitions import (
+    COMMON_PROLOGUES,
+    DEFAULT_PROLOGUES,
+    DEFAULT_PROLOGUES_64,
+    ENDBR64_BYTES,
+    GAP_SEQUENCES,
+)
 from .FunctionCandidate import FunctionCandidate
 from .LanguageAnalyzer import LanguageAnalyzer
 
@@ -606,22 +612,32 @@ class FunctionCandidateManager:
                     )
                     self.setInitialCandidate(function_addr)
 
+    def _seedPrologueMatches(self, pattern):
+        """returns True once the analysis timeout trips, so callers can stop scanning
+        further patterns instead of each one re-discovering the timeout on its own first match."""
+        for match_count, prologue_match in enumerate(re.finditer(pattern, self.disassembly.binary_info.binary)):
+            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                return True
+            candidate_addr = (self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask()
+            if not self._passesCodeFilter(candidate_addr):
+                continue
+            self.addPrologueCandidate(candidate_addr)
+            self.setInitialCandidate(candidate_addr)
+        return False
+
     def locatePrologueCandidates(self):
         # next check for the default function prologue regardless of references
         for re_prologue in DEFAULT_PROLOGUES:
-            for match_count, prologue_match in enumerate(
-                re.finditer(re.escape(re_prologue), self.disassembly.binary_info.binary)
-            ):
-                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+            if self._seedPrologueMatches(re.escape(re_prologue)):
+                return
+        if self.bitness == 64:
+            # extended GCC/Clang/MSVC AMD64 prologue family: a CET landing pad (endbr64) that may
+            # prefix the real prologue, plus exact stack-frame openers.
+            if self._seedPrologueMatches(re.escape(ENDBR64_BYTES)):
+                return
+            for re_prologue in DEFAULT_PROLOGUES_64:
+                if self._seedPrologueMatches(re.escape(re_prologue)):
                     return
-                if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + prologue_match.start()):
-                    continue
-                self.addPrologueCandidate(
-                    (self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask()
-                )
-                self.setInitialCandidate(
-                    (self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask()
-                )
 
     def locateLangSpecCandidates(self):
         if self.lang_analyzer.checkGo():

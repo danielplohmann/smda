@@ -120,6 +120,7 @@ class TestMachoFileLoader(unittest.TestCase):
                 self.assertEqual(report.num_functions, 0)
                 self.assertEqual(list(report.getFunctions()), [])
                 self.assertEqual(report.toDict()["status"], "error")
+                self.assertIn(f"No disassembly backend available for architecture '{architecture}'", report.message)
 
     def test_fat_universal_system_binary_loads_when_present(self):
         true_path = Path("/usr/bin/true")

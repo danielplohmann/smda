@@ -1,10 +1,14 @@
 from binascii import hexlify
 
-from .definitions import COMMON_PROLOGUES
+from .definitions import COMMON_PROLOGUES, ENDBR64_BYTES
 
 # Hoisted: prologue lengths are checked longest-first on every candidate scoring call.
 # Pre-sort once at import time instead of re-sorting per call (hot path during CFG recovery).
 _COMMON_PROLOGUE_LENGTHS = sorted((int(k) for k in COMMON_PROLOGUES), reverse=True)
+_ENDBR64_LEN = len(ENDBR64_BYTES)
+# longest byte window a candidate ever needs to see: the widest prologue match, plus a
+# potential leading endbr64 to strip before re-matching the remainder.
+_PROLOGUE_WINDOW_SIZE = _COMMON_PROLOGUE_LENGTHS[0] + _ENDBR64_LEN
 
 
 class FunctionCandidate:
@@ -12,7 +16,7 @@ class FunctionCandidate:
         self.bitness = binary_info.bitness
         self.addr = addr
         rel_start_addr = addr - binary_info.base_addr
-        self.bytes = binary_info.binary[rel_start_addr : rel_start_addr + 5]
+        self.bytes = binary_info.binary[rel_start_addr : rel_start_addr + _PROLOGUE_WINDOW_SIZE]
         self.lang_spec = None
         # set, not list: addCallRef / removeCallRefs do membership tests in the inner
         # CFG-recovery loop. Order is never read externally (only len + truthiness).
@@ -66,21 +70,28 @@ class FunctionCandidate:
                 self._confidence = round(weighted_confidence, 3)
         return self._confidence
 
-    def hasCommonFunctionStart(self):
+    def _lookupPrologueScore(self, byte_window):
+        # longest-first, so a specific multi-byte match always wins over a weak single-byte fallback.
         for length in _COMMON_PROLOGUE_LENGTHS:
-            byte_sequence = self.bytes[:length]
-            if byte_sequence in COMMON_PROLOGUES[f"{length}"][self.bitness]:
-                return True
-        return False
+            window_slice = byte_window[:length]
+            if len(window_slice) < length:
+                continue
+            prologue_score = COMMON_PROLOGUES.get(f"{length}", {}).get(self.bitness, {}).get(window_slice)
+            if prologue_score is not None:
+                return prologue_score
+        return None
+
+    def hasCommonFunctionStart(self):
+        return self.getFunctionStartScore() > 0
 
     def getFunctionStartScore(self):
         if self.function_start_score is None:
-            for length in _COMMON_PROLOGUE_LENGTHS:
-                byte_sequence = self.bytes[:length]
-                if byte_sequence in COMMON_PROLOGUES[f"{length}"][self.bitness]:
-                    self.function_start_score = COMMON_PROLOGUES[f"{length}"][self.bitness][byte_sequence]
-                    break
-            self.function_start_score = self.function_start_score if self.function_start_score else 0
+            # endbr64 is a CET landing pad prefixing the real prologue, not a prologue itself:
+            # strip it before matching so the prologue behind it is scored, not the raw bytes.
+            byte_window = self.bytes
+            if self.bitness == 64 and self.bytes[:_ENDBR64_LEN] == ENDBR64_BYTES:
+                byte_window = self.bytes[_ENDBR64_LEN:]
+            self.function_start_score = self._lookupPrologueScore(byte_window) or 0
         return self.function_start_score
 
     def addCallRef(self, source_addr):

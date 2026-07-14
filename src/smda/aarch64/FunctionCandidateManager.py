@@ -342,6 +342,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             0xD69F03E0,  # eret
             0xD69F0BFF,  # eretaa
             0xD69F0FFF,  # eretab
+            0xD6BF03E0,  # drps (Debug Restore PState: transfers control to ELR_ELx, same class)
         }
         return not (
             (prev_word & RET_MASK) == RET_VALUE

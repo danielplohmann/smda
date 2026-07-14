@@ -6,7 +6,6 @@ from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.common.arch.ArchBackend import ArchBackend
 from smda.utility.ElfFileLoader import ElfFileLoader
-from smda.utility.MachoBinary import get_macho_stub_ranges
 
 from .BitnessAnalyzer import BitnessAnalyzer
 from .definitions import (
@@ -74,6 +73,12 @@ SYSCALL_IMPLICIT_RAX_WRITERS = {
 
 SYSCALL_READ_ONLY_INS = {"cmp", "test", "push", "bt"}
 
+# process-terminating syscall numbers (Linux x86_64 syscall convention: rax/eax)
+SYSCALL_EXIT_NUMBERS = {60, 231}  # exit, exit_group
+# process-terminating syscall numbers via the 32-bit ABI int 0x80 gate (always eax, even
+# from a 64-bit process)
+INT80_EXIT_NUMBERS = {1, 252}  # exit, exit_group
+
 
 class X86Backend(ArchBackend):
     """x86/x64 backend: capstone setup, x86 collaborators and the x86 control-flow
@@ -107,26 +112,6 @@ class X86Backend(ArchBackend):
         return BitnessAnalyzer().determineBitnessFromDisassembly(disassembly)
 
     @staticmethod
-    def _getPltRanges(binary_info):
-        if not hasattr(binary_info, "_plt_ranges"):
-            binary_info._plt_ranges = ElfFileLoader.getPltRanges(
-                binary_info.raw_data or binary_info.binary,
-                parsed=binary_info.getLiefBinary(),
-            )
-        return binary_info._plt_ranges
-
-    @staticmethod
-    def _getMachoStubRanges(binary_info):
-        if not hasattr(binary_info, "_macho_stub_ranges"):
-            binary_info._macho_stub_ranges = get_macho_stub_ranges(
-                binary_info.getLiefBinary(),
-                base_addr=binary_info.base_addr,
-                bitness=binary_info.bitness,
-                architecture=getattr(binary_info, "architecture", ""),
-            )
-        return binary_info._macho_stub_ranges
-
-    @staticmethod
     def _getElfGotBases(binary_info):
         if not hasattr(binary_info, "_elf_got_bases"):
             binary_info._elf_got_bases = ElfFileLoader.getGotBases(
@@ -134,10 +119,6 @@ class X86Backend(ArchBackend):
                 parsed=binary_info.getLiefBinary(),
             )
         return binary_info._elf_got_bases
-
-    @classmethod
-    def _getImportStubRanges(cls, binary_info):
-        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
 
     @classmethod
     def _resolveImportSlot(cls, d, target):
@@ -407,7 +388,22 @@ class X86Backend(ArchBackend):
             )
         elif i_mnemonic_noprefix in ["syscall"]:
             syscall_number = self._resolveSyscallNumber(state.current_block, d.disassembly.binary_info.bitness)
-            if syscall_number == 60:
+            if syscall_number in SYSCALL_EXIT_NUMBERS:
+                self._analyzeEndInstruction(state)
+                LOGGER.debug(
+                    "  analyzeFunction() found program ending instruction @0x%08x",
+                    i_address,
+                )
+        elif i_mnemonic_noprefix == "int" and i_op_str == "0x80":
+            # int 0x80 is always the 32-bit ABI syscall gate (eax), even from a 64-bit process.
+            # Backtrack with bitness=64 regardless: its register set (rax/eax/ax/al/ah) is a
+            # strict superset of the 32-bit one, so it also catches a full-width "mov rax, N"
+            # write that a 64-bit binary may still use before dropping into int 0x80 -- forcing
+            # 32 here would drop "rax" from the clobber set and silently walk past that write.
+            syscall_number = self._resolveSyscallNumber(state.current_block, 64)
+            # int 0x80 only reads the low 32 bits (eax); truncate in case a full-width
+            # "mov rax, N" write resolved a value wider than that (e.g. mov rax, 0x100000001).
+            if syscall_number is not None and (syscall_number & 0xFFFFFFFF) in INT80_EXIT_NUMBERS:
                 self._analyzeEndInstruction(state)
                 LOGGER.debug(
                     "  analyzeFunction() found program ending instruction @0x%08x",

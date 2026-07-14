@@ -26,7 +26,9 @@ from types import SimpleNamespace
 import lief
 
 from smda.aarch64.AArch64Backend import AArch64Backend
-from smda.aarch64.definitions import adrp_page_value
+from smda.aarch64.AArch64CapstoneVerification import is_control_flow_mnemonic
+from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
+from smda.aarch64.definitions import EXCEPTION_RETURN_INS, adrp_page_value, is_conditional_branch
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaReport import SmdaReport
@@ -372,6 +374,148 @@ class TestAArch64PacAndAlwaysBranches(unittest.TestCase):
         )
 
 
+class TestAArch64HintedConditionalBranch(unittest.TestCase):
+    """FEAT_HBC's hinted conditional branch bc.<cond> (ARMv8.8/9.3).
+
+    Capstone decodes bc.eq/bc.ne/... distinctly from b.eq/b.ne/... (mnemonic
+    prefix "bc." instead of "b."), with the encoding differing only in bit 4
+    (o1/hint bit). Every "is this a conditional branch" check in the AArch64
+    backend must recognize both prefixes, and the raw-encoding gap-scan mask
+    must match bit 4 set or unset. Verified live against capstone 5.0.7:
+    bytes 10 00 00 54 decode to mnemonic 'bc.eq', op_str '#0x401000', groups [].
+    """
+
+    @staticmethod
+    def _encode_bc_cond(source, target, cond, hint=1):
+        imm19 = ((target - source) // 4) & 0x7FFFF
+        return 0x54000000 | (imm19 << 5) | (hint << 4) | cond
+
+    def _disassemble_words(self, words, oep=None):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=oep,
+            architecture="aarch64",
+        )
+
+    def test_is_control_flow_mnemonic_recognizes_bc_cond_forms(self):
+        for mnemonic in ("bc.eq", "bc.ne", "bc.al", "bc.nv", "bc.gt"):
+            self.assertTrue(is_control_flow_mnemonic(mnemonic), mnemonic)
+
+    def test_is_conditional_branch_matches_hinted_encoding(self):
+        # bc.eq: bit 4 (hint/o1) is set, distinguishing it from plain b.eq.
+        word = self._encode_bc_cond(BASE, BASE + 0xC, cond=0x0, hint=1)
+        self.assertEqual(word, 0x54000070)
+        self.assertTrue(is_conditional_branch(word))
+        # This is exactly the bit-4-set case the pre-fix BCOND_MASK (0xFF000010,
+        # which required bit 4 clear) excluded: confirm the bit really is set,
+        # i.e. the old mask would have missed this word.
+        self.assertNotEqual(word & 0xFF000010, 0x54000000)
+        self.assertEqual(word & 0x10, 0x10)
+
+    def test_conditional_branch_has_two_successors(self):
+        # mirrors TestAArch64Disassembler.test_conditional_branch_has_two_successors,
+        # substituting bc.eq (hinted) for cbz.
+        target = BASE + 0xC
+        report = self._disassemble_words(
+            [
+                self._encode_bc_cond(BASE, target, cond=0x0),  # bc.eq 0x40100c
+                0xD2800020,  # 0x401004 mov x0, #1
+                0xD65F03C0,  # 0x401008 ret
+                0xD65F03C0,  # 0x40100c ret
+            ],
+            oep=0,
+        )
+        self.assertEqual(report.status, "ok")
+        function = report.getFunction(BASE)
+        self.assertEqual(function.num_blocks, 3)
+        blocks = {b.offset: b for b in function.getBlocks()}
+        self.assertEqual(set(blocks), {BASE, BASE + 0x4, target})
+        # bc.eq #0x40100c -> taken (target) + fall-through (BASE + 0x4)
+        self.assertEqual(set(blocks[BASE].getSuccessors()), {BASE + 0x4, target})
+
+    def test_bc_always_branch_has_no_fallthrough(self):
+        # bc.al always branches (like b.al): the skipped-over fall-through
+        # instruction must NOT be booked into the function.
+        report = self._disassemble_words(
+            [
+                0xD503233F,  # 0x401000 paciasp
+                self._encode_bc_cond(BASE + 0x4, BASE + 0xC, cond=0xE),  # 0x401004 bc.al 0x40100c
+                0xD2800060,  # 0x401008 mov x0, #3  (unreachable fall-through)
+                0xD65F03C0,  # 0x40100c ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        instruction_offsets = [ins.offset for ins in report.getFunction(BASE).getInstructions()]
+        self.assertEqual(instruction_offsets, [BASE, BASE + 0x4, BASE + 0xC])
+        self.assertNotIn(BASE + 0x8, instruction_offsets)
+
+    def test_escaper_classifies_bc_cond_as_control_flow(self):
+        target = BASE + 0xC
+        report = self._disassemble_words(
+            [
+                self._encode_bc_cond(BASE, target, cond=0x0),  # bc.eq 0x40100c
+                0xD2800020,  # mov x0, #1
+                0xD65F03C0,  # ret
+                0xD65F03C0,  # ret
+            ],
+            oep=0,
+        )
+        self.assertEqual(report.status, "ok")
+        instruction = next(iter(report.getFunction(BASE).getInstructions()))
+        self.assertEqual(instruction.mnemonic, "bc.eq")
+        self.assertEqual(AArch64InstructionEscaper.escapeMnemonicForInstruction(instruction), "C")
+
+
+class TestAArch64DrpsExceptionReturn(unittest.TestCase):
+    """drps (Debug Restore PState) carries no capstone groups and 0 operands,
+    same class as eret/brk/hlt/udf: it must be special-cased by mnemonic since
+    capstone gives no group signal, and it transfers control to ELR_ELx."""
+
+    def _disassemble_words(self, words):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            architecture="aarch64",
+        )
+
+    def test_drps_in_exception_return_ins(self):
+        self.assertIn("drps", EXCEPTION_RETURN_INS)
+
+    def test_is_control_flow_mnemonic_recognizes_drps(self):
+        self.assertTrue(is_control_flow_mnemonic("drps"))
+
+    def test_drps_terminates_block(self):
+        # mirrors TestAArch64PacAndAlwaysBranches.test_exception_return_terminates_block,
+        # substituting drps for eret.
+        report = self._disassemble_words(
+            [
+                0xD503233F,  # paciasp
+                0xD2800020,  # mov x0, #1
+                0xD6BF03E0,  # drps
+                0xD503233F,  # paciasp
+                0xD2800040,  # mov x0, #2
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0xC})
+        self.assertEqual(
+            [ins.mnemonic for ins in report.getFunction(BASE).getInstructions()],
+            ["paciasp", "mov", "drps"],
+        )
+
+
 class TestAArch64BranchTarget(unittest.TestCase):
     """The branch destination is the LAST immediate operand (tbz/tbnz trap)."""
 
@@ -554,6 +698,93 @@ class TestAArch64PltResolution(unittest.TestCase):
         self.assertTrue(state.sanely_ending)
         self.assertEqual(fake_disassembler.api_targets, [(branch_addr, got_slot, got_slot)])
         self.assertEqual(state.code_refs, [(branch_addr, plt, True)])
+
+
+class TestAArch64ApiThunkDetection(unittest.TestCase):
+    """danielplohmann/smda#172: a function whose entire body is the canonical
+    adrp; [add;] ldr; br GOT/API-import thunk (optionally nop/bti-prefixed) is
+    flagged via state.setThunkCall(True), landing in disassembly.thunk_functions."""
+
+    def _disassemble_words(self, words, oep=0):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        disassembler = Disassembler(config, backend="aarch64")
+        report = disassembler.disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=oep,
+            architecture="aarch64",
+        )
+        return report, disassembler.disassembly
+
+    def test_walk_got_thunk_three_instructions(self):
+        words = [
+            0x90000010,  # adrp x16, #0
+            0xF9400210,  # ldr x16, [x16]
+            0xD61F0200,  # br x16
+        ]
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        binary_info = BinaryInfo(code)
+        binary_info.base_addr = BASE
+        fake_disassembler = SimpleNamespace(disassembly=SimpleNamespace(binary_info=binary_info))
+        fake_disassembler.disassembly.isAddrWithinMemoryImage = lambda addr: BASE <= addr < BASE + len(code)
+
+        result = AArch64Backend._walkGotThunk(fake_disassembler, BASE)
+
+        self.assertIsNotNone(result)
+        end_addr, _target = result
+        self.assertEqual(end_addr, BASE + len(words) * 4)
+
+    def test_three_instruction_thunk_is_flagged(self):
+        report, disassembly = self._disassemble_words(
+            [
+                0x90000010,  # adrp x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(BASE, disassembly.thunk_functions)
+
+    def test_four_instruction_thunk_with_add_is_flagged(self):
+        report, disassembly = self._disassemble_words(
+            [
+                0x90000010,  # adrp x16, #0
+                0x91000210,  # add x16, x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(BASE, disassembly.thunk_functions)
+
+    def test_bti_prefixed_thunk_is_flagged(self):
+        report, disassembly = self._disassemble_words(
+            [
+                0xD503245F,  # bti c
+                0x90000010,  # adrp x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(BASE, disassembly.thunk_functions)
+
+    def test_normal_function_with_more_than_thunk_body_is_not_flagged(self):
+        # a real prologue precedes the adrp/ldr/br shape: not a thunk.
+        report, disassembly = self._disassemble_words(
+            [
+                0xA9BF7BFD,  # stp x29, x30, [sp, #-16]!
+                0x90000010,  # adrp x16, #0
+                0xF9400210,  # ldr x16, [x16]
+                0xD61F0200,  # br x16
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertNotIn(BASE, disassembly.thunk_functions)
 
 
 class TestAArch64PrologueDiscovery(unittest.TestCase):
@@ -883,6 +1114,119 @@ class TestAArch64StringExtraction(unittest.TestCase):
         )
 
 
+class TestAArch64StackStringRecovery(unittest.TestCase):
+    """danielplohmann/smda#173: strings built byte-by-byte on the stack via
+    tracked-register stores (str/strb/strh/stur* and stp) are reconstructed and
+    recorded into disassembly.stringrefs / SmdaFunction.stringrefs, same as
+    dalvik/cil's own addStringRef-backed (non-buffer) strings."""
+
+    def _disassemble_words(self, words, with_strings=True):
+        config = SmdaConfig()
+        config.WITH_STRINGS = with_strings
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        return Disassembler(config, backend="aarch64").disassembleBuffer(
+            code,
+            base_addr=BASE,
+            bitness=64,
+            code_areas=[[BASE, BASE + len(code)]],
+            oep=0,
+            architecture="aarch64",
+        )
+
+    def test_string_built_byte_by_byte_via_strb_is_recovered(self):
+        report = self._disassemble_words(
+            [
+                0x52800908,  # mov w8, #0x48 ('H')
+                0x390003E8,  # strb w8, [sp]
+                0x52800CA8,  # mov w8, #0x65 ('e')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0x52800DE8,  # mov w8, #0x6f ('o')
+                0x390013E8,  # strb w8, [sp, #4]
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(
+            {"string": "Hello", "ins_addr": BASE + 4, "data_addr": None, "type": "stack"},
+            report.getFunction(BASE).stringrefs,
+        )
+
+    def test_string_built_via_stp_register_pair_is_recovered(self):
+        report = self._disassemble_words(
+            [
+                0x528CA908,  # mov w8, #0x6548
+                0x72AD8D88,  # movk w8, #0x6c6c, lsl #16   (w8 = 0x6C6C6548 = "Hell", little-endian)
+                0x52842DE9,  # mov w9, #0x216f
+                0x72A00009,  # movk w9, #0, lsl #16        (w9 = 0x0000216F = "o!\0\0", little-endian)
+                0x290027E8,  # stp w8, w9, [sp]
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertIn(
+            {"string": "Hello!", "ins_addr": BASE + 0x10, "data_addr": None, "type": "stack"},
+            report.getFunction(BASE).stringrefs,
+        )
+
+    def test_gated_by_with_strings_config(self):
+        report = self._disassemble_words(
+            [
+                0x52800908,  # mov w8, #0x48 ('H')
+                0x390003E8,  # strb w8, [sp]
+                0x52800CA8,  # mov w8, #0x65 ('e')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800D88,  # mov w8, #0x6c ('l')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0x52800DE8,  # mov w8, #0x6f ('o')
+                0x390013E8,  # strb w8, [sp, #4]
+                0xD65F03C0,  # ret
+            ],
+            with_strings=False,
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertFalse(report.getFunction(BASE).stringrefs)
+
+    def test_stack_pointer_mutation_resets_stale_offsets(self):
+        # "Test" is written at offsets 0-3 relative to the ORIGINAL sp; "sub sp,
+        # sp, #16" then moves sp, so "Data" at offsets 0-3 afterwards is a
+        # PHYSICALLY DIFFERENT stack slot even though the numeric offsets repeat.
+        # Without resetting tracked offsets on the sp mutation, "Data"'s writes
+        # would silently overwrite the same dict keys "Test" used, losing "Test"
+        # entirely (never flushed) instead of producing two separate strings.
+        report = self._disassemble_words(
+            [
+                0x52800A88,  # mov w8, #0x54 ('T')
+                0x390003E8,  # strb w8, [sp]
+                0x52800CA8,  # mov w8, #0x65 ('e')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800E68,  # mov w8, #0x73 ('s')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800E88,  # mov w8, #0x74 ('t')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0xD10043FF,  # sub sp, sp, #0x10
+                0x52800888,  # mov w8, #0x44 ('D')
+                0x390003E8,  # strb w8, [sp]
+                0x52800C28,  # mov w8, #0x61 ('a')
+                0x390007E8,  # strb w8, [sp, #1]
+                0x52800E88,  # mov w8, #0x74 ('t')
+                0x39000BE8,  # strb w8, [sp, #2]
+                0x52800C28,  # mov w8, #0x61 ('a')
+                0x39000FE8,  # strb w8, [sp, #3]
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        stringrefs = report.getFunction(BASE).stringrefs
+        self.assertIn({"string": "Test", "ins_addr": BASE + 4, "data_addr": None, "type": "stack"}, stringrefs)
+        self.assertIn({"string": "Data", "ins_addr": BASE + 0x28, "data_addr": None, "type": "stack"}, stringrefs)
+
+
 class TestAArch64AddressMaterialization(unittest.TestCase):
     """adrp page resolution used by the address-reference recovery pass."""
 
@@ -957,6 +1301,24 @@ class TestAArch64GapScan(unittest.TestCase):
             word.to_bytes(4, "little")
             for word in [
                 0xD65F0BFF,  # retaa
+                0xD503245F,  # bti c
+            ]
+        )
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
+        manager._candidate_offsets = set()
+
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+
+    def test_bti_after_drps_is_not_suppressed_as_interior(self):
+        # drps (Debug Restore PState) transfers control to ELR_ELx like eret*, so a BTI
+        # right after it is a legitimate landing pad, not fragmentation of straight-line code.
+        binary = b"".join(
+            word.to_bytes(4, "little")
+            for word in [
+                0xD6BF03E0,  # drps
                 0xD503245F,  # bti c
             ]
         )
@@ -1161,6 +1523,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def __init__(self, disassembly_result, capstone):
                 self.disassembly = disassembly_result
                 self.capstone = capstone
+                self.config = SimpleNamespace(WITH_STRINGS=False)
 
             def resolveApi(self, to_addr, api_addr):
                 if to_addr == 0x401020:
@@ -1240,6 +1603,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def __init__(self, disassembly_result, capstone):
                 self.disassembly = disassembly_result
                 self.capstone = capstone
+                self.config = SimpleNamespace(WITH_STRINGS=False)
 
             def resolveApi(self, to_addr, api_addr):
                 if to_addr == 0x401020:
