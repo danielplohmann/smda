@@ -63,7 +63,18 @@ class SmdaInstruction:
                     if value is not None and value not in emitted and smda_report.isAddrWithinMemoryImage(value):
                         emitted.add(value)
                         data_refs.append(value)
-        elif smda_report.architecture == "aarch64" and self.operands and "0x" in self.operands:
+        elif (
+            smda_report.architecture == "aarch64"
+            and not smda_report.data_refs_from
+            and self.operands
+            and "0x" in self.operands
+        ):
+            # AArch64 CFG recovery derives per-instruction data refs with this same
+            # IMM/MEM(base==0)/in-image/not-in-code-area filter (AArch64Backend._recordDataRefs)
+            # and stores them in the report as data_refs_from, so re-deriving them here via a
+            # capstone re-decode is redundant whenever the report carries recorded refs. Only
+            # fall back for reports without any (e.g. serialized by versions predating
+            # xdata_refs_from).
             if self.getMnemonicGroup(AArch64InstructionEscaper) == "C":
                 self._data_refs = data_refs
                 yield from self._data_refs
