@@ -9,6 +9,7 @@ scan-produced candidates (prologue/call-reference) are absent, on both backends.
 """
 
 import unittest
+from types import SimpleNamespace
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.common.BinaryInfo import BinaryInfo
@@ -62,6 +63,31 @@ class TimeoutCallbackReachesCandidateScansTestSuite(unittest.TestCase):
         result = disassembler.analyzeBuffer(_aarch64_binary_info(), cbAnalysisTimeout=lambda: True)
         self.assertNotIn(0x401010, disassembler.fc_manager.candidates)
         self.assertTrue(result.analysis_timeout)
+
+
+class IdaExporterTimeoutTestSuite(unittest.TestCase):
+    def test_tripped_callback_halts_ida_function_collection(self):
+        # IdaExporter.analyzeBuffer accepted cb_analysis_timeout but never polled
+        # it; a tripping callback must stop function collection and flag the report
+        from smda.DisassemblyResult import DisassemblyResult
+        from smda.ida.IdaExporter import IdaExporter
+
+        exporter = IdaExporter.__new__(IdaExporter)  # no IDA environment available
+        exporter.bitness = 64
+        exporter.architecture = "intel"
+        exporter.capstone = None
+        exporter.disassembly = DisassemblyResult()
+        exporter.ida_interface = SimpleNamespace(
+            getArchitecture=lambda: "intel",
+            getFunctionSymbols=dict,
+            getApiMap=dict,
+            getFunctions=lambda: [0x1000, 0x2000],
+            isExternalFunction=lambda offset: False,
+            getBlocks=lambda offset: [],
+        )
+        result = exporter.analyzeBuffer(_intel_binary_info(), cb_analysis_timeout=lambda: True)
+        self.assertTrue(result.analysis_timeout)
+        self.assertEqual(result.functions, {})
 
 
 if __name__ == "__main__":

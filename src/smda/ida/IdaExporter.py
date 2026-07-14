@@ -87,6 +87,9 @@ class IdaExporter:
         self.disassembly.function_symbols = self.ida_interface.getFunctionSymbols()
         api_map = self.ida_interface.getApiMap()
         for function_offset in self.ida_interface.getFunctions():
+            if cb_analysis_timeout and cb_analysis_timeout():
+                self.disassembly.analysis_timeout = True
+                break
             if self.ida_interface.isExternalFunction(function_offset):
                 continue
             converted_function = []
