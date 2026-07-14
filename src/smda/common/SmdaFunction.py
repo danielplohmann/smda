@@ -31,6 +31,15 @@ AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 2, 0]
 
 
 class LazyIntKeyDict(dict):
+    def __new__(cls, data=None):
+        # Pickle reconstructs dict subclasses via __new__ + update, bypassing
+        # __init__, so the lazy-conversion state must be initialized here to
+        # survive being passed to a multiprocessing worker.
+        instance = super().__new__(cls)
+        instance._is_converted = True
+        instance._raw_data = None
+        return instance
+
     def __init__(self, data=None):
         if data:
             self._raw_data = data
