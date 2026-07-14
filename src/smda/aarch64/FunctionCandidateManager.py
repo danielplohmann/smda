@@ -33,6 +33,7 @@ import lief
 
 from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
+from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment, get_macho_stub_ranges
 
 from .definitions import (
     ADD_IMM64_MASK,
@@ -71,9 +72,11 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # The base init() builds an x86 capstone purely for its NOP-based gap scan,
         # which this backend disables (see nextGapCandidate); drop the stale handle.
         self.capstone = None
-        # Drop the memoized executable-section ranges so a reused manager instance
-        # recomputes them for the new binary instead of leaking stale ranges.
+        # Drop the memoized executable-section ranges and Mach-O fixup state so a
+        # reused manager instance recomputes them for the new binary instead of
+        # leaking stale data.
         self._exec_ranges = None
+        self._macho_fixup_state = None
 
     def locateCandidates(self):
         # AArch64 candidate discovery: symbols, PE ARM64 exception-directory entries
@@ -239,16 +242,159 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             self.addCandidate(fde_start)
             yield fde_start
 
+    def _machoActiveBinaryAndAdjustment(self):
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
+            return None, 0
+        macho = get_active_macho_binary(lief_binary, bitness=binary_info.bitness, architecture=binary_info.architecture)
+        if macho is None or not isinstance(macho, lief.MachO.Binary):
+            return None, 0
+        adjustment = get_macho_address_adjustment(
+            macho,
+            base_addr=binary_info.base_addr,
+            bitness=binary_info.bitness,
+            architecture=binary_info.architecture,
+        )
+        return macho, adjustment
+
+    @staticmethod
+    def _machoInstructionSectionRanges(macho, adjustment, pure_only=False):
+        # SMDA-VA [start, end) ranges of Mach-O sections holding instructions.
+        # pure_only restricts to S_ATTR_PURE_INSTRUCTIONS sections (no mixed
+        # code/data), for scans that decode every word as an instruction.
+        ins_flags = lief.MachO.Section.FLAGS.PURE_INSTRUCTIONS.value
+        if not pure_only:
+            ins_flags += lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS.value
+        ranges = []
+        for section in macho.sections:
+            if section.virtual_address and section.flags.value & ins_flags:
+                start = section.virtual_address + adjustment
+                ranges.append((start, start + section.size))
+        return ranges
+
+    def _machoFixupState(self, macho):
+        """(rebase map {LIEF slot VA -> LIEF target VA}, binding slot VAs, has_chained).
+
+        With dyld chained fixups the mapped image holds packed fixup words, so a
+        stored pointer is only meaningful through its RelocationFixup target; a
+        binding slot holds an import and never a local function pointer.
+        """
+        # getattr: locateCandidates() runs inside the base init() before this
+        # backend's init() epilogue can reset the cache attribute
+        if getattr(self, "_macho_fixup_state", None) is None:
+            rebases = {}
+            for relocation in macho.relocations:
+                target = getattr(relocation, "target", None)
+                if target is not None:
+                    rebases[relocation.address] = target
+            bindings = set()
+            for binding in getattr(macho, "bindings", []):
+                address = getattr(binding, "address", 0)
+                if address:
+                    bindings.add(address)
+            has_chained = getattr(macho, "dyld_chained_fixups", None) is not None
+            self._macho_fixup_state = (rebases, bindings, has_chained)
+        return self._macho_fixup_state
+
+    def _resolveMachoStoredPointer(self, slot_lief_va, adjustment, fixup_state):
+        """Resolve the pointer stored at a Mach-O slot to an SMDA VA, or None."""
+        rebases, bindings, has_chained = fixup_state
+        if slot_lief_va in bindings:
+            return None  # import slot, never a local function
+        if slot_lief_va in rebases:
+            return rebases[slot_lief_va] + adjustment
+        if has_chained:
+            return None  # unresolved chained slot: the raw word is packed metadata
+        raw = self.disassembly.getBytes(slot_lief_va + adjustment, 8)
+        if raw is None or len(raw) != 8:
+            return None
+        value = int.from_bytes(raw, "little") & self.getBitMask()
+        if not value:
+            return None
+        return value + adjustment
+
+    def _locateMachoFunctionPointerMetadataCandidates(self):
+        # Explicit Mach-O function-pointer metadata only - the platform-native
+        # equivalent of ELF .init_array/.fini_array: mod-init/term and TLV-init
+        # pointer sections, __init_offsets tables, and interposing pairs. Broad
+        # regular-data sweeps are deliberately NOT performed; GOT/lazy pointers,
+        # imports and stub islands are excluded.
+        macho, adjustment = self._machoActiveBinaryAndAdjustment()
+        if macho is None:
+            return
+        section_types = lief.MachO.Section.TYPE
+        pointer_types = {
+            section_types.MOD_INIT_FUNC_POINTERS,
+            section_types.MOD_TERM_FUNC_POINTERS,
+            section_types.THREAD_LOCAL_INIT_FUNCTION_POINTERS,
+        }
+        init_offsets_type = getattr(section_types, "INIT_FUNC_OFFSETS", None)
+        interposing_type = section_types.INTERPOSING
+        exec_ranges = self._machoInstructionSectionRanges(macho, adjustment)
+        if not exec_ranges:
+            return
+        binary_info = self.disassembly.binary_info
+        stub_ranges = get_macho_stub_ranges(
+            macho,
+            base_addr=binary_info.base_addr,
+            bitness=binary_info.bitness,
+            architecture=binary_info.architecture,
+        )
+        fixup_state = self._machoFixupState(macho)
+
+        def seed(target, source_va):
+            if target is None or target % INSTRUCTION_SIZE != 0:
+                return
+            if not any(start <= target < end for start, end in exec_ranges):
+                return
+            if any(start <= target < end for start, end in stub_ranges):
+                return
+            if not self._passesCodeFilter(target) or not self.disassembly.isAddrWithinMemoryImage(target):
+                return
+            self.addReferenceCandidate(target, source_va)
+            self.setInitialCandidate(target)
+
+        for section in macho.sections:
+            if not section.virtual_address or not section.size:
+                continue
+            section_type = section.type
+            if section_type in pointer_types:
+                for slot_va in range(section.virtual_address, section.virtual_address + section.size - 7, 8):
+                    if self._candidateTimeoutTripped():
+                        return
+                    seed(self._resolveMachoStoredPointer(slot_va, adjustment, fixup_state), slot_va + adjustment)
+            elif init_offsets_type is not None and section_type == init_offsets_type:
+                # __init_offsets: 32-bit offsets from the image base, no fixups involved
+                for slot_va in range(section.virtual_address, section.virtual_address + section.size - 3, 4):
+                    if self._candidateTimeoutTripped():
+                        return
+                    raw = self.disassembly.getBytes(slot_va + adjustment, 4)
+                    if raw is None or len(raw) != 4:
+                        continue
+                    seed(macho.imagebase + int.from_bytes(raw, "little") + adjustment, slot_va + adjustment)
+            elif section_type == interposing_type:
+                # interposing entries are <replacement, replacee> pointer pairs; only
+                # the replacement of a complete pair is a local function
+                for pair_va in range(section.virtual_address, section.virtual_address + section.size - 15, 16):
+                    if self._candidateTimeoutTripped():
+                        return
+                    seed(self._resolveMachoStoredPointer(pair_va, adjustment, fixup_state), pair_va + adjustment)
+
     def locateDataPointerCandidates(self):
         # Seed candidates from stored function pointers. ELF .init_array/.fini_array
         # entries are authoritative constructor/destructor pointers; other data
         # sections are scanned for aligned words pointing into executable code.
+        # Mach-O images use their explicit function-pointer metadata instead.
         # This recovers functions reached only indirectly (CRT init stubs, pointer
         # / dispatch tables) that no direct BL or recognized prologue would find,
         # and anchors true entries so the prologue scan no longer mislabels an
         # inner block as the function start.
         binary_info = self.disassembly.binary_info
         lief_binary = binary_info.getLiefBinary()
+        if isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
+            self._locateMachoFunctionPointerMetadataCandidates()
+            return
         if not isinstance(lief_binary, lief.ELF.Binary) or not lief_binary.sections:
             return
         exec_ranges = self._executableSectionRanges(lief_binary)
@@ -299,9 +445,23 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # common in position-independent code.
         binary_info = self.disassembly.binary_info
         lief_binary = binary_info.getLiefBinary()
-        if not isinstance(lief_binary, lief.ELF.Binary) or not lief_binary.sections:
+        adjustment = 0
+        macho_fixup_state = None
+        if isinstance(lief_binary, lief.ELF.Binary) and lief_binary.sections:
+            exec_ranges = self._executableSectionRanges(lief_binary)
+        elif self.config.USE_MACHO_ADDRESS_REF_CANDIDATES and isinstance(
+            lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)
+        ):
+            # opt-in Mach-O extension: scan only S_ATTR_PURE_INSTRUCTIONS sections
+            # (every word is decoded as an instruction) and resolve loaded slots
+            # through local fixups before trusting stored words
+            macho, adjustment = self._machoActiveBinaryAndAdjustment()
+            if macho is None:
+                return
+            exec_ranges = self._machoInstructionSectionRanges(macho, adjustment, pure_only=True)
+            macho_fixup_state = self._machoFixupState(macho)
+        else:
             return
-        exec_ranges = self._executableSectionRanges(lief_binary)
         if not exec_ranges:
             return
         base = binary_info.base_addr
@@ -315,7 +475,15 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             target &= bit_mask
             if target % INSTRUCTION_SIZE != 0 or not in_exec(target):
                 return
-            if self._passesCodeFilter(target) and self.disassembly.isAddrWithinMemoryImage(target):
+            if not (self._passesCodeFilter(target) and self.disassembly.isAddrWithinMemoryImage(target)):
+                return
+            if macho_fixup_state is not None:
+                # Mach-O targets are weak address evidence, not inbound call refs:
+                # register the bare candidate without a reference source so it gains
+                # no call-reference score (addCandidate would touch the queue, which
+                # does not exist yet during candidate identification)
+                self.ensureCandidate(target)
+            else:
                 self.addReferenceCandidate(target, source)
 
         for low, high in exec_ranges:
@@ -352,7 +520,11 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                     if rn in pages:
                         imm = ((word >> 10) & 0xFFF) * 8
                         slot_addr = pages[rn] + imm
-                        if self.disassembly.isAddrWithinMemoryImage(slot_addr):
+                        if macho_fixup_state is not None:
+                            val = self._resolveMachoStoredPointer(slot_addr - adjustment, adjustment, macho_fixup_state)
+                            if val is not None:
+                                seed(val, addr)
+                        elif self.disassembly.isAddrWithinMemoryImage(slot_addr):
                             raw_val = self.disassembly.getBytes(slot_addr, 8)
                             if raw_val and len(raw_val) == 8:
                                 val = struct.unpack("<Q", raw_val)[0]

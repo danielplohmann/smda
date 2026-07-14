@@ -37,6 +37,10 @@ class SmdaConfig:
     # promote unclaimed ELF .eh_frame FDE starts as late AArch64 candidates (after the primary
     # pass, before gap analysis); off until validated against ground-truth function boundaries
     USE_ELF_EH_FRAME_CANDIDATES = False
+    # extend the AArch64 adr/adrp address-materialization scan to Mach-O instruction sections,
+    # recording targets as weak address evidence; off until validated with exact-address ground
+    # truth for the Mach-O corpus
+    USE_MACHO_ADDRESS_REF_CANDIDATES = False
     RESOLVE_REGISTER_CALLS = True
     # limit this to avoid blowing up analysis time for weird samples
     MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
