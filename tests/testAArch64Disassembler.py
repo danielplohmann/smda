@@ -636,6 +636,7 @@ class TestAArch64PltResolution(unittest.TestCase):
                 self.block_ending = False
                 self.queue = []
                 self.code_refs = []
+                self.is_thunk_call = False
 
             def setSanelyEnding(self, value=True):
                 self.sanely_ending = value
@@ -651,6 +652,9 @@ class TestAArch64PltResolution(unittest.TestCase):
 
             def addCodeRef(self, from_addr, to_addr, by_jump=False):
                 self.code_refs.append((from_addr, to_addr, by_jump))
+
+            def setThunkCall(self, value):
+                self.is_thunk_call = value
 
         state = FakeState(plt)
         backend = AArch64Backend()
@@ -1749,6 +1753,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def __init__(self, disassembly_result, capstone):
                 self.disassembly = disassembly_result
                 self.capstone = capstone
+                self.config = SimpleNamespace(WITH_STRINGS=False)
 
             def resolveApi(self, to_addr, api_addr):
                 del to_addr, api_addr

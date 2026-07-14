@@ -346,6 +346,13 @@ class AArch64Backend(ArchBackend):
         elif i_mnemonic in UNCOND_JUMP_INS:
             self._analyzeUncondBranch(d, instruction, state)
         elif i_mnemonic in INDIRECT_JUMP_INS:
+            if i_mnemonic == "br":
+                # a function whose ENTIRE body is the canonical GOT/API-import thunk
+                # (optional nop/bti landing pad, then adrp; [add;] ldr; br) is a thunk,
+                # not a real routine — same decode _resolvePltGotSlot uses for callers.
+                thunk_walk = self._walkGotThunk(d, state.start_addr)
+                if thunk_walk is not None and thunk_walk[0] == i_address + i_size:
+                    state.setThunkCall(True)
             # br / bra*: import stubs (PLT/Mach-O) are multi-insn adrp+ldr+br sequences
             # whose entry is in a stub range — resolve the GOT slot and attribute the API
             # to this branch (mirrors x86 jmp [iat] thunk analysis).

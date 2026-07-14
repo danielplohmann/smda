@@ -8,7 +8,10 @@ import contextlib
 import logging
 import struct
 
+from capstone.arm64_const import ARM64_SFT_LSL
+
 from .dataflow import gatherContextInstructions, norm_reg, propagateConstants, propagateConstantsHistory
+from .definitions import adrp_page_value
 
 
 def _movImmediateValue(op):
@@ -301,6 +304,7 @@ class AArch64IndirectCallAnalyzer:
             _emitStackStrings(d, analysis_state, stack_bytes)
 
     def resolveRegisterCalls(self, analysis_state, block_depth=3):
+        self.recoverStackStrings(analysis_state)
         if not analysis_state.call_register_ins:
             return
 
