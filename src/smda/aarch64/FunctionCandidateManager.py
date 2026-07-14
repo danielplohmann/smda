@@ -31,6 +31,7 @@ import struct
 
 import lief
 
+from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
 
 from .definitions import (
@@ -195,6 +196,48 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             if not any(start <= addr < end for start, end in exec_ranges):
                 continue
             self.addExceptionCandidate(addr)
+
+    def locateDeferredCandidates(self):
+        # ELF .eh_frame FDE starts (opt-in): every FDE names a code range that
+        # unwinding treats as one routine, so an FDE start the primary pass left
+        # unclaimed is strong evidence of a missed function (e.g. a wrapper only
+        # reached through data). Runs after the primary pass so code_map claims
+        # can veto entries: an already-claimed start would split existing
+        # functions, which this pass must never do. Accepted starts get ordinary
+        # candidate bookkeeping - deliberately NOT the PE exception-candidate
+        # priority, since .eh_frame commonly also covers non-function ranges.
+        if not self.config.USE_ELF_EH_FRAME_CANDIDATES:
+            return
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, lief.ELF.Binary):
+            return
+        eh_frame = next((section for section in lief_binary.sections if section.name == ".eh_frame"), None)
+        if eh_frame is None or not eh_frame.virtual_address or not eh_frame.size:
+            return
+        section_bytes = self.disassembly.getBytes(eh_frame.virtual_address, eh_frame.size)
+        if not section_bytes:
+            return
+        pointer_size = 8 if binary_info.bitness == 64 else 4
+        fde_ranges = decodeEhFrameFdeRanges(bytes(section_bytes), eh_frame.virtual_address, pointer_size=pointer_size)
+        exec_ranges = self._cachedExecutableSectionRanges()
+
+        def in_exec(addr):
+            return any(start <= addr < end for start, end in exec_ranges)
+
+        for fde_start in sorted({fde_range[0] for fde_range in fde_ranges}):
+            if self._candidateTimeoutTripped():
+                return
+            if fde_start % INSTRUCTION_SIZE != 0 or not in_exec(fde_start):
+                continue
+            if not self._passesCodeFilter(fde_start):
+                continue
+            # checked lazily per yield: an earlier deferred candidate's analysis
+            # may have claimed this start in the meantime
+            if self.disassembly.isCode(fde_start):
+                continue
+            self.addCandidate(fde_start)
+            yield fde_start
 
     def locateDataPointerCandidates(self):
         # Seed candidates from stored function pointers. ELF .init_array/.fini_array

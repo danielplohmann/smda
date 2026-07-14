@@ -546,6 +546,12 @@ class FunctionCandidateManager:
         self.locateStubChainCandidates()
         self.identified_alignment = self._identifyAlignment()
 
+    def locateDeferredCandidates(self):
+        """Deferred candidate sources that need the primary pass's results (e.g.
+        code_map claims) before they can be filtered; yields addresses the engine
+        analyzes between the primary pass and gap analysis. No sources here."""
+        return ()
+
     def _buildQueue(self):
         LOGGER.debug("Located %d function candidates", len(self.candidates))
         # increase lookup speed with static set

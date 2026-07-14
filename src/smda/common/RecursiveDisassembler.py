@@ -427,6 +427,12 @@ class RecursiveDisassembler:
             "Finished heuristical analysis, functions: %d",
             len(self.disassembly.functions),
         )
+        # deferred candidate sources need the primary pass's code_map claims to filter
+        # against; they run before gap analysis so accepted starts anchor real functions
+        for deferred_addr in self.fc_manager.locateDeferredCandidates():
+            if cbAnalysisTimeout and cbAnalysisTimeout():
+                break
+            state = self.analyzeFunction(deferred_addr)
         # second pass, analyze remaining gaps for additional candidates in an iterative way
         gap_candidate = self.fc_manager.nextGapCandidate()
         while gap_candidate is not None:
