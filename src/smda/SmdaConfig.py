@@ -31,6 +31,9 @@ class SmdaConfig:
     # improve disassembly by resolving references through data flows
     USE_ALIGNMENT = True
     USE_SYMBOLS_AS_CANDIDATES = True
+    # seed AArch64 function candidates from the PE ARM64 exception directory (classic 0xAA64
+    # images only); off until validated against real ARM64 PE samples with independent labels
+    USE_PE_ARM64_PDATA_CANDIDATES = False
     RESOLVE_REGISTER_CALLS = True
     # limit this to avoid blowing up analysis time for weird samples
     MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
