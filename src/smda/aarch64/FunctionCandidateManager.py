@@ -43,6 +43,8 @@ from .definitions import (
     BR_MASK,
     BR_VALUE,
     INSTRUCTION_SIZE,
+    LDR_UNSIGNED_64_MASK,
+    LDR_UNSIGNED_64_VALUE,
     NOP,
     RET_MASK,
     RET_VALUE,
@@ -50,6 +52,8 @@ from .definitions import (
     is_bti_landing_pad,
     is_conditional_branch,
     is_function_prologue,
+    rd_field,
+    rn_field,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -196,7 +200,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                     continue
                 word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
                 if (word & ADRP_MASK) == ADRP_VALUE:
-                    pages[word & 0x1F] = adrp_page_value(word, addr)
+                    pages[rd_field(word)] = adrp_page_value(word, addr)
                 elif (word & ADRP_MASK) == ADR_VALUE:
                     immlo = (word >> 29) & 0x3
                     immhi = (word >> 5) & 0x7FFFF
@@ -204,15 +208,15 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                     if imm & (1 << 20):
                         imm -= 1 << 21
                     seed(addr + imm, addr)
-                    pages.pop(word & 0x1F, None)
+                    pages.pop(rd_field(word), None)
                 elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
-                    rn = (word >> 5) & 0x1F
+                    rn = rn_field(word)
                     if rn in pages:
                         seed(pages[rn] + ((word >> 10) & 0xFFF), addr)
-                    pages.pop(word & 0x1F, None)
-                elif (word & 0xFFC00000) == 0xF9400000:  # ldr Xt, [Xn, #imm]
-                    rn = (word >> 5) & 0x1F
-                    rd = word & 0x1F
+                    pages.pop(rd_field(word), None)
+                elif (word & LDR_UNSIGNED_64_MASK) == LDR_UNSIGNED_64_VALUE:  # ldr Xt, [Xn, #imm]
+                    rn = rn_field(word)
+                    rd = rd_field(word)
                     if rn in pages:
                         imm = ((word >> 10) & 0xFFF) * 8
                         slot_addr = pages[rn] + imm
@@ -231,7 +235,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 ):
                     pages.clear()  # control-flow edge: register provenance no longer holds
                 else:
-                    pages.pop(word & 0x1F, None)  # any other write invalidates the dest register
+                    pages.pop(rd_field(word), None)  # any other write invalidates the dest register
                 addr += INSTRUCTION_SIZE
 
     def locateReferenceCandidates(self):
