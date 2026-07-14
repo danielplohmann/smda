@@ -414,7 +414,7 @@ class RecursiveDisassembler:
         # once we are initialized, add OEP
         if binary_info.oep is not None:
             self.fc_manager.symbol_addresses.append(binary_info.base_addr + binary_info.oep)
-        self.fc_manager.init(self.disassembly)
+        self.fc_manager.init(self.disassembly, cbAnalysisTimeout)
         self.capstone = self.backend.createCapstone(self.disassembly.binary_info.bitness)
         self._tfidf = self.backend.createTfIdf(self.disassembly.binary_info.bitness)
         LOGGER.debug("Starting heuristical analysis.")
