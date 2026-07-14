@@ -12,6 +12,7 @@ from smda.aarch64.definitions import EXCEPTION_RETURN_INS as AARCH64_EXCEPTION_R
 from smda.aarch64.definitions import INDIRECT_JUMP_INS as AARCH64_INDIRECT_JUMP_INS
 from smda.aarch64.definitions import RET_INS as AARCH64_RET_INS
 from smda.aarch64.definitions import UNCOND_JUMP_INS as AARCH64_UNCOND_JUMP_INS
+from smda.cil.CilInstructionEscaper import CilInstructionEscaper
 from smda.common.CodeXref import CodeXref
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -124,7 +125,7 @@ class SmdaFunction:
         self._normalized_blockrefs = None
         self._basic_blocks = None
         if disassembly is not None and function_offset is not None:
-            self._escaper = self._getInstructionEscaper(disassembly.binary_info.architecture)
+            self._escaper = self.getInstructionEscaper(disassembly.binary_info.architecture)
             self.offset = function_offset
             self._parseBlocks(disassembly.getBlocksAsDict(function_offset))
             self.apirefs = disassembly.getApiRefs(function_offset)
@@ -176,11 +177,13 @@ class SmdaFunction:
         return sum(len(value) for value in self.blockrefs.values())
 
     @staticmethod
-    def _getInstructionEscaper(architecture):
+    def getInstructionEscaper(architecture):
         if architecture == "intel":
             return IntelInstructionEscaper
         if architecture == "aarch64":
             return AArch64InstructionEscaper
+        if architecture == "cil":
+            return CilInstructionEscaper
         return None
 
     @property
@@ -549,7 +552,7 @@ class SmdaFunction:
             smda_function.stringrefs = smda_function._normalizeDalvikStringRefs(stringrefs)
         else:
             smda_function.stringrefs = stringrefs
-        smda_function._escaper = cls._getInstructionEscaper(function_architecture)
+        smda_function._escaper = cls.getInstructionEscaper(function_architecture)
         hash_context = binary_info
         if (
             hash_context is None
@@ -585,7 +588,7 @@ class SmdaFunction:
                 smda_function.pic_hash = smda_function.getPicHash(hash_context)
             # as last resort, assume we analyze Intel
             elif binary_info and binary_info.architecture in (None, "intel"):
-                smda_function._escaper = IntelInstructionEscaper
+                smda_function._escaper = cls.getInstructionEscaper("intel")
                 smda_function.pic_hash = smda_function.getPicHash(binary_info)
         return smda_function
 

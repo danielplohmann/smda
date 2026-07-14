@@ -197,6 +197,9 @@ class SmdaReport:
             self.capstone.detail = True
         return self.capstone
 
+    def getInstructionEscaper(self):
+        return SmdaFunction.getInstructionEscaper(self.architecture)
+
     def getSection(self, offset):
         for section in self.code_sections:
             if section[1] <= offset < section[2]:
