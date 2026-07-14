@@ -105,6 +105,13 @@ make test
 
 ## Version History
 
+
+ * 2026-07-14: v4.2.9 - Aarch64: shared constant-propagation dataflow module enabling cross-block indirect-call resolution and deeper jump-table recovery (predecessor-resolved bases/sizes, ldr+extend chains). (THX: @r0ny123)
+ * 2026-07-14: v4.2.8 - Aarch64: architecture-aware report metrics (num_calls/num_returns/isApiThunk), indirect-jump PLT/GOT API attribution, and candidate-scan timeout guards. (THX: @r0ny123)
+ * 2026-07-14: v4.2.7 - Intel x64: extended AMD64 prologue family (endbr64, callee-saved pushes, masked mov/sub openers) and exit_group / int 0x80 syscall-exit detection. (THX: @r0ny123)
+ * 2026-07-13: v4.2.6 - Aarch64: FEAT_HBC bc.<cond>/drps classification, adrp+ldr+br API/GOT thunk detection, and stack-built string recovery. (THX: @r0ny123)
+ * 2026-07-13: v4.2.5 - Core: hoist shared import-stub range helpers into ArchBackend and report the unsupported architecture in no-backend error reports. (THX: @r0ny123)
+ * 2026-07-11: v4.2.4 - Cross-format loader parity: Mach-O fat-binary slice handling, Intel/AArch64 import stub resolution, and Mach-O Rust symbol demangling. (THX: @r0ny123)
  * 2026-07-10: v4.2.3 - Fix: function promotion bug caused by missing symbol type evaluation (THX: @r0ny123).
  * 2026-07-09: v4.2.2 - Now also parsing delay import tables from Windows PEs.
  * 2026-07-09: v4.2.1 - Better detection of CFG instructions with prefixes, improved accuracy of gap search. (THX: @r0ny123) IDA ARM64 export.
