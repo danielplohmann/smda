@@ -56,8 +56,8 @@ LOGGER = logging.getLogger(__name__)
 
 
 class FunctionCandidateManager(_IntelFunctionCandidateManager):
-    def init(self, disassembly):
-        super().init(disassembly)
+    def init(self, disassembly, cbAnalysisTimeout=None):
+        super().init(disassembly, cbAnalysisTimeout)
         # The base init() builds an x86 capstone purely for its NOP-based gap scan,
         # which this backend disables (see nextGapCandidate); drop the stale handle.
         self.capstone = None
