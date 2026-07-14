@@ -212,12 +212,8 @@ class DisassemblyResult:
         return None
 
     def addCodeRefs(self, addr_from, addr_to):
-        refs_from = self.code_refs_from.get(addr_from, set())
-        refs_from.add(addr_to)
-        self.code_refs_from[addr_from] = refs_from
-        refs_to = self.code_refs_to.get(addr_to, set())
-        refs_to.add(addr_from)
-        self.code_refs_to[addr_to] = refs_to
+        self.code_refs_from.setdefault(addr_from, set()).add(addr_to)
+        self.code_refs_to.setdefault(addr_to, set()).add(addr_from)
 
     def removeCodeRefs(self, addr_from, addr_to):
         refs_from = self.code_refs_from.get(addr_from, set())
@@ -228,12 +224,8 @@ class DisassemblyResult:
         self.code_refs_to[addr_to] = refs_to
 
     def addDataRefs(self, addr_from, addr_to):
-        refs_from = self.data_refs_from.get(addr_from, set())
-        refs_from.add(addr_to)
-        self.data_refs_from[addr_from] = refs_from
-        refs_to = self.data_refs_to.get(addr_to, set())
-        refs_to.add(addr_from)
-        self.data_refs_to[addr_to] = refs_to
+        self.data_refs_from.setdefault(addr_from, set()).add(addr_to)
+        self.data_refs_to.setdefault(addr_to, set()).add(addr_from)
 
     def removeDataRefs(self, addr_from, addr_to):
         refs_from = self.data_refs_from.get(addr_from, set())
