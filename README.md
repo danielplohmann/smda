@@ -2,8 +2,8 @@
 # SMDA
 
 SMDA is a minimalist recursive disassembler library that is optimized for accurate Control Flow Graph (CFG) recovery from memory dumps.
-It is based on [Capstone](http://www.capstone-engine.org/) and currently supports x86/x64 Intel machine code, experimental CIL (.NET) disassembly, and Dalvik bytecode from raw DEX files.
-As input, arbitrary memory dumps (ideally with known base address) can be processed, and raw DEX files can be analyzed directly.
+It is based on [Capstone](http://www.capstone-engine.org/) and currently provides native backends for x86/x64 Intel and AArch64 (ARM64) machine code, experimental CIL (.NET) disassembly, and Dalvik bytecode from raw DEX files.
+As input, PE, ELF, and Mach-O files (including fat/universal binaries), arbitrary memory dumps (ideally with known base address), and raw DEX files can be processed.
 The output is a collection of functions, basic blocks, and instructions with their respective edges between blocks and functions (in/out).
 Optionally, references to the Windows API can be inferred by using the ApiScout method.
 
@@ -65,7 +65,7 @@ Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependenc
 
 For Dalvik, the current scope is raw single-DEX inputs. APK, multi-dex container handling, and ODEX/VDEX/CDEX runtime-artifact analysis are not yet first-class workflows in SMDA.
 
-The code should be fully compatible with Python 3.8+.
+The code should be fully compatible with Python 3.10+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
 To take full advantage of SMDA's capabilities, make sure to (optionally) install:
