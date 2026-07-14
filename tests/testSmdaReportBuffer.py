@@ -89,5 +89,20 @@ class TestSmdaReportBufferPacking(unittest.TestCase):
         self.assertNotIn("buffer", report.toDict())
 
 
+class TestSmdaReportGetCapstone(unittest.TestCase):
+    def test_supported_architectures_return_engine(self):
+        for architecture in ("intel", "aarch64", None):
+            report = _make_minimal_report()
+            report.architecture = architecture
+            self.assertIsNotNone(report.getCapstone())
+
+    def test_unsupported_architectures_raise(self):
+        for architecture in ("cil", "dalvik"):
+            report = _make_minimal_report()
+            report.architecture = architecture
+            with self.assertRaises(NotImplementedError):
+                report.getCapstone()
+
+
 if __name__ == "__main__":
     unittest.main()
