@@ -76,12 +76,8 @@ class FunctionAnalysisState:
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.add((addr_from, addr_to))
-        refs_from = self.code_refs_from.get(addr_from, set())
-        refs_from.add(addr_to)
-        self.code_refs_from[addr_from] = refs_from
-        refs_to = self.code_refs_to.get(addr_to, set())
-        refs_to.add(addr_from)
-        self.code_refs_to[addr_to] = refs_to
+        self.code_refs_from.setdefault(addr_from, set()).add(addr_to)
+        self.code_refs_to.setdefault(addr_to, set()).add(addr_from)
         if by_jump:
             self.is_jmp = True
             self.jump_targets.add(addr_to)
