@@ -24,12 +24,16 @@ from .definitions import (
     EXCEPTION_RETURN_INS,
     INDIRECT_JUMP_INS,
     INSTRUCTION_SIZE,
+    LDR_UNSIGNED_64_MASK,
+    LDR_UNSIGNED_64_VALUE,
     NOP,
     RET_INS,
     UNCOND_JUMP_INS,
     adrp_page_value,
     is_bti_landing_pad,
     is_function_prologue,
+    rd_field,
+    rn_field,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -38,8 +42,6 @@ LOGGER = logging.getLogger(__name__)
 
 # capstone renders AArch64 immediates as "#0x....": match the hex operands.
 _HEX_OPERAND = re.compile(r"0x[0-9a-fA-F]+")
-_LDR_UNSIGNED_64_MASK = 0xFFC00000
-_LDR_UNSIGNED_64_VALUE = 0xF9400000
 
 
 class AArch64Backend(ArchBackend):
@@ -269,21 +271,21 @@ class AArch64Backend(ArchBackend):
             if word is None:
                 return None
 
-            rd = word & 0x1F
+            rd = rd_field(word)
             if (word & ADRP_MASK) == ADRP_VALUE:
                 registers[rd] = adrp_page_value(word, word_addr)
             elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
-                rn = (word >> 5) & 0x1F
+                rn = rn_field(word)
                 if rn not in registers:
                     return None
                 registers[rd] = registers[rn] + ((word >> 10) & 0xFFF)
-            elif (word & _LDR_UNSIGNED_64_MASK) == _LDR_UNSIGNED_64_VALUE:
-                rn = (word >> 5) & 0x1F
+            elif (word & LDR_UNSIGNED_64_MASK) == LDR_UNSIGNED_64_VALUE:
+                rn = rn_field(word)
                 if rn not in registers:
                     return None
                 registers[rd] = registers[rn] + (((word >> 10) & 0xFFF) * 8)
             elif (word & BR_MASK) == BR_VALUE:
-                rn = (word >> 5) & 0x1F
+                rn = rn_field(word)
                 return word_addr + INSTRUCTION_SIZE, registers.get(rn)
             else:
                 return None

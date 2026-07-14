@@ -104,6 +104,10 @@ ADR_VALUE = 0x10000000
 # add Xd, Xn, #imm12 — the lo12 of an adrp+add pair (sh=0 is required by the mask).
 ADD_IMM64_MASK = 0xFFC00000
 ADD_IMM64_VALUE = 0x91000000
+# ldr Xt, [Xn, #imm12] — unsigned-offset 64-bit load, the third leg of an
+# adrp+[add+]ldr GOT/data-pointer materialization.
+LDR_UNSIGNED_64_MASK = 0xFFC00000
+LDR_UNSIGNED_64_VALUE = 0xF9400000
 
 
 def adrp_page_value(word, pc):
@@ -118,6 +122,16 @@ def adrp_page_value(word, pc):
     if imm & (1 << 20):
         imm -= 1 << 21
     return (pc & ~0xFFF) + (imm << 12)
+
+
+def rd_field(word):
+    """Destination register index (bits [4:0]) of a raw AArch64 instruction word."""
+    return word & 0x1F
+
+
+def rn_field(word):
+    """First source register index (bits [9:5]) of a raw AArch64 instruction word."""
+    return (word >> 5) & 0x1F
 
 
 def is_conditional_branch(word):
