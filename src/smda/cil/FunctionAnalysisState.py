@@ -53,16 +53,16 @@ class FunctionAnalysisState:
         self.is_jmp = False
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
-        self.code_refs.update([(addr_from, addr_to)])
+        self.code_refs.add((addr_from, addr_to))
         refs_from = self.code_refs_from.get(addr_from, set())
-        refs_from.update([addr_to])
+        refs_from.add(addr_to)
         self.code_refs_from[addr_from] = refs_from
         refs_to = self.code_refs_to.get(addr_to, set())
-        refs_to.update([addr_from])
+        refs_to.add(addr_from)
         self.code_refs_to[addr_to] = refs_to
         if by_jump:
             self.is_jmp = True
-            self.jump_targets.update([addr_to])
+            self.jump_targets.add(addr_to)
 
     def removeCodeRef(self, addr_from, addr_to):
         if (addr_from, addr_to) in self.code_refs:
@@ -75,9 +75,8 @@ class FunctionAnalysisState:
             self.jump_targets.remove(addr_to)
 
     def addDataRef(self, addr_from, addr_to, size=1):
-        self.data_refs.update([(addr_from, addr_to)])
-        for i in range(size):
-            self.data_bytes.update([addr_to + i])
+        self.data_refs.add((addr_from, addr_to))
+        self.data_bytes.update(range(addr_to, addr_to + size))
 
     def finalizeAnalysis(self, as_gap=False):
         fn_min = min([ins[0] for ins in self.instructions])
