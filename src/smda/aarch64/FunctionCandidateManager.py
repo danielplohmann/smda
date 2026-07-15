@@ -228,6 +228,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         def in_exec(addr):
             return any(start <= addr < end for start, end in exec_ranges)
 
+        accepted = []
         for fde_start in sorted({fde_range[0] for fde_range in fde_ranges}):
             if self._candidateTimeoutTripped():
                 return
@@ -235,11 +236,22 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 continue
             if not self._passesCodeFilter(fde_start):
                 continue
-            # checked lazily per yield: an earlier deferred candidate's analysis
-            # may have claimed this start in the meantime
             if self.disassembly.isCode(fde_start):
                 continue
-            self.addCandidate(fde_start)
+            self.ensureCandidate(fde_start)
+            accepted.append(fde_start)
+        # register ALL accepted starts as known function starts before analyzing
+        # any of them: the branch classifier consults getFunctionStartCandidates()
+        # during analysis, so an earlier deferred function could otherwise absorb
+        # a later FDE start it branches or tailcalls into
+        self._candidate_offsets.update(accepted)
+        for fde_start in accepted:
+            if self._candidateTimeoutTripped():
+                return
+            # re-checked per yield: an earlier deferred candidate's analysis may
+            # still have claimed this start in the meantime (e.g. as a callee)
+            if self.disassembly.isCode(fde_start):
+                continue
             yield fde_start
 
     def _machoActiveBinaryAndAdjustment(self):
