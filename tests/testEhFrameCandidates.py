@@ -126,6 +126,22 @@ class EhFrameDecoderTestSuite(unittest.TestCase):
         stream += _fde(0, len(stream), 0x401000, 0x10, "<Q")
         self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [(0x401000, 0x10)])
 
+    def test_truncated_cie_header_marks_cie_unsupported(self):
+        # CIE body ends inside the code-alignment ULEB (continuation bit set on the
+        # record's last byte); the CIE must be rejected and its FDE skipped
+        truncated_cie = _record(0, bytes([1]) + b"\x00" + b"\x80\x80")
+        stream = truncated_cie + _fde(0, len(truncated_cie), 0x401000, 0x10, "<Q")
+        self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [])
+
+    def test_unsupported_personality_encoding_marks_cie_unsupported(self):
+        # zPR with a uleb128-encoded personality pointer (0x01): its size is unknown,
+        # so the cursor cannot reach the R byte reliably - the CIE must be rejected
+        # rather than misreading a data byte as the FDE encoding
+        aug_extra = bytes([0x01, 0x00])
+        stream = _cie(augmentation=b"zPR", fde_encoding=0x00, aug_extra=aug_extra)
+        stream += _fde(0, len(stream), 0x401000, 0x10, "<Q")
+        self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [])
+
     def test_version3_cie_with_uleb_return_register(self):
         stream = _cie(fde_encoding=0x00, version=3)
         stream += _fde(0, len(stream), 0x401000, 0x10, "<Q")
