@@ -159,6 +159,91 @@ class EhFrameDecoderTestSuite(unittest.TestCase):
         self.assertEqual(tuple(IntelFunctionCandidateManager(SmdaConfig()).locateDeferredCandidates()), ())
 
 
+def _build_aarch64_elf_with_ehframe(code, eh_frame, base=0x400000, vaddr=0x401000, eh_vaddr=0x402000):
+    """ELF64/AArch64 with one R+X PT_LOAD plus a real .eh_frame section (non-exec)."""
+    em_aarch64, ehsize, phentsize, shentsize = 183, 64, 56, 64
+    shstrtab = b"\x00.text\x00.eh_frame\x00.shstrtab\x00"
+    name_text = shstrtab.index(b".text")
+    name_eh = shstrtab.index(b".eh_frame")
+    name_str = shstrtab.index(b".shstrtab")
+
+    text_off = ehsize + phentsize
+    eh_off = eh_vaddr - base  # keep file offset == vaddr - base for the whole segment
+    shstr_off = eh_off + len(eh_frame)
+    sh_off = shstr_off + len(shstrtab)
+
+    ehdr = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        b"\x7fELF\x02\x01\x01" + b"\x00" * 9,
+        2,
+        em_aarch64,
+        1,
+        vaddr,  # e_entry
+        ehsize,
+        sh_off,
+        0,
+        ehsize,
+        phentsize,
+        1,
+        shentsize,
+        4,  # e_shnum
+        3,  # e_shstrndx
+    )
+    phdr = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, sh_off, sh_off, 0x1000)
+
+    def shdr(name, sh_type, flags, addr, offset, size, align, entsize):
+        return struct.pack("<IIQQQQIIQQ", name, sh_type, flags, addr, offset, size, 0, 0, align, entsize)
+
+    blob = bytearray(sh_off + 4 * shentsize)
+    blob[0:ehsize] = ehdr
+    blob[ehsize : ehsize + phentsize] = phdr
+    blob[text_off : text_off + len(code)] = code
+    blob[eh_off : eh_off + len(eh_frame)] = eh_frame
+    blob[shstr_off : shstr_off + len(shstrtab)] = shstrtab
+    sections = (
+        shdr(0, 0, 0, 0, 0, 0, 0, 0)
+        + shdr(name_text, 1, 0x2 | 0x4, vaddr, text_off, len(code), 4, 0)  # ALLOC|EXECINSTR
+        + shdr(name_eh, 1, 0x2, eh_vaddr, eh_off, len(eh_frame), 8, 0)  # ALLOC only
+        + shdr(name_str, 3, 0, 0, shstr_off, len(shstrtab), 1, 0)
+    )
+    blob[sh_off : sh_off + len(sections)] = sections
+    return bytes(blob)
+
+
+class EhFrameDeferredOrderingTestSuite(unittest.TestCase):
+    def test_earlier_deferred_function_does_not_absorb_later_fde_start(self):
+        # f1 (0x401004) tail-branches into f2 (0x40100c); both are reachable only
+        # via .eh_frame. All accepted FDE starts must be registered as function
+        # starts BEFORE f1 is analyzed, or f1 absorbs f2's bytes and f2 is then
+        # skipped as already-claimed code.
+        # the branch must not be f1's first instruction (a lone-branch stub is
+        # already left unabsorbed by the STUB-TAILCALL case) and the target must
+        # be forward and nearby (backward / far targets hit the tailcall cases)
+        code = b"".join(
+            word.to_bytes(4, "little")
+            for word in [
+                0xD65F03C0,  # 0x401000 entry: ret (claimed by the OEP/symbol pass)
+                0xD2800020,  # 0x401004 f1: mov x0, #1
+                0x14000001,  # 0x401008     b 0x40100c (tail-branch into f2)
+                0xD65F03C0,  # 0x40100c f2: ret
+            ]
+        )
+        eh_vaddr = 0x402000
+        eh_frame = _cie(fde_encoding=0x00)
+        eh_frame += _fde(0, len(eh_frame), 0x401004, 8, "<Q")
+        eh_frame += _fde(0, len(eh_frame), 0x40100C, 4, "<Q")
+        blob = _build_aarch64_elf_with_ehframe(code, eh_frame, eh_vaddr=eh_vaddr)
+
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        config.USE_ELF_EH_FRAME_CANDIDATES = True
+        report = Disassembler(config).disassembleUnmappedBuffer(blob)
+        self.assertEqual(report.status, "ok")
+        offsets = {function.offset for function in report.getFunctions()}
+        self.assertIn(0x401004, offsets)
+        self.assertIn(0x40100C, offsets)
+
+
 class EhFrameFixtureTestSuite(unittest.TestCase):
     """Real-fixture behavior: default off is covered by the 278-function
     assertions in testAArch64Disassembler; opting in must add exactly the one
