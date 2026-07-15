@@ -59,6 +59,7 @@ from .definitions import (
     is_bti_landing_pad,
     is_conditional_branch,
     is_function_prologue,
+    is_trap,
     rd_field,
     rn_field,
 )
@@ -673,6 +674,7 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             or (prev_word & BR_MASK) == BR_VALUE
             or (prev_word & B_MASK) == B_VALUE
             or (prev_word & BL_MASK) == BL_VALUE
+            or is_trap(prev_word)
             or auth_or_exception_return
         )
 
@@ -680,8 +682,8 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # AArch64 gap scan: a fixed-stride linear sweep of unanalyzed executable bytes
         # for functions that no prologue, call reference or stored pointer reached
         # (typically unreferenced / indirect-only routines). Guards keep each gap
-        # candidate at a plausible function entry: skip padding (nop / zero) and a
-        # leading conditional branch, constrain to genuine executable sections (the
+        # candidate at a plausible function entry: skip padding (nop / zero), a
+        # leading conditional branch or trap, constrain to genuine executable sections (the
         # loader's code_areas can be a coarse segment covering data), and drop runs
         # that flow into the interior of an already-mapped function.
         if self.gap_pointer is None:
@@ -723,6 +725,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if is_conditional_branch(word):  # a function never opens with a cond branch
+                self.gap_pointer += INSTRUCTION_SIZE
+                continue
+            if is_trap(word):  # udf-space data words / trap filler, never an entry
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if self.previously_analyzed_gap == self.gap_pointer:
