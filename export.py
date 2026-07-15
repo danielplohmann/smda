@@ -1,35 +1,34 @@
+"""Export the current IDA database to a SMDA report.
+
+For headless IDA 9.1+ export, use ``ida_domain_export.py`` instead.
+"""
+
 import json
 
 from smda.Disassembler import Disassembler
+from smda.ida.IdaInterface import getIdaSdkVersion
+from smda.SmdaConfig import SmdaConfig
 
 
 def detectBackend():
-    backend = ""
-    version = ""
     try:
-        import idaapi
-
-        backend = "IDA"
-        version = idaapi.IDA_SDK_VERSION
+        return ("IDA", getIdaSdkVersion())
     except ImportError:
-        pass
-    return (backend, version)
+        return ("", "")
 
 
 if __name__ == "__main__":
     BACKEND, VERSION = detectBackend()
     if BACKEND == "IDA":
-        from smda.ida.IdaInterface import IdaInterface
-
-        ida_interface = IdaInterface()
+        config = SmdaConfig()
+        disassembler = Disassembler(config, backend=BACKEND)
+        ida_interface = disassembler.disassembler.ida_interface
         binary = ida_interface.getBinary()
         base_addr = ida_interface.getBaseAddr()
-        DISASSEMBLER = Disassembler(backend=BACKEND)
-        REPORT = DISASSEMBLER.disassembleBuffer(binary, base_addr, architecture="aarch64")
-        output_path = ida_interface.getIdbDir()
-        output_filepath = output_path + "ConvertedFromIdb.smda"
+        REPORT = disassembler.disassembleBuffer(binary, base_addr)
+        output_filepath = ida_interface.getIdbDir() + "ConvertedFromIdb.smda"
         with open(output_filepath, "w") as fout:
             json.dump(REPORT.toDict(), fout, indent=1, sort_keys=True)
             print(f"Output saved to: {output_filepath}")
     else:
-        raise Exception("No supported backend found.")
+        raise Exception("Run this script from within IDA.")
