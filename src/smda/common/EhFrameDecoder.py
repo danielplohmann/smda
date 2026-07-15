@@ -110,12 +110,20 @@ def _parse_cie(data, pos, end, pointer_size):
     # the legacy "eh" augmentation carries an extra raw pointer we do not handle
     if augmentation and (not augmentation.startswith("z") or any(c not in "zRLPSB" for c in augmentation)):
         return unsupported
-    _, pos = _read_uleb128(data, pos, end)  # code alignment factor
-    _, pos = _read_sleb128(data, pos, end)  # data alignment factor
+    code_alignment, pos = _read_uleb128(data, pos, end)
+    if code_alignment is None:
+        return unsupported
+    data_alignment, pos = _read_sleb128(data, pos, end)
+    if data_alignment is None:
+        return unsupported
     if version == 1:
+        if pos >= end:
+            return unsupported
         pos += 1  # return address register (single byte)
     else:
-        _, pos = _read_uleb128(data, pos, end)
+        return_address_register, pos = _read_uleb128(data, pos, end)
+        if return_address_register is None:
+            return unsupported
     fde_encoding = DW_EH_PE_absptr
     if augmentation.startswith("z"):
         aug_length, pos = _read_uleb128(data, pos, end)
@@ -130,7 +138,11 @@ def _parse_cie(data, pos, end, pointer_size):
             elif char == "P":
                 personality_encoding = data[pos]
                 pos += 1
-                _, pos = _read_encoded_value(data, pos, aug_data_end, personality_encoding, pointer_size)
+                personality, pos = _read_encoded_value(data, pos, aug_data_end, personality_encoding, pointer_size)
+                if personality is None:
+                    # unknown personality-pointer size: the cursor cannot advance
+                    # past it, so any following 'R' byte would be misread
+                    return unsupported
             elif char == "R":
                 fde_encoding = data[pos]
                 pos += 1
