@@ -64,15 +64,16 @@ LOGGER = logging.getLogger(__name__)
 
 class FunctionCandidateManager(_IntelFunctionCandidateManager):
     def init(self, disassembly, cbAnalysisTimeout=None):
+        # Reset the memoized executable-section ranges and Mach-O fixup state
+        # BEFORE base initialization: super().init() runs candidate discovery,
+        # so a reused manager instance would otherwise consume the previous
+        # binary's cached data during the scans.
+        self._exec_ranges = None
+        self._macho_fixup_state = None
         super().init(disassembly, cbAnalysisTimeout)
         # The base init() builds an x86 capstone purely for its NOP-based gap scan,
         # which this backend disables (see nextGapCandidate); drop the stale handle.
         self.capstone = None
-        # Drop the memoized executable-section ranges and Mach-O fixup state so a
-        # reused manager instance recomputes them for the new binary instead of
-        # leaking stale data.
-        self._exec_ranges = None
-        self._macho_fixup_state = None
 
     def locateCandidates(self):
         # AArch64 candidate discovery: symbols, PE ARM64 exception-directory entries
@@ -235,7 +236,10 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
             if self.disassembly.isCode(fde_start):
                 continue
             self.ensureCandidate(fde_start)
-            accepted.append(fde_start)
+            # MAX_FUNCTION_CANDIDATES can reject the registration; never analyze
+            # a start that was not actually recorded
+            if fde_start in self.candidates:
+                accepted.append(fde_start)
         # register ALL accepted starts as known function starts before analyzing
         # any of them: the branch classifier consults getFunctionStartCandidates()
         # during analysis, so an earlier deferred function could otherwise absorb
