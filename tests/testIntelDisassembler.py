@@ -469,6 +469,12 @@ class TestIntelDisassembler(unittest.TestCase):
         # as an effective NOP and skipped, so it is never returned as the candidate start.
         self.assertNotEqual(self._first_gap_candidate(b"\x8b\xff\x90\x90\x90"), 0x1010)
 
+    def test_gap_scan_skips_hlt_and_ud2_trap_filler(self):
+        # hlt (0xf4) and ud2 (0x0f 0x0b) are trap filler a function never opens with;
+        # the gap scanner must skip them like int3 and promote the code behind them.
+        self.assertEqual(self._first_gap_candidate(b"\xf4\x55\x8b\xec"), 0x1011)
+        self.assertEqual(self._first_gap_candidate(b"\x0f\x0b\x55\x8b\xec"), 0x1012)
+
     def test_is_hotpatch_prologue_predicate(self):
         # The shared predicate backs both the gap scanner and the post-call alignment-cut
         # path, so lock its contract directly: both `mov edi, edi` encodings of the MSVC
