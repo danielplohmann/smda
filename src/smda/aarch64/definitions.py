@@ -150,6 +150,27 @@ def is_conditional_branch(word):
     )
 
 
+# --- trap / permanently-undefined encodings --------------------------------
+# udf #imm16 occupies the reserved all-zero-top-halfword space (0x0000iiii);
+# brk/hlt carry imm16 at bits [20:5]. Verified live against capstone 5.0.7.
+UDF_MASK = 0xFFFF0000
+UDF_VALUE = 0x00000000
+BRK_MASK = 0xFFE0001F
+BRK_VALUE = 0xD4200000
+HLT_MASK = 0xFFE0001F
+HLT_VALUE = 0xD4400000
+
+
+def is_trap(word):
+    """True for udf/brk/hlt (trap and permanently-undefined encodings).
+
+    A function never opens with one of these: in unclaimed gaps such words are
+    embedded data that happens to decode into the udf space, or trap filler
+    between functions, so the gap scan must not promote them to entries.
+    """
+    return (word & UDF_MASK) == UDF_VALUE or (word & BRK_MASK) == BRK_VALUE or (word & HLT_MASK) == HLT_VALUE
+
+
 # --- function-entry prologues ---------------------------------------------
 # AArch64 has no single dominant byte prologue (no `push ebp`). The recognized
 # strong, position-independent function-start markers are, in rough frequency
