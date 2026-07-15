@@ -165,10 +165,12 @@ GAP_SEQUENCES = {
     1: [
         b"\x90",  # NOP1_OVERRIDE_NOP - AMD / nop - INTEL
         b"\xcc",  # int3
+        b"\xf4",  # hlt - trap filler, a function never opens with it
         b"\x00",  # pass over sequences of null bytes
     ],
     2: [
         b"\x66\x90",  # NOP2_OVERRIDE_NOP - AMD / nop - INTEL
+        b"\x0f\x0b",  # ud2 - trap filler, a function never opens with it
         b"\x8b\xc0",  # mov eax, eax
         b"\x89\xc0",  # mov eax, eax
         b"\x8b\xff",  # mov edi, edi
