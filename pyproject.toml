@@ -45,6 +45,9 @@ dev = [
     "tqdm",
     "twine",
 ]
+ida = [
+    "ida-domain>=0.5.0",
+]
 # Optional CPU/memory profiling toolkit (see profiling/). Kept out of `dev` so
 # the default install stays lean. Install with: pip install -e ".[dev,profile]"
 profile = [
