@@ -29,12 +29,19 @@ VALID_XDATA = struct.pack("<I", (1 << 27) | 0x10)
 
 
 def _build_arm64_pe(
-    pdata_bytes, xdata_bytes=VALID_XDATA, machine=0xAA64, image_base=IMAGE_BASE, exc_rva=PDATA_RVA, exc_size=None
+    pdata_bytes,
+    xdata_bytes=VALID_XDATA,
+    machine=0xAA64,
+    image_base=IMAGE_BASE,
+    exc_rva=PDATA_RVA,
+    exc_size=None,
+    text_bytes=None,
 ):
     """Minimal PE32+ image: .text (RX) @0x1000, .pdata @0x2000, .xdata @0x3000."""
     if exc_size is None:
         exc_size = len(pdata_bytes)
-    text_bytes = struct.pack("<II", 0xD65F03C0, 0xD503201F) * 64  # ret; nop filler
+    if text_bytes is None:
+        text_bytes = struct.pack("<II", 0xD65F03C0, 0xD503201F) * 64  # ret; nop filler
 
     dos = bytearray(0x40)
     dos[0:2] = b"MZ"
@@ -193,6 +200,63 @@ class AArch64PdataExtractionTestSuite(unittest.TestCase):
         records = _record(TEXT_RVA, XDATA_RVA)
         fcm = _candidates_for(_build_arm64_pe(records), cb_timeout=lambda: True)
         self.assertNotIn(IMAGE_BASE + TEXT_RVA, fcm.candidates)
+
+
+class AArch64CallFallthroughAlignmentTestSuite(unittest.TestCase):
+    """MSVC ARM64 nop-aligns loop heads MID-function; on PE images an aligned word
+    after a bl-fallthrough gap must only be treated as a new function start when it
+    actually looks like a function entry (stp/str prologue, PAC, or BTI). A plain
+    16-aligned non-entry word (e.g. a mid-body ldr) must stay inside the calling
+    function instead of being promoted to a bogus function start."""
+
+    # stp x29,x30,[sp,#-16]!
+    STP_PROLOGUE = 0xA9BF7BFD
+    # bl <delta=0x28> -> targets the stp prologue at .text+0x2C
+    BL_TO_0x2C = 0x9400000A
+    NOP = 0xD503201F
+    # ldr x0,[x29,#0x20]: 16-aligned, but NOT a recognized function prologue
+    LDR_MID_BODY = 0xF94013A0
+    MOV_X0_1 = 0xD2800020
+    RET = 0xD65F03C0
+
+    def _words(self):
+        return [
+            self.STP_PROLOGUE,  # +0x00: function entry
+            self.BL_TO_0x2C,  # +0x04: bl call
+            self.NOP,  # +0x08: skipped padding
+            self.NOP,  # +0x0C: skipped padding
+            self.LDR_MID_BODY,  # +0x10: 16-aligned, NOT an entry -> must stay in caller
+            self.MOV_X0_1,  # +0x14
+            self.RET,  # +0x18: caller's own return
+            self.NOP,  # +0x1C
+            self.NOP,  # +0x20
+            self.NOP,  # +0x24
+            self.NOP,  # +0x28
+            self.STP_PROLOGUE,  # +0x2C: bl target, a real function entry
+            self.RET,  # +0x30
+        ]
+
+    def _disassemble_pe(self):
+        code = b"".join(w.to_bytes(4, "little") for w in self._words())
+        blob = _build_arm64_pe(b"", text_bytes=code)
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        return Disassembler(config).disassembleUnmappedBuffer(blob)
+
+    def test_aligned_mid_body_word_does_not_split_pe_function(self):
+        report = self._disassemble_pe()
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.architecture, "aarch64")
+        starts = {f.offset for f in report.getFunctions()}
+        # the aligned ldr at +0x10 must NOT be its own function start
+        self.assertNotIn(IMAGE_BASE + TEXT_RVA + 0x10, starts)
+        caller = report.getFunction(IMAGE_BASE + TEXT_RVA)
+        self.assertEqual(
+            [ins.mnemonic for ins in caller.getInstructions()],
+            ["stp", "bl", "nop", "nop", "ldr", "mov", "ret"],
+        )
+        # the bl's real target (a genuine prologue) is still recovered as its own function
+        self.assertIn(IMAGE_BASE + TEXT_RVA + 0x2C, starts)
 
 
 if __name__ == "__main__":

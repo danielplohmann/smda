@@ -142,8 +142,18 @@ class AArch64Backend(ArchBackend):
             return cursor
         if skipped_nop and cursor % 16 == 0:
             word = cls._wordAt(d, cursor)
-            if word not in (None, 0, NOP):
-                return cursor
+            if word in (None, 0, NOP):
+                return None
+            # MSVC ARM64 nop-aligns loop heads MID-function, so on PE images an
+            # aligned word after call-fallthrough padding is only a boundary when
+            # it actually looks like a function entry (real starts are seeded by
+            # .pdata/candidates anyway). clang/Go pad between functions and emit
+            # prologue-less entries, so other formats keep the plain alignment cut.
+            if d.disassembly.binary_info._getLiefType() == "PE" and not (
+                is_function_prologue(word) or is_bti_landing_pad(word)
+            ):
+                return None
+            return cursor
         return None
 
     def _analyzeCondBranch(self, d, instruction, state):
