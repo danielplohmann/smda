@@ -169,9 +169,9 @@ class AArch64PdataExtractionTestSuite(unittest.TestCase):
         for offset in (0, 8, 16):
             self.assertIn(IMAGE_BASE + TEXT_RVA + offset, _exception_candidates(fcm))
 
-    def test_default_off_produces_no_exception_candidates(self):
+    def test_enabled_by_default_and_flag_off_produces_no_exception_candidates(self):
         records = _record(TEXT_RVA, XDATA_RVA)
-        self.assertFalse(SmdaConfig().USE_PE_ARM64_PDATA_CANDIDATES)
+        self.assertTrue(SmdaConfig().USE_PE_ARM64_PDATA_CANDIDATES)
         fcm = _candidates_for(_build_arm64_pe(records), use_pdata=False)
         self.assertNotIn(IMAGE_BASE + TEXT_RVA, _exception_candidates(fcm))
 
