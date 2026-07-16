@@ -32,8 +32,10 @@ class SmdaConfig:
     USE_ALIGNMENT = True
     USE_SYMBOLS_AS_CANDIDATES = True
     # seed AArch64 function candidates from the PE ARM64 exception directory (classic 0xAA64
-    # images only); off until validated against real ARM64 PE samples with independent labels
-    USE_PE_ARM64_PDATA_CANDIDATES = False
+    # images only); funclet/fragment records are filtered at seeding, and IDA-labeled ARM64
+    # system binaries (wermgr/ping/robocopy/bcrypt) show equal-or-better boundary accuracy
+    # with the directory enabled, so it is on by default
+    USE_PE_ARM64_PDATA_CANDIDATES = True
     # promote unclaimed ELF .eh_frame FDE starts as late AArch64 candidates (after the primary
     # pass, before gap analysis); off until validated against ground-truth function boundaries
     USE_ELF_EH_FRAME_CANDIDATES = False
