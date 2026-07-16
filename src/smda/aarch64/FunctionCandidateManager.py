@@ -58,6 +58,7 @@ from .definitions import (
     adrp_page_value,
     is_bti_landing_pad,
     is_conditional_branch,
+    is_exception_record_entry,
     is_function_prologue,
     is_trap,
     rd_field,
@@ -199,6 +200,17 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 continue
             addr = base_addr + begin_rva
             if not any(start <= addr < end for start, end in exec_ranges):
+                continue
+            # Exception records also name funclets and function fragments, whose
+            # begin address is a mid-body word continuing the enclosing function;
+            # seeding those as authoritative starts splits real functions. Only a
+            # record whose first word looks like a function entry (prologue, BTI
+            # pad, or a thunk shape) names an independent function start.
+            begin_word_bytes = self.disassembly.getRawBytes(begin_rva, 4)
+            if begin_word_bytes is None or len(begin_word_bytes) < 4:
+                continue
+            begin_word = int.from_bytes(begin_word_bytes, "little")
+            if not is_exception_record_entry(begin_word):
                 continue
             self.addExceptionCandidate(addr)
 

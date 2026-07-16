@@ -31,6 +31,7 @@ from .definitions import (
     UNCOND_JUMP_INS,
     adrp_page_value,
     is_bti_landing_pad,
+    is_exception_record_entry,
     is_function_prologue,
     rd_field,
     rn_field,
@@ -183,12 +184,12 @@ class AArch64Backend(ArchBackend):
         # An exception-record-seeded candidate (PE .pdata) is only treated as an
         # authoritative boundary when it also opens like a function entry: exception
         # records name funclets and function fragments too, and those continue the
-        # enclosing function (their record start is a mid-body word, not a prologue).
+        # enclosing function (their record start is a mid-body word, not an entry).
         candidate = d.fc_manager.candidates.get(addr)
         if candidate is None or not candidate.is_exception_handler:
             return False
         word = cls._wordAt(d, addr)
-        return word is not None and (is_function_prologue(word) or is_bti_landing_pad(word))
+        return word is not None and is_exception_record_entry(word)
 
     @staticmethod
     def _isBackwardTailcallTarget(target, state):
