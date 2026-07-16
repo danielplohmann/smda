@@ -1010,6 +1010,30 @@ class TestAArch64FunctionBoundaries(unittest.TestCase):
             [second, second + 4, second + 8],
         )
 
+    def test_call_fallthrough_alignment_cut_is_format_scoped_not_prologue_scoped(self):
+        # Control case for the PE-only prologue/BTI gate in _callFallthroughFunctionStart:
+        # a plain mapped buffer (not a PE image) keeps the old unconditional alignment cut
+        # even when the aligned word is definitely NOT a function entry (a mid-body ldr).
+        second = BASE + 0x10
+        report = self._disassemble_words(
+            [
+                0xA9BF7BFD,  # stp x29, x30, [sp, #-16]!
+                _encode_bl(BASE + 4, BASE),  # bl 0x401000
+                0xD503201F,  # nop
+                0xD503201F,  # nop
+                0xF94013A0,  # ldr x0, [x29, #0x20]  -- NOT a recognized function prologue
+                0xD2800020,  # mov x0, #1
+                0xD65F03C0,  # ret
+            ]
+        )
+        self.assertEqual(report.status, "ok")
+        self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, second})
+        self.assertEqual([ins.offset for ins in report.getFunction(BASE).getInstructions()], [BASE, BASE + 4])
+        self.assertEqual(
+            [ins.offset for ins in report.getFunction(second).getInstructions()],
+            [second, second + 4, second + 8],
+        )
+
     def test_call_fallthrough_directly_before_prologue_terminates_function(self):
         second = BASE + 0x8
         report = self._disassemble_words(
