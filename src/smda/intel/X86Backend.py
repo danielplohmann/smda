@@ -411,9 +411,30 @@ class X86Backend(ArchBackend):
                 )
         elif previous_address is not None and i_address != start_addr and previous_mnemonic == "call":
             instruction_sequence = list(d.capstone.disasm(d._getDisasmWindowBuffer(i_address), i_address))
-            if (
-                d.disassembly.language["_guess"] != "go" and d.fc_manager.isAlignmentSequence(instruction_sequence)
-            ) or d.fc_manager.isFunctionCandidate(i_address):
+            is_alignment_evidence = d.disassembly.language["_guess"] != "go" and d.fc_manager.isAlignmentSequence(
+                instruction_sequence
+            )
+            is_candidate_evidence = d.fc_manager.isFunctionCandidate(i_address)
+            if is_alignment_evidence and not is_candidate_evidence and d.disassembly.binary_info._getLiefType() == "PE":
+                if d.fc_manager.isHotpatchPrologue(d._getDisasmWindowBuffer(i_address)[:5]):
+                    seed_address = i_address
+                else:
+                    seed_address = previous_address + (16 - previous_address % 16)
+                # MSVC also int3/nop-pads mid-function (after noreturn calls, loop-head
+                # alignment) on PE images, so alignment-only evidence (no candidate hit at
+                # i_address) needs its seed to actually decode as a function entry before
+                # cutting -- real PE starts are seeded by exports/pdata/candidates anyway.
+                # Other formats keep the plain alignment cut: clang/GCC/Go pad between
+                # real functions with prologue-less entries.
+                if not d.fc_manager.hasCommonPrologue(seed_address):
+                    LOGGER.debug(
+                        "    current function: 0x%x ---> alignment sequence after call seeds non-entry-shaped 0x%08x, NOT cutting block at -> 0x%08x.",
+                        start_addr,
+                        seed_address,
+                        i_address,
+                    )
+                    return False
+            if is_alignment_evidence or is_candidate_evidence:
                 # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
                 # however, Go tends to insert alignment NOPs after calls, too, but in this case, they are no tailcall indicator
                 # apparently calls are frequently padded with NOPs, so one last chance to continue disassembly is when we already have instructions for our function beyond this call.

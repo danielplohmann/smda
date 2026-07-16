@@ -24,6 +24,12 @@ LOGGER = logging.getLogger(__name__)
 # crawling them byte-by-byte in the gap scanner.
 _PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
 
+# The lowest score any multi-byte (length 3/4/5) COMMON_PROLOGUES entry carries, across
+# both bitnesses. Used as the "looks like a real function entry" floor for hasCommonPrologue:
+# excludes the single-opcode-byte fallback table's weak entries (score as low as 1) while
+# still admitting its one strong signal (0x55 "push ebp/rbp", scored 51/33).
+_ENTRY_SHAPE_MIN_SCORE = 30
+
 
 class FunctionCandidateManager:
     def __init__(self, config):
@@ -233,6 +239,18 @@ class FunctionCandidateManager:
         # function's true entry. Recognizing the 5-byte prologue lets callers avoid
         # skipping/rounding past that leading NOP and mislocating the start two bytes late.
         return byte_window in COMMON_PROLOGUES["5"].get(self.bitness, {})
+
+    def hasCommonPrologue(self, addr):
+        # reuses FunctionCandidate's longest-first COMMON_PROLOGUES lookup (and endbr64
+        # strip) to check whether an address, not necessarily a tracked candidate, is
+        # entry-shaped -- e.g. a seed address about to be cut to from alignment padding.
+        # A bare score > 0 (hasCommonFunctionStart) also passes on the single-opcode-byte
+        # fallback table's weak entries (score as low as 1 -- a lone REX prefix or a
+        # "mov"/"lea"/"test" opcode byte says nothing about being a function entry, it's
+        # just a common byte anywhere in code). Require the multi-byte tables' natural
+        # score floor so this gate isn't satisfied by ordinary mid-function bytes; the
+        # single strong single-byte case (0x55 "push ebp/rbp") clears it too.
+        return FunctionCandidate(self.disassembly.binary_info, addr).getFunctionStartScore() >= _ENTRY_SHAPE_MIN_SCORE
 
     def isAlignmentSequence(self, instruction_sequence):
         is_alignment_sequence = False
