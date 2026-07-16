@@ -259,5 +259,81 @@ class AArch64CallFallthroughAlignmentTestSuite(unittest.TestCase):
         self.assertIn(IMAGE_BASE + TEXT_RVA + 0x2C, starts)
 
 
+class AArch64CondBranchExceptionBoundaryTestSuite(unittest.TestCase):
+    """A conditional-branch taken edge into a .pdata-named start must only be treated
+    as an authoritative boundary (left for its own analysis) when that start also
+    opens like a real function entry. .pdata also names funclets/fragments whose
+    record start is a mid-body word — those must still be absorbed into the caller."""
+
+    # cmp x0, #0
+    CMP_X0_0 = 0xF100001F
+    # b.ne +0xC (from the b.ne word itself at +0x04, targets +0x10)
+    BNE_TO_0x10 = 0x54000061
+    RET = 0xD65F03C0
+    NOP = 0xD503201F
+    # stp x29,x30,[sp,#-0x20]!: a real function entry
+    STP_PROLOGUE = 0xA9BE7BFD
+    # ldp x29,x30,[sp],#0x20
+    LDP_EPILOGUE = 0xA8C27BFD
+    # mov w8, #0: 16-aligned mid-body word, NOT a recognized function entry
+    MOV_W8_0 = 0x52800008
+
+    def _pdata_records(self):
+        return _record(TEXT_RVA, (0x10 << 2) | 1) + _record(TEXT_RVA + 0x10, (0x10 << 2) | 1)
+
+    def _disassemble(self, words):
+        code = b"".join(w.to_bytes(4, "little") for w in words)
+        blob = _build_arm64_pe(self._pdata_records(), text_bytes=code)
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        config.USE_PE_ARM64_PDATA_CANDIDATES = True
+        return Disassembler(config).disassembleUnmappedBuffer(blob)
+
+    def test_pdata_named_prologue_target_splits_out_of_guard_stub(self):
+        words = [
+            self.CMP_X0_0,  # +0x00: guard stub A (also named by a .pdata record)
+            self.BNE_TO_0x10,  # +0x04: b.ne into B's real entry
+            self.RET,  # +0x08: A's own fall-through return
+            self.NOP,  # +0x0C: padding up to B's 16-aligned start
+            self.STP_PROLOGUE,  # +0x10: B, a real function entry, also named by .pdata
+            self.LDP_EPILOGUE,  # +0x14
+            self.RET,  # +0x18
+        ]
+        report = self._disassemble(words)
+        self.assertEqual(report.status, "ok")
+        starts = {f.offset for f in report.getFunctions()}
+        # both the guard stub and the real function it conditionally branches into
+        # must be recovered as their own functions, not merged into one
+        self.assertIn(IMAGE_BASE + TEXT_RVA, starts)
+        self.assertIn(IMAGE_BASE + TEXT_RVA + 0x10, starts)
+        guard = report.getFunction(IMAGE_BASE + TEXT_RVA)
+        self.assertEqual(
+            [ins.mnemonic for ins in guard.getInstructions()],
+            ["cmp", "b.ne", "ret"],
+        )
+
+    def test_pdata_named_funclet_continuation_stays_absorbed(self):
+        words = [
+            self.CMP_X0_0,  # +0x00: guard stub A (also named by a .pdata record)
+            self.BNE_TO_0x10,  # +0x04: b.ne into the funclet's .pdata-named start
+            self.RET,  # +0x08: A's own fall-through return
+            self.NOP,  # +0x0C: padding
+            self.MOV_W8_0,  # +0x10: .pdata names this word, but it is NOT an entry shape
+            self.RET,  # +0x14
+        ]
+        report = self._disassemble(words)
+        self.assertEqual(report.status, "ok")
+        starts = {f.offset for f in report.getFunctions()}
+        # the .pdata record at +0x10 names a funclet/fragment continuation, not an
+        # independent function start -- it must stay absorbed into the guard stub
+        self.assertNotIn(IMAGE_BASE + TEXT_RVA + 0x10, starts)
+        self.assertIn(IMAGE_BASE + TEXT_RVA, starts)
+        guard = report.getFunction(IMAGE_BASE + TEXT_RVA)
+        self.assertEqual(
+            [ins.mnemonic for ins in guard.getInstructions()],
+            ["cmp", "b.ne", "ret", "mov", "ret"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
