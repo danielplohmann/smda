@@ -1,6 +1,8 @@
 import unittest
 from types import SimpleNamespace
 
+from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
+
 from smda.common.BinaryInfo import BinaryInfo
 from smda.intel.FunctionAnalysisState import FunctionAnalysisState
 from smda.intel.FunctionCandidate import FunctionCandidate
@@ -9,6 +11,22 @@ from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.intel.MnemonicTfIdf import MnemonicTfIdf
 from smda.intel.X86Backend import X86Backend
 from smda.SmdaConfig import SmdaConfig
+
+
+class _RecordingCandidateManager(FunctionCandidateManager):
+    """A FunctionCandidateManager stand-in that skips the queue/init machinery but
+    reuses the real isAlignmentSequence/isHotpatchPrologue/hasCommonPrologue logic
+    (they only touch self.bitness/self.disassembly), so alignment-cut tests exercise
+    the actual production code paths instead of re-implementing them."""
+
+    def __init__(self, binary_info, bitness, candidate_addrs=None):
+        self.bitness = bitness
+        self.disassembly = SimpleNamespace(binary_info=binary_info)
+        self.candidates = set(candidate_addrs or [])
+        self.added_candidates = []
+
+    def addCandidate(self, addr, is_gap=False, reference_source=None):
+        self.added_candidates.append(addr)
 
 
 class DummyProvider:
@@ -436,7 +454,6 @@ class TestIntelDisassembler(unittest.TestCase):
     def _first_gap_candidate(self, stub, base=0x1000, stub_off=0x10):
         # Build a buffer with a gap (between two mapped instructions at base and base+0x100),
         # int3-padded up to `stub` at base+stub_off, then drive the gap scanner once.
-        from capstone import CS_ARCH_X86, CS_MODE_32, Cs
 
         buf = bytearray(b"\x90")  # base+0x00: a mapped instruction bounding the gap
         buf += b"\xcc" * (stub_off - len(buf))  # int3 padding leading into the gap
@@ -745,6 +762,109 @@ class TestIntelDisassembler(unittest.TestCase):
         # other int vectors are unaffected (not treated as a syscall gate at all)
         state = self._analyze(backend, "int", "0x2e", [self._ins("mov", "eax, 1")])
         self.assertFalse(state.is_sanely_ending)
+
+    def _analyzeCallAlignmentCut(self, tail_bytes, lief_type="PE", bitness=64, candidate_addrs=None):
+        # lays out: call rel32 @ call_addr; effective-NOP padding ("mov eax, eax" x5,
+        # then a 1-byte "nop") up to the next 16-byte boundary (align_addr); tail_bytes
+        # at align_addr. The padding must use a real-mnemonic effective NOP (not
+        # int3/hlt) -- an int3 first byte would instead match analyzeInstruction()'s
+        # earlier int3/hlt branch and never reach the call-alignment branch under test.
+        # Mirrors the real analyzeInstruction() call site (RecursiveDisassembler.
+        # _getDisasmWindowBuffer, capstone disasm_lite tuples) closely enough to
+        # exercise the production alignment-cut branch in X86Backend.analyzeInstruction
+        # end-to-end.
+        base_addr = 0x400000
+        call_addr = 0x401000
+        pad_start = call_addr + 5
+        align_addr = pad_start + (16 - pad_start % 16)
+
+        data = bytearray(0x2000)
+        rel_call = call_addr - base_addr
+        data[rel_call : rel_call + 5] = b"\xe8\x00\x00\x00\x00"
+        pad_len = align_addr - pad_start
+        rel_pad = pad_start - base_addr
+        padding = b"\x8b\xc0" * ((pad_len - 1) // 2) + b"\x90" * (pad_len - 2 * ((pad_len - 1) // 2))
+        assert len(padding) == pad_len
+        data[rel_pad : rel_pad + pad_len] = padding
+        rel_tail = align_addr - base_addr
+        data[rel_tail : rel_tail + len(tail_bytes)] = tail_bytes
+        binary = bytes(data)
+
+        binary_info = SimpleNamespace(bitness=bitness, base_addr=base_addr, binary=binary)
+        binary_info._getLiefType = lambda: lief_type
+
+        fc_manager = _RecordingCandidateManager(binary_info, bitness, candidate_addrs=candidate_addrs)
+        capstone = Cs(CS_ARCH_X86, CS_MODE_64 if bitness == 64 else CS_MODE_32)
+
+        def _get_window(addr):
+            rel = addr - base_addr
+            return binary[rel : rel + 15]
+
+        d = SimpleNamespace(
+            capstone=capstone,
+            disassembly=SimpleNamespace(binary_info=binary_info, language={"_guess": "msvc"}),
+            fc_manager=fc_manager,
+            _getDisasmWindowBuffer=_get_window,
+        )
+        state = FunctionAnalysisState(call_addr, SimpleNamespace())
+        previous_instruction = (call_addr, 5, "call", "0x407000")
+        current_instruction = (pad_start, 2, "mov", "eax, eax")
+
+        backend = X86Backend()
+        result = backend.analyzeInstruction(
+            d,
+            current_instruction,
+            state,
+            previous_instruction=previous_instruction,
+            start_addr=call_addr - 0x100,
+        )
+        return result, state, fc_manager, align_addr
+
+    def test_pe_alignment_cut_not_taken_for_non_entry_shaped_seed(self):
+        # "cmp eax, ebx" (0x39 0xd8) sitting at the 16-byte-aligned seed address is not
+        # a recognized function prologue -- MSVC pads mid-function the same way it pads
+        # between real functions, so alignment-only evidence must NOT split the function
+        # here (root cause of the fixed bug: this used to cut unconditionally on PE).
+        tail = b"\x39\xd8\xc3\x90\x90\x90\x90\x90\x90"
+        result, state, fc_manager, _align_addr = self._analyzeCallAlignmentCut(tail)
+        self.assertFalse(result)
+        self.assertFalse(state.is_sanely_ending)
+        self.assertFalse(state.is_block_ending_instruction)
+        self.assertEqual(fc_manager.added_candidates, [])
+
+    def test_pe_alignment_cut_still_taken_for_entry_shaped_seed(self):
+        # "push rbx; sub rsp, 0x20" at the seed address IS a recognized common
+        # prologue (COMMON_PROLOGUES["5"][64]) -- the cut must still happen; the fix
+        # only gates alignment-only evidence, it doesn't disable the cut outright.
+        tail = b"\x40\x53\x48\x83\xec\x20\x90\x90\x90"
+        result, state, fc_manager, align_addr = self._analyzeCallAlignmentCut(tail)
+        self.assertTrue(result)
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(state.is_block_ending_instruction)
+        self.assertEqual(fc_manager.added_candidates, [align_addr])
+
+    def test_pe_alignment_cut_bypassed_by_candidate_evidence(self):
+        # when the padding-start address is itself a tracked function candidate
+        # (candidate evidence, not alignment-only evidence), the entry-shape gate is
+        # bypassed entirely even though the seed address is not entry-shaped --
+        # candidate evidence is already curated upstream and isn't re-validated here.
+        tail = b"\x39\xd8\xc3\x90\x90\x90\x90\x90\x90"
+        pad_start = 0x401005
+        result, state, _fc_manager, _align_addr = self._analyzeCallAlignmentCut(tail, candidate_addrs=[pad_start])
+        self.assertTrue(result)
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(state.is_block_ending_instruction)
+
+    def test_non_pe_alignment_cut_unaffected_by_entry_shape(self):
+        # the same non-entry-shaped seed on a non-PE image (e.g. ELF) must still cut --
+        # the entry-shape gate is PE-specific and must not affect other formats, which
+        # legitimately pad between (not within) real functions with prologue-less starts.
+        tail = b"\x39\xd8\xc3\x90\x90\x90\x90\x90\x90"
+        result, state, fc_manager, align_addr = self._analyzeCallAlignmentCut(tail, lief_type="ELF")
+        self.assertTrue(result)
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(state.is_block_ending_instruction)
+        self.assertEqual(fc_manager.added_candidates, [align_addr])
 
 
 if __name__ == "__main__":
