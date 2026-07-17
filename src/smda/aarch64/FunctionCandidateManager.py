@@ -63,6 +63,7 @@ from .definitions import (
     rd_field,
     rn_field,
 )
+from .FunctionCandidate import FunctionCandidate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +80,25 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         # The base init() builds an x86 capstone purely for its NOP-based gap scan,
         # which this backend disables (see nextGapCandidate); drop the stale handle.
         self.capstone = None
+
+    def ensureCandidate(self, addr):
+        if addr not in self.candidates:
+            cap = getattr(self.config, "MAX_FUNCTION_CANDIDATES", 0)
+            if cap and len(self.candidates) >= cap:
+                if not self._candidate_cap_logged:
+                    LOGGER.warning(
+                        "MAX_FUNCTION_CANDIDATES cap (%d) reached during candidate identification; "
+                        "refusing further candidates to bound memory usage.",
+                        cap,
+                    )
+                    self._candidate_cap_logged = True
+                return False
+            self.candidates[addr] = FunctionCandidate(self.disassembly.binary_info, addr)
+            return True
+        return False
+
+    def hasCommonPrologue(self, addr):
+        return FunctionCandidate(self.disassembly.binary_info, addr).hasCommonFunctionStart()
 
     def locateCandidates(self):
         # AArch64 candidate discovery: symbols, PE ARM64 exception-directory entries

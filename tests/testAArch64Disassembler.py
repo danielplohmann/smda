@@ -2051,6 +2051,217 @@ class TestAArch64Analyzers(unittest.TestCase):
         targets = analyzer.getJumpTargets(instructions[-1], fake_state)
         self.assertEqual(targets[:3], [0x411120, 0x411140, 0x4110E0])
 
+    def test_aarch64_jump_table_ubfx_uxtw_extend_chain_resolution(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.aarch64.analyzers import AArch64JumpTableAnalyzer
+
+        base = 0x400000
+        # Plain 32-bit table load zero-extended via Capstone's UXTW alias form
+        # (`ubfx x10, x10, #0, #0x20`) before the final add/br.
+        words = [
+            0x90000089,  # adrp x9, #0x411000
+            0x91040129,  # add x9, x9, #0x100      (x9 = table_base = 0x411100)
+            0x8B01092B,  # add x11, x9, x1, lsl #2
+            0xB940016A,  # ldr w10, [x11]
+            0xD3407D4A,  # ubfx x10, x10, #0, #0x20  (UXTW alias)
+            0x8B0A0120,  # add x0, x9, x10
+            0xD61F0000,  # br x0
+        ]
+
+        mapped = bytearray(0x15000)
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            mapped[addr - base : addr - base + 4] = w.to_bytes(4, "little")
+
+        # unsigned relative offsets
+        struct.pack_into("<I", mapped, 0x411100 - base, 0x20)
+        struct.pack_into("<I", mapped, 0x411104 - base, 0x40)
+        struct.pack_into("<I", mapped, 0x411108 - base, 0x60)
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(mapped)
+        binary_info.isInCodeAreas = lambda addr: 0x400000 <= addr < 0x415000
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result, capstone):
+                self.disassembly = disassembly_result
+                self.capstone = capstone
+
+            def getBitMask(self):
+                return 0xFFFFFFFFFFFFFFFF
+
+        fake_disassembler = FakeDisassembler(disassembly, capstone)
+
+        class FakeState:
+            def __init__(self, instructions):
+                self.instructions = instructions
+                self.data_refs = []
+
+            def backtrackInstructions(self, addr_from, num_instructions):
+                del num_instructions
+                return [ins for ins in self.instructions if ins[0] < addr_from]
+
+            def addDataRef(self, from_addr, to_addr, size=1):
+                self.data_refs.append((from_addr, to_addr, size))
+
+        instructions = []
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            inst = next(capstone.disasm(w.to_bytes(4, "little"), addr))
+            instructions.append((addr, 4, inst.mnemonic, inst.op_str, inst.bytes))
+
+        fake_state = FakeState(instructions)
+        analyzer = AArch64JumpTableAnalyzer(fake_disassembler)
+
+        targets = analyzer.getJumpTargets(instructions[-1], fake_state)
+        self.assertEqual(targets[:3], [0x411120, 0x411140, 0x411160])
+
+    def test_aarch64_movz_movk_indirect_call_resolution(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.aarch64.analyzers import AArch64IndirectCallAnalyzer
+
+        base = 0x400000
+        # Materialize absolute address 0x401020 via movz+movk (LSL #16) then blr.
+        # mov x8, #0x1020; movk x8, #0x40, lsl #16  => 0x401020
+        words = [
+            0xD2820408,  # mov x8, #0x1020
+            0xF2A00808,  # movk x8, #0x40, lsl #16
+            0xD63F0100,  # blr x8
+            0xD65F03C0,  # ret
+        ]
+
+        mapped = bytearray(0x5000)
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            mapped[addr - base : addr - base + 4] = w.to_bytes(4, "little")
+
+        binary_info = BinaryInfo(bytes(mapped))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(mapped)
+
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+        disassembly.apis = {}
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+
+        added = []
+
+        class FakeDisassembler:
+            def __init__(self, disassembly_result, capstone):
+                self.disassembly = disassembly_result
+                self.capstone = capstone
+                self.config = SimpleNamespace(WITH_STRINGS=False)
+
+            def resolveApi(self, to_addr, api_addr):
+                del to_addr, api_addr
+                return ("", "")
+
+            @property
+            def fc_manager(self):
+                class FakeFC:
+                    def addCandidate(self, addr, reference_source=None):
+                        added.append((addr, reference_source))
+
+                return FakeFC()
+
+        fake_disassembler = FakeDisassembler(disassembly, capstone)
+
+        class FakeState:
+            def __init__(self, instructions):
+                self.instructions = instructions
+                self.call_register_ins = [0x401008]
+                self.start_addr = 0x401000
+                self.leaf = True
+
+            def getBlocks(self):
+                return [self.instructions]
+
+            def setLeaf(self, leaf):
+                self.leaf = leaf
+
+        instructions = []
+        for i, w in enumerate(words):
+            addr = 0x401000 + i * 4
+            inst = next(capstone.disasm(w.to_bytes(4, "little"), addr))
+            instructions.append((addr, 4, inst.mnemonic, inst.op_str, inst.bytes))
+
+        # Sanity: capstone reports raw unshifted movk imm
+        movk = next(capstone.disasm(words[1].to_bytes(4, "little"), 0x401004))
+        self.assertEqual(movk.mnemonic, "movk")
+
+        fake_state = FakeState(instructions)
+        analyzer = AArch64IndirectCallAnalyzer(fake_disassembler)
+        analyzer.resolveRegisterCalls(fake_state)
+        self.assertIn((0x401020, 0x401008), added)
+        self.assertFalse(fake_state.leaf)
+
+    def test_switch_macho_o0_dense_jump_table_if_present(self):
+        # Optional local integration: Clang -O0 emits real ldrsw+br tables for
+        # dense_switch; O2 optimizes them away. Build with
+        # validation/aarch64_accuracy/build_switch_corpus.sh when validating JT.
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "validation"
+            / "aarch64_accuracy"
+            / "corpus"
+            / "build"
+            / "switch_macho_O0"
+        )
+        if not path.is_file():
+            self.skipTest("switch_macho_O0 not built (run validation/aarch64_accuracy/build_switch_corpus.sh)")
+        report = Disassembler(SmdaConfig()).disassembleFile(str(path))
+        multi = []
+        for function in report.getFunctions():
+            for block_start, succs in (function.blockrefs or {}).items():
+                if len(succs) >= 16:
+                    multi.append((function.offset, block_start, len(succs)))
+        self.assertGreaterEqual(len(multi), 1, f"expected >=1 16-way JT block, got {multi}")
+        self.assertTrue(any(degree == 16 for _, _, degree in multi), multi)
+
+    def test_aarch64_tfidf_and_prologue_confidence(self):
+        from collections import Counter
+
+        from smda.aarch64.analyzers import AArch64TfIdf
+        from smda.aarch64.FunctionCandidate import FunctionCandidate
+        from smda.common.BinaryInfo import BinaryInfo
+
+        scorer = AArch64TfIdf(bitness=64)
+        # Typical function shape: common mnemonics should score negative (boost confidence)
+        common = Counter({"stp": 1, "mov": 2, "bl": 1, "ldp": 1, "ret": 1})
+        rare = Counter({"udf": 3, "brk": 2})
+        self.assertLess(scorer.tfidf(common), 0.0)
+        self.assertGreater(scorer.tfidf(rare), 0.0)
+        self.assertEqual(scorer.getTfIdfFromBlocks({}), 0.0)
+
+        # stp x29, x30, [sp, #-0x10]! is a real AArch64 prologue word
+        stp_fp_lr = (0xA9BF7BFD).to_bytes(4, "little")
+        binary_info = BinaryInfo(stp_fp_lr + b"\x00" * 16)
+        binary_info.base_addr = 0x1000
+        binary_info.binary_size = len(binary_info.binary)
+        cand = FunctionCandidate(binary_info, 0x1000)
+        self.assertTrue(cand.hasCommonFunctionStart())
+        # Priority score stays 0 so mid-function frame records do not outrank call refs
+        self.assertEqual(cand.getFunctionStartScore(), 0)
+
+        # Random non-prologue bytes must not pick up x86 COMMON_PROLOGUES collisions
+        junk = bytes([0x90, 0x90, 0x90, 0x90]) + b"\x00" * 16
+        binary_info2 = BinaryInfo(junk)
+        binary_info2.base_addr = 0x2000
+        binary_info2.binary_size = len(junk)
+        cand2 = FunctionCandidate(binary_info2, 0x2000)
+        self.assertFalse(cand2.hasCommonFunctionStart())
+
     def test_aarch64_jump_table_size_inferred_from_subs_bounds_check(self):
         from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 
