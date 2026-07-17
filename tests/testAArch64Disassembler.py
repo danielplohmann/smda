@@ -46,6 +46,9 @@ from smda.utility.FileLoader import FileLoader
 BASE = 0x401000
 AARCH64_STATIC_FIXTURE = "aarch64_static_xored"
 AARCH64_STATIC_SHA256 = "90e3b997161e33c6485b48182073a864dd3d0775ab96cadbf1b7c9dd4821c6d1"
+AARCH64_SWITCH_MACHO_O0_FIXTURE = "aarch64_switch_macho_O0_xored"
+AARCH64_SWITCH_MACHO_O0_SHA256 = "88c572af2cf9373d897162cb984bded1deb647639453144b4b103fb9c3a91cca"
+AARCH64_SWITCH_MACHO_O0_SIZE = 33648
 
 
 def _load_xored_fixture(fixture_name):
@@ -2206,21 +2209,18 @@ class TestAArch64Analyzers(unittest.TestCase):
         self.assertIn((0x401020, 0x401008), added)
         self.assertFalse(fake_state.leaf)
 
-    def test_switch_macho_o0_dense_jump_table_if_present(self):
-        # Optional local integration: Clang -O0 emits real ldrsw+br tables for
-        # dense_switch; O2 optimizes them away. Build with
-        # validation/aarch64_accuracy/build_switch_corpus.sh when validating JT.
-        path = (
-            Path(__file__).resolve().parents[1]
-            / "validation"
-            / "aarch64_accuracy"
-            / "corpus"
-            / "build"
-            / "switch_macho_O0"
-        )
-        if not path.is_file():
-            self.skipTest("switch_macho_O0 not built (run validation/aarch64_accuracy/build_switch_corpus.sh)")
-        report = Disassembler(SmdaConfig()).disassembleFile(str(path))
+    def test_switch_macho_o0_dense_jump_table_fixture(self):
+        # Clang -O0 Mach-O emits real ldrsw+br tables for dense_switch; committed as
+        # an xored fixture so CI always exercises end-to-end jump-table recovery.
+        xored = (Path(__file__).resolve().parent / AARCH64_SWITCH_MACHO_O0_FIXTURE).read_bytes()
+        binary = _load_xored_fixture(AARCH64_SWITCH_MACHO_O0_FIXTURE)
+        self.assertNotEqual(xored[:4], binary[:4])
+        self.assertEqual(len(binary), AARCH64_SWITCH_MACHO_O0_SIZE)
+        self.assertEqual(hashlib.sha256(binary).hexdigest(), AARCH64_SWITCH_MACHO_O0_SHA256)
+
+        report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(binary)
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.architecture, "aarch64")
         multi = []
         for function in report.getFunctions():
             for block_start, succs in (function.blockrefs or {}).items():
@@ -2254,6 +2254,11 @@ class TestAArch64Analyzers(unittest.TestCase):
         # Priority score stays 0 so mid-function frame records do not outrank call refs
         self.assertEqual(cand.getFunctionStartScore(), 0)
 
+        # Prologue + negative TF-IDF must raise gap-candidate confidence above 0.
+        cand.setTfIdf(scorer.tfidf(common))
+        self.assertLess(cand.getTfIdf(), 0.0)
+        self.assertGreater(cand.getConfidence(), 0.298)
+
         # Random non-prologue bytes must not pick up x86 COMMON_PROLOGUES collisions
         junk = bytes([0x90, 0x90, 0x90, 0x90]) + b"\x00" * 16
         binary_info2 = BinaryInfo(junk)
@@ -2261,6 +2266,29 @@ class TestAArch64Analyzers(unittest.TestCase):
         binary_info2.binary_size = len(junk)
         cand2 = FunctionCandidate(binary_info2, 0x2000)
         self.assertFalse(cand2.hasCommonFunctionStart())
+
+    def test_aarch64_confidence_threshold_filters_report(self):
+        # Default CONFIDENCE_THRESHOLD is 0 (completeness); when raised, low-confidence
+        # recovered starts must be omitted from the report. analyzeBuffer used to drop
+        # the threshold when allocating a fresh DisassemblyResult.
+        binary = _load_xored_fixture(AARCH64_STATIC_FIXTURE)
+
+        baseline = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(binary)
+        self.assertEqual(baseline.confidence_threshold, 0.0)
+        self.assertEqual(baseline.num_functions, 278)
+        self.assertTrue(all(f.tfidf is not None for f in baseline.getFunctions()))
+        self.assertTrue(any(f.tfidf < 0 for f in baseline.getFunctions()))
+        self.assertTrue(any(f.confidence == 0.0 for f in baseline.getFunctions()))
+
+        filtered_cfg = SmdaConfig()
+        filtered_cfg.CONFIDENCE_THRESHOLD = 0.9
+        filtered = Disassembler(filtered_cfg).disassembleUnmappedBuffer(binary)
+        self.assertEqual(filtered.confidence_threshold, 0.9)
+        self.assertLess(filtered.num_functions, baseline.num_functions)
+        self.assertGreater(filtered.num_functions, 0)
+        self.assertTrue(all(f.confidence >= 0.9 for f in filtered.getFunctions()))
+        # Multi-inbound-call starts are forced to confidence 1.0 and must survive.
+        self.assertTrue(any(f.confidence == 1.0 for f in filtered.getFunctions()))
 
     def test_aarch64_jump_table_size_inferred_from_subs_bounds_check(self):
         from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
