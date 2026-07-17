@@ -10,6 +10,7 @@ timeout guard. A backend subclass supplies its architecture through the
 instruction encodings.
 """
 
+import bisect
 import logging
 import struct
 
@@ -109,32 +110,41 @@ class FunctionCandidateManager:
         if self.config.HIGH_ACCURACY:
             conflicts = state.identifyCallConflicts(self._all_call_refs)
             if conflicts:
+                dirty_candidates = []
                 for candidate_addr, conflict in conflicts.items():
-                    self.candidates[candidate_addr].removeCallRefs(conflict)
-                    # depending on implementation, update candidates individually
-                    self.candidate_queue.update(self.candidates[candidate_addr])
-                self.candidate_queue.update()
+                    candidate = self.candidates[candidate_addr]
+                    if candidate.removeCallRefs(conflict):
+                        dirty_candidates.append(candidate)
+                if isinstance(self.candidate_queue, BracketQueue):
+                    for candidate in dirty_candidates:
+                        self.candidate_queue.update(candidate)
+                elif dirty_candidates:
+                    self.candidate_queue.update()
 
     def _addCappedCallRef(self, candidate, source_ref):
         """add an inbound call reference, honoring MAX_CALL_REFS_PER_CANDIDATE to bound set growth and rescoring."""
         cap = getattr(self.config, "MAX_CALL_REFS_PER_CANDIDATE", 0)
         if cap == 0 or len(candidate.call_ref_sources) < cap:
-            candidate.addCallRef(source_ref)
+            return candidate.addCallRef(source_ref)
+        return False
 
     def addCandidate(self, addr, is_gap=False, reference_source=None):
         if not self._passesCodeFilter(addr):
             return False
-        self.ensureCandidate(addr)
+        is_new = self.ensureCandidate(addr)
         if addr not in self.candidates:
             return False
-        self.candidates[addr].setIsGapCandidate(is_gap)
+        candidate = self.candidates[addr]
+        candidate.setIsGapCandidate(is_gap)
+        score_changed = False
         if reference_source:
             # register in _all_call_refs as well so late references still
             # participate in HIGH_ACCURACY call-conflict resolution
             self._all_call_refs[reference_source] = addr
-            self._addCappedCallRef(self.candidates[addr], reference_source)
-        self.candidate_queue.add(self.candidates[addr])
-        self.candidate_queue.update()
+            score_changed = self._addCappedCallRef(candidate, reference_source)
+        self.candidate_queue.add(candidate)
+        if score_changed and not is_new:
+            self.candidate_queue.update(candidate)
 
     def getNextFunctionStartCandidate(self):
         for candidate in self.candidate_queue:
@@ -198,10 +208,9 @@ class FunctionCandidateManager:
 
     def getNextGap(self, dont_skip=False):
         next_gap = self.getBitMask()
-        for gap in self.function_gaps:
-            if gap[0] > self.gap_pointer:
-                next_gap = gap[0]
-                break
+        gap_index = bisect.bisect_right(self.function_gaps, self.gap_pointer, key=lambda gap: gap[0])
+        if gap_index < len(self.function_gaps):
+            next_gap = self.function_gaps[gap_index][0]
         LOGGER.debug(
             "getNextGap(%s) for 0x%08x based on gap_map: 0x%08x",
             dont_skip,

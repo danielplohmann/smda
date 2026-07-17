@@ -183,16 +183,7 @@ class IndirectCallAnalyzer:
                     dll, api = self.disassembler.resolveApi(candidate, candidate)
                     if dll or api:
                         LOGGER.debug("successfully resolved: %s %s", dll, api)
-                        api_entry = {
-                            "referencing_addr": [],
-                            "dll_name": dll,
-                            "api_name": api,
-                        }
-                        if candidate in self.disassembly.apis:
-                            api_entry = self.disassembly.apis[candidate]
-                        if self.current_calling_addr not in api_entry["referencing_addr"]:
-                            api_entry["referencing_addr"].append(self.current_calling_addr)
-                        self.disassembly.apis[candidate] = api_entry
+                        self.disassembly.addApiReference(candidate, self.current_calling_addr, dll, api)
                     elif self.disassembly.isAddrWithinMemoryImage(candidate):
                         LOGGER.debug("successfully resolved: 0x%x", candidate)
                         self.disassembler.fc_manager.addCandidate(candidate, reference_source=self.current_calling_addr)

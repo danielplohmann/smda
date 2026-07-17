@@ -618,14 +618,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self.addPrologueCandidate(addr)
             self.setInitialCandidate(addr)
 
-    def addTailcallCandidate(self, addr):
+    def addTailcallCandidate(self, addr, reference_source=None):
         if not self._passesCodeFilter(addr):
             return False
-        self.ensureCandidate(addr)
-        self.candidates[addr].setIsTailcallCandidate(True)
+        is_new = self.ensureCandidate(addr)
+        if addr not in self.candidates:
+            return False
+        candidate = self.candidates[addr]
+        candidate.setIsTailcallCandidate(True)
+        score_changed = self._addCappedCallRef(candidate, reference_source) if reference_source is not None else False
         self._candidate_offsets.add(addr)
-        self.candidate_queue.add(self.candidates[addr])
-        self.candidate_queue.update()
+        self.candidate_queue.add(candidate)
+        if score_changed and not is_new:
+            self.candidate_queue.update(candidate)
         return True
 
     def _cachedExecutableSectionRanges(self):

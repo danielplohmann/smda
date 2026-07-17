@@ -29,6 +29,7 @@ class FunctionAnalysisState:
         self.instructions = []
         self._instructions_sorted = True
         self.instruction_start_bytes = set()
+        self.max_instruction_start = -1
         self.processed_blocks = set()
         self.processed_bytes = set()
         self.jump_targets = set()
@@ -74,6 +75,8 @@ class FunctionAnalysisState:
         self.instructions.append(ins)
         self._instructions_sorted = False
         self.instruction_start_bytes.add(ins[0])
+        if ins[0] > self.max_instruction_start:
+            self.max_instruction_start = ins[0]
         self.current_block.append(ins)
         self.processed_bytes.update(range(i_address, i_address + i_size))
         if self.is_next_instruction_reachable:

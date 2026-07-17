@@ -187,12 +187,7 @@ class RecursiveDisassembler:
                 LOGGER.debug("potentially uncovered DLL address: 0x%08x", to_addr)
 
     def _updateApiInformation(self, from_addr, to_addr, dll, api):
-        api_entry = {"referencing_addr": [], "dll_name": dll, "api_name": api}
-        if to_addr in self.disassembly.apis:
-            api_entry = self.disassembly.apis[to_addr]
-        if from_addr not in api_entry["referencing_addr"]:
-            api_entry["referencing_addr"].append(from_addr)
-        self.disassembly.apis[to_addr] = api_entry
+        self.disassembly.addApiReference(to_addr, from_addr, dll, api)
 
     def _getDisasmWindowBuffer(self, addr):
         relative_start = addr - self.disassembly.binary_info.base_addr
@@ -219,12 +214,9 @@ class RecursiveDisassembler:
         owner_state = self.backend.createAnalysisState(owner_fn, self.disassembly)
         # Rebuild a minimal state from the disassembly's stored instructions
         # so revertAnalysis can undo code_map/ins2fn/function_borders entries.
-        fn_min, fn_max = self.disassembly.function_borders[owner_fn]
-        owner_state.instructions = []
-        for addr in sorted(self.disassembly.instructions.keys()):
-            if fn_min <= addr < fn_max:
-                mnemonic, size = self.disassembly.instructions[addr]
-                owner_state.instructions.append((addr, size, mnemonic, "", b""))
+        owner_state.instructions = [
+            instruction for block in self.disassembly.functions[owner_fn] for instruction in block
+        ]
         owner_state.code_refs = set()
         owner_state.data_refs = set()
         owner_state.revertAnalysis()

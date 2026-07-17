@@ -85,12 +85,20 @@ class FunctionCandidate:
         raise NotImplementedError
 
     def addCallRef(self, source_addr):
+        previous_size = len(self.call_ref_sources)
         self.call_ref_sources.add(source_addr)
-        self._score = None
+        changed = len(self.call_ref_sources) != previous_size
+        if changed:
+            self._score = None
+        return changed
 
     def removeCallRefs(self, source_addrs):
+        previous_size = len(self.call_ref_sources)
         self.call_ref_sources.difference_update(source_addrs)
-        self._score = None
+        changed = len(self.call_ref_sources) != previous_size
+        if changed:
+            self._score = None
+        return changed
 
     def setIsTailcallCandidate(self, is_tailcall):
         self.is_tailcall = is_tailcall
