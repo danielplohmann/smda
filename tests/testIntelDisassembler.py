@@ -639,6 +639,27 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual([[ins[0] for ins in block] for block in state.getBlocks()], [[0x1000, 0x1006, 0x1008]])
 
+    def test_reachable_collision_ends_block_and_removes_code_ref(self):
+        # 0x1000's only outgoing code ref is its own fall-through to 0x1006 (no mismatch,
+        # so the ordinary "jump ref points elsewhere" cut does NOT fire), but 0x1006 has
+        # separately been marked a colliding address (belongs to another function). getBlocks()
+        # must still end the block at 0x1000 and drop the now-invalid code ref to 0x1006.
+        state = FunctionAnalysisState(0x1000, SimpleNamespace())
+        state.instructions = [
+            (0x1000, 6, "mov", "eax, 1", b""),
+            (0x1006, 2, "xor", "eax, eax", b""),
+            (0x1008, 1, "ret", "", b""),
+        ]
+        state.instruction_start_bytes = {0x1000, 0x1006, 0x1008}
+        state.addCodeRef(0x1000, 0x1006, by_jump=False)
+        state.addCollision(0x1006)
+
+        blocks = state.getBlocks()
+
+        self.assertEqual([[ins[0] for ins in block] for block in blocks], [[0x1000]])
+        self.assertNotIn(0x1006, state.code_refs_from.get(0x1000, set()))
+        self.assertNotIn((0x1000, 0x1006), state.code_refs)
+
     def test_alignment_sequence_recognizes_prefixed_ret(self):
         # a bnd-prefixed ret right after a run of alignment padding is still real code, not
         # more padding - isAlignmentSequence() must recognize it like a plain "ret".
