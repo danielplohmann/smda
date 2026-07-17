@@ -19,6 +19,7 @@ class IdaExporter:
         self.capstone = None
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
+        self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
         self._initCapstone()
 
     def _initCapstone(self):
