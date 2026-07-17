@@ -1,9 +1,12 @@
-from smda.intel.FunctionCandidate import FunctionCandidate as _IntelFunctionCandidate
+from smda.common.FunctionCandidate import FunctionCandidate as _CommonFunctionCandidate
 
-from .definitions import is_bti_landing_pad, is_function_prologue
+from .definitions import INSTRUCTION_SIZE, is_bti_landing_pad, is_function_prologue
 
 
-class FunctionCandidate(_IntelFunctionCandidate):
+class FunctionCandidate(_CommonFunctionCandidate):
+    # entry-shape checks only ever inspect the first instruction word
+    BYTE_WINDOW_SIZE = INSTRUCTION_SIZE
+
     def hasCommonFunctionStart(self):
         if len(self.bytes) < 4:
             return False

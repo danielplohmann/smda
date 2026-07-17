@@ -1,8 +1,8 @@
 """AArch64 function-candidate discovery.
 
-Reuses the candidate queue, scoring and gap book-keeping from the engine's
-candidate manager (currently housed under :mod:`smda.intel`) and replaces the
-x86 byte-level scans with AArch64-aware ones:
+Reuses the candidate queue, scoring and gap book-keeping from the
+architecture-neutral candidate manager under :mod:`smda.common` and supplies
+AArch64-aware byte-level scans:
 
 * call-reference discovery scans for ``BL`` (direct call) and resolves its
   PC-relative target, in place of the x86 ``0xE8`` scan;
@@ -32,7 +32,7 @@ import struct
 import lief
 
 from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
-from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
+from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment, get_macho_stub_ranges
 
 from .definitions import (
@@ -68,7 +68,9 @@ from .FunctionCandidate import FunctionCandidate
 LOGGER = logging.getLogger(__name__)
 
 
-class FunctionCandidateManager(_IntelFunctionCandidateManager):
+class FunctionCandidateManager(_CommonFunctionCandidateManager):
+    CANDIDATE_CLASS = FunctionCandidate
+
     def init(self, disassembly, cbAnalysisTimeout=None):
         # Reset the memoized executable-section ranges and Mach-O fixup state
         # BEFORE base initialization: super().init() runs candidate discovery,
@@ -77,25 +79,6 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         self._exec_ranges = None
         self._macho_fixup_state = None
         super().init(disassembly, cbAnalysisTimeout)
-        # The base init() builds an x86 capstone purely for its NOP-based gap scan,
-        # which this backend disables (see nextGapCandidate); drop the stale handle.
-        self.capstone = None
-
-    def ensureCandidate(self, addr):
-        if addr not in self.candidates:
-            cap = getattr(self.config, "MAX_FUNCTION_CANDIDATES", 0)
-            if cap and len(self.candidates) >= cap:
-                if not self._candidate_cap_logged:
-                    LOGGER.warning(
-                        "MAX_FUNCTION_CANDIDATES cap (%d) reached during candidate identification; "
-                        "refusing further candidates to bound memory usage.",
-                        cap,
-                    )
-                    self._candidate_cap_logged = True
-                return False
-            self.candidates[addr] = FunctionCandidate(self.disassembly.binary_info, addr)
-            return True
-        return False
 
     def hasCommonPrologue(self, addr):
         return FunctionCandidate(self.disassembly.binary_info, addr).hasCommonFunctionStart()
