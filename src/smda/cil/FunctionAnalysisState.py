@@ -46,8 +46,7 @@ class FunctionAnalysisState:
         ins = (i_address, i_size, i_mnemonic, i_op_str, i_bytes)
         self.instructions.append(ins)
         self.instruction_start_bytes.add(ins[0])
-        for byte in range(i_size):
-            self.processed_bytes.add(i_address + byte)
+        self.processed_bytes.update(range(i_address, i_address + i_size))
         if self.is_next_instruction_reachable:
             self.addCodeRef(i_address, i_address + i_size, self.is_jmp)
         self.is_jmp = False
