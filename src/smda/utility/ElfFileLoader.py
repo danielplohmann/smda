@@ -187,6 +187,8 @@ class ElfFileLoader:
             if not segment.virtual_address:
                 continue
             rva = segment.virtual_address - base_addr
+            if rva < 0:
+                continue
             LOGGER.debug(
                 "ELF: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)",
                 segment.physical_size,
@@ -194,19 +196,24 @@ class ElfFileLoader:
                 rva + segment.physical_size,
                 segment.virtual_address,
             )
+            # mapped_binary's capacity is sized from virtual_size (p_memsz), but the write extent
+            # here is physical_size (p_filesz); ELF convention requires filesz <= memsz, but
+            # lief.parse() never enforces that (only an explicit lief.ELF.check_layout() call
+            # does, which this loader never makes), so a crafted/corrupted ELF with filesz >
+            # memsz must not be allowed to write past mapped_binary's capacity.
+            copy_size = min(segment.physical_size, max(0, len(mapped_binary) - rva))
             if len(segment.content) != segment.physical_size:
                 LOGGER.warning("ELF: Mismatch in segment content vs. header-specified physical size!")
                 if len(segment.content) < segment.physical_size:
                     LOGGER.warning("ELF: Padding to physical size with zeroes!")
-                    mapped_binary[rva : rva + len(segment.content)] = segment.content
-                    mapped_binary[rva + len(segment.content) : rva + segment.physical_size] = b"\x00" * (
-                        segment.physical_size - len(segment.content)
-                    )
+                    content_copy_size = min(len(segment.content), copy_size)
+                    mapped_binary[rva : rva + content_copy_size] = segment.content[:content_copy_size]
+                    mapped_binary[rva + content_copy_size : rva + copy_size] = b"\x00" * (copy_size - content_copy_size)
                 else:
                     LOGGER.warning("ELF: More content than physical size!? Aborting, please report this case. :)")
                     raise AssertionError("Received more content than physical size, which should never be possible?")
             else:
-                mapped_binary[rva : rva + segment.physical_size] = segment.content
+                mapped_binary[rva : rva + copy_size] = segment.content[:copy_size]
 
     @staticmethod
     def _map_sections(elffile, mapped_binary, base_addr):
@@ -282,7 +289,10 @@ class ElfFileLoader:
                 min_raw_offset,
                 base_addr,
             )
-            mapped_binary[0:min_raw_offset] = binary[0:min_raw_offset]
+            # clamp to both the raw file's actual length and mapped_binary's capacity so this
+            # slice assignment can never resize mapped_binary on a truncated/malformed file
+            header_copy_len = min(min_raw_offset, len(binary), len(mapped_binary))
+            mapped_binary[0:header_copy_len] = binary[0:header_copy_len]
 
         LOGGER.debug("ELF: final mapped size: 0x%x", len(mapped_binary))
         return bytes(mapped_binary)

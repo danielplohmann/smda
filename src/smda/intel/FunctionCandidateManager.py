@@ -495,10 +495,14 @@ class FunctionCandidateManager:
     def resolvePointerReference(self, offset):
         if self.bitness == 32:
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
+            if addr_block is None or len(addr_block) < 4:
+                return None
             function_pointer = struct.unpack("I", addr_block)[0]
             return self.disassembly.dereferenceDword(function_pointer)
         if self.bitness == 64:
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
+            if addr_block is None or len(addr_block) < 4:
+                return None
             function_pointer = struct.unpack("i", addr_block)[0]
             # we need to calculate RIP + offset + 7 (48 ff 25 ** ** ** **)
             if self.disassembly.getRawBytes(offset, 2) == b"\xff\x25":
