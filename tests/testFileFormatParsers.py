@@ -149,6 +149,83 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         komplex_unmapped_disassembly = disasm.disassembleUnmappedBuffer(komplex_binary)
         self.assertEqual(komplex_unmapped_disassembly.num_functions, 211)
 
+    def _decrypt_xored_file(self, fixture_name):
+        with open(os.path.join(config.PROJECT_ROOT, "tests", fixture_name), "rb") as f_binary:
+            binary = f_binary.read()
+        decrypted = bytearray()
+        for index, byte in enumerate(binary):
+            if isinstance(byte, str):
+                byte = ord(byte)
+            decrypted.append(byte ^ (index % 256))
+        return bytes(decrypted)
+
+    def testHeaderBytesPe(self):
+        binary_info = self._create_binary_info(self._load_xored_fixture("cutwail_xored"))
+        header = binary_info.getHeaderBytes()
+        assert header is not None
+        assert len(header) <= BinaryInfo.HEADER_CAP_PE
+        assert header[:2] == b"MZ"
+        assert len(header) == 0 or header[-1] != 0
+        parsed = lief.parse(list(header))
+        assert parsed is not None
+        assert parsed.dos_header.magic == 0x5A4D
+
+    def testHeaderBytesElf(self):
+        binary_info = self._create_binary_info(self._load_xored_fixture("bashlite_xored"))
+        header = binary_info.getHeaderBytes()
+        assert header is not None
+        assert len(header) <= BinaryInfo.HEADER_CAP_ELF
+        assert header[:4] == b"\x7fELF"
+        assert len(header) > 0x40
+        assert len(header) == 0 or header[-1] != 0
+
+    def testHeaderBytesMacho(self):
+        komplex_binary = self._decrypt_xored_file("komplex_xored")
+        loader = FileLoader("/", map_file=True)
+        loader._loadFile(komplex_binary)
+        binary_info = BinaryInfo(loader.getData())
+        binary_info.raw_data = loader.getRawData()
+        binary_info.file_path = ""
+        binary_info.base_addr = loader.getBaseAddress()
+        binary_info.bitness = loader.getBitness()
+        binary_info.architecture = loader.getArchitecture()
+        binary_info.code_areas = loader.getCodeAreas()
+        header = binary_info.getHeaderBytes()
+        assert header is not None
+        assert len(header) <= BinaryInfo.HEADER_CAP_MACHO
+        assert len(header) == 0 or header[-1] != 0
+        macho_magics = {
+            b"\xce\xfa\xed\xfe",
+            b"\xcf\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xce",
+            b"\xfe\xed\xfa\xcf",
+        }
+        assert header[:4] in macho_magics
+
+    def testPeHeaderHash(self):
+        binary_info = self._create_binary_info(self._load_xored_fixture("cutwail_xored"))
+        header_hash = binary_info.getPeHeaderHash()
+        assert header_hash is not None
+        assert len(header_hash) == 64
+        int(header_hash, 16)
+
+    def testPeHeaderHashNormalizesVolatileFields(self):
+        raw = bytearray(self._load_xored_fixture("cutwail_xored"))
+        base_info = BinaryInfo(bytes(raw))
+        baseline = base_info.getPeHeaderHash()
+        e_lfanew = int.from_bytes(raw[0x3C:0x40], "little")
+        coff = e_lfanew + 4
+        opt = coff + 20
+        mutated = bytearray(raw)
+        for offset in (coff + 8, opt + 56, opt + 64):
+            mutated[offset : offset + 4] = b"\xde\xad\xbe\xef"
+        mutated_info = BinaryInfo(bytes(mutated))
+        assert mutated_info.getPeHeaderHash() == baseline
+
+    def testPeHeaderHashNoneForNonPe(self):
+        elf_info = self._create_binary_info(self._load_xored_fixture("bashlite_xored"))
+        assert elf_info.getPeHeaderHash() is None
+
     def test_binary_info_and_file_loader_do_not_share_code_areas(self):
         first_binary = BinaryInfo(b"a")
         second_binary = BinaryInfo(b"b")

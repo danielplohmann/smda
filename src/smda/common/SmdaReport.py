@@ -53,6 +53,7 @@ class SmdaReport:
     version = None
     xcfg = None
     xheader = None
+    pe_header_hash = None
     data_refs_from = None
     data_refs_to = None
 
@@ -112,6 +113,7 @@ class SmdaReport:
             self._num_blocks = sum(f.num_blocks for f in self.xcfg.values())
             self._num_instructions = sum(f.num_instructions for f in self.xcfg.values())
             self.xheader = disassembly.binary_info.getHeaderBytes()
+            self.pe_header_hash = disassembly.binary_info.getPeHeaderHash()
             pairs = sorted((s, d) for s, ds in disassembly.data_refs_from.items() for d in ds)
             self.data_refs_from = {}
             self.data_refs_to = {}
@@ -323,6 +325,7 @@ class SmdaReport:
         smda_report._num_blocks = sum(f.num_blocks for f in smda_report.xcfg.values())
         smda_report._num_instructions = sum(f.num_instructions for f in smda_report.xcfg.values())
         smda_report.xheader = bytes.fromhex(report_dict["xheader"]) if "xheader" in report_dict else None
+        smda_report.pe_header_hash = report_dict.get("pe_header_hash") or None
         smda_report.xmetadata = report_dict.get("xmetadata", None)
         # buffer is only present when the report was serialized with STORE_BUFFER enabled;
         # older reports omit it and keep buffer == None for backward compatibility.
@@ -378,6 +381,7 @@ class SmdaReport:
             "xdata_refs_from": self.data_refs_from if self.data_refs_from is not None else {},
             "xdata_refs_to": self.data_refs_to if self.data_refs_to is not None else {},
             "xheader": self.xheader.hex() if self.xheader else "",
+            "pe_header_hash": self.pe_header_hash if self.pe_header_hash else "",
             "xmetadata": self.xmetadata,
         }
         # only emit the (compressed) buffer when one was retained, e.g. via STORE_BUFFER;

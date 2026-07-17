@@ -1,3 +1,5 @@
+import contextlib
+import hashlib
 import logging
 
 import lief
@@ -212,13 +214,125 @@ class BinaryInfo:
             is_inside = any(a[0] <= address < a[1] for a in self.code_areas)
         return is_inside
 
+    HEADER_CAP_PE = 0x1000
+    HEADER_CAP_ELF = 0x400
+    HEADER_CAP_MACHO = 0x2000
+    HEADER_SIZE_DEX = 0x70
+
+    @staticmethod
+    def _trimTrailingZeros(data):
+        end = len(data)
+        while end > 0 and data[end - 1] == 0:
+            end -= 1
+        return data[:end]
+
+    def _getPeHeaderRegion(self, data, lief_result):
+        try:
+            e_lfanew = int.from_bytes(data[0x3C:0x40], "little")
+            size_opt = int.from_bytes(data[e_lfanew + 20 : e_lfanew + 22], "little")
+            num_sections = int.from_bytes(data[e_lfanew + 6 : e_lfanew + 8], "little")
+            section_table = e_lfanew + 24 + size_opt
+            section_table_end = section_table + num_sections * 0x28
+        except Exception:
+            return self.HEADER_CAP_PE
+        sizeof_headers = 0
+        with contextlib.suppress(Exception):
+            sizeof_headers = lief_result.optional_header.sizeof_headers
+        first_raw = None
+        for index in range(min(num_sections, 4096)):
+            entry = section_table + index * 0x28 + 20
+            if entry + 4 > len(data):
+                break
+            praw = int.from_bytes(data[entry : entry + 4], "little")
+            if praw > 0 and (first_raw is None or praw < first_raw):
+                first_raw = praw
+        if first_raw is None:
+            first_raw = sizeof_headers or section_table_end
+        header_cap = min(sizeof_headers, first_raw) if sizeof_headers else first_raw
+        return max(section_table_end, header_cap)
+
+    def _getElfHeaderRegion(self, data):
+        try:
+            is_64 = data[4] == 2
+            endian = "little" if data[5] == 1 else "big"
+            if is_64:
+                e_phoff = int.from_bytes(data[0x20:0x28], endian)
+                e_ehsize = int.from_bytes(data[0x34:0x36], endian)
+                e_phentsize = int.from_bytes(data[0x36:0x38], endian)
+                e_phnum = int.from_bytes(data[0x38:0x3A], endian)
+            else:
+                e_phoff = int.from_bytes(data[0x1C:0x20], endian)
+                e_ehsize = int.from_bytes(data[0x28:0x2A], endian)
+                e_phentsize = int.from_bytes(data[0x2A:0x2C], endian)
+                e_phnum = int.from_bytes(data[0x2C:0x2E], endian)
+        except Exception:
+            return self.HEADER_CAP_ELF
+        phdr_end = e_phoff + e_phnum * e_phentsize if e_phoff else e_ehsize
+        return max(e_ehsize, phdr_end)
+
+    def _getMachoHeaderRegion(self, data, lief_result):
+        from smda.utility.MachoBinary import get_active_macho_binary
+
+        active = get_active_macho_binary(
+            lief_result,
+            bitness=self.bitness or None,
+            architecture=self.architecture or "",
+        )
+        if active is None:
+            return 0, self.HEADER_CAP_MACHO
+        slice_offset = 0
+        try:
+            slice_offset = active.fat_offset
+        except Exception:
+            slice_offset = 0
+        try:
+            is_64 = active.header.is_64bit
+            header_size = 32 if is_64 else 28
+            sizeof_cmds = active.header.sizeof_cmds
+        except Exception:
+            return slice_offset, self.HEADER_CAP_MACHO
+        return slice_offset, header_size + sizeof_cmds
+
+    def getPeHeaderHash(self):
+        """sha256 over the PE header region with volatile/hash-busting fields
+        (TimeDateStamp, CheckSum, SizeOfImage) zeroed, so builds differing only
+        in those fields collide. Returns None for non-PE inputs."""
+        if not self.raw_data:
+            return None
+        if self._getLiefType() != "PE":
+            return None
+        region = self._getPeHeaderRegion(self.raw_data, self.getLiefBinary())
+        region = min(region, self.HEADER_CAP_PE, len(self.raw_data))
+        header = bytearray(self.raw_data[:region])
+        try:
+            e_lfanew = int.from_bytes(header[0x3C:0x40], "little")
+            coff = e_lfanew + 4
+            opt = coff + 20
+            for offset in (coff + 8, opt + 56, opt + 64):
+                if offset + 4 <= len(header):
+                    header[offset : offset + 4] = b"\x00\x00\x00\x00"
+        except Exception:
+            return None
+        return hashlib.sha256(bytes(header)).hexdigest()
+
     def getHeaderBytes(self):
-        if self.raw_data:
-            lief_type = self._getLiefType()
-            if lief_type == "PE":
-                return self.raw_data[:0x400]
-            elif lief_type == "ELF":
-                return self.raw_data[:0x40]
-            elif self.architecture == "dalvik" or self.raw_data[:4] == b"dex\n":
-                return self.raw_data[:0x70]
+        if not self.raw_data:
+            return None
+        data = self.raw_data
+        lief_type = self._getLiefType()
+        if lief_type == "PE":
+            region = self._getPeHeaderRegion(data, self.getLiefBinary())
+            region = min(region, self.HEADER_CAP_PE, len(data))
+            return self._trimTrailingZeros(data[:region])
+        elif lief_type == "ELF":
+            region = self._getElfHeaderRegion(data)
+            region = min(region, self.HEADER_CAP_ELF, len(data))
+            return self._trimTrailingZeros(data[:region])
+        elif lief_type == "MACH_O":
+            slice_offset, region = self._getMachoHeaderRegion(data, self.getLiefBinary())
+            region = min(region, self.HEADER_CAP_MACHO)
+            end = min(slice_offset + region, len(data))
+            return self._trimTrailingZeros(data[slice_offset:end])
+        elif self.architecture == "dalvik" or data[:4] == b"dex\n":
+            return data[: self.HEADER_SIZE_DEX]
         return None
