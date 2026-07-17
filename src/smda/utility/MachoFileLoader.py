@@ -280,7 +280,10 @@ class MachoFileLoader:
                 min_raw_offset,
                 base_addr,
             )
-            mapped_binary[0:min_raw_offset] = binary[0:min_raw_offset]
+            # clamp to both the raw file's actual length and mapped_binary's capacity so this
+            # slice assignment can never resize mapped_binary on a truncated/malformed file
+            header_copy_len = min(min_raw_offset, len(binary), len(mapped_binary))
+            mapped_binary[0:header_copy_len] = binary[0:header_copy_len]
 
         LOGGER.debug("MachO: final mapped size: 0x%x", len(mapped_binary))
         return bytes(mapped_binary)
