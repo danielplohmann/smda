@@ -234,13 +234,13 @@ class FunctionAnalysisState:
                 current_mnemonic = current[2].split(" ")[-1]
                 block.append(current)
                 # if one code reference is to another address than the next
-                if (
-                    current[0] in self.code_refs_from
-                    and current_mnemonic not in self.CALL_MNEMONICS
-                    and i != len(self.instructions) - 1
-                    and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
-                ):
-                    break
+                if current[0] in self.code_refs_from:
+                    if (
+                        current_mnemonic not in self.CALL_MNEMONICS
+                        and i != len(self.instructions) - 1
+                        and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
+                    ):
+                        break
                     # if we can reach a colliding address from here, the block is broken and should end.
                     reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
                     next_addr = current[0] + current[1]
