@@ -4,8 +4,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.Disassembler import Disassembler
+from smda.intel.IntelDisassembler import IntelDisassembler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SMDA_ROOT = PROJECT_ROOT / "smda"
@@ -88,6 +90,51 @@ class ExceptionHandlingTestSuite(unittest.TestCase):
         except Exception as exc:
             with self.assertRaises(NameError):
                 reraise_non_operational_exception(exc)
+
+    def test_init_disassembler_switches_backend_on_differing_architecture(self):
+        disasm = Disassembler()
+        disasm.initDisassembler("intel")
+        self.assertIsInstance(disasm.disassembler, IntelDisassembler)
+
+        disasm.initDisassembler("aarch64")
+        self.assertIsInstance(disasm.disassembler, AArch64Disassembler)
+
+    def test_init_disassembler_keeps_pinned_explicit_backend(self):
+        disasm = Disassembler(backend="intel")
+        self.assertIsInstance(disasm.disassembler, IntelDisassembler)
+
+        disasm.initDisassembler("aarch64")
+        self.assertIsInstance(disasm.disassembler, IntelDisassembler)
+
+    def test_disassemble_buffer_creates_error_report_exactly_once_on_exception(self):
+        disasm = Disassembler()
+        disasm._disassemble = MagicMock(side_effect=RuntimeError("backend failed"))
+
+        with patch.object(Disassembler, "_createErrorReport", wraps=disasm._createErrorReport) as mock_create_report:
+            report = disasm.disassembleBuffer(b"dummy_content", 0x1000)
+
+        mock_create_report.assert_called_once()
+        self.assertEqual(report.status, "error")
+
+    def test_disassemble_unmapped_buffer_creates_error_report_exactly_once_on_exception(self):
+        disasm = Disassembler()
+        disasm._disassemble = MagicMock(side_effect=RuntimeError("backend failed"))
+
+        with patch.object(Disassembler, "_createErrorReport", wraps=disasm._createErrorReport) as mock_create_report:
+            report = disasm.disassembleUnmappedBuffer(b"dummy_content")
+
+        mock_create_report.assert_called_once()
+        self.assertEqual(report.status, "error")
+
+    def test_disassemble_file_creates_error_report_exactly_once_on_exception(self):
+        disasm = Disassembler()
+        disasm._disassemble = MagicMock(side_effect=RuntimeError("backend failed"))
+
+        with patch.object(Disassembler, "_createErrorReport", wraps=disasm._createErrorReport) as mock_create_report:
+            report = self._call_disassemble_file(disasm)
+
+        mock_create_report.assert_called_once()
+        self.assertEqual(report.status, "error")
 
     def test_all_broad_exception_handlers_reraise_non_operational_exceptions(self):
         offenders = []
