@@ -417,13 +417,6 @@ class FunctionCandidateManager:
             current_entry = entry
         return False
 
-    def checkCodePadding(self):
-        pattern_functions = []
-        for _pattern_count, pattern in enumerate(
-            re.finditer(r"((\xCC){2,}|(\x90){2,})", self.disassembly.binary_info.binary), 1
-        ):
-            pattern_functions.append(pattern.span()[1] + 1)
-
     def ensureCandidate(self, addr):
         """create candidate if it does not exist yet, returns True if newly created, else False"""
         if addr not in self.candidates:

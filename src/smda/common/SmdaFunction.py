@@ -80,6 +80,22 @@ class LazyIntKeyDict(dict):
         self._convert()
         return dict.__contains__(self, key)
 
+    def __eq__(self, other):
+        self._convert()
+        if isinstance(other, LazyIntKeyDict):
+            other._convert()
+        return dict.__eq__(self, other)
+
+    def __ne__(self, other):
+        self._convert()
+        if isinstance(other, LazyIntKeyDict):
+            other._convert()
+        return dict.__ne__(self, other)
+
+    def __repr__(self):
+        self._convert()
+        return dict.__repr__(self)
+
     def get(self, key, default=None):
         self._convert()
         return dict.get(self, key, default)

@@ -30,7 +30,9 @@ class WinApiResolver(AbstractLabelProvider):
         self._is_buffer = False
         for os_name, db_filepath in self._config.API_COLLECTION_FILES.items():
             self._loadDbFile(os_name, db_filepath)
-            self._os_name = os_name
+        loaded_os_names = [os_name for os_name in self._config.API_COLLECTION_FILES if os_name in self._api_map]
+        if len(loaded_os_names) == 1:
+            self._os_name = loaded_os_names[0]
 
     def update(self, binary_info):
         self._is_buffer = binary_info.is_buffer
@@ -99,8 +101,15 @@ class WinApiResolver(AbstractLabelProvider):
         if self._is_buffer:
             if self._os_name and self._os_name in self._api_map:
                 return self._api_map[self._os_name].get(absolute_addr, (None, None))
-            else:
+            if self._os_name:
                 return (None, None)
+            for os_name, api_map in self._api_map.items():
+                if os_name == "lief":
+                    continue
+                api = api_map.get(absolute_addr)
+                if api:
+                    return api
+            return (None, None)
         # otherwise take import table info from LIEF
         else:
             return self._api_map["lief"].get(to_addr, (None, None))

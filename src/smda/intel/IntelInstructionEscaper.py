@@ -2183,9 +2183,6 @@ class IntelInstructionEscaper:
                 if field != 0:
                     opcode_length += 1
         escaped_sequence += cleaned[: opcode_length * 2] + "?" * (len(cleaned) - opcode_length * 2)
-        # ensure length by readding prefix bytes
-        if len(escaped_sequence) < len(ins.bytes):
-            escaped_sequence = ins.bytes[: -1 * len(ins.bytes)] + escaped_sequence
         return escaped_sequence
 
     @staticmethod
@@ -2317,8 +2314,7 @@ class IntelInstructionEscaper:
         if num_occurrences == 1:
             escaped_sequence = escaped_sequence.replace(packed_hex, "????????")
         elif num_occurrences == 2:
-            escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
-            escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 1))
+            escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 2))
             LOGGER.warning(
                 "IntelInstructionEscaper.escapeBinaryValue: 2 occurrences for %s in %s, trying to escape both, if they were non-overlapping",
                 packed_hex,

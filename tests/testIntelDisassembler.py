@@ -170,6 +170,19 @@ class TestIntelDisassembler(unittest.TestCase):
     def test_mnemonic_tfidf_empty_counts_returns_zero(self):
         self.assertEqual(MnemonicTfIdf().tfidf({}), 0.0)
 
+    def test_mnemonic_tfidf_tables_are_cached_and_bitness_isolated(self):
+        tfidf32 = MnemonicTfIdf(bitness=32)
+        mov32 = tfidf32.getFrequency("mov")
+
+        tfidf64 = MnemonicTfIdf(bitness=64)
+
+        self.assertEqual(tfidf32.getFrequency("mov"), mov32)
+        self.assertNotEqual(tfidf64.getFrequency("mov"), mov32)
+        self.assertIs(tfidf32.idf, MnemonicTfIdf(bitness=32).idf)
+        self.assertEqual(tfidf32.getFrequency("unknown-mnemonic"), tfidf32._max_idf)
+        with self.assertRaises(TypeError):
+            tfidf32.idf["mov"] = 0
+
     def test_pointer_reference_uses_byte_prefixes(self):
         manager = FunctionCandidateManager(SmdaConfig())
         manager.bitness = 64
