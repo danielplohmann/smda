@@ -106,4 +106,6 @@ class ArchBackend:
 
     @classmethod
     def _getImportStubRanges(cls, binary_info):
-        return cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
+        if not hasattr(binary_info, "_import_stub_ranges"):
+            binary_info._import_stub_ranges = cls._getPltRanges(binary_info) + cls._getMachoStubRanges(binary_info)
+        return binary_info._import_stub_ranges

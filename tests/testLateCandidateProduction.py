@@ -3,6 +3,7 @@
 import logging
 import types
 import unittest
+from unittest.mock import patch
 
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
@@ -57,9 +58,7 @@ class LateCandidateTestBase:
         self.assertIsNotNone(first)
 
         late_addr = 0x35E0
-        self.manager.addTailcallCandidate(late_addr)
-        # The backend calls addCallRef *after* addTailcallCandidate.
-        self.manager.candidates[late_addr].addCallRef(0x5000)
+        self.manager.addTailcallCandidate(late_addr, reference_source=0x5000)
 
         produced = [c.addr for c in gen]
         self.assertIn(
@@ -79,8 +78,7 @@ class LateCandidateTestBase:
         # Another analysis path created the candidate earlier (in candidates only).
         self.manager.ensureCandidate(late_addr)
         # Now addTailcallCandidate fires — should re-add to queue.
-        self.manager.addTailcallCandidate(late_addr)
-        self.manager.candidates[late_addr].addCallRef(0x6000)
+        self.manager.addTailcallCandidate(late_addr, reference_source=0x6000)
 
         produced = [c.addr for c in self.manager.getNextFunctionStartCandidate()]
         self.assertIn(
@@ -100,8 +98,7 @@ class LateCandidateTestBase:
 
         late_addr = 0x45E0
         self.manager.ensureCandidate(late_addr)  # candidates only
-        self.manager.addTailcallCandidate(late_addr)  # re-adds to queue
-        self.manager.candidates[late_addr].addCallRef(0x6000)
+        self.manager.addTailcallCandidate(late_addr, reference_source=0x6000)  # re-adds to queue
 
         produced = [c.addr for c in gen]
         self.assertIn(
@@ -157,10 +154,8 @@ class LateCandidateTestBase:
 
         late_a = 0x75E0
         late_b = 0x85E0
-        self.manager.addTailcallCandidate(late_a)
-        self.manager.candidates[late_a].addCallRef(0x8000)
-        self.manager.addTailcallCandidate(late_b)
-        self.manager.candidates[late_b].addCallRef(0x9000)
+        self.manager.addTailcallCandidate(late_a, reference_source=0x8000)
+        self.manager.addTailcallCandidate(late_b, reference_source=0x9000)
 
         produced = [c.addr for c in gen]
         self.assertIn(late_a, produced)
@@ -172,8 +167,7 @@ class LateCandidateTestBase:
     def test_late_tailcall_with_callref_has_nonzero_score(self):
         """addCallRef resets _score to None; getScore recalculates > 0."""
         late_addr = 0x95E0
-        self.manager.addTailcallCandidate(late_addr)
-        self.manager.candidates[late_addr].addCallRef(0xA000)
+        self.manager.addTailcallCandidate(late_addr, reference_source=0xA000)
 
         gen = self.manager.getNextFunctionStartCandidate()
         produced = [c.addr for c in gen]
@@ -182,6 +176,26 @@ class LateCandidateTestBase:
             produced,
             f"Candidate 0x{late_addr:x} with upcoming addCallRef should be produced [queue={self.queue_type}]",
         )
+
+    def test_new_scored_candidate_does_not_rebuild_queue(self):
+        with patch.object(self.manager.candidate_queue, "update", wraps=self.manager.candidate_queue.update) as update:
+            self.manager.addTailcallCandidate(0xA5E0, reference_source=0xB000)
+
+        update.assert_not_called()
+
+    def test_tailcall_candidate_respects_candidate_cap(self):
+        rejected_addr = 0xB5E0
+        self.config.MAX_FUNCTION_CANDIDATES = len(self.manager.candidates)
+
+        self.assertFalse(self.manager.addTailcallCandidate(rejected_addr, reference_source=0xC000))
+        self.assertNotIn(rejected_addr, self.manager.candidates)
+        self.assertNotIn(rejected_addr, self.manager._candidate_offsets)
+        if hasattr(self.manager.candidate_queue, "heap"):
+            self.assertNotIn(rejected_addr, [item.element.addr for item in self.manager.candidate_queue.heap])
+        else:
+            self.assertFalse(
+                any(rejected_addr in bracket for bracket in self.manager.candidate_queue.brackets.values())
+            )
 
 
 class PriorityQueueTestCase(LateCandidateTestBase, unittest.TestCase):

@@ -473,16 +473,7 @@ class AArch64IndirectCallAnalyzer:
                 analysis_state.setLeaf(False)
                 dll, api = d.resolveApi(candidate, candidate)
                 if dll or api:
-                    api_entry = {
-                        "referencing_addr": [],
-                        "dll_name": dll,
-                        "api_name": api,
-                    }
-                    if candidate in d.disassembly.apis:
-                        api_entry = d.disassembly.apis[candidate]
-                    if calling_addr not in api_entry["referencing_addr"]:
-                        api_entry["referencing_addr"].append(calling_addr)
-                    d.disassembly.apis[candidate] = api_entry
+                    d.disassembly.addApiReference(candidate, calling_addr, dll, api)
                 elif d.disassembly.isAddrWithinMemoryImage(candidate):
                     d.fc_manager.addCandidate(candidate, reference_source=calling_addr)
 

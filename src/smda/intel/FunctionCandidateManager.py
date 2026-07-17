@@ -71,23 +71,33 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # single strong single-byte case (0x55 "push ebp/rbp") clears it too.
         return FunctionCandidate(self.disassembly.binary_info, addr).getFunctionStartScore() >= _ENTRY_SHAPE_MIN_SCORE
 
-    def isAlignmentSequence(self, instruction_sequence):
+    def isAlignmentSequence(self, instruction_sequence, raw_bytes=None):
         is_alignment_sequence = False
         instructions_analyzed = 0
         if len(instruction_sequence) > 0:
-            current_offset = instruction_sequence[0].address
+            start_addr = instruction_sequence[0].address if raw_bytes is None else instruction_sequence[0][0]
+            current_offset = start_addr
             for instruction in instruction_sequence:
-                if instruction.bytes in GAP_SEQUENCES[len(instruction.bytes)]:
+                if raw_bytes is None:
+                    size = len(instruction.bytes)
+                    instruction_bytes = instruction.bytes
+                else:
+                    address, size, _mnemonic, _operands = instruction
+                    instruction_bytes = raw_bytes[address - start_addr : address - start_addr + size]
+                if instruction_bytes in GAP_SEQUENCES[size]:
                     instructions_analyzed += 1
-                    current_offset += len(instruction.bytes)
+                    current_offset += size
                     if current_offset % 16 == 0:
                         is_alignment_sequence = True
                         break
                 else:
                     break
-        if len(instruction_sequence) > instructions_analyzed and instruction_sequence[
-            instructions_analyzed
-        ].mnemonic.split(" ")[-1] in [
+        if len(instruction_sequence) > instructions_analyzed:
+            trailing_instruction = instruction_sequence[instructions_analyzed]
+            trailing_mnemonic = trailing_instruction.mnemonic if raw_bytes is None else trailing_instruction[2]
+        else:
+            trailing_mnemonic = ""
+        if trailing_mnemonic.split(" ")[-1] in [
             "leave",
             "ret",
             "retn",

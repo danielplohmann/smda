@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
+from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.IndirectCallAnalyzer import IndirectCallAnalyzer
 
 
@@ -115,7 +116,7 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         import_slot = 0x403000
         memory_value = 0x500000
         disassembler = MagicMock()
-        disassembler.disassembly.apis = {}
+        disassembler.disassembly = DisassemblyResult()
         disassembler.resolveApi.return_value = ("kernel32.dll", "CreateFileA")
         analyzer = IndirectCallAnalyzer(disassembler)
         analyzer.getDword = MagicMock(return_value=memory_value)
@@ -145,6 +146,15 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
                 "api_name": "CreateFileA",
             },
         )
+
+    def test_api_reference_deduplication_preserves_list_shape(self):
+        disassembly = DisassemblyResult()
+
+        disassembly.addApiReference(0x403000, 0x401006, "kernel32.dll", "CreateFileA")
+        disassembly.addApiReference(0x403000, 0x401006, "kernel32.dll", "CreateFileA")
+        disassembly.addApiReference(0x403000, 0x401010, "kernel32.dll", "CreateFileA")
+
+        self.assertEqual(disassembly.apis[0x403000]["referencing_addr"], [0x401006, 0x401010])
 
     def test_processBlock_uses_dword_when_pointer_is_not_import_slot(self):
         disassembler = MagicMock()

@@ -650,6 +650,37 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertFalse(manager.isAlignmentSequence(instruction_sequence))
 
+    def test_alignment_sequence_accepts_lite_tuples(self):
+        manager = FunctionCandidateManager(SmdaConfig())
+        instruction_bytes = b"\x90\xc3"
+        instruction_sequence = [
+            (0x100F, 1, "nop", ""),
+            (0x1010, 1, "ret", ""),
+        ]
+
+        self.assertFalse(manager.isAlignmentSequence(instruction_sequence, instruction_bytes))
+
+    def test_function_state_tracks_max_instruction_start(self):
+        state = FunctionAnalysisState(0x1000, SimpleNamespace())
+        state.is_next_instruction_reachable = False
+
+        state.addInstruction(0x1005, 1, "nop", "", b"\x90")
+        state.addInstruction(0x1001, 1, "nop", "", b"\x90")
+
+        self.assertEqual(state.max_instruction_start, 0x1005)
+
+    def test_import_stub_ranges_are_cached(self):
+        binary_info = SimpleNamespace(
+            _plt_ranges=[(0x1000, 0x1010)],
+            _macho_stub_ranges=[(0x2000, 0x2010)],
+        )
+
+        first = X86Backend._getImportStubRanges(binary_info)
+        second = X86Backend._getImportStubRanges(binary_info)
+
+        self.assertIs(first, second)
+        self.assertEqual(first, [(0x1000, 0x1010), (0x2000, 0x2010)])
+
     def test_gap_stub_with_prefixed_jmp_is_accepted(self):
         # a single bnd-prefixed jmp stub discovered via gap-scanning (e.g. a misaligned
         # import-jmp thunk) must still be accepted as a legitimate function, matching the

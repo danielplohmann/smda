@@ -214,9 +214,7 @@ class AArch64Backend(ArchBackend):
             elif self._isBackwardTailcallTarget(target, state) or self._isShortBranchStub(d, state, target):
                 # A direct branch to code before the current entry, or from a short
                 # no-frame stub, is a tailcall/shared thunk target, not a local block.
-                tailcall_added = d.fc_manager.addTailcallCandidate(target)
-                if tailcall_added:
-                    d.fc_manager.candidates[target].addCallRef(i_address)
+                d.fc_manager.addTailcallCandidate(target, reference_source=i_address)
                 state.setSanelyEnding(True)
             elif target in d.fc_manager.getFunctionStartCandidates():
                 # case = "TAILCALL?" — leave for its own analysis

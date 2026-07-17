@@ -35,6 +35,7 @@ class DisassemblyResult:
         self.code_refs_to = {}
         # key: address of API in target DLL, value: {referencing_addr, api_name, dll_name}
         self.apis = {}
+        self._api_ref_sources = {}
         self.addr_to_api = {}
         # address:name
         self.function_symbols = {}
@@ -317,6 +318,22 @@ class DisassemblyResult:
             api = self.apis[api_offset]
             for ref in api["referencing_addr"]:
                 self.addr_to_api[ref] = "{}!{}".format(api["dll_name"], api["api_name"])
+
+    def addApiReference(self, api_addr, referencing_addr, dll_name, api_name):
+        api_entry = self.apis.get(
+            api_addr,
+            {"referencing_addr": [], "dll_name": dll_name, "api_name": api_name},
+        )
+        if api_addr not in self.apis:
+            self._api_ref_sources[api_addr] = set()
+        ref_sources = self._api_ref_sources.get(api_addr)
+        if ref_sources is None:
+            ref_sources = set(api_entry["referencing_addr"])
+            self._api_ref_sources[api_addr] = ref_sources
+        if referencing_addr not in ref_sources:
+            ref_sources.add(referencing_addr)
+            api_entry["referencing_addr"].append(referencing_addr)
+        self.apis[api_addr] = api_entry
 
     def getAllApiRefs(self):
         all_api_refs = {}
