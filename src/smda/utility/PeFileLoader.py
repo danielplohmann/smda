@@ -79,10 +79,14 @@ class PeFileLoader:
                 raise ValueError("PE file larger than MAX_IMAGE_SIZE")
 
             for section_info in section_infos:
+                # clamp the copy length to the bytes actually available in the raw file so a
+                # truncated/malformed raw_size never shrinks mapped_binary via slice assignment
+                # (the target region stays zero-filled beyond whatever was actually copied)
+                available_raw_bytes = max(0, len(binary) - section_info["raw_offset"])
+                copy_size = min(section_info["raw_size"], available_raw_bytes)
                 mapped_from = section_info["virt_offset"]
-                mapped_to = section_info["virt_offset"] + section_info["raw_size"]
-                mapped_binary[mapped_from:mapped_to] = binary[
-                    section_info["raw_offset"] : section_info["raw_offset"] + section_info["raw_size"]
+                mapped_binary[mapped_from : mapped_from + copy_size] = binary[
+                    section_info["raw_offset"] : section_info["raw_offset"] + copy_size
                 ]
                 LOGGER.debug(
                     "Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)",

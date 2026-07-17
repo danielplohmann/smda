@@ -44,7 +44,7 @@ class PeFileLoaderTestSuite(unittest.TestCase):
 
     def test_mergeCodeAreas(self):
         test_cases = [
-            ("Overlapping intervals", [[1, 5], [3, 7], [8, 12]], [[1, 5], [3, 7], [8, 12]]),
+            ("Overlapping intervals", [[1, 5], [3, 7], [8, 12]], [[1, 7], [8, 12]]),
             ("Contiguous intervals", [[1, 5], [5, 10], [10, 15]], [[1, 15]]),
             ("Unsorted contiguous intervals", [[10, 15], [1, 5], [5, 10]], [[1, 15]]),
             ("Separated intervals", [[1, 5], [6, 10], [11, 15]], [[1, 5], [6, 10], [11, 15]]),

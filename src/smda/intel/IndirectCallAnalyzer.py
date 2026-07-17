@@ -50,7 +50,10 @@ class IndirectCallAnalyzer:
     def getDword(self, addr):
         if not self.disassembly.isAddrWithinMemoryImage(addr):
             return None
-        return struct.unpack("I", self.disassembly.getBytes(addr, 4))[0]
+        raw_bytes = self.disassembly.getBytes(addr, 4)
+        if raw_bytes is None or len(raw_bytes) < 4:
+            return None
+        return struct.unpack("I", raw_bytes)[0]
 
     def _resolveDwordPointerValue(self, addr):
         dll, api = self.disassembler.resolveApi(addr, addr)
@@ -238,7 +241,7 @@ class IndirectCallAnalyzer:
             self.state = analysis_state
             start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
             if not start_block:
-                return
+                continue
             # we only process at most 10 register-calls per block to avoid extreme cases
             # found one Go sample with 130k register calls.
             if start_block[0] not in calls_per_block:

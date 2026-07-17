@@ -332,7 +332,7 @@ class ElfFileLoader:
             if section_flags & lief.ELF.Section.FLAGS.EXECINSTR.value:
                 section_start = section.virtual_address
                 section_size = section.size
-                if section_size % section.alignment != 0:
+                if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
                 code_areas.append([section_start, section_end])
@@ -341,8 +341,8 @@ class ElfFileLoader:
             # ignore invalid segment flags and assume it's not a code section
             with contextlib.suppress(ValueError):
                 segment_flags = segment.flags.value
-            # SHF_EXECINSTR = 4
-            if segment_flags & lief.ELF.Section.FLAGS.EXECINSTR.value:
+            # PF_X = 1 (segment flags use the ELF program-header bits, not section SHF_* bits)
+            if segment_flags & lief.ELF.Segment.FLAGS.X.value:
                 segment_start = segment.virtual_address
                 segment_size = segment.virtual_size
                 if segment.alignment and segment_size % segment.alignment != 0:

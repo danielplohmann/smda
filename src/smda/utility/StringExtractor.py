@@ -118,16 +118,14 @@ def read_go_string(smda_report, offset):
     # for Go strings, we need to deref once to get to the String struct (string pointer and len) and then
     # deref again for the actual string
     if smda_report.isAddrWithinMemoryImage(offset):
-        if smda_report.bitness == 64:
-            string_pointer_bytes = read_bytes(smda_report, offset, num_bytes=8)
-            string_pointer = struct.unpack("Q", string_pointer_bytes)[0]
-            length_bytes = read_bytes(smda_report, offset + 8, num_bytes=8)
-            length = struct.unpack("Q", length_bytes)[0]
-        else:
-            string_pointer_bytes = read_bytes(smda_report, offset, num_bytes=4)
-            string_pointer = struct.unpack("I", string_pointer_bytes)[0]
-            length_bytes = read_bytes(smda_report, offset + 4, num_bytes=4)
-            length = struct.unpack("I", length_bytes)[0]
+        word_size = 8 if smda_report.bitness == 64 else 4
+        word_format = "Q" if word_size == 8 else "I"
+        string_pointer_bytes = read_bytes(smda_report, offset, num_bytes=word_size)
+        length_bytes = read_bytes(smda_report, offset + word_size, num_bytes=word_size)
+        if len(string_pointer_bytes) < word_size or len(length_bytes) < word_size:
+            return None
+        string_pointer = struct.unpack(word_format, string_pointer_bytes)[0]
+        length = struct.unpack(word_format, length_bytes)[0]
         if smda_report.isAddrWithinMemoryImage(string_pointer):
             return read_string(smda_report, string_pointer, length)
 

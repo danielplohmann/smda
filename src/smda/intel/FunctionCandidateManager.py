@@ -593,7 +593,7 @@ class FunctionCandidateManager:
                 return
             if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + call_match.start()):
                 continue
-            if len(self.disassembly.binary_info.binary) - call_match.start() > 5:
+            if len(self.disassembly.binary_info.binary) - call_match.start() >= 5:
                 packed_call = self.disassembly.getRawBytes(call_match.start() + 1, 4)
                 rel_call_offset = struct.unpack("i", packed_call)[0]
                 # ignore zero offset calls, as they will likely not lead to functions but are rather used for positioning in shellcode etc
@@ -683,6 +683,8 @@ class FunctionCandidateManager:
             LOGGER.debug("Iterating relocations.")
             binary_as_array = bytearray(self.disassembly.binary_info.binary)
             for relocation_offset in relocations:
+                if not (relocation_offset > 0 and relocation_offset + 3 < len(binary_as_array)):
+                    continue
                 # don't relocate relative jumps/calls
                 if self.disassembly.binary_info.binary[relocation_offset - 1] not in [
                     0xE8,
