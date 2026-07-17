@@ -9,11 +9,14 @@ LOGGER = logging.getLogger(__name__)
 class IndirectCallAnalyzer:
     """Perform basic dataflow analysis to resolve indirect call targets"""
 
-    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z]{3}), (?P<reg2>[a-z]{3})$")
-    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z]{3}), (?P<val>0x[0-9a-f]{,8})$")
-    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$")
-    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$")
-    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z]{3}), \[(?P<addr>0x[0-9a-f]{,8})\]$")
+    # [a-z0-9]{2,4} covers legacy 2/3-char regs (ax, eax, rax) as well as the
+    # r8-r15 family and their d/w/b suffixed forms (r8, r10d, r15w, r9b);
+    # {1,16} hex digits covers 64-bit immediates/addresses, not just 32-bit.
+    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z0-9]{2,4}), (?P<reg2>[a-z0-9]{2,4})$")
+    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z0-9]{2,4}), (?P<val>0x[0-9a-f]{1,16})$")
+    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), dword ptr \[(?P<addr>0x[0-9a-f]{1,16})\]$")
+    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{1,16})\]$")
+    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), \[(?P<addr>0x[0-9a-f]{1,16})\]$")
 
     def __init__(self, disassembler):
         self.disassembler = disassembler
