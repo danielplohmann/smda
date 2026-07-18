@@ -191,9 +191,31 @@ class LanguageAnalyzer:
 
         # guess the programming language and
         # return dict with probabilities for the use of certain programming languages
+        result["_guess"] = self._deriveGuess(result)
+        return result
+
+    @staticmethod
+    def _deriveGuess(result):
         guess = None
         for lang in [key for key in result if not key.startswith("_")]:
             if not (guess and result[guess] > result[lang]):
                 guess = lang
-        result["_guess"] = guess
+        if result.get("go", 0) > 0.5:
+            # an exact "Go build ID" string match is unambiguous evidence that must win over
+            # any other heuristic score -- especially the c++ thiscall score, which is called
+            # here (identify()) before any function exists, so it always divides by 1 and can
+            # spuriously outscore a real Go binary (see rescore()).
+            guess = "go"
+        return guess
+
+    def rescore(self, result, function_count):
+        """
+        Re-normalize scores that depend on the function count, which is only known once
+        disassembly has finished (identify() runs at candidate-discovery time, before any
+        function exists). Called once analysis completes so the exported SmdaReport.language
+        reflects the true function count instead of identify()'s pre-disassembly snapshot.
+        """
+        thiscall_count = result.get("_count_thiscalls", 0)
+        result["c++"] = min(1, 6.0 * thiscall_count / max(1, function_count))
+        result["_guess"] = self._deriveGuess(result)
         return result

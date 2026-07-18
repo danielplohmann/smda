@@ -466,6 +466,14 @@ class RecursiveDisassembler:
                 candidate.setTfIdf(function_tfidf)
                 candidate.getConfidence()
             self.disassembly.candidates[addr] = candidate
+        lang_analyzer = getattr(self.fc_manager, "lang_analyzer", None)
+        if lang_analyzer is not None:
+            # identify() ran before any function existed (candidate-discovery time), so its
+            # c++ score always divided by 1; re-normalize now that the real function count
+            # is known, so the exported SmdaReport.language reflects it correctly.
+            self.disassembly.language = lang_analyzer.rescore(
+                self.disassembly.language, len(self.disassembly.functions)
+            )
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
