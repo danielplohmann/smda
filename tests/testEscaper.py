@@ -196,6 +196,18 @@ class DisassemblyTestSuite(unittest.TestCase):
                 "bitness": 64,
                 "expected_opc": "48a3????????????????",
             },
+            # a full 64-bit immediate ("movabs reg, imm64") landing inside the mapped image's
+            # address range must be fully escaped, not truncated to its first 8 hex digits and
+            # left un-escaped (the previous regex/struct.pack("I", ...) could not match or pack
+            # anything wider than 32 bits)
+            {
+                "ins": (0, "48b83412004001000000", "movabs", "rax, 0x140001234"),
+                "lower": 0x140001000,
+                "upper": 0x140002000,
+                "expected_bin": "48b8????????????????",
+                "bitness": 64,
+                "expected_opc": "48b8????????????????",
+            },
         ]
         for data in test_data:
             smda_report = SmdaReport()

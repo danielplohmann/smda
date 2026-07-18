@@ -2229,7 +2229,7 @@ class IntelInstructionEscaper:
             )
         ):
             immediates = []
-            for immediate_match in re.finditer(r"0x[0-9a-fA-F]{1,8}", ins.operands):
+            for immediate_match in re.finditer(r"0x[0-9a-fA-F]{1,16}", ins.operands):
                 immediate = int(immediate_match.group()[2:], 16)
                 if lower_addr > 0x00100000 and lower_addr <= immediate < upper_addr:
                     immediates.append(immediate)
@@ -2309,12 +2309,17 @@ class IntelInstructionEscaper:
 
     @staticmethod
     def escapeBinaryValue(ins, escaped_sequence, value):
-        packed_hex = str(codecs.encode(struct.pack("I", value), "hex").decode("ascii"))
+        try:
+            packed_hex = str(codecs.encode(struct.pack("<I", value), "hex").decode("ascii"))
+        except struct.error:
+            # value doesn't fit in 32 bits -- a 64-bit immediate (e.g. "mov r64, imm64")
+            packed_hex = str(codecs.encode(struct.pack("<Q", value), "hex").decode("ascii"))
+        wildcard = "?" * len(packed_hex)
         num_occurrences = occurrences(escaped_sequence, packed_hex)
         if num_occurrences == 1:
-            escaped_sequence = escaped_sequence.replace(packed_hex, "????????")
+            escaped_sequence = escaped_sequence.replace(packed_hex, wildcard)
         elif num_occurrences == 2:
-            escaped_sequence = "????????".join(escaped_sequence.rsplit(packed_hex, 2))
+            escaped_sequence = wildcard.join(escaped_sequence.rsplit(packed_hex, 2))
             LOGGER.warning(
                 "IntelInstructionEscaper.escapeBinaryValue: 2 occurrences for %s in %s, trying to escape both, if they were non-overlapping",
                 packed_hex,
