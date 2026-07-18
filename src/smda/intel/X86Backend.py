@@ -236,7 +236,10 @@ class X86Backend(ArchBackend):
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
             if dereferenced is not None:
-                d._handleApiTarget(i_address, jump_destination, dereferenced)
+                resolved_api = d._handleApiTarget(i_address, jump_destination, dereferenced)
+                if resolved_api and state.isFirstInstruction():
+                    # the entire function body is this one jmp-to-import: a thunk, not a real routine
+                    state.setThunkCall(True)
         elif i_op_str.startswith("qword ptr [rip"):
             # case = "QWORD-PTR, RIP-relative"
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
@@ -246,7 +249,9 @@ class X86Backend(ArchBackend):
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
             if dereferenced is not None:
-                d._handleApiTarget(i_address, jump_destination, dereferenced)
+                resolved_api = d._handleApiTarget(i_address, jump_destination, dereferenced)
+                if resolved_api and state.isFirstInstruction():
+                    state.setThunkCall(True)
         elif i_op_str.startswith("0x"):
             jump_destination = d.getReferencedAddr(i_op_str)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
