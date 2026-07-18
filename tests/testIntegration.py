@@ -9,6 +9,7 @@ from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
+from smda.DisassemblyResult import DisassemblyResult
 from smda.DisassemblyStatistics import DisassemblyStatistics
 from smda.utility.FileLoader import FileLoader
 
@@ -191,6 +192,35 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(total.num_functions, 11)
         left += right
         self.assertEqual(left.num_failed_instructions, 99)
+
+    def test_statistics_num_thunk_functions_roundtrip(self):
+        result = DisassemblyResult()
+        result.thunk_functions.add(0x401000)
+        result.thunk_functions.add(0x402000)
+
+        stats = DisassemblyStatistics(result)
+        self.assertEqual(stats.num_thunk_functions, 2)
+
+        restored = DisassemblyStatistics.fromDict(stats.toDict())
+        self.assertEqual(restored.num_thunk_functions, 2)
+        self.assertEqual((restored + stats).num_thunk_functions, 4)
+
+    def test_statistics_from_dict_tolerates_missing_num_thunk_functions(self):
+        stats = DisassemblyStatistics.fromDict(
+            {
+                "num_functions": 1,
+                "num_recursive_functions": 0,
+                "num_leaf_functions": 1,
+                "num_basic_blocks": 1,
+                "num_instructions": 2,
+                "num_api_calls": 0,
+                "num_function_calls": 1,
+                "num_failed_functions": 0,
+                "num_failed_instructions": 0,
+            }
+        )
+        self.assertIsNone(stats.num_thunk_functions)
+        self.assertIsNone(stats.toDict()["num_thunk_functions"])
 
 
 if __name__ == "__main__":

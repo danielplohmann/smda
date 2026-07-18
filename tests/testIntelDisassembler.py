@@ -506,6 +506,49 @@ class TestIntelDisassembler(unittest.TestCase):
         manager.bitness = 64
         self.assertFalse(manager.isHotpatchPrologue(b"\x8b\xff\x55\x8b\xec"))
 
+    def test_jmp_to_resolved_import_as_first_instruction_marks_thunk_call(self):
+        # A single "jmp dword ptr [import_slot]" that is the function's very first
+        # instruction is a textbook single-instruction import-thunk stub: the entire
+        # function body is the jmp, so it must be flagged as a thunk call.
+        disassembler = self._create_disassembler()
+        disassembler._registerLabelProvider(ImportSlotProvider(0x1020, "kernel32.dll", "ExitProcess"))
+        disassembler.disassembly = SimpleNamespace(
+            apis={},
+            dereferenceDword=lambda addr: 0x9999 if addr == 0x1020 else None,
+            isAddrWithinMemoryImage=lambda addr: True,
+        )
+        disassembler.tailcall_analyzer = SimpleNamespace(addJump=lambda *a, **kw: None)
+        backend = X86Backend.__new__(X86Backend)
+
+        state = FunctionAnalysisState(0x1000, disassembler.disassembly)
+        instruction = (0x1000, 6, "jmp", "dword ptr [0x1020]")
+
+        backend._analyzeJmpInstruction(disassembler, instruction, state)
+
+        self.assertTrue(state.is_thunk_call)
+
+    def test_jmp_to_resolved_import_deep_in_function_does_not_mark_thunk_call(self):
+        # The identical jmp-to-resolved-API shape, but reached only after a preceding
+        # instruction inside the same function, is a thunk-shaped tailcall INSIDE a
+        # larger routine, not a whole-function thunk -- it must not be flagged.
+        disassembler = self._create_disassembler()
+        disassembler._registerLabelProvider(ImportSlotProvider(0x1020, "kernel32.dll", "ExitProcess"))
+        disassembler.disassembly = SimpleNamespace(
+            apis={},
+            dereferenceDword=lambda addr: 0x9999 if addr == 0x1020 else None,
+            isAddrWithinMemoryImage=lambda addr: True,
+        )
+        disassembler.tailcall_analyzer = SimpleNamespace(addJump=lambda *a, **kw: None)
+        backend = X86Backend.__new__(X86Backend)
+
+        state = FunctionAnalysisState(0x1010, disassembler.disassembly)
+        state.addInstruction(0x1010, 1, "push", "ebp", b"\x55")
+        instruction = (0x1013, 6, "jmp", "dword ptr [0x1020]")
+
+        backend._analyzeJmpInstruction(disassembler, instruction, state)
+
+        self.assertFalse(state.is_thunk_call)
+
     def test_function_gaps_cover_head_and_tail_without_code_areas(self):
         # Raw memory dumps are loaded without section info (_code_areas is empty). The gap scan
         # must still cover the head (before the first instruction) and tail (after the last

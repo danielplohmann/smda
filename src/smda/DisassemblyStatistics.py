@@ -2,6 +2,7 @@ class DisassemblyStatistics:
     num_functions = None
     num_recursive_functions = None
     num_leaf_functions = None
+    num_thunk_functions = None
     num_basic_blocks = None
     num_instructions = None
     num_api_calls = None
@@ -12,6 +13,7 @@ class DisassemblyStatistics:
         "num_functions",
         "num_recursive_functions",
         "num_leaf_functions",
+        "num_thunk_functions",
         "num_basic_blocks",
         "num_instructions",
         "num_api_calls",
@@ -25,6 +27,7 @@ class DisassemblyStatistics:
             self.num_functions = len(disassembly_result.functions)
             self.num_recursive_functions = len(disassembly_result.recursive_functions)
             self.num_leaf_functions = len(disassembly_result.leaf_functions)
+            self.num_thunk_functions = len(disassembly_result.thunk_functions)
             self.num_basic_blocks = self._countBlocks(disassembly_result)
             self.num_instructions = self._countInstructions(disassembly_result)
             self.num_api_calls = self._countApiCalls(disassembly_result)
@@ -61,6 +64,7 @@ class DisassemblyStatistics:
         statistics.num_functions = statistics_dict["num_functions"]
         statistics.num_recursive_functions = statistics_dict["num_recursive_functions"]
         statistics.num_leaf_functions = statistics_dict["num_leaf_functions"]
+        statistics.num_thunk_functions = statistics_dict.get("num_thunk_functions")
         statistics.num_basic_blocks = statistics_dict["num_basic_blocks"]
         statistics.num_instructions = statistics_dict["num_instructions"]
         statistics.num_api_calls = statistics_dict["num_api_calls"]
@@ -74,6 +78,7 @@ class DisassemblyStatistics:
             "num_functions": self.num_functions,
             "num_recursive_functions": self.num_recursive_functions,
             "num_leaf_functions": self.num_leaf_functions,
+            "num_thunk_functions": self.num_thunk_functions,
             "num_basic_blocks": self.num_basic_blocks,
             "num_instructions": self.num_instructions,
             "num_api_calls": self.num_api_calls,
