@@ -6,6 +6,8 @@ from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.SmdaFunction import LazyIntKeyDict, SmdaFunction
 from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
+from smda.Disassembler import Disassembler
+from smda.SmdaConfig import SmdaConfig
 
 
 class TestCommonModels(unittest.TestCase):
@@ -72,6 +74,29 @@ class TestCommonModels(unittest.TestCase):
             function.getOpcHash(),
             struct.unpack("<Q", hashlib.sha256(b"opc-sequence").digest()[:8])[0],
         )
+
+    def test_report_exports_language_metadata(self):
+        # SmdaReport previously had no `language` attribute at all and dropped the whole
+        # feature from toDict(); it must now be exported and round-trip through fromDict.
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        func = b"\x55\x48\x89\xe5\x5d\xc3"  # push rbp; mov rbp, rsp; pop rbp; ret
+        code = func * 10
+        thiscall_tail = b"\x8b\x4d\x04\xe8\x01\x02\x03\x00"
+        buf = code + thiscall_tail
+        base = 0x401000
+        report = Disassembler(config).disassembleBuffer(
+            buf, base_addr=base, bitness=64, code_areas=[[base, base + len(code)]]
+        )
+
+        self.assertIsInstance(report.language, dict)
+        self.assertIn("_guess", report.language)
+
+        report_dict = report.toDict()
+        self.assertEqual(report_dict["metadata"]["language"], report.language)
+
+        restored = SmdaReport.fromDict(report_dict)
+        self.assertEqual(restored.language, report.language)
 
     def test_num_calls_and_returns_count_prefixed_mnemonics(self):
         # capstone prepends mandatory prefixes (bnd/rep/lock/...) to the mnemonic string;

@@ -40,6 +40,7 @@ class SmdaReport:
     identified_alignment = None
     is_library = None
     is_buffer = None
+    language = None
     message = None
     oep = None
     sha256 = None
@@ -97,6 +98,7 @@ class SmdaReport:
             self.identified_alignment = disassembly.identified_alignment
             self.is_library = disassembly.binary_info.is_library
             self.is_buffer = disassembly.binary_info.is_buffer
+            self.language = disassembly.language
             self.message = "Analysis finished regularly."
             self.oep = disassembly.binary_info.getOep()
             self.sha256 = disassembly.binary_info.sha256
@@ -286,6 +288,8 @@ class SmdaReport:
                 smda_report.filename = report_dict["metadata"]["filename"]
             if "is_library" in report_dict["metadata"]:
                 smda_report.is_library = report_dict["metadata"]["is_library"]
+            if "language" in report_dict["metadata"]:
+                smda_report.language = report_dict["metadata"]["language"]
             if "version" in report_dict["metadata"]:
                 smda_report.version = report_dict["metadata"]["version"]
             smda_report.is_buffer = report_dict["metadata"].get("is_buffer", False)
@@ -366,6 +370,7 @@ class SmdaReport:
                 "filename": self.filename,
                 "is_library": self.is_library,
                 "is_buffer": self.is_buffer,
+                "language": self.language,
                 "version": self.version,
             },
             "message": self.message,
