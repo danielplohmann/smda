@@ -41,6 +41,11 @@ _ENTRY_SHAPE_MIN_SCORE = 30
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
 
+    def __init__(self, config):
+        super().__init__(config)
+        self.pdata_start_addresses = set()
+        self.pdata_end_addresses = set()
+
     def init(self, disassembly, cbAnalysisTimeout=None):
         # the gap scan decodes potential NOP instructions, so it needs an x86 capstone
         # matching the binary's bitness; build it before the base init runs discovery
@@ -542,6 +547,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     def locateExceptionHandlerCandidates(self):
         # 64bit only - if we have a .pdata section describing exception handlers, we extract entries of guaranteed function starts from it.
         if self.disassembly.binary_info.bitness == 64:
+            self.pdata_start_addresses = set()
+            self.pdata_end_addresses = set()
+            record_pdata_ends = self.config.USE_PE_X64_PDATA_ENDS
+            base_addr = self.disassembly.binary_info.base_addr
             for section_info in self.disassembly.binary_info.getSections():
                 section_name, section_va_start, section_va_end = section_info
                 if section_name == ".pdata":
@@ -560,7 +569,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                             # split-off cold/epilogue chunk) chained to another function's
                             # primary RUNTIME_FUNCTION entry, not an independent function start.
                             continue
-                        self.addExceptionCandidate(self.disassembly.binary_info.base_addr + rva_function_candidate)
+                        self.addExceptionCandidate(base_addr + rva_function_candidate)
+                        if record_pdata_ends and _rva_function_end > rva_function_candidate:
+                            # record .pdata EndAddresses as candidate split points; skip degenerate
+                            # (EndAddress <= BeginAddress) entries and keep them as VAs.
+                            self.pdata_start_addresses.add(base_addr + rva_function_candidate)
+                            self.pdata_end_addresses.add(base_addr + _rva_function_end)
 
     def _isChainedUnwindInfo(self, rva_unwind_info):
         # x64 UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7);

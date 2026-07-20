@@ -36,6 +36,13 @@ class SmdaConfig:
     # system binaries (wermgr/ping/robocopy/bcrypt) show equal-or-better boundary accuracy
     # with the directory enabled, so it is on by default
     USE_PE_ARM64_PDATA_CANDIDATES = True
+    # force function-end splits at x64 PE .pdata RUNTIME_FUNCTION EndAddresses so that
+    # SMDA functions align with the compiler's exception-table boundaries; off by default
+    # because MSVC fragments single control-flow functions across many .pdata ranges
+    # (cold/hot splitting), so naive splitting fragments real functions. When on, splits
+    # are only performed where the interior .pdata start has a non-fall-through inbound
+    # jmp/call from another recovered function, never from candidate membership alone.
+    USE_PE_X64_PDATA_ENDS = False
     # promote unclaimed ELF .eh_frame FDE starts as late AArch64 candidates (after the primary
     # pass, before gap analysis); off until validated against ground-truth function boundaries
     USE_ELF_EH_FRAME_CANDIDATES = False
