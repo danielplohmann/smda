@@ -549,6 +549,45 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertFalse(state.is_thunk_call)
 
+    def test_direct_jmp_to_resolved_import_as_first_instruction_marks_thunk_call(self):
+        disassembler = self._create_disassembler()
+        disassembler._registerLabelProvider(ImportSlotProvider(0x1020, "kernel32.dll", "ExitProcess"))
+        disassembler.disassembly = SimpleNamespace(
+            apis={},
+            functions={},
+            isAddrWithinMemoryImage=lambda addr: True,
+        )
+        disassembler.fc_manager = SimpleNamespace(getFunctionStartCandidates=lambda: set())
+        disassembler.tailcall_analyzer = SimpleNamespace(addJump=lambda *a, **kw: None)
+        backend = X86Backend.__new__(X86Backend)
+        backend._resolveImportSlot = lambda d, target: 0x1020
+
+        state = FunctionAnalysisState(0x1000, disassembler.disassembly)
+        backend._analyzeJmpInstruction(disassembler, (0x1000, 5, "jmp", "0x1100"), state)
+
+        self.assertTrue(state.is_thunk_call)
+        self.assertTrue(state.is_sanely_ending)
+
+    def test_direct_jmp_to_resolved_import_deep_in_function_does_not_mark_thunk_call(self):
+        disassembler = self._create_disassembler()
+        disassembler._registerLabelProvider(ImportSlotProvider(0x1020, "kernel32.dll", "ExitProcess"))
+        disassembler.disassembly = SimpleNamespace(
+            apis={},
+            functions={},
+            isAddrWithinMemoryImage=lambda addr: True,
+        )
+        disassembler.fc_manager = SimpleNamespace(getFunctionStartCandidates=lambda: set())
+        disassembler.tailcall_analyzer = SimpleNamespace(addJump=lambda *a, **kw: None)
+        backend = X86Backend.__new__(X86Backend)
+        backend._resolveImportSlot = lambda d, target: 0x1020
+
+        state = FunctionAnalysisState(0x1000, disassembler.disassembly)
+        state.addInstruction(0x1000, 1, "push", "rbp", b"\x55")
+        backend._analyzeJmpInstruction(disassembler, (0x1001, 5, "jmp", "0x1100"), state)
+
+        self.assertFalse(state.is_thunk_call)
+        self.assertTrue(state.is_sanely_ending)
+
     def test_function_gaps_cover_head_and_tail_without_code_areas(self):
         # Raw memory dumps are loaded without section info (_code_areas is empty). The gap scan
         # must still cover the head (before the first instruction) and tail (after the last
