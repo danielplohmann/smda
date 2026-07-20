@@ -236,10 +236,7 @@ class X86Backend(ArchBackend):
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
             if dereferenced is not None:
-                resolved_api = d._handleApiTarget(i_address, jump_destination, dereferenced)
-                if resolved_api and state.isFirstInstruction():
-                    # the entire function body is this one jmp-to-import: a thunk, not a real routine
-                    state.setThunkCall(True)
+                self._handleApiJumpTarget(d, state, i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("qword ptr [rip"):
             # case = "QWORD-PTR, RIP-relative"
             # Handles mostly jmp-to-api, stubs or tailcalls, all should be handled sanely this way.
@@ -249,9 +246,7 @@ class X86Backend(ArchBackend):
             state.addCodeRef(i_address, jump_destination, by_jump=True)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
             if dereferenced is not None:
-                resolved_api = d._handleApiTarget(i_address, jump_destination, dereferenced)
-                if resolved_api and state.isFirstInstruction():
-                    state.setThunkCall(True)
+                self._handleApiJumpTarget(d, state, i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("0x"):
             jump_destination = d.getReferencedAddr(i_op_str)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
@@ -263,7 +258,7 @@ class X86Backend(ArchBackend):
                 pass
             else:
                 import_slot = self._resolveImportSlot(d, jump_destination)
-                if import_slot is not None and d._handleApiTarget(i_address, import_slot, import_slot):
+                if import_slot is not None and self._handleApiJumpTarget(d, state, i_address, import_slot, import_slot):
                     # case = "STUB-TAILCALL-API!"
                     state.setSanelyEnding(True)
                 elif state.isFirstInstruction():
@@ -281,6 +276,14 @@ class X86Backend(ArchBackend):
                     state.addCodeRef(i_address, target, by_jump=True)
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
+
+    @staticmethod
+    def _handleApiJumpTarget(d, state, instruction_addr, import_slot, dereferenced):
+        resolved_api = d._handleApiTarget(instruction_addr, import_slot, dereferenced)
+        if resolved_api and state.isFirstInstruction():
+            # the entire function body is this one jmp-to-import: a thunk, not a real routine
+            state.setThunkCall(True)
+        return resolved_api
 
     def _analyzeEndInstruction(self, state):
         state.setSanelyEnding(True)
