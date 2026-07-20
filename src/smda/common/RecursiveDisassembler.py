@@ -3,6 +3,7 @@
 import datetime
 import logging
 import re
+from bisect import bisect_right
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
@@ -457,6 +458,8 @@ class RecursiveDisassembler:
                 if cbAnalysisTimeout and cbAnalysisTimeout():
                     break
                 state = self.analyzeFunction(candidate.addr)
+        if self.config.USE_PE_X64_PDATA_ENDS:
+            self._splitMergedFunctionsAtPdataEnds(cbAnalysisTimeout)
         self.disassembly.failed_analysis_addr = self.fc_manager.getAbortedCandidates()
         # package up and finish
         for addr, candidate in self.fc_manager.candidates.items():
@@ -478,3 +481,125 @@ class RecursiveDisassembler:
         if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True
         return self.disassembly
+
+    def _splitMergedFunctionsAtPdataEnds(self, cbAnalysisTimeout=None):
+        if not self.config.USE_PE_X64_PDATA_ENDS:
+            return 0
+        if self.backend.name != "intel":
+            return 0
+        pdata_ends = self.fc_manager.pdata_end_addresses
+        if not pdata_ends:
+            return 0
+        if self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+            return 0
+        split_points_by_owner = {}
+        for index, end_addr in enumerate(sorted(pdata_ends)):
+            if index and index % 4096 == 0 and self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+                return 0
+            fn_start = self.disassembly.ins2fn.get(end_addr)
+            if (
+                fn_start is None
+                or end_addr == fn_start
+                or end_addr not in self.disassembly.instructions
+                or fn_start not in self.disassembly.functions
+            ):
+                continue
+            fn_min, fn_max = self.disassembly.function_borders[fn_start]
+            if not fn_min < end_addr < fn_max:
+                continue
+            if self._hasNonFallthroughCodeRef(end_addr, fn_start):
+                split_points_by_owner.setdefault(fn_start, []).append(end_addr)
+        splits_performed = 0
+        for fn_start, genuine_splits in sorted(split_points_by_owner.items()):
+            if self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+                break
+            splits_performed += self._partitionFunctionAtPdataEnds(fn_start, genuine_splits)
+        return splits_performed
+
+    def _pdataSplitTimeoutTripped(self, cbAnalysisTimeout):
+        if self.disassembly.analysis_timeout:
+            return True
+        if cbAnalysisTimeout is not None and cbAnalysisTimeout():
+            self.disassembly.analysis_timeout = True
+            return True
+        return False
+
+    def _hasNonFallthroughCodeRef(self, target_addr, owner_fn):
+        for source_addr in self.disassembly.code_refs_to.get(target_addr, ()):
+            instruction = self.disassembly.instructions.get(source_addr)
+            source_owner = self.disassembly.ins2fn.get(source_addr)
+            if instruction is not None and source_addr + instruction[1] != target_addr and source_owner is not None:
+                return True
+        return False
+
+    def _partitionFunctionAtPdataEnds(self, fn_start, split_points):
+        split_points = sorted(set(split_points))
+        segment_starts = [fn_start, *split_points]
+        partitioned_blocks = {start: [] for start in segment_starts}
+
+        for block in self.disassembly.functions[fn_start]:
+            current_segment = None
+            block_fragment = []
+            for instruction in block:
+                segment = segment_starts[bisect_right(split_points, instruction[0])]
+                if segment != current_segment and block_fragment:
+                    partitioned_blocks[current_segment].append(block_fragment)
+                    block_fragment = []
+                current_segment = segment
+                block_fragment.append(instruction)
+            if block_fragment:
+                partitioned_blocks[current_segment].append(block_fragment)
+
+        if any(not blocks for blocks in partitioned_blocks.values()):
+            return 0
+
+        self.disassembly.recursive_functions.discard(fn_start)
+        self.disassembly.leaf_functions.discard(fn_start)
+        self.disassembly.thunk_functions.discard(fn_start)
+
+        for segment_start, blocks in partitioned_blocks.items():
+            instructions = [instruction for block in blocks for instruction in block]
+            self.disassembly.functions[segment_start] = blocks
+            self.disassembly.function_borders[segment_start] = (
+                min(instruction[0] for instruction in instructions),
+                max(instruction[0] + instruction[1] for instruction in instructions),
+            )
+            for instruction in instructions:
+                for byte_addr in range(instruction[0], instruction[0] + instruction[1]):
+                    self.disassembly.ins2fn[byte_addr] = segment_start
+
+            self.disassembly.function_symbols[segment_start] = self.resolveSymbol(segment_start)
+            if not any(instruction[2].split(" ")[-1] == "call" for instruction in instructions):
+                self.disassembly.leaf_functions.add(segment_start)
+            if any(
+                instruction[2].split(" ")[-1] == "call"
+                and segment_start in self.disassembly.code_refs_from.get(instruction[0], ())
+                for instruction in instructions
+            ):
+                self.disassembly.recursive_functions.add(segment_start)
+            if self._isApiJumpThunk(instructions):
+                self.disassembly.thunk_functions.add(segment_start)
+
+            candidate = self.fc_manager.candidates.get(segment_start)
+            if candidate is not None:
+                candidate.analysis_aborted = False
+                candidate.abortion_reason = ""
+                candidate.setAnalysisCompleted()
+
+        for split_point in split_points:
+            for source_addr in tuple(self.disassembly.code_refs_to.get(split_point, ())):
+                instruction = self.disassembly.instructions.get(source_addr)
+                if (
+                    instruction is not None
+                    and source_addr + instruction[1] == split_point
+                    and self.disassembly.ins2fn.get(source_addr) != split_point
+                ):
+                    self.disassembly.removeCodeRefs(source_addr, split_point)
+
+        return len(split_points)
+
+    def _isApiJumpThunk(self, instructions):
+        if len(instructions) != 1 or instructions[0][2].split(" ")[-1] != "jmp":
+            return False
+        instruction_addr = instructions[0][0]
+        return any(instruction_addr in api.get("referencing_addr", ()) for api in self.disassembly.apis.values())
