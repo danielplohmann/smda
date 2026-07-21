@@ -9,11 +9,14 @@ LOGGER = logging.getLogger(__name__)
 class IndirectCallAnalyzer:
     """Perform basic dataflow analysis to resolve indirect call targets"""
 
-    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z]{3}), (?P<reg2>[a-z]{3})$")
-    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z]{3}), (?P<val>0x[0-9a-f]{,8})$")
-    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{,8})\]$")
-    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{,8})\]$")
-    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z]{3}), \[(?P<addr>0x[0-9a-f]{,8})\]$")
+    # [a-z0-9]{2,4} covers legacy 2/3-char regs (ax, eax, rax) as well as the
+    # r8-r15 family and their d/w/b suffixed forms (r8, r10d, r15w, r9b);
+    # {1,16} hex digits covers 64-bit immediates/addresses, not just 32-bit.
+    RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z0-9]{2,4}), (?P<reg2>[a-z0-9]{2,4})$")
+    RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z0-9]{2,4}), (?P<val>0x[0-9a-f]{1,16})$")
+    RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), dword ptr \[(?P<addr>0x[0-9a-f]{1,16})\]$")
+    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{1,16})\]$")
+    RE_REG_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), \[(?P<addr>0x[0-9a-f]{1,16})\]$")
 
     def __init__(self, disassembler):
         self.disassembler = disassembler
@@ -50,7 +53,10 @@ class IndirectCallAnalyzer:
     def getDword(self, addr):
         if not self.disassembly.isAddrWithinMemoryImage(addr):
             return None
-        return struct.unpack("I", self.disassembly.getBytes(addr, 4))[0]
+        raw_bytes = self.disassembly.getBytes(addr, 4)
+        if raw_bytes is None or len(raw_bytes) < 4:
+            return None
+        return struct.unpack("I", raw_bytes)[0]
 
     def _resolveDwordPointerValue(self, addr):
         dll, api = self.disassembler.resolveApi(addr, addr)
@@ -238,7 +244,7 @@ class IndirectCallAnalyzer:
             self.state = analysis_state
             start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
             if not start_block:
-                return
+                continue
             # we only process at most 10 register-calls per block to avoid extreme cases
             # found one Go sample with 130k register calls.
             if start_block[0] not in calls_per_block:

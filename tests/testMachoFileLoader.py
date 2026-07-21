@@ -251,6 +251,69 @@ class TestMachoFileLoader(unittest.TestCase):
         ):
             self.assertFalse(MachoFileLoader.getHasBackend(b"", parsed=object()))
 
+    def test_map_binary_clamps_header_copy_to_truncated_raw_binary(self):
+        # min_raw_offset (from segment.file_offset) is larger than the raw
+        # binary actually supplied; the header-copy slice must clamp to the
+        # shorter of the two instead of shrinking mapped_binary via a
+        # length-mismatched bytearray slice assignment.
+        selected = _MachoSlice()
+        selected.sections = []
+        # virtual_address 0x1600 (rva 0x600, since imagebase/base_addr is 0x1000) is
+        # deliberately placed AFTER the header-copy region (clamped to 0x100, well
+        # below min_raw_offset's 0x500) so the two writes don't land on the same
+        # bytes -- mapBinary() always maps the header last, so a segment write that
+        # overlaps the header region gets overwritten by design, independent of this
+        # fix; that's a distinct, unrelated behavior from the length-clamp under test.
+        selected.segments = [
+            _Segment(
+                virtual_address=0x1600,
+                virtual_size=0x2000,
+                file_size=4,
+                file_offset=0x500,
+                content=b"CODE",
+            )
+        ]
+        expected_len = 0x3000  # align((0x1600 + 0x2000) - 0x1000, 0x1000)
+        truncated_binary = b"\x00" * 0x100  # shorter than min_raw_offset (0x500)
+
+        with mock.patch(
+            "smda.utility.MachoFileLoader.get_active_macho_binary",
+            return_value=selected,
+        ):
+            mapped = MachoFileLoader.mapBinary(truncated_binary, parsed=object())
+
+        self.assertEqual(len(mapped), expected_len)
+        self.assertEqual(mapped[0x600:0x604], b"CODE")
+
+    def test_map_binary_clamps_segment_write_to_buffer_capacity(self):
+        # mapped_binary's capacity is sized from virtual_size, but a
+        # crafted/corrupted segment can declare a file_size far larger than
+        # that capacity while still self-consistently matching its own
+        # content length; the write must clamp to the buffer's remaining
+        # capacity instead of growing/corrupting mapped_binary.
+        selected = _MachoSlice()
+        selected.sections = []
+        oversized_content = b"X" * 0x2000
+        selected.segments = [
+            _Segment(
+                virtual_address=0x1000,
+                virtual_size=0x100,
+                file_size=len(oversized_content),
+                file_offset=0,
+                content=oversized_content,
+            )
+        ]
+        expected_len = 0x1000  # align(max_virtual_address - base_addr, 0x1000)
+
+        with mock.patch(
+            "smda.utility.MachoFileLoader.get_active_macho_binary",
+            return_value=selected,
+        ):
+            mapped = MachoFileLoader.mapBinary(b"", parsed=object())
+
+        self.assertEqual(len(mapped), expected_len)
+        self.assertEqual(mapped[:4], b"XXXX")
+
     def test_intel_macho_mapped_and_unmapped_results_match(self):
         xored = (Path(__file__).resolve().parent / "komplex_xored").read_bytes()
         raw = bytes(byte ^ (index % 256) for index, byte in enumerate(xored))

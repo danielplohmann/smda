@@ -40,6 +40,48 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         self.assertEqual(match.group("reg"), "rsi")
         self.assertEqual(match.group("addr"), "0x400000")
 
+    def test_regex_matching_legacy_3letter_registers(self):
+        # Confirm no regression on the pre-existing 3-letter legacy register coverage.
+        analyzer = IndirectCallAnalyzer(MagicMock())
+
+        match = analyzer.RE_MOV_REG_REG.match("eax, ebx")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg1"), "eax")
+        self.assertEqual(match.group("reg2"), "ebx")
+
+    def test_regex_matching_extended_registers_and_wide_immediates(self):
+        analyzer = IndirectCallAnalyzer(MagicMock())
+
+        # Test mov <reg>, <reg> with r8-r15 family registers (2-3 chars)
+        match = analyzer.RE_MOV_REG_REG.match("r8, r9")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg1"), "r8")
+        self.assertEqual(match.group("reg2"), "r9")
+
+        # Test mov <reg>, <const> with a sized r10-r15 register and a 64-bit immediate
+        match = analyzer.RE_MOV_REG_CONST.match("r10, 0x1234567890abcdef")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg"), "r10")
+        self.assertEqual(match.group("val"), "0x1234567890abcdef")
+
+        # Test mov <reg>, dword ptr [<addr>] with an r11 register and a 64-bit address
+        match = analyzer.RE_REG_DWORD_PTR_ADDR.match("r11, dword ptr [0x1234567890abcdef]")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg"), "r11")
+        self.assertEqual(match.group("addr"), "0x1234567890abcdef")
+
+        # Test mov <reg>, qword ptr [rip + <addr>] with an r12 register and a 64-bit address
+        match = analyzer.RE_REG_QWORD_PTR_RIP_ADDR.match("r12, qword ptr [rip + 0x1234567890abcdef]")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg"), "r12")
+        self.assertEqual(match.group("addr"), "0x1234567890abcdef")
+
+        # Test lea <reg>, [<addr>] with an r13 register and a 64-bit address
+        match = analyzer.RE_REG_ADDR.match("r13, [0x1234567890abcdef]")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group("reg"), "r13")
+        self.assertEqual(match.group("addr"), "0x1234567890abcdef")
+
     def test_processBlock_logic(self):
         disassembler = MagicMock()
         disassembler.resolveApi.return_value = (None, None)
@@ -130,6 +172,50 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         self.assertEqual(registers["eax"], 0x401234)
         analyzer.getDword.assert_called_once_with(0x403000)
         disassembler.fc_manager.addCandidate.assert_called_once_with(0x401234, reference_source=0x401006)
+
+    def test_getDword_returns_none_on_short_or_missing_bytes(self):
+        disassembler = MagicMock()
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.disassembly = MagicMock()
+        analyzer.disassembly.isAddrWithinMemoryImage.return_value = True
+
+        for raw_bytes in (None, b"\x01\x02"):
+            with self.subTest(raw_bytes=raw_bytes):
+                analyzer.disassembly.getBytes.return_value = raw_bytes
+                result = analyzer.getDword(0x401000)
+                self.assertIsNone(result, f"getDword should return None for getBytes() == {raw_bytes!r}")
+
+    def test_resolveRegisterCalls_continues_after_empty_start_block(self):
+        disassembler = MagicMock()
+        # hasattr(disassembler.config, "MAX_INDIRECT_CALLS_PER_BASIC_BLOCK") must be False
+        # so resolveRegisterCalls falls back to its default max_calls of 50.
+        disassembler.config = MagicMock(spec=[])
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.processBlock = MagicMock()
+
+        analysis_state = MagicMock()
+        analysis_state.start_addr = 0x401000
+        analysis_state.call_register_ins = [0x401000, 0x402000]
+
+        # Second call site's block is resolvable. Real FunctionAnalysisState
+        # instructions are tuples (hashable), which resolveRegisterCalls relies
+        # on when keying calls_per_block by start_block[0].
+        resolvable_block = [(0x402000, 5, "call", "eax")]
+
+        def searchBlock_side_effect(state, addr):
+            if addr == 0x401000:
+                return []
+            return resolvable_block
+
+        analyzer.searchBlock = MagicMock(side_effect=searchBlock_side_effect)
+
+        analyzer.resolveRegisterCalls(analysis_state)
+
+        # The first call site's empty block lookup must not abort resolution
+        # for the second, independent call site.
+        analyzer.processBlock.assert_called_once()
+        called_args = analyzer.processBlock.call_args[0]
+        self.assertEqual(called_args[1], resolvable_block)
 
 
 if __name__ == "__main__":

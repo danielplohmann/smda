@@ -28,6 +28,7 @@ class Disassembler:
         self.config = config
         self.disassembler = None
         self._explicit_backend = bool(backend)
+        self._active_architecture = backend if backend in ("intel", "aarch64", "cil", "dalvik") else None
         if backend == "intel":
             self.disassembler = IntelDisassembler(self.config)
         elif backend == "aarch64":
@@ -45,16 +46,22 @@ class Disassembler:
         self.disassembly = None
 
     def initDisassembler(self, architecture="intel"):
-        """Initialize disassembler backend to given architecture, if not initialized yet, default: intel"""
-        if self.disassembler is None:
-            if architecture == "intel":
-                self.disassembler = IntelDisassembler(self.config)
-            elif architecture == "aarch64":
-                self.disassembler = AArch64Disassembler(self.config)
-            elif architecture == "cil":
-                self.disassembler = CilDisassembler(self.config)
-            elif architecture == "dalvik":
-                self.disassembler = DalvikDisassembler(self.config)
+        """Initialize disassembler backend to given architecture, default: intel.
+        Re-creates the backend if a differing architecture is requested later, unless a
+        backend was explicitly pinned at construction time (self._explicit_backend)."""
+        if self.disassembler is not None and (self._explicit_backend or self._active_architecture == architecture):
+            return
+        if architecture == "intel":
+            self.disassembler = IntelDisassembler(self.config)
+        elif architecture == "aarch64":
+            self.disassembler = AArch64Disassembler(self.config)
+        elif architecture == "cil":
+            self.disassembler = CilDisassembler(self.config)
+        elif architecture == "dalvik":
+            self.disassembler = DalvikDisassembler(self.config)
+        else:
+            return
+        self._active_architecture = architecture
 
     def _getDurationInSeconds(self, start_ts, end_ts):
         return (end_ts - start_ts).seconds + ((end_ts - start_ts).microseconds / 1000000.0)
@@ -175,13 +182,11 @@ class Disassembler:
             if self.config.STORE_BUFFER:
                 smda_report.buffer = binary_info.binary
         except Exception as exc:
-            LOGGER.error("An error occurred while disassembling file.")
             smda_report = self._handleDisassemblyException(
                 start,
                 exc,
                 "An error occurred while disassembling file.",
             )
-            smda_report = self._createErrorReport(start, exc)
         return smda_report
 
     def disassembleUnmappedBuffer(self, file_content):
@@ -198,13 +203,11 @@ class Disassembler:
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
-            LOGGER.error("An error occurred while disassembling unmapped buffer.")
             smda_report = self._handleDisassemblyException(
                 start,
                 exc,
                 "An error occurred while disassembling unmapped buffer.",
             )
-            smda_report = self._createErrorReport(start, exc)
         return smda_report
 
     def disassembleBuffer(
@@ -227,9 +230,6 @@ class Disassembler:
             architecture = "dalvik"
             if bitness is None:
                 bitness = DexFileLoader.getBitness(file_content)
-            # initDisassembler caches by self.disassembler-is-None, so a backend
-            # picked at construction time would otherwise win against autodetect.
-            self.disassembler = None
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness
@@ -248,13 +248,11 @@ class Disassembler:
             if self.config.STORE_BUFFER:
                 smda_report.buffer = file_content
         except Exception as exc:
-            LOGGER.error("An error occurred while disassembling buffer.")
             smda_report = self._handleDisassemblyException(
                 start,
                 exc,
                 "An error occurred while disassembling buffer.",
             )
-            smda_report = self._createErrorReport(start, exc)
         return smda_report
 
     def _disassemble(self, binary_info, timeout=0):

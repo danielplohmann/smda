@@ -238,6 +238,8 @@ class MachoFileLoader:
             if not segment.virtual_address:
                 continue
             rva = segment.virtual_address - base_addr
+            if rva < 0:
+                continue
             LOGGER.debug(
                 "MachO: mapping segment of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)",
                 segment.file_size,
@@ -249,7 +251,12 @@ class MachoFileLoader:
                 raise ValueError(
                     f"Segment content size mismatch: expected {segment.file_size}, got {len(segment.content)}"
                 )
-            mapped_binary[rva : rva + segment.file_size] = segment.content
+            # mapped_binary's capacity is sized from virtual_size, but lief.parse() never
+            # validates file_size against virtual_size (only an explicit lief.MachO.check_layout()
+            # call does, which this loader never makes); clamp the write extent so a crafted/
+            # corrupted Mach-O with file_size > virtual_size can't write past the buffer.
+            copy_size = min(segment.file_size, max(0, len(mapped_binary) - rva))
+            mapped_binary[rva : rva + copy_size] = segment.content[:copy_size]
 
         # map sections.
         for section in _get_sorted_sections(macho_file):
@@ -273,7 +280,10 @@ class MachoFileLoader:
                 min_raw_offset,
                 base_addr,
             )
-            mapped_binary[0:min_raw_offset] = binary[0:min_raw_offset]
+            # clamp to both the raw file's actual length and mapped_binary's capacity so this
+            # slice assignment can never resize mapped_binary on a truncated/malformed file
+            header_copy_len = min(min_raw_offset, len(binary), len(mapped_binary))
+            mapped_binary[0:header_copy_len] = binary[0:header_copy_len]
 
         LOGGER.debug("MachO: final mapped size: 0x%x", len(mapped_binary))
         return bytes(mapped_binary)

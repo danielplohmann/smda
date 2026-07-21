@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import logging
+import struct
 import types
 import unittest
 
@@ -17,6 +18,45 @@ def _make_manager(config, binary=b"\x55\x8b\xec" * 1024, base_addr=0x1000, bitne
     binary_info = types.SimpleNamespace(bitness=bitness, base_addr=base_addr, binary=binary)
     manager.disassembly = types.SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
     manager.bitness = bitness
+    return manager
+
+
+def _make_full_manager(config, binary, base_addr=0x1000, bitness=32):
+    """build a FunctionCandidateManager wired with a disassembly stub that mirrors
+    DisassemblyResult's real getRawBytes/isAddrWithinMemoryImage semantics (no bounds
+    checking on getRawBytes, range-checked isAddrWithinMemoryImage), enough to drive
+    locateReferenceCandidates()/resolvePointerReference() directly."""
+    manager = FunctionCandidateManager(config)
+    binary_info = types.SimpleNamespace(
+        bitness=bitness, base_addr=base_addr, binary=binary, binary_size=len(binary), code_areas=[]
+    )
+
+    def _get_raw_bytes(offset, num_bytes):
+        return binary_info.binary[offset : offset + num_bytes]
+
+    def _is_addr_within_memory_image(destination):
+        if destination is None:
+            return False
+        return binary_info.base_addr <= destination < (binary_info.base_addr + binary_info.binary_size)
+
+    def _dereference_dword(addr):
+        if _is_addr_within_memory_image(addr):
+            rel_start = addr - binary_info.base_addr
+            extracted = binary_info.binary[rel_start : rel_start + 4]
+            if len(extracted) < 4:
+                return None
+            return struct.unpack("I", extracted)[0]
+        return None
+
+    manager.disassembly = types.SimpleNamespace(
+        binary_info=binary_info,
+        analysis_timeout=False,
+        getRawBytes=_get_raw_bytes,
+        isAddrWithinMemoryImage=_is_addr_within_memory_image,
+        dereferenceDword=_dereference_dword,
+    )
+    manager.bitness = bitness
+    manager._code_areas = []
     return manager
 
 
@@ -122,6 +162,61 @@ class CandidateSafeguardsTestSuite(unittest.TestCase):
         manager.disassembly.analysis_timeout = True
         manager.locateCandidates()
         self.assertEqual(manager.candidates, {})
+
+    def test_reference_candidate_with_exactly_five_bytes_remaining_is_registered(self):
+        # the 0xE8 opcode byte is at offset 0x10; exactly 5 bytes remain in the binary
+        # (1 opcode byte + 4 relative-offset bytes), which is a fully in-bounds read.
+        base_addr = 0x1000
+        call_offset_in_binary = 0x10
+        rel_call_offset = -(call_offset_in_binary + 5)  # makes call_destination == base_addr
+        binary = b"\x90" * call_offset_in_binary + b"\xe8" + struct.pack("<i", rel_call_offset)
+        self.assertEqual(len(binary) - call_offset_in_binary, 5)
+
+        config = SmdaConfig()
+        manager = _make_full_manager(config, binary, base_addr=base_addr, bitness=32)
+        manager.locateReferenceCandidates()
+
+        self.assertIn(
+            base_addr,
+            manager.candidates,
+            "the last valid 0xE8 call candidate (exactly 5 bytes remaining) must not be dropped",
+        )
+
+    def test_delphi_kb_relocation_skips_out_of_bounds_offsets(self):
+        base_addr = 0x400000
+        binary = b"\x90" * 0x20
+        config = SmdaConfig()
+        manager = _make_full_manager(config, binary, base_addr=base_addr, bitness=32)
+        manager.symbol_addresses = []
+        manager.lang_analyzer = types.SimpleNamespace(
+            checkGo=lambda: False,
+            checkDelphiKb=lambda: True,
+            checkDelphi=lambda: False,
+            getDelphiKbObjects=list,
+            delphi_kb_resolver=types.SimpleNamespace(
+                getRelocations=lambda: [-5, 0, len(binary) - 3, len(binary) - 2, len(binary) - 1, len(binary), 1000]
+            ),
+        )
+        original_binary = manager.disassembly.binary_info.binary
+
+        # must not raise (IndexError/etc.) despite the out-of-bounds relocation offsets
+        manager.locateLangSpecCandidates()
+
+        # every offending offset was skipped, so the underlying bytes are untouched
+        self.assertEqual(manager.disassembly.binary_info.binary, original_binary)
+
+    def test_resolve_pointer_reference_returns_none_on_short_tail_read(self):
+        base_addr = 0x1000
+        # only 2 bytes remain after offset+2, so getRawBytes(offset + 2, 4) is short
+        binary = b"\xff\x25\x11\x22"
+        offset = 0  # offset + 2 == 2, only 2 bytes left in the 4-byte binary
+
+        config = SmdaConfig()
+        manager_32 = _make_full_manager(config, binary, base_addr=base_addr, bitness=32)
+        self.assertIsNone(manager_32.resolvePointerReference(offset))
+
+        manager_64 = _make_full_manager(config, binary, base_addr=base_addr, bitness=64)
+        self.assertIsNone(manager_64.resolvePointerReference(offset))
 
 
 if __name__ == "__main__":
