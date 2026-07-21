@@ -86,6 +86,37 @@ class _MockPeBinary:
 
 
 class TestPeSymbolProviderImports(unittest.TestCase):
+    def test_win_api_resolver_searches_all_configured_dump_databases(self):
+        cached_databases = {
+            "/first.json": (
+                {
+                    0x1000: ("first.dll", "FirstApi"),
+                    0x3000: ("first.dll", "SharedAddress"),
+                },
+                False,
+            ),
+            "/second.json": (
+                {
+                    0x2000: ("second.dll", "SecondApi"),
+                    0x3000: ("second.dll", "SharedAddress"),
+                },
+                False,
+            ),
+        }
+        config = SimpleNamespace(API_COLLECTION_FILES={"first": "/first.json", "second": "/second.json"})
+        with mock.patch.object(WinApiResolver, "_db_cache", cached_databases):
+            resolver = WinApiResolver(config)
+        resolver.update(SimpleNamespace(is_buffer=True))
+
+        self.assertIsNone(resolver._os_name)
+        self.assertEqual(resolver.getApi(0, 0x1000), ("first.dll", "FirstApi"))
+        self.assertEqual(resolver.getApi(0, 0x2000), ("second.dll", "SecondApi"))
+        self.assertEqual(resolver.getApi(0, 0x3000), ("first.dll", "SharedAddress"))
+
+        resolver.setOsName("second")
+        self.assertEqual(resolver.getApi(0, 0x1000), (None, None))
+        self.assertEqual(resolver.getApi(0, 0x3000), ("second.dll", "SharedAddress"))
+
     def test_parse_imports_uses_active_base_addr_not_imagebase(self):
         provider = PeSymbolProvider(None)
         pe_binary = _MockPeBinary(

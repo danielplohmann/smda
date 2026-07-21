@@ -228,6 +228,17 @@ class DisassemblyTestSuite(unittest.TestCase):
         smda_ins = SmdaInstruction((0, "f2e80b100000", "bnd call", "0x1010"))
         self.assertEqual(IntelInstructionEscaper.escapeBinary(smda_ins), "f2e8????????")
 
+    def testIntelEscapeBinaryValuePreservesTwoOccurrenceBehavior(self):
+        value = 0x01010101
+        self.assertEqual(
+            IntelInstructionEscaper.escapeBinaryValue(None, "aa01010101bb01010101cc", value),
+            "aa????????bb????????cc",
+        )
+        self.assertEqual(
+            IntelInstructionEscaper.escapeBinaryValue(None, "0101010101", value),
+            "01????????",
+        )
+
     def testCilInstructionWildcarding(self):
         test_data = [
             # call MemberRef

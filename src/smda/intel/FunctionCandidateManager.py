@@ -217,12 +217,92 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 return self.gap_pointer
         return None
 
-    def checkCodePadding(self):
-        pattern_functions = []
-        for _pattern_count, pattern in enumerate(
-            re.finditer(r"((\xCC){2,}|(\x90){2,})", self.disassembly.binary_info.binary), 1
-        ):
-            pattern_functions.append(pattern.span()[1] + 1)
+    def checkFunctionOverlap(self):
+        function_boundaries = []
+        for function in self.disassembly.functions:
+            min_addr = self.getBitMask()
+            max_addr = 0
+            for block in self.disassembly.functions[function]:
+                min_addr = min(min_addr, min([instruction[0] for instruction in block]))
+                max_addr = max(
+                    max_addr,
+                    max([instruction[0] + instruction[1] for instruction in block]),
+                )
+            function_boundaries.append((min_addr, max_addr))
+        current_entry = (0, 0)
+        for entry in sorted(function_boundaries):
+            if current_entry[1] > entry[0]:
+                return True
+            current_entry = entry
+        return False
+
+    def ensureCandidate(self, addr):
+        """create candidate if it does not exist yet, returns True if newly created, else False"""
+        if addr not in self.candidates:
+            cap = getattr(self.config, "MAX_FUNCTION_CANDIDATES", 0)
+            if cap and len(self.candidates) >= cap:
+                if not self._candidate_cap_logged:
+                    LOGGER.warning(
+                        "MAX_FUNCTION_CANDIDATES cap (%d) reached during candidate identification; "
+                        "refusing further candidates to bound memory usage.",
+                        cap,
+                    )
+                    self._candidate_cap_logged = True
+                return False
+            self.candidates[addr] = FunctionCandidate(self.disassembly.binary_info, addr)
+            return True
+        return False
+
+    def addGapCandidate(self, addr):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
+            self.candidates[addr].setIsGapCandidate(True)
+
+    def addTailcallCandidate(self, addr):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
+            self.candidates[addr].setIsTailcallCandidate(True)
+
+    def addReferenceCandidate(self, addr, source_ref):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
+            self._all_call_refs[source_ref] = addr
+        if addr in self.candidates:
+            self._addCappedCallRef(self.candidates[addr], source_ref)
+
+    def addLanguageSpecCandidate(self, addr, lang_spec):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
+            self.candidates[addr].setLanguageSpec(lang_spec)
+
+    def addPrologueCandidate(self, addr):
+        if not self._passesCodeFilter(addr):
+            return False
+        return self.ensureCandidate(addr)
+
+    def addSymbolCandidate(self, addr):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
+            self.candidates[addr].setIsSymbol(True)
+            self.candidates[addr].setInitialCandidate(True)
+
+    def addExceptionCandidate(self, addr):
+        if not self._passesCodeFilter(addr):
+            return False
+        self.ensureCandidate(addr)
+        if addr in self.candidates:
+            self.candidates[addr].setIsExceptionHandler(True)
+            self.candidates[addr].setInitialCandidate(True)
 
     def resolvePointerReference(self, offset):
         if self.bitness == 32:

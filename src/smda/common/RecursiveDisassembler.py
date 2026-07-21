@@ -252,14 +252,6 @@ class RecursiveDisassembler:
             # state.getBlocks(); this collision path is unreachable from the gap pass today, so
             # the change is behavior-neutral (output stays byte-for-byte identical).
             return state
-            self.fc_manager.updateAnalysisAborted(
-                start_addr,
-                f"collision with existing code of function 0x{self.disassembly.ins2fn[start_addr]:08x}",
-            )
-            # return the (empty) state, not a bare list, so every caller path can safely call
-            # state.getBlocks(); this collision path is unreachable from the gap pass today, so
-            # the change is behavior-neutral (output stays byte-for-byte identical).
-            return state
         while state.hasUnprocessedBlocks():
             LOGGER.debug(
                 "  current block queue: %s",
