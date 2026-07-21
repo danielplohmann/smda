@@ -99,7 +99,7 @@ Pre-commit hooks (ruff + standard hygiene checks) run on commit via `.pre-commit
 ## Repo Layout
 
 ```
-src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, ida/, utility/)
+src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, ida/, synthesis/, utility/)
 tests/           # pytest suite (test*.py)
 data/            # generated ApiScout / reference JSON data (do not hand-edit; see Gotchas)
 profiling/       # CPU/memory profiling toolkit (make profile-cpu / profile-mem / profile-flame)
@@ -132,6 +132,7 @@ Keep the two version strings in sync. Do not bump versions unless the change is 
 - Run `make test` and `make lint` before considering work complete.
 - Architecture-specific behavior (intel / aarch64 / cil / dalvik) should be covered with representative fixtures where feasible.
 - The xored `tests/*_xored` corpora and the malpedia **benchmark matrix (`.github/workflows/perf_benchmark.yml`) are PR/CI-only** — they require a password-gated malpedia corpus and are not expected to run locally. For local recovery-quality validation, the maintainer works against separate groundtruth datasets rather than the full public matrix. Do not assume you can reproduce the benchmark suite locally.
+- Run tests inside the devcontainer (`.devcontainer/run.sh pytest ...`) if the host system's Python is too old — the devcontainer provides Python 3.10+ with all deps.
 
 ## Gotchas
 
@@ -164,6 +165,13 @@ Constraints an agent must respect to avoid breaking SMDA or its downstream consu
 
 ### CFG model is strict (IDA-style)
 - A function may contain only instructions belonging to that function, and instructions may not overlap. Do not relax this model — recovery passes and downstream tooling depend on it.
+
+### Synthesis (`synthesis/`) is experimental per-format binary reconstruction
+- `smda.synthesis` (`PeSynthesizer`, `ElfSynthesizer`, `MachoSynthesizer`) rebuilds fictive PE/ELF/Mach-O files from an `SmdaReport` via `report.synthesizeBinary()`. It plants bytes per basic block (not per function extent; blocks may be non-contiguous), fuses import metadata, and targets BSim-compatible output.
+- The feature is **experimental**: it works on well-formed reports but has not been hardened against pathological or adversarial inputs. The golden test fixtures cover one sample per format only.
+- `code_sections` names are **not preserved** through `SmdaReport.toDict()`/`fromDict()` round-trips (they come from LIEF metadata). Tests that mutate a report via `fromDict` must capture VA ranges before the round-trip.
+- Synthesis is deterministic from report content only — it does not consult `STORE_BUFFER`.
+- The devcontainer (`./.devcontainer/run.sh`) provides Python 3.10+ with all deps; use it to run tests instead of the host system (which may be too old).
 
 ### Reality check — common traps for agents
 - **The pipeline description is intel-centric.** The `E8`/`FF 15`/`55 8B EC` heuristics and the gap-search/NOP-list logic belong to the intel backend. Other backends follow their own candidate/traversal logic (e.g. `cil` does essentially no gap search thanks to rich metadata). Do not apply intel assumptions to other architectures.

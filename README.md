@@ -76,6 +76,11 @@ virtual address, while the legacy `exported_functions` and `symbols` maps remain
 demangled in these label maps; API references (`SmdaFunction.apirefs`) keep the undecorated import name so they
 stay comparable across PE, ELF, and Mach-O.
 
+### Experimental: Binary Synthesis
+
+SMDA can rebuild fictive PE, ELF, and Mach-O files from a recovered CFG via `SmdaReport.synthesizeBinary()`. The output plants function bytes per basic block at their original VAs and fuses import metadata, producing binaries that parse cleanly with LIEF and can be loaded into analysis tools (e.g. IDA, Ghidra Binary Ninja). This feature is experimental and works on well-formed reports but has not been hardened against pathological or adversarial inputs. Synthesis is deterministic from report content only and does not require the stored buffer.
+
+The code should be fully compatible with Python 3.10+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
 To take full advantage of SMDA's capabilities, make sure to (optionally) install:
@@ -141,6 +146,7 @@ make test
  * 2026-07-22: v4.3.3 - Detect x86/x64 import-jmp thunks (a single `jmp` through a resolved IAT/GOT slot) and populate `num_thunk_functions` in reports. (THX: @r0ny123)
  * 2026-07-22: v4.3.2 - Fixed language identification to prefer exact Go build-ID evidence over the structurally noisy C++ score and now export the computed `language` guess in `SmdaReport`. (THX: @r0ny123)
  * 2026-07-22: v4.3.1 - Restored the dropped reachable-collision cleanup in `FunctionAnalysisState.getBlocks()` so a fall-through colliding with another function removes the stale cross-function code reference and ends the block. (THX: @r0ny123)
+
  * 2026-07-17: v4.3.0 - Format-aware `xheader` capture: `getHeaderBytes()` now stores computed, trailing-zero-trimmed, capped header regions for PE (section table), ELF (program headers), and Mach-O (active-slice load commands) instead of fixed truncations, enabling metadata recovery and binary re-synthesis. Added a normalized PE header hash (`SmdaReport.pe_header_hash`, volatile TimeDateStamp/CheckSum/SizeOfImage zeroed) for hash-busting-resistant clustering.
  * 2026-07-17: v4.2.17 - Improved function-boundary accuracy on ARM64 PE binaries (trap-data gap rejection, prologue-gated call-fallthrough alignment cuts, .pdata-authoritative conditional-tailcall boundaries) with the matching x86 gap-scan/alignment-cut fixes. (THX: @r0ny123)
  * 2026-07-15: v4.2.16 - Aarch64: add platform-specific function-candidate sources (PE ARM64 exception directory, ELF .eh_frame FDEs, Mach-O function-pointer metadata), wire the analysis-timeout callback into candidate identification, and extend README platform support wording. (THX: @r0ny123)
