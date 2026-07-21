@@ -3,7 +3,7 @@ import unittest
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
-from smda.intel.LanguageAnalyzer import LanguageAnalyzer
+from smda.common.LanguageAnalyzer import LanguageAnalyzer
 
 
 class _DummyDisassembly:

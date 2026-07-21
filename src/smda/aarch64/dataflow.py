@@ -7,6 +7,8 @@ over capstone operands. This module is the single, maintained copy.
 
 import struct
 
+from capstone.arm64_const import ARM64_SFT_LSL
+
 from .definitions import INSTRUCTION_SIZE, adrp_page_value
 
 
@@ -18,6 +20,16 @@ def norm_reg(name):
     if name.startswith(("w", "x")):
         return "x" + name[1:]
     return name
+
+
+def movImmediateValue(op):
+    """Value contributed by an IMM operand of mov/movz/movk, with LSL applied.
+
+    Capstone leaves ``op.imm`` as the raw unshifted 16-bit field
+    (e.g. ``movk w8, #0x6c6c, lsl #16`` reports imm=0x6c6c, not 0x6c6c0000).
+    """
+    shift = op.shift.value if op.shift.type == ARM64_SFT_LSL else 0
+    return op.imm << shift, shift
 
 
 def _applyConstantWrite(cap_ins, constants, disassembler):
@@ -56,7 +68,13 @@ def _applyConstantWrite(cap_ins, constants, disassembler):
     elif mnemonic in ("mov", "movz", "movk") and len(cap_ins.operands) >= 2:
         op1 = cap_ins.operands[1]
         if op1.type == 2:  # IMM
-            constants[dest_reg] = op1.imm
+            imm_value, shift = movImmediateValue(op1)
+            if mnemonic == "movk" and dest_reg in constants:
+                constants[dest_reg] = (constants[dest_reg] & ~(0xFFFF << shift)) | imm_value
+            elif mnemonic == "movk":
+                constants.pop(dest_reg, None)
+            else:
+                constants[dest_reg] = imm_value
         elif op1.type == 1:  # REG
             src_reg = norm_reg(cap_ins.reg_name(op1.reg))
             if src_reg in constants:

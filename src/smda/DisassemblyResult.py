@@ -279,7 +279,7 @@ class DisassemblyResult:
             ins_addrs.remove(func_addr)
         # reduce outrefs to addresses within the memory image
         max_addr = self.binary_info.base_addr + self.binary_info.binary_size
-        image_refs = [ref for ref in code_refs if self.binary_info.base_addr <= ref[1] <= max_addr]
+        image_refs = [ref for ref in code_refs if self.binary_info.base_addr <= ref[1] < max_addr]
         for ref in image_refs:
             if ref[1] in ins_addrs:
                 continue

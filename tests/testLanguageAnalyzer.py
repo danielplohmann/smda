@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 
 from smda.common.BinaryInfo import BinaryInfo
-from smda.intel.LanguageAnalyzer import LanguageAnalyzer
+from smda.common.LanguageAnalyzer import LanguageAnalyzer
 
 
 class _DummyDisassembly:
@@ -26,7 +26,7 @@ class TestLanguageAnalyzer(unittest.TestCase):
             findall_calls.append((pattern, subject))
             return original_findall(pattern, subject)
 
-        with mock.patch("smda.intel.LanguageAnalyzer.re.findall", side_effect=counting_findall):
+        with mock.patch("smda.common.LanguageAnalyzer.re.findall", side_effect=counting_findall):
             result = analyzer.identify()
 
         self.assertEqual(result["_count_thiscalls"], 2)

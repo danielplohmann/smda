@@ -381,6 +381,9 @@ class RecursiveDisassembler:
         self._api_cache = {}
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
+        # analyzeBuffer replaces the DisassemblyResult allocated in __init__; re-apply
+        # CONFIDENCE_THRESHOLD so report filtering actually sees the configured value.
+        self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = self.backend.name
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)

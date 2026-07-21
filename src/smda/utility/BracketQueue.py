@@ -31,6 +31,9 @@ class BracketQueue:
 
     def add(self, candidate):
         bracket_index = min(2, len(candidate.call_ref_sources))
+        for other_index in range(3):
+            if other_index != bracket_index:
+                self.brackets[other_index].pop(candidate.addr, None)
         self.brackets[bracket_index][candidate.addr] = candidate
 
     def update(self, target_candidate=None):

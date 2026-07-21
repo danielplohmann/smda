@@ -217,6 +217,31 @@ class BracketQueueTestSuite(unittest.TestCase):
         for _index, candidate in enumerate(queue):
             print(candidate)
 
+    def testAddDoesNotLeaveStaleDuplicateAcrossBrackets(self):
+        buffer = bytes(bytearray.fromhex(BENIGN_TEST_DATA))
+        binary_info = BinaryInfo(buffer)
+        binary_info.bitness = 32
+        queue = BracketQueue()
+        candidate = FunctionCandidate(binary_info, 0x0)
+        # first insertion with no call refs lands in bracket 0
+        queue.add(candidate)
+        self.assertIn(candidate.addr, queue.brackets[0])
+        self.assertNotIn(candidate.addr, queue.brackets[1])
+        self.assertNotIn(candidate.addr, queue.brackets[2])
+        # call_ref_sources grows and add() (not update()) is called again,
+        # which must move the candidate to bracket 2, not duplicate it
+        candidate.addCallRef(0x30)
+        candidate.addCallRef(0x160)
+        queue.add(candidate)
+        self.assertNotIn(candidate.addr, queue.brackets[0])
+        self.assertNotIn(candidate.addr, queue.brackets[1])
+        self.assertIn(candidate.addr, queue.brackets[2])
+        self.assertEqual(
+            sum(1 for bracket in queue.brackets.values() if candidate.addr in bracket),
+            1,
+        )
+        self.assertEqual(sum(len(b) for b in queue.brackets.values()), 1)
+
     def test_priority_queue_uses_public_heap_ordering(self):
         binary_info = BinaryInfo(b"\x90" * 0x40)
         binary_info.base_addr = 0

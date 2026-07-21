@@ -247,3 +247,40 @@ def is_function_prologue(word):
         and word & STR_IMM9_NEGATIVE
         and (word & 0x1F) == _LINK_REGISTER
     )
+
+
+# movz (64-bit, any hw shift); Rd in the intra-procedure-call scratch registers
+# x16/x17 marks veneer/thunk immediate setup - compilers reserve IP0/IP1 for
+# linker-generated stubs, so ordinary function bodies do not load them first.
+MOVZ_64_MASK = 0xFF800000
+MOVZ_64_VALUE = 0xD2800000
+_IP_REGISTERS = frozenset({16, 17})
+
+
+def is_exception_record_entry(word):
+    """Whether an exception record's begin word looks like an independent
+    function entry rather than a funclet/fragment continuation.
+
+    PE ARM64 exception records also name funclets and function fragments,
+    whose begin address is an ordinary mid-body word (ldr/mov/adrp/branch)
+    continuing the enclosing function. Independent entries named by records
+    open with a recognized prologue or BTI pad, or with one of the
+    thunk-shaped bodies MSVC emits records for: a bare indirect branch
+    (``br xN`` import/guard dispatch), a single callee-saved pre-index store
+    (``str x{19..28}, [sp, #-imm]!``), or veneer immediate setup
+    (``movz x16/x17, #imm``).
+    """
+    if is_function_prologue(word):
+        return True
+    # br xN: single-instruction dispatch/import thunk
+    if (word & BR_MASK) == BR_VALUE:
+        return True
+    # callee-saved single-register save: str x{19..28}, [sp, #-imm]!
+    if (
+        (word & STR_PREINDEX_MASK) == STR_PREINDEX_VALUE
+        and ((word >> 5) & 0x1F) == _SP
+        and word & STR_IMM9_NEGATIVE
+        and (word & 0x1F) in _CALLEE_SAVED_GPR
+    ):
+        return True
+    return (word & MOVZ_64_MASK) == MOVZ_64_VALUE and (word & 0x1F) in _IP_REGISTERS

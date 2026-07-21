@@ -42,7 +42,10 @@ class JumpTableAnalyzer:
             b"(\x48|\x4c)\x8d.{5}(.\x63|\x77|.\x89..\x63)",
             self.disassembly.binary_info.binary,
         ):
-            rel_table_offset = struct.unpack("I", self.disassembly.getRawBytes(match_offset.start() + 3, 4))[0]
+            raw_offset_bytes = self.disassembly.getRawBytes(match_offset.start() + 3, 4)
+            if len(raw_offset_bytes) < 4:
+                continue
+            rel_table_offset = struct.unpack("I", raw_offset_bytes)[0]
             ins_offset = self.disassembly.binary_info.base_addr + match_offset.start()
             table_offset = ins_offset + rel_table_offset + 7
             if self.disassembly.isAddrWithinMemoryImage(table_offset):
@@ -106,11 +109,11 @@ class JumpTableAnalyzer:
         jump_targets = set()
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
-                try:
-                    entry = struct.unpack("I", self.disassembly.getBytes(off_jumptable + index * 4, 4))[0]
-                    jump_targets.add(entry)
-                except (struct.error, IndexError):
+                raw_entry_bytes = self.disassembly.getBytes(off_jumptable + index * 4, 4)
+                if raw_entry_bytes is None or len(raw_entry_bytes) < 4:
                     continue
+                entry = struct.unpack("I", raw_entry_bytes)[0]
+                jump_targets.add(entry)
         return sorted(jump_targets)
 
     def _extractRelativeTableOffsets(self, jumptable_size, off_jumptable, alternative_base=None, bonus_offset=0):
@@ -120,22 +123,24 @@ class JumpTableAnalyzer:
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
                 rebased = off_jumptable + bonus_offset - self.disassembly.binary_info.base_addr
-                try:
-                    entry = struct.unpack("I", self.disassembly.getRawBytes(rebased + index * 4, 4))[0]
-                    # check if we are hitting a known jump table
-                    if index and (off_jumptable + index * 4) in self.table_offsets:
-                        # print("  Hit limit for jump table: 0x%x" % (off_jumptable + index * 4))
-                        break
-                    if not self.disassembly.isAddrWithinMemoryImage(jump_base + entry):
-                        break
-                    if entry:
-                        target = (jump_base + entry) & self.disassembler.getBitMask()
-                        jump_targets.add(target)
-                        # state.addDataRef(off_jumptable, rebased + index * 4, size=4)
-                    elif not alternative_base:
-                        break
-                except (struct.error, IndexError):
+                if rebased < 0:
                     continue
+                raw_entry_bytes = self.disassembly.getRawBytes(rebased + index * 4, 4)
+                if len(raw_entry_bytes) < 4:
+                    continue
+                entry = struct.unpack("I", raw_entry_bytes)[0]
+                # check if we are hitting a known jump table
+                if index and (off_jumptable + index * 4) in self.table_offsets:
+                    # print("  Hit limit for jump table: 0x%x" % (off_jumptable + index * 4))
+                    break
+                if not self.disassembly.isAddrWithinMemoryImage(jump_base + entry):
+                    break
+                if entry:
+                    target = (jump_base + entry) & self.disassembler.getBitMask()
+                    jump_targets.add(target)
+                    # state.addDataRef(off_jumptable, rebased + index * 4, size=4)
+                elif not alternative_base:
+                    break
         return sorted(jump_targets)
 
     def _resolveExplicitTable(self, jump_instruction_address, state, jumptable_address, jumptable_size=None):
@@ -153,10 +158,10 @@ class JumpTableAnalyzer:
             return jumptable_addresses
         if self.disassembly.isAddrWithinMemoryImage(jumptable_address):
             for i in range(jumptable_size):
-                table_entry = struct.unpack(
-                    entry_format,
-                    self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size),
-                )[0]
+                raw_entry_bytes = self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size)
+                if raw_entry_bytes is None or len(raw_entry_bytes) < entry_size:
+                    break
+                table_entry = struct.unpack(entry_format, raw_entry_bytes)[0]
                 if not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
                 state.addDataRef(

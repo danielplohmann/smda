@@ -74,15 +74,23 @@ class PeFileLoader:
             # support up to 100MB for now.
             if max_virt_section_offset and max_virt_section_offset <= SmdaConfig.MAX_IMAGE_SIZE:
                 mapped_binary = bytearray([0] * max_virt_section_offset)
-                mapped_binary[0:min_raw_section_offset] = binary[0:min_raw_section_offset]
+                # clamp to both the raw file's actual length and mapped_binary's capacity so this
+                # header-copy slice assignment can never resize mapped_binary (same length on
+                # both sides of the assignment, mirroring the per-section copy clamp below)
+                header_copy_len = min(min_raw_section_offset, len(binary), len(mapped_binary))
+                mapped_binary[0:header_copy_len] = binary[0:header_copy_len]
             else:
                 raise ValueError("PE file larger than MAX_IMAGE_SIZE")
 
             for section_info in section_infos:
+                # clamp the copy length to the bytes actually available in the raw file so a
+                # truncated/malformed raw_size never shrinks mapped_binary via slice assignment
+                # (the target region stays zero-filled beyond whatever was actually copied)
+                available_raw_bytes = max(0, len(binary) - section_info["raw_offset"])
+                copy_size = min(section_info["raw_size"], available_raw_bytes)
                 mapped_from = section_info["virt_offset"]
-                mapped_to = section_info["virt_offset"] + section_info["raw_size"]
-                mapped_binary[mapped_from:mapped_to] = binary[
-                    section_info["raw_offset"] : section_info["raw_offset"] + section_info["raw_size"]
+                mapped_binary[mapped_from : mapped_from + copy_size] = binary[
+                    section_info["raw_offset"] : section_info["raw_offset"] + copy_size
                 ]
                 LOGGER.debug(
                     "Mapping %d: raw 0x%x (0x%x bytes) -> virtual 0x%x (0x%x bytes)",

@@ -133,14 +133,23 @@ def get_nesting_depth(graph, domtree, root):
     significant_nodes = set.union(*([set(v) for v in expanded_graph.values() if len(v) > 1] + [set()]))
 
     # print("significant_nodes", significant_nodes)
-    def maximum_costs(cn):
-        # print("  maximum_costs cn", cn)
-        if cn not in domtree or not domtree[cn]:
-            # print("    %d not in domtree or not domtree[%d]" % (cn, cn), 1 if cn in significant_nodes else 0)
-            return 1 if cn in significant_nodes else 0
-        val = max(maximum_costs(n) for n in domtree[cn]) + (1 if cn in significant_nodes else 0)
-        # print("   ", val, 1 if cn in significant_nodes else 0)
-        return val
+    def maximum_costs(root_node):
+        # iterative post-order traversal (explicit stack) so deep dominator trees
+        # don't hit Python's recursion limit and silently report depth 0
+        costs = {}
+        stack = [(root_node, False)]
+        while stack:
+            cn, children_done = stack.pop()
+            if children_done:
+                children = domtree.get(cn) or []
+                own_cost = 1 if cn in significant_nodes else 0
+                costs[cn] = max((costs[child] for child in children), default=0) + own_cost if children else own_cost
+            else:
+                stack.append((cn, True))
+                for child in domtree.get(cn) or []:
+                    if child not in costs:
+                        stack.append((child, False))
+        return costs[root_node]
 
     try:
         return maximum_costs(root)

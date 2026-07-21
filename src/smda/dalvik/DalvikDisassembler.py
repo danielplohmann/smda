@@ -262,6 +262,7 @@ class DalvikDisassembler:
         self.config = config
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
+        self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
         self._diag_stubs_suppressed = 0
 
     def addPdbFile(self, binary_info, pdb_path):
@@ -884,6 +885,7 @@ class DalvikDisassembler:
         LOGGER.info("Analyzing buffer with %d bytes @0x%08x", binary_info.binary_size, binary_info.base_addr)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
+        self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "dalvik"
         self.disassembly.binary_info.bitness = 32  # Dalvik VM is always 32-bit
