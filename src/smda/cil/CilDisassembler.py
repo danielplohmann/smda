@@ -120,6 +120,7 @@ class CilDisassembler:
         self._addLabelProviders()
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = config.VERSION
+        self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
 
     def addPdbFile(self, binary_info, pdb_path):
         return
@@ -239,6 +240,7 @@ class CilDisassembler:
         self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
+        self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "cil"
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)

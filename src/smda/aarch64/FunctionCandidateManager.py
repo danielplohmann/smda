@@ -1,8 +1,8 @@
 """AArch64 function-candidate discovery.
 
-Reuses the candidate queue, scoring and gap book-keeping from the engine's
-candidate manager (currently housed under :mod:`smda.intel`) and replaces the
-x86 byte-level scans with AArch64-aware ones:
+Reuses the candidate queue, scoring and gap book-keeping from the
+architecture-neutral candidate manager under :mod:`smda.common` and supplies
+AArch64-aware byte-level scans:
 
 * call-reference discovery scans for ``BL`` (direct call) and resolves its
   PC-relative target, in place of the x86 ``0xE8`` scan;
@@ -32,7 +32,7 @@ import struct
 import lief
 
 from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
-from smda.intel.FunctionCandidateManager import FunctionCandidateManager as _IntelFunctionCandidateManager
+from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment, get_macho_stub_ranges
 
 from .definitions import (
@@ -58,16 +58,20 @@ from .definitions import (
     adrp_page_value,
     is_bti_landing_pad,
     is_conditional_branch,
+    is_exception_record_entry,
     is_function_prologue,
     is_trap,
     rd_field,
     rn_field,
 )
+from .FunctionCandidate import FunctionCandidate
 
 LOGGER = logging.getLogger(__name__)
 
 
-class FunctionCandidateManager(_IntelFunctionCandidateManager):
+class FunctionCandidateManager(_CommonFunctionCandidateManager):
+    CANDIDATE_CLASS = FunctionCandidate
+
     def init(self, disassembly, cbAnalysisTimeout=None):
         # Reset the memoized executable-section ranges and Mach-O fixup state
         # BEFORE base initialization: super().init() runs candidate discovery,
@@ -76,9 +80,9 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
         self._exec_ranges = None
         self._macho_fixup_state = None
         super().init(disassembly, cbAnalysisTimeout)
-        # The base init() builds an x86 capstone purely for its NOP-based gap scan,
-        # which this backend disables (see nextGapCandidate); drop the stale handle.
-        self.capstone = None
+
+    def hasCommonPrologue(self, addr):
+        return FunctionCandidate(self.disassembly.binary_info, addr).hasCommonFunctionStart()
 
     def locateCandidates(self):
         # AArch64 candidate discovery: symbols, PE ARM64 exception-directory entries
@@ -199,6 +203,17 @@ class FunctionCandidateManager(_IntelFunctionCandidateManager):
                 continue
             addr = base_addr + begin_rva
             if not any(start <= addr < end for start, end in exec_ranges):
+                continue
+            # Exception records also name funclets and function fragments, whose
+            # begin address is a mid-body word continuing the enclosing function;
+            # seeding those as authoritative starts splits real functions. Only a
+            # record whose first word looks like a function entry (prologue, BTI
+            # pad, or a thunk shape) names an independent function start.
+            begin_word_bytes = self.disassembly.getRawBytes(begin_rva, 4)
+            if begin_word_bytes is None or len(begin_word_bytes) < 4:
+                continue
+            begin_word = int.from_bytes(begin_word_bytes, "little")
+            if not is_exception_record_entry(begin_word):
                 continue
             self.addExceptionCandidate(addr)
 
