@@ -65,6 +65,10 @@ Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependenc
 
 For Dalvik, the current scope is raw single-DEX inputs. APK, multi-dex container handling, and ODEX/VDEX/CDEX runtime-artifact analysis are not yet first-class workflows in SMDA.
 
+### Experimental: Binary Synthesis
+
+SMDA can rebuild fictive PE, ELF, and Mach-O files from a recovered CFG via `SmdaReport.synthesizeBinary()`. The output plants function bytes per basic block at their original VAs and fuses import metadata, producing binaries that parse cleanly with LIEF and can be loaded into analysis tools (e.g. IDA, Ghidra Binary Ninja). This feature is experimental and works on well-formed reports but has not been hardened against pathological or adversarial inputs. Synthesis is deterministic from report content only and does not require the stored buffer.
+
 The code should be fully compatible with Python 3.10+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
@@ -119,6 +123,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-21: v4.4.0 - Experimental binary synthesis: `SmdaReport.synthesizeBinary()` rebuilds fictive PE/ELF/Mach-O files from a recovered CFG, planting bytes per basic block at original VAs and fusing import metadata. New `smda/synthesis/` package with `BinarySynthesizer`, `PeSynthesizer`, `ElfSynthesizer`, `MachoSynthesizer`. (No new runtime deps.)
  * 2026-07-17: v4.3.0 - Format-aware `xheader` capture: `getHeaderBytes()` now stores computed, trailing-zero-trimmed, capped header regions for PE (section table), ELF (program headers), and Mach-O (active-slice load commands) instead of fixed truncations, enabling metadata recovery and binary re-synthesis. Added a normalized PE header hash (`SmdaReport.pe_header_hash`, volatile TimeDateStamp/CheckSum/SizeOfImage zeroed) for hash-busting-resistant clustering.
  * 2026-07-17: v4.2.17 - Improved function-boundary accuracy on ARM64 PE binaries (trap-data gap rejection, prologue-gated call-fallthrough alignment cuts, .pdata-authoritative conditional-tailcall boundaries) with the matching x86 gap-scan/alignment-cut fixes. (THX: @r0ny123)
  * 2026-07-15: v4.2.16 - Aarch64: add platform-specific function-candidate sources (PE ARM64 exception directory, ELF .eh_frame FDEs, Mach-O function-pointer metadata), wire the analysis-timeout callback into candidate identification, and extend README platform support wording. (THX: @r0ny123)
