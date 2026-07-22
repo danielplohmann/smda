@@ -226,7 +226,7 @@ class DelphiPythiaProvider(AbstractLabelProvider):
                 merged.append([start_offset, end_offset])
             else:
                 merged[-1][1] = max(merged[-1][1], end_offset)
-        return [tuple(entry) for entry in merged]
+        return [(start, end) for start, end in merged]
 
     def _scan_code_range(
         self, profile: DelphiVmtProfile, start_offset: int, end_offset: int
