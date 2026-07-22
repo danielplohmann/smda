@@ -176,7 +176,7 @@ class Disassembler:
                 self.disassembler.addPdbFile(binary_info, pdb_path)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
                 self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
@@ -197,7 +197,7 @@ class Disassembler:
             self.initDisassembler(binary_info.architecture)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
                 self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
@@ -242,7 +242,7 @@ class Disassembler:
         try:
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
-                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info.binary)
+                go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
                 self._addStringsToReport(smda_report, file_content, mode=string_mode)
             if self.config.STORE_BUFFER:
