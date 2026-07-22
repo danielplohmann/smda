@@ -4,7 +4,7 @@ import hashlib
 import logging
 import re
 import struct
-from typing import Iterator, List
+from typing import List
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
 from smda.aarch64.definitions import CALL_INS as AARCH64_CALL_INS
@@ -337,7 +337,7 @@ class SmdaFunction:
         for block in self.getBlocks():
             yield from block.getInstructions()
 
-    def getInstructionsForBlock(self, offset) -> Iterator["SmdaInstruction"]:
+    def getInstructionsForBlock(self, offset) -> List["SmdaInstruction"]:
         if offset is None:
             offset = self.offset
         if offset not in self.blocks:

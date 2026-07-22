@@ -164,7 +164,7 @@ def read_string(smda_report, offset, maxlen=None):
     return res
 
 
-def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int]]:
+def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int, int, str]]:
     """parse string features from the given instruction."""
     if mode == "go":
         # we address stack assigned strings and String structs
