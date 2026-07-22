@@ -35,7 +35,7 @@ class RustSymbolProvider(AbstractLabelProvider):
     def isApiProvider(self):
         return False
 
-    def getApi(self, to_address, api_address=None):
+    def getApi(self, to_addr, absolute_addr=None):
         return ("", "")
 
     def update(self, binary_info):
