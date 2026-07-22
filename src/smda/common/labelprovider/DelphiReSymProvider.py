@@ -297,6 +297,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def _read_ptr(self, offset: int) -> Optional[int]:
         """Read a pointer at the given offset."""
+        if offset < 0:
+            return None
         try:
             if self._settings.ptr_size == 4:
                 return struct.unpack("<I", self._binary[offset : offset + 4])[0]
@@ -313,6 +315,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def _read_short(self, offset: int) -> Optional[int]:
         """Read a 16-bit value at the given offset."""
+        if offset < 0:
+            return None
         try:
             return struct.unpack("<H", self._binary[offset : offset + 2])[0]
         except (struct.error, IndexError):
