@@ -278,6 +278,97 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(state.code_refs_from[0x1000], {0x2000})
         self.assertIn(0x1000, disassembler.disassembly.functions)
 
+    def test_cil_jmp_with_method_name_operand_does_not_abort_analysis(self):
+        # jmp's real operand type is InlineMethod (a tail-jump to another method's Token),
+        # so format_operand resolves it to a method-name STRING, not a hex address. The old
+        # code did an unconditional int(i_op_str, 16), which raises ValueError here and (with
+        # no try/except around analyzeFunction in analyzeBuffer) aborted analysis of every
+        # other method in the assembly too, not just this one.
+        class FakeInstruction:
+            offset = 0x1000
+            opcode = "jmp"
+            operand = object()
+
+            def get_bytes(self):
+                return b"\x27\x00"
+
+        disassembler = CilDisassembler(SmdaConfig())
+        disassembler.disassembly = DisassemblyResult()
+        method_body = SimpleNamespace(offset=0x1000, instructions=[FakeInstruction()])
+
+        with mock.patch("smda.cil.CilDisassembler.format_operand", return_value="DoSomething"):
+            state = disassembler.analyzeFunction(None, method_body.offset, method_body)
+
+        self.assertNotIn(0x1000, state.code_refs_from)
+        self.assertFalse(state.isNextInstructionReachable())
+        self.assertIn(0x1000, disassembler.disassembly.functions)
+
+    def test_cil_leave_records_branch_target_and_ends_block(self):
+        class FakeInstruction:
+            offset = 0x1000
+            opcode = "leave.s"
+            operand = object()
+
+            def get_bytes(self):
+                return b"\xdd\x00"
+
+        disassembler = CilDisassembler(SmdaConfig())
+        disassembler.disassembly = DisassemblyResult()
+        method_body = SimpleNamespace(offset=0x1000, instructions=[FakeInstruction()])
+
+        with mock.patch("smda.cil.CilDisassembler.format_operand", return_value="0x2000"):
+            state = disassembler.analyzeFunction(None, method_body.offset, method_body)
+
+        self.assertIn(0x2000, state.code_refs_from[0x1000])
+        self.assertIn(0x2000, state.jump_targets)
+
+    def test_cil_rethrow_and_endfinally_end_the_current_block(self):
+        for opcode in ("rethrow", "endfinally", "endfilter"):
+            with self.subTest(opcode=opcode):
+
+                class FakeInstruction:
+                    offset = 0x1000
+                    operand = object()
+
+                    def get_bytes(self):
+                        return b"\x00\x00"
+
+                FakeInstruction.opcode = opcode
+                disassembler = CilDisassembler(SmdaConfig())
+                disassembler.disassembly = DisassemblyResult()
+                method_body = SimpleNamespace(offset=0x1000, instructions=[FakeInstruction()])
+
+                with mock.patch("smda.cil.CilDisassembler.format_operand", return_value=""):
+                    state = disassembler.analyzeFunction(None, method_body.offset, method_body)
+
+                self.assertFalse(state.isNextInstructionReachable())
+
+    def test_cil_calli_after_tail_prefix_disables_fallthrough(self):
+        class TailInstruction:
+            offset = 0x1000
+            opcode = "tail."
+            operand = object()
+
+            def get_bytes(self):
+                return b"\xfe\x14"
+
+        class CalliInstruction:
+            offset = 0x1002
+            opcode = "calli"
+            operand = object()
+
+            def get_bytes(self):
+                return b"\x29\x00"
+
+        disassembler = CilDisassembler(SmdaConfig())
+        disassembler.disassembly = DisassemblyResult()
+        method_body = SimpleNamespace(offset=0x1000, instructions=[TailInstruction(), CalliInstruction()])
+
+        with mock.patch("smda.cil.CilDisassembler.format_operand", return_value="0x3000"):
+            state = disassembler.analyzeFunction(None, method_body.offset, method_body)
+
+        self.assertFalse(state.isNextInstructionReachable())
+
     def test_elf_api_resolver_uses_relocation_slot_address(self):
         resolver = ElfApiResolver(None)
         resolver._api_map["lief"][0x4018] = ("GLIBC_2.2.5", "puts")
