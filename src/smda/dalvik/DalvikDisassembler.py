@@ -18,6 +18,12 @@ from smda.utility.DexFileLoader import DexFileLoader
 
 LOGGER = logging.getLogger(__name__)
 
+# Safety bound on the payload-discovery fixed-point loop in
+# DalvikDisassembler._buildValidInstructionStarts. Each retry either discovers at least
+# one genuinely new payload range or the loop breaks, so this is far above any realistic
+# method's distinct switch/fill-array-data count and only guards against a logic error.
+_MAX_PAYLOAD_DISCOVERY_PASSES = 256
+
 
 class DexReferenceResolver:
     PRIMITIVE_TYPES = {
@@ -625,9 +631,33 @@ class DalvikDisassembler:
         The result is used in the recursive CFG pass (pass 2) to reject externally-
         derived targets (switch tables, exception handlers) that land mid-instruction
         or outside the method, preventing phantom CFG nodes from adversarial DEX.
+
+        Real compiled DEX only ever places a payload AFTER the switch/fill-array-data
+        instruction that references it, so a single forward sweep normally discovers a
+        payload's range before reaching its bytes. A crafted 31t branch offset can point
+        BACKWARD to a payload located earlier in the stream; a single sweep would then
+        have already misdecoded that payload's raw bytes as ordinary instructions before
+        ever learning they were payload data. Re-sweep with every payload range found so
+        far pre-excluded until the discovered set stops growing (bounded, since each
+        retry must either discover a genuinely new range or stop).
+        """
+        payload_ranges = []
+        valid = set()
+        for _ in range(_MAX_PAYLOAD_DISCOVERY_PASSES):
+            valid, next_payload_ranges = self._sweepInstructionStarts(bytecode, payload_ranges)
+            if len(next_payload_ranges) == len(payload_ranges):
+                break
+            payload_ranges = next_payload_ranges
+        return valid
+
+    def _sweepInstructionStarts(self, bytecode, seed_payload_ranges):
+        """One forward pass of :meth:`_buildValidInstructionStarts`, treating every range
+        in ``seed_payload_ranges`` as already-known payload data. Returns the legal
+        instruction-start offsets plus the full (possibly grown) list of payload ranges
+        discovered during this pass, for the caller to detect newly-found ranges.
         """
         valid = set()
-        payload_ranges = []
+        payload_ranges = list(seed_payload_ranges)
         idx = 0
         null_resolve = lambda ref_kind, ref_index: ""  # noqa: E731
         # Dalvik instructions are 16-bit aligned (one "code unit"), so always
@@ -646,9 +676,11 @@ class DalvikDisassembler:
             if decoded.payload_idx is not None:
                 payload_size = self._getPayloadSize(bytecode, decoded.payload_idx)
                 if payload_size:
-                    payload_ranges.append((decoded.payload_idx, decoded.payload_idx + payload_size))
+                    payload_range = (decoded.payload_idx, decoded.payload_idx + payload_size)
+                    if payload_range not in payload_ranges:
+                        payload_ranges.append(payload_range)
             idx += decoded.size_bytes
-        return valid
+        return valid, payload_ranges
 
     def _addStructuralViolation(self, metadata, violation_type, **fields):
         violation = {"type": violation_type}
