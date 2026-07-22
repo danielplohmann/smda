@@ -55,7 +55,7 @@ class JumpTableAnalyzer:
     def _findJumpTableSize(self, backtracked):
         jumptable_size = 0
         for instr in backtracked[::-1]:
-            if instr[2].startswith("ret"):
+            if instr[2].split(" ")[-1].startswith("ret"):
                 break
             if instr[2] == "cmp" and self.RE_CMP_SIZE.match(instr[3]):
                 jumptable_size = int(instr[3].split(",")[-1].strip(), base=16) + 1

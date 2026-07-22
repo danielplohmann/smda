@@ -316,9 +316,9 @@ class X86Backend(ArchBackend):
             # forms write only their explicit destination, handled below)
             if mnemonic == "imul" and len(operands) == 1:
                 return None
-            # xchg writes both operands, so the target register being written is
+            # xchg/xadd write both operands, so the target register being written is
             # not necessarily the first operand
-            if mnemonic == "xchg" and any(operand in clobber_regs for operand in operands):
+            if mnemonic in ("xchg", "xadd") and any(operand in clobber_regs for operand in operands):
                 return None
             # read-only instructions whose first operand is a source do not clobber
             if mnemonic in SYSCALL_READ_ONLY_INS:
