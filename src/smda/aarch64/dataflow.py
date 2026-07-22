@@ -7,9 +7,17 @@ over capstone operands. This module is the single, maintained copy.
 
 import struct
 
-from capstone.arm64_const import ARM64_SFT_LSL
+from capstone import CS_AC_WRITE
+from capstone.arm64_const import ARM64_EXT_INVALID, ARM64_SFT_LSL
 
 from .definitions import INSTRUCTION_SIZE, adrp_page_value
+
+# CMP/CMN/TST are ARM64 aliases (SUBS/ADDS/ANDS with a discarded Xzr destination) whose
+# first, non-destination operand capstone still reports as CS_AC_WRITE - a documented
+# capstone limitation (cs_v6_release_guide.md: "Some operands have incorrect access
+# attributes set" for AArch64 aliases). Treat them as non-writing rather than trusting
+# access flags for these three mnemonics specifically.
+_ALIAS_ACCESS_QUIRK_MNEMONICS = {"cmp", "cmn", "tst"}
 
 
 def norm_reg(name):
@@ -52,19 +60,27 @@ def _applyConstantWrite(cap_ins, constants, disassembler):
     elif mnemonic == "add" and len(cap_ins.operands) >= 3:
         op1 = cap_ins.operands[1]
         op2 = cap_ins.operands[2]
+        # ADD (immediate) allows an optional "lsl #12"; ADD (shifted register) allows
+        # an optional "lsl/lsr/asr #imm" - op.imm/op.reg's raw value must be shifted by
+        # op.shift.value when op.shift.type is LSL, mirroring movImmediateValue below.
+        # Extended-register forms (uxtw/sxtw/...) are not modeled and stay unresolved.
         if op1.type == 1 and op2.type == 2:  # REG + IMM
             src_reg = norm_reg(cap_ins.reg_name(op1.reg))
+            shift = op2.shift.value if op2.shift.type == ARM64_SFT_LSL else 0
             if src_reg in constants:
-                constants[dest_reg] = constants[src_reg] + op2.imm
+                constants[dest_reg] = constants[src_reg] + (op2.imm << shift)
             else:
                 constants.pop(dest_reg, None)
-        elif op1.type == 1 and op2.type == 1:  # REG + REG (incl. extended/shifted register)
+        elif op1.type == 1 and op2.type == 1 and op2.ext == ARM64_EXT_INVALID:  # REG + (shifted) REG
             reg1 = norm_reg(cap_ins.reg_name(op1.reg))
             reg2 = norm_reg(cap_ins.reg_name(op2.reg))
-            if reg1 in constants and reg2 in constants:
-                constants[dest_reg] = constants[reg1] + constants[reg2]
+            shift = op2.shift.value if op2.shift.type == ARM64_SFT_LSL else 0
+            if reg1 in constants and reg2 in constants and op2.shift.type in (0, ARM64_SFT_LSL):
+                constants[dest_reg] = constants[reg1] + (constants[reg2] << shift)
             else:
                 constants.pop(dest_reg, None)
+        else:
+            constants.pop(dest_reg, None)
     elif mnemonic in ("mov", "movz", "movk") and len(cap_ins.operands) >= 2:
         op1 = cap_ins.operands[1]
         if op1.type == 2:  # IMM
@@ -95,6 +111,14 @@ def _applyConstantWrite(cap_ins, constants, disassembler):
                         resolved = True
         if not resolved:
             constants.pop(dest_reg, None)
+    elif mnemonic not in _ALIAS_ACCESS_QUIRK_MNEMONICS:
+        # Any other instruction that writes a tracked register (per capstone's per-operand
+        # access flags) redefines it with a value this pass does not model - the stale
+        # entry must not survive (e.g. sub/mul/and/orr/lsl/ldp/csel/... clobbering a
+        # register this pass previously resolved via adrp/add/mov/ldr).
+        for op in cap_ins.operands:
+            if op.type == 1 and (op.access & CS_AC_WRITE):
+                constants.pop(norm_reg(cap_ins.reg_name(op.reg)), None)
 
 
 def propagateConstants(cap_insns, disassembler):
