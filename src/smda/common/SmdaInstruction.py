@@ -176,7 +176,7 @@ class SmdaInstruction:
         smda_instruction.operands = instruction_dict[3]
         return smda_instruction
 
-    def toDict(self) -> dict:
+    def toDict(self) -> list:
         return [self.offset, self.bytes, self.mnemonic, self.operands]
 
     def __int__(self):

@@ -115,7 +115,7 @@ class SmdaBasicBlock:
     def fromDict(cls, block_dict, smda_function=None) -> "SmdaBasicBlock":
         return cls([SmdaInstruction.fromDict(d, smda_function=smda_function) for d in block_dict], smda_function)
 
-    def toDict(self) -> dict:
+    def toDict(self) -> list:
         if self.instructions is None:
             return []
         return [smda_ins.toDict() for smda_ins in self.instructions]

@@ -158,7 +158,7 @@ class SmdaReport:
             self._num_instructions = sum(function.num_instructions for function in self.getFunctions())
         return self._num_instructions
 
-    def getBuffer(self) -> bytes:
+    def getBuffer(self) -> Optional[bytes]:
         return self.buffer
 
     def getFunction(self, function_addr) -> Optional["SmdaFunction"]:
