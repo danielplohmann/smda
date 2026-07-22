@@ -28,8 +28,6 @@ class GoSymbolProvider(AbstractLabelProvider):
         # addr:func_name
         self._func_symbols = {}
 
-    _pclntab_cache = {}
-
     def getPcLntabOffset(self, binary):
         from smda.common.BinaryInfo import BinaryInfo
 
@@ -41,13 +39,6 @@ class GoSymbolProvider(AbstractLabelProvider):
             binary_bytes = binary_info.binary
         else:
             binary_bytes = binary
-
-        cache_key = (id(binary_bytes), len(binary_bytes), binary_bytes[:16])
-        if cache_key in GoSymbolProvider._pclntab_cache:
-            res = GoSymbolProvider._pclntab_cache[cache_key]
-            if binary_info is not None:
-                binary_info._go_pclntab_offset = res
-            return res
 
         pclntab_offset = None
         try:
@@ -84,7 +75,6 @@ class GoSymbolProvider(AbstractLabelProvider):
             hits = [match.start() for match in re.finditer(pclntab_regex, binary_bytes)]
             if len(hits) == 1:
                 pclntab_offset = hits[0]
-        GoSymbolProvider._pclntab_cache[cache_key] = pclntab_offset
         if binary_info is not None:
             binary_info._go_pclntab_offset = pclntab_offset
         return pclntab_offset
