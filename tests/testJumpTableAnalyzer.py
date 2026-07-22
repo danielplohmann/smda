@@ -105,6 +105,38 @@ class JumpTableAnalyzerTestSuite(unittest.TestCase):
         self.assertEqual(result, [])
         state.addDataRef.assert_not_called()
 
+    def test_findJumpTableSize_stops_at_prefixed_ret(self):
+        """A CET-hardened "bnd ret" must be recognized as a backtrack boundary just like a
+        plain "ret" (capstone prepends the mandatory "bnd" prefix to the mnemonic string).
+        The scan walks backward (backtracked[::-1], from the highest address down): here it
+        first sees an unrelated "mov" (no match, keeps going), then the "bnd ret" boundary,
+        which must stop the scan before it ever reaches the earlier "cmp eax, 0x9" -- picking
+        that up would be the unrelated-code false bound the bug produced."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 2, "cmp", "eax, 0x9"),
+            (0x1002, 1, "bnd ret", ""),
+            (0x1004, 2, "mov", "ecx, 0x1"),
+        ]
+
+        result = analyzer._findJumpTableSize(backtracked)
+
+        self.assertEqual(result, 0)
+
+    def test_findJumpTableSize_stops_at_plain_ret(self):
+        """Baseline: an unprefixed "ret" already worked before the fix; isolates the
+        prefix-handling regression from ordinary boundary detection."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 2, "cmp", "eax, 0x9"),
+            (0x1002, 1, "ret", ""),
+            (0x1004, 2, "mov", "ecx, 0x1"),
+        ]
+
+        result = analyzer._findJumpTableSize(backtracked)
+
+        self.assertEqual(result, 0)
+
     def test_resolveExplicitTable_short_bytes_does_not_raise(self):
         analyzer = _makeAnalyzer(bitness=32)
         analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(return_value=True)

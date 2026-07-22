@@ -889,6 +889,13 @@ class TestIntelDisassembler(unittest.TestCase):
         # xchg writes both operands, even when rax is the second one
         xchg_second = [self._ins("mov", "rax, 0x3c"), self._ins("xchg", "qword ptr [rdi], rax")]
         self.assertIsNone(disassembler._resolveSyscallNumber(xchg_second, 64))
+        # xadd writes both operands too, even when the syscall register is only the
+        # source (second) operand -- regression for the xadd/xchg dual-write class
+        xadd_second = [self._ins("mov", "eax, 0x3c"), self._ins("xadd", "ebx, eax")]
+        self.assertIsNone(disassembler._resolveSyscallNumber(xadd_second, 64))
+        # xadd to an unrelated pair of registers does not clobber rax
+        xadd_other = [self._ins("mov", "rax, 0x3c"), self._ins("xadd", "rbx, rcx")]
+        self.assertEqual(disassembler._resolveSyscallNumber(xadd_other, 64), 60)
         # multi-operand imul to an unrelated register does not clobber rax
         imul_other = [self._ins("mov", "rax, 0x3c"), self._ins("imul", "rbx, rcx, 2")]
         self.assertEqual(disassembler._resolveSyscallNumber(imul_other, 64), 60)
