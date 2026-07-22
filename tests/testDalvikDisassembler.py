@@ -668,6 +668,36 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertIsInstance(reconstructed_function.stringrefs, list)
         self.assertIsNone(reconstructed_function.stringrefs[0]["data_addr"])
 
+    def testThrowableOpcodesCarryCanThrowFlag(self):
+        # const-string, const-string/jumbo, instance-of, fill-array-data,
+        # const-method-handle, const-method-type all carry kThrow in AOSP's
+        # dex_instruction_list.h, so a try-protected use of any of them must be
+        # able to raise an exception edge into its handler.
+        for opcode in (0x1A, 0x1B, 0x20, 0x26, 0xFE, 0xFF):
+            self.assertTrue(OPCODES[opcode].can_throw, f"opcode 0x{opcode:02x} must be marked can_throw")
+
+    def testBackwardPayloadReferenceExcludedFromValidInstructionStarts(self):
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        # fill-array-data-payload: ident(2) + element_width(2) + size(4) + data(2) = 10 bytes,
+        # placed BEFORE the instruction that references it (backward branch offset).
+        payload = struct.pack("<HHI", 0x0300, 2, 1) + b"\x00\x00"
+        nop = b"\x00\x00"
+        # fill-array-data (0x26, format 31t) at byte offset 12, branch offset in
+        # 16-bit code units pointing backward to the payload at offset 0.
+        branch_offset_code_units = (0 - 12) // 2
+        instruction = bytes([0x26, 0x00]) + struct.pack("<i", branch_offset_code_units)
+        bytecode = payload + nop + instruction
+
+        disasm = DalvikDisassembler.__new__(DalvikDisassembler)
+        valid_starts = disasm._buildValidInstructionStarts(bytecode)
+
+        self.assertFalse(
+            any(0 <= offset < 10 for offset in valid_starts),
+            f"payload bytes [0, 10) must not be misdecoded as instruction starts: {sorted(valid_starts)}",
+        )
+        self.assertEqual(valid_starts, {10, 12})
+
 
 if __name__ == "__main__":
     unittest.main()
