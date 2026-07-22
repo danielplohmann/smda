@@ -158,7 +158,7 @@ class CilDisassembler:
             i_mnemonic = str(insn.opcode)
             i_op_str = format_operand(pe, insn.operand)
             # https://en.wikipedia.org/wiki/List_of_CIL_instructions
-            if i_mnemonic in ["ret"]:
+            if i_mnemonic in ["ret", "endfinally", "endfilter"]:
                 state.setNextInstructionReachable(False)
             if i_mnemonic in [
                 "beq",
@@ -193,21 +193,26 @@ class CilDisassembler:
                 "brtrue.s",
                 "brzero",
                 "brzero.s",
+                "leave",
+                "leave.s",
             ]:
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
             if i_mnemonic in ["jmp"]:
-                target = int(i_op_str, 16)
-                state.addCodeRef(i_address, target, by_jump=True)
+                # jmp's operand is InlineMethod (a tail-jump to another method), not a
+                # same-function branch offset, so i_op_str is usually a method name/token
+                # string here rather than a hex address like the branches above.
                 state.setNextInstructionReachable(False)
-                LOGGER.error(
-                    "Found unhandled CIL jmp instruction at 0x%x, report back its structure and have Daniel fix it.",
-                    i_address,
-                )
+                try:
+                    target = int(i_op_str, 16)
+                except ValueError:
+                    pass
+                else:
+                    state.addCodeRef(i_address, target, by_jump=True)
             if i_mnemonic in ["ldstr"]:
                 # we possibly want to extract and collect these and put them in the stringref part of SmdaFunction
                 self.disassembly.addStringRef(start_addr, i_address, i_op_str[1:-1])
-            if i_mnemonic in ["call", "callvirt"]:
+            if i_mnemonic in ["call", "calli", "callvirt"]:
                 self._updateApiInformation(i_address, i_bytes, i_op_str)
                 # https://blog.objektkultur.de/about-tail-recursion-in-.net/
                 if state.prev_opcode.startswith("tail"):
@@ -218,7 +223,7 @@ class CilDisassembler:
                         # override operand string with "address" of the method
                         method_name = self.cil_label_provider.decodeSymbolName(operand.Name.value)
                         i_op_str = f"0x{self.cil_label_provider.getAddress(method_name):x}"
-            if i_mnemonic in ["throw"]:
+            if i_mnemonic in ["throw", "rethrow"]:
                 state.setNextInstructionReachable(False)
             if i_mnemonic in ["switch"]:
                 next_addrs = []
