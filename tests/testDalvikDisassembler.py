@@ -690,13 +690,44 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         bytecode = payload + nop + instruction
 
         disasm = DalvikDisassembler.__new__(DalvikDisassembler)
-        valid_starts = disasm._buildValidInstructionStarts(bytecode)
+        valid_starts, _ = disasm._buildValidInstructionStarts(bytecode)
 
         self.assertFalse(
             any(0 <= offset < 10 for offset in valid_starts),
             f"payload bytes [0, 10) must not be misdecoded as instruction starts: {sorted(valid_starts)}",
         )
         self.assertEqual(valid_starts, {10, 12})
+
+    def testBackwardPayloadReferenceExcludedFromRecursiveWalk(self):
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        # Method entry (nop) at raw 0x10, a 10-byte fill-array-data payload at raw [18, 28),
+        # and the 31t fill-array-data instruction at raw 28 that references it BACKWARD. The
+        # entry nop's fallthrough lands inside the payload region. Before the recursive CFG
+        # pass seeded its payload_ranges from the fixed-point sweep (PAT-SMDA-029 recursive
+        # sibling), the walk reached that fallthrough before decoding the 31t and misdecoded
+        # the payload's raw bytes as instructions.
+        nop = b"\x00\x00"
+        payload = struct.pack("<HHI", 0x0300, 2, 1) + b"\x00\x00"
+        branch_offset_units = (18 - 28) // 2  # 31t at raw 28, target raw 18
+        fill_array_data = bytes([0x26, 0x00]) + struct.pack("<i", branch_offset_units)
+        ret = bytes([0x0E, 0x00])
+        code_item = build_code_item(nop + payload + fill_array_data + ret)
+
+        disassembler = DalvikDisassembler(config)
+        disassembler.disassembly = DisassemblyResult()
+        binary_info = BinaryInfo(code_item)
+        binary_info.raw_data = code_item
+        binary_info.architecture = "dalvik"
+        disassembler.disassembly.binary_info = binary_info
+        state = disassembler.analyzeFunction(None, SyntheticDalvikResolver(), SyntheticDalvikMethod())
+
+        instr_addrs = [ins[0] for ins in state.instructions]
+        self.assertIn(16, instr_addrs)
+        self.assertFalse(
+            any(18 <= addr < 28 for addr in instr_addrs),
+            f"payload bytes [18, 28) must not be misdecoded as instructions: {instr_addrs}",
+        )
 
 
 if __name__ == "__main__":

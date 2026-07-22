@@ -648,7 +648,7 @@ class DalvikDisassembler:
             if len(next_payload_ranges) == len(payload_ranges):
                 break
             payload_ranges = next_payload_ranges
-        return valid
+        return valid, payload_ranges
 
     def _sweepInstructionStarts(self, bytecode, seed_payload_ranges):
         """One forward pass of :meth:`_buildValidInstructionStarts`, treating every range
@@ -765,7 +765,7 @@ class DalvikDisassembler:
         )
 
         # Pass 1: build a set of legal instruction-start byte offsets for target validation.
-        valid_instruction_starts = self._buildValidInstructionStarts(bytecode)
+        valid_instruction_starts, initial_payload_ranges = self._buildValidInstructionStarts(bytecode)
 
         try_blocks, target_violations = self._sanitizeTryBlocks(try_blocks, bytecode_offset, valid_instruction_starts)
 
@@ -787,7 +787,11 @@ class DalvikDisassembler:
                 state.addBlockToQueue(ca_addr)
 
         visited_offsets = set()
-        payload_ranges = []
+        # Seed with the payload ranges discovered by the fixed-point sweep in Pass 1 so the
+        # recursive walk cannot misdecode a payload's raw bytes as instructions even when it
+        # reaches them via an unvalidated fallthrough (the identical backward-31t adversarial
+        # gap PAT-SMDA-029 closed for _buildValidInstructionStarts).
+        payload_ranges = list(initial_payload_ranges)
 
         while state.hasUnprocessedBlocks():
             block_start_addr = state.chooseNextBlock()
