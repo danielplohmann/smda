@@ -1,27 +1,44 @@
 #!/usr/bin/env python3
 import logging
 
-
-def occurrences(string, sub):
-    # https://stackoverflow.com/a/2970542
-    count = start = 0
-    while True:
-        start = string.find(sub, start) + 1
-        if start > 0:
-            count += 1
-        else:
-            return count
-
+from dncil.cil.opcode import OpCode, OpCodes, OperandType
 
 LOGGER = logging.getLogger(__name__)
 
+# Build operand-type lookup from dncil (the actual decoder) so token/branch
+# escaping stays synchronized with the opcode table.
+_OPERAND_TYPE_BY_MNEMONIC = {}
+for attr in dir(OpCodes):
+    if not attr.startswith("_"):
+        opcode = getattr(OpCodes, attr)
+        if isinstance(opcode, OpCode):
+            _OPERAND_TYPE_BY_MNEMONIC[opcode.name] = opcode.operand_type
+
+# Operand types whose byte-level operand is a 4-byte metadata token (table kind
+# in the last byte, RID in the previous three) — wildcard RID, keep table-kind.
+_TOKEN_OPERAND_TYPES = frozenset(
+    {
+        OperandType.InlineField,
+        OperandType.InlineMethod,
+        OperandType.InlineTok,
+        OperandType.InlineType,
+        OperandType.InlineString,
+        OperandType.InlineSig,
+    }
+)
+
+# Operand types whose byte-level operand is a code offset (branch target) —
+# wildcard entirely when escape_intraprocedural_jumps is set.
+_BRANCH_OPERAND_TYPES = frozenset(
+    {
+        OperandType.InlineBrTarget,
+        OperandType.ShortInlineBrTarget,
+        OperandType.InlineSwitch,
+    }
+)
+
 
 class CilInstructionEscaper:
-    """
-    Escaper to abstract information from disassembled instructions.
-    Based on https://en.wikipedia.org/wiki/List_of_CIL_instructions
-    """
-
     _aritlog_group = [
         "add",
         "add.ovf",
@@ -40,6 +57,9 @@ class CilInstructionEscaper:
         "shl",
         "shr",
         "shr.un",
+        "sub",
+        "sub.ovf",
+        "sub.ovf.un",
         "xor",
     ]
 
@@ -92,6 +112,7 @@ class CilInstructionEscaper:
         "call",
         "calli",
         "callvirt",
+        "newobj",
         # Comparisons
         "ceq",
         "cgt",
@@ -124,10 +145,13 @@ class CilInstructionEscaper:
         "stsfld",
         # copy
         "cpblk",
+        "cpobj",
         "initblk",
         "initobj",
         "localloc",
         "ldtoken",
+        # allocation
+        "newarr",
         # special
         "arglist",
     ]
@@ -207,6 +231,15 @@ class CilInstructionEscaper:
         # Function pointer to stack
         "ldftn",
         "ldvirtftn",
+        # Type test / cast
+        "castclass",
+        "isinst",
+        # Typed reference operations
+        "mkrefany",
+        "refanytype",
+        "refanyval",
+        # Sizeof pushes constant
+        "sizeof",
         # Conversion operations (all work with stack)
         "conv.i",
         "conv.i1",
@@ -214,15 +247,25 @@ class CilInstructionEscaper:
         "conv.i4",
         "conv.i8",
         "conv.ovf.i",
+        "conv.ovf.i.un",
         "conv.ovf.i1",
+        "conv.ovf.i1.un",
         "conv.ovf.i2",
+        "conv.ovf.i2.un",
         "conv.ovf.i4",
+        "conv.ovf.i4.un",
         "conv.ovf.i8",
+        "conv.ovf.i8.un",
         "conv.ovf.u",
+        "conv.ovf.u.un",
         "conv.ovf.u1",
+        "conv.ovf.u1.un",
         "conv.ovf.u2",
+        "conv.ovf.u2.un",
         "conv.ovf.u4",
+        "conv.ovf.u4.un",
         "conv.ovf.u8",
+        "conv.ovf.u8.un",
         "conv.r.un",
         "conv.u",
         "conv.u1",
@@ -236,10 +279,21 @@ class CilInstructionEscaper:
         "readonly.",
         "unaligned.",
         "volatile.",
-        "no.typecheck",
-        "no.rangecheck",
-        "no.nullcheck",
-        "tail",
+        "no.",
+        "tail.",
+    ]
+
+    _reserved_group = [
+        "UNKNOWN1",
+        "UNKNOWN2",
+        "prefix1",
+        "prefix2",
+        "prefix3",
+        "prefix4",
+        "prefix5",
+        "prefix6",
+        "prefix7",
+        "prefixref",
     ]
 
     _privileged_group = ["break"]
@@ -283,6 +337,8 @@ class CilInstructionEscaper:
             return "M"
         elif mnemonic in CilInstructionEscaper._stack_group:
             return "S"
+        elif mnemonic in CilInstructionEscaper._prefix_group:
+            return "N"
         elif mnemonic in CilInstructionEscaper._privileged_group:
             return "P"
         elif mnemonic in CilInstructionEscaper._crypto_group:
@@ -295,7 +351,7 @@ class CilInstructionEscaper:
             return "V"
         elif mnemonic in CilInstructionEscaper._nop_group:
             return "N"
-        elif mnemonic == "error":
+        elif mnemonic in CilInstructionEscaper._reserved_group or mnemonic == "error":
             return "U"
         else:
             LOGGER.error(
@@ -311,10 +367,8 @@ class CilInstructionEscaper:
         if op_field == "":
             return ""
         if escape_registers:
-            # there are no registers in CIL, it is a stack-based machine
             pass
         if escape_pointers and not (op_field.startswith(("-", "0"))):
-            # if we do not have an immediate, we assume it is a pointer
             escaped_field = "PTR"
         if escape_constants:
             try:
@@ -335,22 +389,20 @@ class CilInstructionEscaper:
 
     @staticmethod
     def escapeOperands(ins, offsets_only=False):
+        if offsets_only:
+            op_type = _OPERAND_TYPE_BY_MNEMONIC.get(ins.mnemonic)
+            if op_type in (
+                OperandType.InlineBrTarget,
+                OperandType.ShortInlineBrTarget,
+                OperandType.InlineSwitch,
+                OperandType.InlineMethod,
+                OperandType.InlineSig,
+            ):
+                return "OFFSET"
         opstring = ins.operands
         op_fields = opstring.split(",")
         esc_regs = True
         esc_consts = True
-        if offsets_only:
-            if ins.mnemonic in CilInstructionEscaper._cfg_group and ins.mnemonic not in [
-                "ceq",
-                "cgt",
-                "cgt.un",
-                "clt",
-                "clt.un",
-                "ckfinite",
-            ]:
-                return "OFFSET"
-            esc_regs = False
-            esc_consts = False
         escaped_fields = []
         for op_field in op_fields:
             escaped_fields.append(
@@ -365,103 +417,32 @@ class CilInstructionEscaper:
 
     @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
-        escaped_sequence = ins.bytes
-        if ins.mnemonic in CilInstructionEscaper._cfg_group and ins.mnemonic not in [
-            "ceq",
-            "cgt",
-            "cgt.un",
-            "clt",
-            "clt.un",
-            "ckfinite",
-        ]:
-            escaped_sequence = CilInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
-            return escaped_sequence
-        if ins.mnemonic in [
-            "newobj",
-            "ldobj",
-            "stobj",
-            "newarr",
-            "stsfld",
-            "stfld",
-            "ldsfld",
-            "ldfld",
-            "ldflda",
-            "box",
-            "unbox",
-            "unbox.any",
-            "isinst",
-            "castclass",
-            "ldtoken",
-        ]:
-            escaped_sequence = ins.bytes[:2] + "?" * (len(ins.bytes) - 4) + ins.bytes[-2:]
-            return escaped_sequence
-        if ins.mnemonic in ["initobj", "ldftn", "constrained."]:
-            escaped_sequence = ins.bytes[:4] + "?" * (len(ins.bytes) - 6) + ins.bytes[-2:]
-            return escaped_sequence
-        if False:
-            # 20250211 - we don't know yet how allocations look like in CIL, so we leave this out for now
-            escaped_sequence = CilInstructionEscaper.escapeBinaryPtrRef(ins)
-        if ins.operands.startswith("0x") or ins.operands.startswith("-"):
-            # 20250211 - when comparing with Intel, we onl want to wildcard addresses within our range - should we not wildcard at all here?
-            pass
-            # escaped_sequence = CilInstructionEscaper.escapeBinaryValue(ins, escaped_sequence, None)
-        return escaped_sequence
+        op_type = _OPERAND_TYPE_BY_MNEMONIC.get(ins.mnemonic, OperandType.InlineNone)
+        if op_type in _TOKEN_OPERAND_TYPES:
+            return CilInstructionEscaper._escapeTokenBinary(ins)
+        if op_type in _BRANCH_OPERAND_TYPES:
+            if escape_intraprocedural_jumps:
+                return CilInstructionEscaper.escapeToOpcodeOnly(ins)
+            return ins.bytes
+        return ins.bytes
+
+    @staticmethod
+    def _escapeTokenBinary(ins):
+        bytes_str = ins.bytes
+        opcode_hex_len = 4 if bytes_str.startswith("fe") else 2
+        min_hex_len = opcode_hex_len + 8
+        if len(bytes_str) >= min_hex_len:
+            wildcard_len = len(bytes_str) - opcode_hex_len - 2
+            return bytes_str[:opcode_hex_len] + "?" * wildcard_len + bytes_str[-2:]
+        return bytes_str
 
     @staticmethod
     def escapeBinaryJumpCall(ins, escape_intraprocedural_jumps=False):
-        escaped_sequence = ins.bytes
-        if ins.mnemonic in CilInstructionEscaper._cfg_group and ins.mnemonic not in [
-            "ceq",
-            "cgt",
-            "cgt.un",
-            "clt",
-            "clt.un",
-            "ckfinite",
-        ]:
-            if escape_intraprocedural_jumps and ins.mnemonic in [
-                "beq",
-                "beq.s",
-                "bge",
-                "bge.s",
-                "bge.un",
-                "bge.un.s",
-                "bgt",
-                "bgt.s",
-                "bgt.un",
-                "bgt.un.s",
-                "ble",
-                "ble.s",
-                "ble.un",
-                "ble.un.s",
-                "blt",
-                "blt.s",
-                "blt.un",
-                "blt.un.s",
-                "bne.un",
-                "bne.un.s",
-                "br",
-                "br.s",
-                "brfalse",
-                "brfalse.s",
-                "brinst",
-                "brinst.s",
-                "brnull",
-                "brnull.s",
-                "brtrue",
-                "brtrue.s",
-                "brzero",
-                "brzero.s",
-                "switch",
-            ]:
-                escaped_sequence = CilInstructionEscaper.escapeToOpcodeOnly(ins)
-            elif ins.mnemonic in ["jmp", "call", "calli", "callvirt"]:
-                escaped_sequence = ins.bytes[:2] + "?" * (len(ins.bytes) - 4) + ins.bytes[-2:]
-        return escaped_sequence
+        return CilInstructionEscaper.escapeBinary(ins, escape_intraprocedural_jumps=escape_intraprocedural_jumps)
 
     @staticmethod
     def escapeBinaryPtrRef(ins):
-        escaped_sequence = ins.bytes
-        return escaped_sequence
+        return ins.bytes
 
     @staticmethod
     def escapeBinaryValue(ins, escaped_sequence, value):
@@ -469,5 +450,4 @@ class CilInstructionEscaper:
 
     @staticmethod
     def getByteWithoutPrefixes(ins_bytes):
-        # if I understand correctly, there are only prefix instructions and not prefix bytes within instructions
         return ins_bytes
