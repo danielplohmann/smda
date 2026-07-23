@@ -119,6 +119,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-23: v4.3.6 - Completed CIL instruction escaper coverage (all 229 dncil opcodes now map to a mnemonic group, eliminating the "U" gap for 30 real instructions including `sub`, `newobj`, `castclass`, `ldstr`, all prefixes) and reworked `escapeBinary` to be operand-type-driven against the dncil opcode table — fixing metadata-token wildcarding gaps (`ldstr`, `cpobj`, `ldelema`, `ldelem`, `stelem`, `mkrefany`, `refanyval`, `ldvirtftn`, `sizeof`) and branch wildcarding for `leave`/`leave.s`. Added `CIL_PIC_HASH_ESCAPE_VERSION` migration so older serialized CIL reports are automatically recomputed on import. (THX: @r0ny123)
  * 2026-07-22: v4.3.5 - Widened Intel PIC-hash escaping to cover 64-bit immediates (`mov r64, imm64` constants were previously truncated to their first 8 hex digits and never escaped, so PicHash was not relocation-invariant on 64-bit binaries). (THX: @r0ny123)
  * 2026-07-22: v4.3.4 - Added a default-off x64 PE pass (`USE_PE_X64_PDATA_ENDS`) that splits already-recovered functions at exact `.pdata` RUNTIME_FUNCTION boundaries when an interior boundary has an external non-fall-through inbound reference. (THX: @r0ny123)
  * 2026-07-22: v4.3.3 - Detect x86/x64 import-jmp thunks (a single `jmp` through a resolved IAT/GOT slot) and populate `num_thunk_functions` in reports. (THX: @r0ny123)
