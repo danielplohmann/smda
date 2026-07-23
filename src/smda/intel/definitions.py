@@ -1,50 +1,55 @@
 # some mnemonics as specific to capstone
-CJMP_INS = [
-    "je",
-    "jne",
-    "js",
-    "jns",
-    "jp",
-    "jnp",
-    "jo",
-    "jno",
-    "jl",
-    "jle",
-    "jg",
-    "jge",
-    "jb",
-    "jbe",
-    "ja",
-    "jae",
-    "jcxz",
-    "jecxz",
-    "jrcxz",
-]
-LOOP_INS = ["loop", "loopne", "loope"]
-JMP_INS = ["jmp", "ljmp"]
-CALL_INS = ["call", "lcall"]
-RET_INS = ["ret", "retn", "retf", "iret"]
-END_INS = ["ret", "retn", "retf", "iret", "int3", "hlt"]
-REGS_32BIT = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
-REGS_64BIT = [
-    "rax",
-    "rbx",
-    "rcx",
-    "rdx",
-    "rsp",
-    "rbp",
-    "rsi",
-    "rdi",
-    "rip",
-    "r8",
-    "r9",
-    "r10",
-    "r11",
-    "r12",
-    "r13",
-    "r14",
-    "r15",
-]
+# (frozensets: membership-tested per instruction on the analysis hot path)
+CJMP_INS = frozenset(
+    {
+        "je",
+        "jne",
+        "js",
+        "jns",
+        "jp",
+        "jnp",
+        "jo",
+        "jno",
+        "jl",
+        "jle",
+        "jg",
+        "jge",
+        "jb",
+        "jbe",
+        "ja",
+        "jae",
+        "jcxz",
+        "jecxz",
+        "jrcxz",
+    }
+)
+LOOP_INS = frozenset({"loop", "loopne", "loope"})
+JMP_INS = frozenset({"jmp", "ljmp"})
+CALL_INS = frozenset({"call", "lcall"})
+RET_INS = frozenset({"ret", "retn", "retf", "iret"})
+END_INS = frozenset({"ret", "retn", "retf", "iret", "int3", "hlt"})
+REGS_32BIT = frozenset({"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"})
+REGS_64BIT = frozenset(
+    {
+        "rax",
+        "rbx",
+        "rcx",
+        "rdx",
+        "rsp",
+        "rbp",
+        "rsi",
+        "rdi",
+        "rip",
+        "r8",
+        "r9",
+        "r10",
+        "r11",
+        "r12",
+        "r13",
+        "r14",
+        "r15",
+    }
+)
 DOUBLE_ZERO = bytearray(b"\x00\x00")
 
 DEFAULT_PROLOGUES = [

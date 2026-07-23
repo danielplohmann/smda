@@ -246,12 +246,15 @@ class RecursiveDisassembler:
             # the change is behavior-neutral (output stays byte-for-byte identical).
             return state
         while state.hasUnprocessedBlocks():
-            LOGGER.debug(
-                "  current block queue: %s",
-                ", ".join([f"0x{addr:x}" for addr in state.block_queue]),
-            )
+            debug_logging = LOGGER.isEnabledFor(logging.DEBUG)
+            if debug_logging:
+                LOGGER.debug(
+                    "  current block queue: %s",
+                    ", ".join([f"0x{addr:x}" for addr in state.block_queue]),
+                )
             state.chooseNextBlock()
-            LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
+            if debug_logging:
+                LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
             # in capstone, disassembly is more expensive than calling the function, so we use the maximum instruction
             # size as look-ahead. disasm_lite() also provides faster disassembly than disasm(), so we work with tuples.
             cache = list(self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start))
@@ -264,11 +267,12 @@ class RecursiveDisassembler:
                     i_op_str = i_op_str.strip()
                     i_relative_address = i_address - self.disassembly.binary_info.base_addr
                     i_bytes = self.disassembly.binary_info.binary[i_relative_address : i_relative_address + i_size]
-                    LOGGER.debug(
-                        "  analyzeFunction() now processing instruction @0x%08x: %s",
-                        i_address,
-                        i_mnemonic + " " + i_op_str,
-                    )
+                    if debug_logging:
+                        LOGGER.debug(
+                            "  analyzeFunction() now processing instruction @0x%08x: %s",
+                            i_address,
+                            i_mnemonic + " " + i_op_str,
+                        )
                     cache_pos += i_size
                     state.setNextInstructionReachable(True)
                     # count "suspicious" all-zero instructions (e.g. x86 `00 00`,
@@ -297,19 +301,21 @@ class RecursiveDisassembler:
                         and i_address not in self.disassembly.data_map
                         and not state.isProcessed(i_address)
                     ):
-                        LOGGER.debug(
-                            "  analyzeFunction() booked instruction @0x%08x: %s for processed state",
-                            i_address,
-                            i_mnemonic + " " + i_op_str,
-                        )
+                        if debug_logging:
+                            LOGGER.debug(
+                                "  analyzeFunction() booked instruction @0x%08x: %s for processed state",
+                                i_address,
+                                i_mnemonic + " " + i_op_str,
+                            )
                         state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
                     elif i_address in self.disassembly.code_map:
-                        LOGGER.debug(
-                            "  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)",
-                            i_address,
-                            i_mnemonic + " " + i_op_str,
-                            self.disassembly.ins2fn[i_address],
-                        )
+                        if debug_logging:
+                            LOGGER.debug(
+                                "  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)",
+                                i_address,
+                                i_mnemonic + " " + i_op_str,
+                                self.disassembly.ins2fn[i_address],
+                            )
                         # If the collision is with a gap function, revert it and
                         # book this instruction so the current function absorbs it.
                         # Only apply during the tailcall re-drain (as_gap=False),
@@ -464,7 +470,10 @@ class RecursiveDisassembler:
         # package up and finish
         for addr, candidate in self.fc_manager.candidates.items():
             if addr in self.disassembly.functions:
-                function_blocks = self.disassembly.getBlocksAsDict(addr)
+                # score from the raw instruction tuples directly: both backend TF-IDF
+                # scorers only read ins[2] (mnemonic), so the hex-transformed
+                # getBlocksAsDict() copy would be discarded work.
+                function_blocks = {block[0][0]: block for block in self.disassembly.functions[addr]}
                 function_tfidf = self._tfidf.getTfIdfFromBlocks(function_blocks)
                 candidate.setTfIdf(function_tfidf)
                 candidate.getConfidence()
