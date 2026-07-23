@@ -18,6 +18,33 @@ def occurrences(string, sub):
 
 LOGGER = logging.getLogger(__name__)
 
+# Hoisted frozensets: escapeBinary()/escapeOperands() membership-test these per instruction.
+_JUMP_CALL_MNEMONICS = frozenset({"call", "lcall", "jmp", "ljmp", "loop", "loopne", "loope"})
+_COND_JUMP_MNEMONICS = frozenset(
+    {
+        "je",
+        "jne",
+        "js",
+        "jns",
+        "jp",
+        "jnp",
+        "jo",
+        "jno",
+        "jl",
+        "jle",
+        "jg",
+        "jge",
+        "jb",
+        "jbe",
+        "ja",
+        "jae",
+        "jcxz",
+        "jecxz",
+        "jrcxz",
+    }
+)
+_ALL_JUMP_MNEMONICS = _JUMP_CALL_MNEMONICS | _COND_JUMP_MNEMONICS
+
 
 class IntelInstructionEscaper:
     """Escaper to abstract information from disassembled instructions. Based on capstone disassembly.
@@ -2114,34 +2141,7 @@ class IntelInstructionEscaper:
         esc_regs = True
         esc_consts = True
         if offsets_only:
-            if ins.mnemonic.split(" ")[-1] in [
-                "call",
-                "lcall",
-                "jmp",
-                "ljmp",
-                "je",
-                "jne",
-                "js",
-                "jns",
-                "jp",
-                "jnp",
-                "jo",
-                "jno",
-                "jl",
-                "jle",
-                "jg",
-                "jge",
-                "jb",
-                "jbe",
-                "ja",
-                "jae",
-                "jcxz",
-                "jecxz",
-                "jrcxz",
-                "loop",
-                "loopne",
-                "loope",
-            ]:
+            if ins.mnemonic.split(" ")[-1] in _ALL_JUMP_MNEMONICS:
                 return "OFFSET"
             esc_regs = False
             esc_consts = False
@@ -2190,30 +2190,7 @@ class IntelInstructionEscaper:
         escaped_sequence = ins.bytes
         mnemonic = ins.mnemonic.split(" ")[-1]
         # remove segment, operand, address, repeat override prefixes
-        if mnemonic in ["call", "lcall", "jmp", "ljmp", "loop", "loopne", "loope"]:
-            escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
-            return escaped_sequence
-        if mnemonic in [
-            "je",
-            "jne",
-            "js",
-            "jns",
-            "jp",
-            "jnp",
-            "jo",
-            "jno",
-            "jl",
-            "jle",
-            "jg",
-            "jge",
-            "jb",
-            "jbe",
-            "ja",
-            "jae",
-            "jcxz",
-            "jecxz",
-            "jrcxz",
-        ]:
+        if mnemonic in _JUMP_CALL_MNEMONICS or mnemonic in _COND_JUMP_MNEMONICS:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
             return escaped_sequence
         if "ptr [0x" in ins.operands or "[rip + 0x" in ins.operands or "[rip - 0x" in ins.operands:

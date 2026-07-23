@@ -90,8 +90,16 @@ class DalvikFunctionAnalysisState:
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.add((addr_from, addr_to))
-        self.code_refs_from.setdefault(addr_from, set()).add(addr_to)
-        self.code_refs_to.setdefault(addr_to, set()).add(addr_from)
+        refs_from = self.code_refs_from.get(addr_from)
+        if refs_from is None:
+            self.code_refs_from[addr_from] = {addr_to}
+        else:
+            refs_from.add(addr_to)
+        refs_to = self.code_refs_to.get(addr_to)
+        if refs_to is None:
+            self.code_refs_to[addr_to] = {addr_from}
+        else:
+            refs_to.add(addr_from)
         if by_jump:
             self.jump_targets.add(addr_to)
 

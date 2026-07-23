@@ -79,6 +79,10 @@ SYSCALL_EXIT_NUMBERS = {60, 231}  # exit, exit_group
 # from a 64-bit process)
 INT80_EXIT_NUMBERS = {1, 252}  # exit, exit_group
 
+# hoisted membership tables for the per-instruction dispatch in analyzeInstruction()
+_TRAP_TERMINATOR_INS = frozenset({"int3", "hlt"})
+_SYSCALL_INS = frozenset({"syscall"})
+
 
 class X86Backend(ArchBackend):
     """x86/x64 backend: capstone setup, x86 collaborators and the x86 control-flow
@@ -375,10 +379,11 @@ class X86Backend(ArchBackend):
             # we do not analyze any potential exception handler (tricks), so treat breakpoints as exit condition
         elif i_mnemonic_noprefix in RET_INS:
             self._analyzeEndInstruction(state)
-            LOGGER.debug(
-                "  analyzeFunction() found ending instruction @0x%08x",
-                i_address,
-            )
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(
+                    "  analyzeFunction() found ending instruction @0x%08x",
+                    i_address,
+                )
             if previous_address is not None and previous_mnemonic == "push":
                 push_ret_destination = d.getReferencedAddr(previous_op_str)
                 if d.disassembly.isAddrWithinMemoryImage(push_ret_destination):
@@ -388,20 +393,22 @@ class X86Backend(ArchBackend):
                     )
                     state.addBlockToQueue(push_ret_destination)
                     state.addCodeRef(i_address, push_ret_destination, by_jump=True)
-        elif i_mnemonic_noprefix in ["int3", "hlt"]:
+        elif i_mnemonic_noprefix in _TRAP_TERMINATOR_INS:
             self._analyzeEndInstruction(state)
-            LOGGER.debug(
-                "  analyzeFunction() found ending instruction @0x%08x",
-                i_address,
-            )
-        elif i_mnemonic_noprefix in ["syscall"]:
+            if LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug(
+                    "  analyzeFunction() found ending instruction @0x%08x",
+                    i_address,
+                )
+        elif i_mnemonic_noprefix in _SYSCALL_INS:
             syscall_number = self._resolveSyscallNumber(state.current_block, d.disassembly.binary_info.bitness)
             if syscall_number in SYSCALL_EXIT_NUMBERS:
                 self._analyzeEndInstruction(state)
-                LOGGER.debug(
-                    "  analyzeFunction() found program ending instruction @0x%08x",
-                    i_address,
-                )
+                if LOGGER.isEnabledFor(logging.DEBUG):
+                    LOGGER.debug(
+                        "  analyzeFunction() found program ending instruction @0x%08x",
+                        i_address,
+                    )
         elif i_mnemonic_noprefix == "int" and i_op_str == "0x80":
             # int 0x80 is always the 32-bit ABI syscall gate (eax), even from a 64-bit process.
             # Backtrack with bitness=64 regardless: its register set (rax/eax/ax/al/ah) is a
@@ -413,10 +420,11 @@ class X86Backend(ArchBackend):
             # "mov rax, N" write resolved a value wider than that (e.g. mov rax, 0x100000001).
             if syscall_number is not None and (syscall_number & 0xFFFFFFFF) in INT80_EXIT_NUMBERS:
                 self._analyzeEndInstruction(state)
-                LOGGER.debug(
-                    "  analyzeFunction() found program ending instruction @0x%08x",
-                    i_address,
-                )
+                if LOGGER.isEnabledFor(logging.DEBUG):
+                    LOGGER.debug(
+                        "  analyzeFunction() found program ending instruction @0x%08x",
+                        i_address,
+                    )
         elif previous_address is not None and i_address != start_addr and previous_mnemonic == "call":
             instruction_bytes = d._getDisasmWindowBuffer(i_address)
             instruction_sequence = list(d.capstone.disasm_lite(instruction_bytes, i_address))
@@ -435,12 +443,13 @@ class X86Backend(ArchBackend):
                 # Other formats keep the plain alignment cut: clang/GCC/Go pad between
                 # real functions with prologue-less entries.
                 if not d.fc_manager.hasCommonPrologue(seed_address):
-                    LOGGER.debug(
-                        "    current function: 0x%x ---> alignment sequence after call seeds non-entry-shaped 0x%08x, NOT cutting block at -> 0x%08x.",
-                        start_addr,
-                        seed_address,
-                        i_address,
-                    )
+                    if LOGGER.isEnabledFor(logging.DEBUG):
+                        LOGGER.debug(
+                            "    current function: 0x%x ---> alignment sequence after call seeds non-entry-shaped 0x%08x, NOT cutting block at -> 0x%08x.",
+                            start_addr,
+                            seed_address,
+                            i_address,
+                        )
                     return False
             if is_alignment_evidence or is_candidate_evidence:
                 # LLVM and GCC sometimes tends to produce lots of tailcalls that basically mess with function end detection, we cut whenever we find effective nops after calls
@@ -450,11 +459,12 @@ class X86Backend(ArchBackend):
                 if max_instruction_start is None:
                     max_instruction_start = max(state.instruction_start_bytes, default=-1)
                 if max_instruction_start <= i_address:
-                    LOGGER.debug(
-                        "    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.",
-                        start_addr,
-                        i_address,
-                    )
+                    if LOGGER.isEnabledFor(logging.DEBUG):
+                        LOGGER.debug(
+                            "    current function: 0x%x ---> ran into alignment sequence after call -> 0x%08x, cutting block here.",
+                            start_addr,
+                            i_address,
+                        )
                     # remove next instruction from references
                     state.removeCodeRef(previous_address, i_address)
                     # end block
@@ -470,13 +480,14 @@ class X86Backend(ArchBackend):
                             next_candidate_address = i_address
                         else:
                             next_candidate_address = previous_address + (16 - previous_address % 16)
-                        LOGGER.debug(
-                            "  Adding: 0x%x as candidate.",
-                            next_candidate_address,
-                        )
+                        if LOGGER.isEnabledFor(logging.DEBUG):
+                            LOGGER.debug(
+                                "  Adding: 0x%x as candidate.",
+                                next_candidate_address,
+                            )
                         d.fc_manager.addCandidate(next_candidate_address, is_gap=True)
                     return True
-                else:
+                elif LOGGER.isEnabledFor(logging.DEBUG):
                     LOGGER.debug(
                         "    current function: 0x%x ---> alignment sequence seems to just pad a call -> 0x%08x, NOT cutting block here.",
                         start_addr,

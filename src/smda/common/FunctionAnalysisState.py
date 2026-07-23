@@ -85,8 +85,16 @@ class FunctionAnalysisState:
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.add((addr_from, addr_to))
-        self.code_refs_from.setdefault(addr_from, set()).add(addr_to)
-        self.code_refs_to.setdefault(addr_to, set()).add(addr_from)
+        refs_from = self.code_refs_from.get(addr_from)
+        if refs_from is None:
+            self.code_refs_from[addr_from] = {addr_to}
+        else:
+            refs_from.add(addr_to)
+        refs_to = self.code_refs_to.get(addr_to)
+        if refs_to is None:
+            self.code_refs_to[addr_to] = {addr_from}
+        else:
+            refs_to.add(addr_from)
         if by_jump:
             self.is_jmp = True
             self.jump_targets.add(addr_to)
@@ -136,16 +144,21 @@ class FunctionAnalysisState:
         return conflicts
 
     def _finalizeRegularAnalysis(self):
-        fn_min = min([ins[0] for ins in self.instructions])
-        fn_max = max([ins[0] + ins[1] for ins in self.instructions])
+        fn_min = min(ins[0] for ins in self.instructions)
+        fn_max = max(ins[0] + ins[1] for ins in self.instructions)
 
         self.disassembly.function_symbols[self.start_addr] = self.label
         self.disassembly.function_borders[self.start_addr] = (fn_min, fn_max)
+        instructions_map = self.disassembly.instructions
+        code_map = self.disassembly.code_map
+        ins2fn = self.disassembly.ins2fn
+        start_addr = self.start_addr
         for ins in self.instructions:
-            self.disassembly.instructions[ins[0]] = (ins[2], ins[1])
-            for offset in range(ins[1]):
-                self.disassembly.code_map[ins[0] + offset] = ins[0]
-                self.disassembly.ins2fn[ins[0] + offset] = self.start_addr
+            ins_addr = ins[0]
+            instructions_map[ins_addr] = (ins[2], ins[1])
+            for byte_addr in range(ins_addr, ins_addr + ins[1]):
+                code_map[byte_addr] = ins_addr
+                ins2fn[byte_addr] = start_addr
         self.disassembly.data_map.update(self.data_bytes)
         self.disassembly.functions[self.start_addr] = self.getBlocks()
         for cref in self.code_refs:
@@ -223,7 +236,7 @@ class FunctionAnalysisState:
             self._instructions_sorted = True
         ins = {i[0]: ind for ind, i in enumerate(self.instructions)}
         potential_starts = {self.start_addr}
-        potential_starts.update(list(self.jump_targets))
+        potential_starts.update(self.jump_targets)
         blocks = []
         for start in sorted(potential_starts):
             if start not in ins:
@@ -242,13 +255,14 @@ class FunctionAnalysisState:
                     ):
                         break
                     # if we can reach a colliding address from here, the block is broken and should end.
-                    reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
-                    next_addr = current[0] + current[1]
-                    is_next_addr = next_addr in reachable_collisions
-                    if reachable_collisions and is_next_addr:
-                        # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
-                        self.removeCodeRef(current[0], next_addr)
-                        break
+                    if self.colliding_addresses:
+                        reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
+                        next_addr = current[0] + current[1]
+                        is_next_addr = next_addr in reachable_collisions
+                        if reachable_collisions and is_next_addr:
+                            # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
+                            self.removeCodeRef(current[0], next_addr)
+                            break
                 if (
                     i != len(self.instructions) - 1
                     and self.instructions[i + 1][0] in self.code_refs_to
