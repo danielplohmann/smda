@@ -118,8 +118,9 @@ class RustSymbolProvider(AbstractLabelProvider):
 
     def _get_binary_data(self, binary_info):
         """Safely retrieves binary data from either raw_data or a file path."""
-        data = binary_info.raw_data
-        if not data and binary_info.file_path:
+        data = getattr(binary_info, "raw_data", None)
+        file_path = getattr(binary_info, "file_path", None)
+        if not data and file_path:
             try:
                 with open(binary_info.file_path, "rb") as fin:
                     data = fin.read()

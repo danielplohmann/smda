@@ -50,6 +50,19 @@ class TestLanguageAnalyzer(unittest.TestCase):
         self.assertEqual(result["c++"], 1)  # the pre-disassembly zero-function artifact
         self.assertEqual(result["_guess"], "go")
 
+    def test_identify_prefers_rust_signature_over_zero_function_cpp_artifact(self):
+        # same rationale as the Go case above: an unambiguous Rust marker string must win the
+        # guess over the inflated pre-disassembly c++ score, or a real Rust binary gets
+        # misclassified as c++.
+        binary = b"RUST_MIN_STACK" + b"\x8b\x4d\x04\xe8\x01\x02\x03\x00" * 3
+        analyzer = LanguageAnalyzer(_DummyDisassembly(binary, functions={}))
+
+        result = analyzer.identify()
+
+        self.assertGreater(result["rust"], 0.5)
+        self.assertEqual(result["c++"], 1)  # the pre-disassembly zero-function artifact
+        self.assertEqual(result["_guess"], "rust")
+
     def test_rescore_renormalizes_cpp_score_and_guess_with_real_function_count(self):
         binary = b'Go build ID: "abc123def456"' + b"\x8b\x4d\x04\xe8\x01\x02\x03\x00" * 3
         analyzer = LanguageAnalyzer(_DummyDisassembly(binary, functions={}))
