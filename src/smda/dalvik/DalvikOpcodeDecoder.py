@@ -154,19 +154,23 @@ _register(0x16, "const-wide/16", "21s", 2)
 _register(0x17, "const-wide/32", "31i", 3)
 _register(0x18, "const-wide", "51l", 5)
 _register(0x19, "const-wide/high16", "21h", 2)
-_register(0x1A, "const-string", "21c", 2, ref_kind="string")
-_register(0x1B, "const-string/jumbo", "31c", 3, ref_kind="string")
+# can_throw flags follow AOSP: dalvik/opcode-gen/bytecode.txt continue|throw, reconciled
+# against ART libdexfile/dex/dex_instruction_list.h (kThrow) where the legacy table lags.
+_register(0x1A, "const-string", "21c", 2, ref_kind="string", can_throw=True)
+_register(0x1B, "const-string/jumbo", "31c", 3, ref_kind="string", can_throw=True)
 _register(0x1C, "const-class", "21c", 2, ref_kind="type", can_throw=True)
 _register(0x1D, "monitor-enter", "11x", 1, can_throw=True)
 _register(0x1E, "monitor-exit", "11x", 1, can_throw=True)
 _register(0x1F, "check-cast", "21c", 2, ref_kind="type", can_throw=True)
-_register(0x20, "instance-of", "22c", 2, ref_kind="type")
+_register(0x20, "instance-of", "22c", 2, ref_kind="type", can_throw=True)
 _register(0x21, "array-length", "12x", 1, can_throw=True)
 _register(0x22, "new-instance", "21c", 2, ref_kind="type", can_throw=True)
 _register(0x23, "new-array", "22c", 2, ref_kind="type", can_throw=True)
 _register(0x24, "filled-new-array", "35c", 3, ref_kind="type", can_throw=True)
 _register(0x25, "filled-new-array/range", "3rc", 3, ref_kind="type", can_throw=True)
-_register(0x26, "fill-array-data", "31t", 3, payload_kind="fill-array-data")
+# fill-array-data: legacy bytecode.txt says "continue" only, but ART dex_instruction_list.h
+# marks it kContinue|kThrow (NPE on null array) — follow ART for CFG completeness.
+_register(0x26, "fill-array-data", "31t", 3, payload_kind="fill-array-data", can_throw=True)
 _register(0x27, "throw", "11x", 1, can_throw=True, is_terminator=True)
 _register(0x28, "goto", "10t", 1, is_terminator=True)
 _register(0x29, "goto/16", "20t", 2, is_terminator=True)
@@ -442,8 +446,8 @@ _register(0xFA, "invoke-polymorphic", "45cc", 4, ref_kind="method", can_throw=Tr
 _register(0xFB, "invoke-polymorphic/range", "4rcc", 4, ref_kind="method", can_throw=True, is_invoke=True)
 _register(0xFC, "invoke-custom", "35c", 3, ref_kind="call_site", can_throw=True, is_invoke=True)
 _register(0xFD, "invoke-custom/range", "3rc", 3, ref_kind="call_site", can_throw=True, is_invoke=True)
-_register(0xFE, "const-method-handle", "21c", 2, ref_kind="method_handle")
-_register(0xFF, "const-method-type", "21c", 2, ref_kind="proto")
+_register(0xFE, "const-method-handle", "21c", 2, ref_kind="method_handle", can_throw=True)
+_register(0xFF, "const-method-type", "21c", 2, ref_kind="proto", can_throw=True)
 
 
 def _reg_name(register_index):

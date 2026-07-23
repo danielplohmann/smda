@@ -8,6 +8,7 @@ import lief
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 from smda.dalvik.DalvikOpcodeDecoder import (
+    OPCODES,
     decode_instruction,
     parse_code_item_header,
     read_sleb128,
@@ -19,7 +20,74 @@ from smda.utility.DexFileLoader import DexFileLoader
 LOGGER = logging.getLogger(__name__)
 
 
+def parse_map_sections(raw_data):
+    """Return {type_code: (offset, size)} from the DEX map_list (AOSP map_item)."""
+    if not raw_data or len(raw_data) < 0x38:
+        return {}
+    map_off = struct.unpack_from("<I", raw_data, 0x34)[0]
+    if map_off == 0 or map_off + 4 > len(raw_data):
+        return {}
+    count = struct.unpack_from("<I", raw_data, map_off)[0]
+    sections = {}
+    cursor = map_off + 4
+    for _ in range(count):
+        if cursor + 12 > len(raw_data):
+            break
+        type_code, _unused, size, offset = struct.unpack_from("<HHII", raw_data, cursor)
+        sections[type_code] = (offset, size)
+        cursor += 12
+    return sections
+
+
+class _OrphanCodeItemMethod:
+    """Synthetic method object for gap-discovered code_items (no LIEF row)."""
+
+    def __init__(self, code_offset):
+        self.code_offset = code_offset
+        self.code_info = object()
+        self.has_class = True
+        self.name = f"orphan_code_item@0x{code_offset:x}"
+        self.cls = None
+        self.prototype = None
+        self.access_flags = 0
+
+
 class DexReferenceResolver:
+    # AOSP dex-format MethodHandleTypeCodes
+    METHOD_HANDLE_TYPES = {
+        0x00: "static-put",
+        0x01: "static-get",
+        0x02: "instance-put",
+        0x03: "instance-get",
+        0x04: "invoke-static",
+        0x05: "invoke-instance",
+        0x06: "invoke-constructor",
+        0x07: "invoke-direct",
+        0x08: "invoke-interface",
+    }
+    METHOD_HANDLE_FIELD_TYPES = {0x00, 0x01, 0x02, 0x03}
+    # AOSP encoded_value type codes used by call_site_item
+    VALUE_BYTE = 0x00
+    VALUE_SHORT = 0x02
+    VALUE_CHAR = 0x03
+    VALUE_INT = 0x04
+    VALUE_LONG = 0x06
+    VALUE_FLOAT = 0x10
+    VALUE_DOUBLE = 0x11
+    VALUE_METHOD_TYPE = 0x15
+    VALUE_METHOD_HANDLE = 0x16
+    VALUE_STRING = 0x17
+    VALUE_TYPE = 0x18
+    VALUE_FIELD = 0x19
+    VALUE_METHOD = 0x1A
+    VALUE_ENUM = 0x1B
+    VALUE_ARRAY = 0x1C
+    VALUE_ANNOTATION = 0x1D
+    VALUE_NULL = 0x1E
+    VALUE_BOOLEAN = 0x1F
+    TYPE_CALL_SITE_ID = 0x0007
+    TYPE_METHOD_HANDLE = 0x0008
+
     PRIMITIVE_TYPES = {
         "VOID_T": "V",
         "VOID": "V",
@@ -64,14 +132,32 @@ class DexReferenceResolver:
         (0x20000, "declared-synchronized"),
     ]
 
-    def __init__(self, dex_file):
+    def __init__(self, dex_file, raw_data=None):
         self.dex_file = dex_file
+        self.raw_data = raw_data if raw_data is not None else getattr(dex_file, "raw", None)
+        if isinstance(self.raw_data, memoryview):
+            self.raw_data = self.raw_data.tobytes()
+        elif self.raw_data is not None and not isinstance(self.raw_data, (bytes, bytearray)):
+            with contextlib.suppress(Exception):
+                self.raw_data = bytes(self.raw_data)
         self.strings = list(getattr(dex_file, "strings", []))
         self.methods = self._indexItems(getattr(dex_file, "methods", []))
         self.fields = self._indexItems(getattr(dex_file, "fields", []))
         self.types = self._indexItems(getattr(dex_file, "types", []))
         self.prototypes = self._indexItems(getattr(dex_file, "prototypes", []))
         self.classes = self._indexItems(getattr(dex_file, "classes", []))
+        self.method_handles = {}
+        self.call_sites = {}
+        # id()-keyed: only safe while callers keep the LIEF objects alive for the
+        # resolver's lifetime (resolver tables and analyzeBuffer's method list do);
+        # an id reused after GC would alias a stale entry.
+        self._method_format_cache = {}
+        self._field_format_cache = {}
+        # id()-keyed: only safe while callers keep the LIEF objects alive for the
+        # resolver's lifetime (resolver tables and analyzeBuffer's method list do);
+        # an id reused after GC would alias a stale entry.
+        self._type_format_cache = {}
+        self._loadExtendedTables()
 
     def _indexItems(self, items):
         indexed = {}
@@ -106,6 +192,22 @@ class DexReferenceResolver:
         return type_name
 
     def _formatType(self, type_obj):
+        if type_obj is None:
+            return "<?>"
+        if isinstance(type_obj, str):
+            return self._normalizeTypeString(type_obj)
+        # Type objects are id()-stable for the resolver's lifetime (LIEF keeps
+        # them alive via the parsed dex_file and analyzeBuffer's method list),
+        # so caching by id() avoids re-deriving the same descriptor thousands
+        # of times across method/field/proto rendering — the dominant cost.
+        cached = self._type_format_cache.get(id(type_obj))
+        if cached is not None:
+            return cached
+        result = self._formatTypeUncached(type_obj)
+        self._type_format_cache[id(type_obj)] = result
+        return result
+
+    def _formatTypeUncached(self, type_obj):
         if type_obj is None:
             return "<?>"
         if isinstance(type_obj, str):
@@ -151,18 +253,30 @@ class DexReferenceResolver:
     def formatMethod(self, method):
         if method is None:
             return "method@<?>"
+        cache_key = id(method)
+        cached = self._method_format_cache.get(cache_key)
+        if cached is not None:
+            return cached
         class_name = self._formatType(getattr(method, "cls", None))
         method_name = getattr(method, "name", "<?>")
         prototype = self._formatProto(getattr(method, "prototype", None))
-        return f"{class_name}->{method_name}{prototype}"
+        result = f"{class_name}->{method_name}{prototype}"
+        self._method_format_cache[cache_key] = result
+        return result
 
     def formatField(self, field):
         if field is None:
             return "field@<?>"
+        cache_key = id(field)
+        cached = self._field_format_cache.get(cache_key)
+        if cached is not None:
+            return cached
         class_name = self._formatType(getattr(field, "cls", None))
         field_name = getattr(field, "name", "<?>")
         field_type = self._formatType(getattr(field, "type", None))
-        return f"{class_name}->{field_name}:{field_type}"
+        result = f"{class_name}->{field_name}:{field_type}"
+        self._field_format_cache[cache_key] = result
+        return result
 
     def formatProto(self, index):
         prototype = self._safeGet(self.prototypes, index)
@@ -199,6 +313,206 @@ class DexReferenceResolver:
                 parts.append(f"\\u{ord(ch):04x}")
         return "".join(parts)
 
+    def _mapSections(self):
+        return parse_map_sections(self.raw_data)
+
+    def _loadExtendedTables(self):
+        """Parse method_handles and call_site_ids from the DEX map (DEX 038+)."""
+        sections = self._mapSections()
+        mh = sections.get(self.TYPE_METHOD_HANDLE)
+        if mh:
+            offset, count = mh
+            for index in range(count):
+                item_off = offset + index * 8
+                if self.raw_data is None or item_off + 8 > len(self.raw_data):
+                    break
+                handle_type, _u1, member_idx, _u2 = struct.unpack_from("<HHHH", self.raw_data, item_off)
+                self.method_handles[index] = {
+                    "type": handle_type,
+                    "type_name": self.METHOD_HANDLE_TYPES.get(handle_type, f"type@{handle_type}"),
+                    "member_index": member_idx,
+                    "is_field": handle_type in self.METHOD_HANDLE_FIELD_TYPES,
+                }
+        cs = sections.get(self.TYPE_CALL_SITE_ID)
+        if cs:
+            offset, count = cs
+            for index in range(count):
+                item_off = offset + index * 4
+                if self.raw_data is None or item_off + 4 > len(self.raw_data):
+                    break
+                call_site_off = struct.unpack_from("<I", self.raw_data, item_off)[0]
+                self.call_sites[index] = self._parseCallSiteItem(call_site_off)
+
+    def _readEncodedValue(self, data, offset):
+        """Parse one encoded_value; return (python_value, next_offset)."""
+        if offset >= len(data):
+            raise ValueError("truncated encoded_value")
+        header = data[offset]
+        offset += 1
+        value_type = header & 0x1F
+        value_arg = (header >> 5) & 0x07
+        if value_type == self.VALUE_NULL:
+            return None, offset
+        if value_type == self.VALUE_BOOLEAN:
+            return bool(value_arg), offset
+        if value_type == self.VALUE_ARRAY:
+            return self._readEncodedArray(data, offset)
+        if value_type == self.VALUE_ANNOTATION:
+            # Skip nested annotation: type_idx, size, then size * (name_idx + value)
+            _type_idx, offset = read_uleb128(data, offset)
+            size, offset = read_uleb128(data, offset)
+            for _ in range(size):
+                _name_idx, offset = read_uleb128(data, offset)
+                _val, offset = self._readEncodedValue(data, offset)
+            return {"annotation": True}, offset
+        size = value_arg + 1
+        if offset + size > len(data):
+            raise ValueError("truncated encoded_value payload")
+        raw = data[offset : offset + size]
+        offset += size
+        # AOSP encoded_value extension rules: indices and char are zero-extended,
+        # byte/short/int/long are sign-extended, float/double are zero-extended
+        # to the right (bits occupy the high bytes of the IEEE754 pattern).
+        int_val = int.from_bytes(raw, byteorder="little", signed=False)
+        if value_type == self.VALUE_STRING:
+            return ("string", int_val), offset
+        if value_type == self.VALUE_TYPE:
+            return ("type", int_val), offset
+        if value_type == self.VALUE_FIELD or value_type == self.VALUE_ENUM:
+            return ("field", int_val), offset
+        if value_type == self.VALUE_METHOD:
+            return ("method", int_val), offset
+        if value_type == self.VALUE_METHOD_TYPE:
+            return ("proto", int_val), offset
+        if value_type == self.VALUE_METHOD_HANDLE:
+            return ("method_handle", int_val), offset
+        if value_type in (self.VALUE_BYTE, self.VALUE_SHORT, self.VALUE_INT, self.VALUE_LONG):
+            return int.from_bytes(raw, byteorder="little", signed=True), offset
+        if value_type == self.VALUE_FLOAT:
+            bits = (int_val << (8 * (4 - size))) & 0xFFFFFFFF
+            return struct.unpack("<f", struct.pack("<I", bits))[0], offset
+        if value_type == self.VALUE_DOUBLE:
+            bits = (int_val << (8 * (8 - size))) & 0xFFFFFFFFFFFFFFFF
+            return struct.unpack("<d", struct.pack("<Q", bits))[0], offset
+        # VALUE_CHAR and any unknown type code: keep the zero-extended value.
+        return int_val, offset
+
+    def _readEncodedArray(self, data, offset):
+        size, offset = read_uleb128(data, offset)
+        values = []
+        for _ in range(size):
+            value, offset = self._readEncodedValue(data, offset)
+            values.append(value)
+        return values, offset
+
+    def _parseCallSiteItem(self, call_site_off):
+        """
+        call_site_item is an encoded_array (AOSP dex-format):
+          [0] method_handle index, [1] method name string, [2] method type proto,
+          [3..] bootstrap linker args.
+        """
+        raw = self.raw_data
+        if raw is None or call_site_off >= len(raw):
+            return {"offset": call_site_off, "values": [], "display": f"call_site@off={call_site_off}"}
+        try:
+            values, _ = self._readEncodedArray(raw, call_site_off)
+        except (ValueError, struct.error):
+            return {"offset": call_site_off, "values": [], "display": f"call_site@off={call_site_off}"}
+        handle_idx = None
+        name_idx = None
+        proto_idx = None
+        bootstrap_args = []
+        if values:
+            v0 = values[0]
+            if isinstance(v0, tuple) and v0[0] == "method_handle":
+                handle_idx = v0[1]
+            elif isinstance(v0, int):
+                handle_idx = v0
+        if len(values) > 1:
+            v1 = values[1]
+            if isinstance(v1, tuple) and v1[0] == "string":
+                name_idx = v1[1]
+        if len(values) > 2:
+            v2 = values[2]
+            if isinstance(v2, tuple) and v2[0] == "proto":
+                proto_idx = v2[1]
+        if len(values) > 3:
+            bootstrap_args = values[3:]
+        return {
+            "offset": call_site_off,
+            "values": values,
+            "method_handle_index": handle_idx,
+            "name_index": name_idx,
+            "proto_index": proto_idx,
+            "bootstrap_args": bootstrap_args,
+            "display": None,
+        }
+
+    def formatMethodHandle(self, index):
+        handle = self.method_handles.get(index)
+        if handle is None:
+            return f"method_handle@{index}"
+        type_name = handle["type_name"]
+        member_idx = handle["member_index"]
+        if handle["is_field"]:
+            member = self.formatField(self._safeGet(self.fields, member_idx))
+        else:
+            member = self.formatMethod(self._safeGet(self.methods, member_idx))
+        return f"method_handle@{index}:{type_name}@{member}"
+
+    def _formatBootstrapArg(self, arg):
+        if arg is None:
+            return "null"
+        if isinstance(arg, bool):
+            return "true" if arg else "false"
+        if isinstance(arg, int):
+            return hex(arg)
+        if isinstance(arg, tuple) and len(arg) == 2:
+            kind, idx = arg
+            if kind == "string":
+                if 0 <= idx < len(self.strings):
+                    return '"' + self._escapeDexString(self.strings[idx]) + '"'
+                return f"string@{idx}"
+            if kind == "type":
+                return self.formatTypeByIndex(idx)
+            if kind == "field":
+                return self.formatField(self._safeGet(self.fields, idx))
+            if kind == "method":
+                return self.formatMethod(self._safeGet(self.methods, idx))
+            if kind == "proto":
+                return self.formatProto(idx)
+            if kind == "method_handle":
+                return self.formatMethodHandle(idx)
+            return f"{kind}@{idx}"
+        if isinstance(arg, list):
+            return "[" + ", ".join(self._formatBootstrapArg(v) for v in arg) + "]"
+        if isinstance(arg, dict):
+            return "annotation"
+        return repr(arg)
+
+    def formatCallSite(self, index):
+        site = self.call_sites.get(index)
+        if site is None:
+            return f"call_site@{index}"
+        if site.get("display"):
+            return site["display"]
+        handle_idx = site.get("method_handle_index")
+        name_idx = site.get("name_index")
+        proto_idx = site.get("proto_index")
+        handle_str = self.formatMethodHandle(handle_idx) if handle_idx is not None else "method_handle@<?>"
+        if name_idx is not None and 0 <= name_idx < len(self.strings):
+            name_str = self.strings[name_idx]
+        elif name_idx is not None:
+            name_str = f"string@{name_idx}"
+        else:
+            name_str = "<?>"
+        proto_str = self.formatProto(proto_idx) if proto_idx is not None else "()<?>"
+        args = site.get("bootstrap_args") or []
+        args_str = ", ".join(self._formatBootstrapArg(a) for a in args)
+        if args_str:
+            return f"call_site@{index}:{{{handle_str}, {name_str}, {proto_str}, {args_str}}}"
+        return f"call_site@{index}:{{{handle_str}, {name_str}, {proto_str}}}"
+
     def formatRef(self, ref_kind, index):
         if ref_kind == "string":
             if 0 <= index < len(self.strings):
@@ -213,9 +527,9 @@ class DexReferenceResolver:
         if ref_kind == "proto":
             return self.formatProto(index)
         if ref_kind == "method_handle":
-            return f"method_handle@{index}"
+            return self.formatMethodHandle(index)
         if ref_kind == "call_site":
-            return f"call_site@{index}"
+            return self.formatCallSite(index)
         return f"{ref_kind}@{index}" if ref_kind else f"item@{index}"
 
     def getMethod(self, method_index):
@@ -486,15 +800,21 @@ class DalvikDisassembler:
         return try_items, structural_violations
 
     def _instructionCanThrow(self, decoded):
-        if decoded.can_throw:
-            return True
-        return decoded.mnemonic.startswith("invoke-")
+        return decoded.can_throw
 
     def _updateApiInformation(self, from_addr, api_name):
         self.disassembly.addr_to_api[from_addr] = api_name
 
-    def _applyExceptionEdges(self, state, instruction_addr, decoded, try_blocks):
+    def _applyExceptionEdges(self, state, instruction_addr, decoded, try_blocks, metadata):
+        """
+        Add CFG edges from a throwable instruction to covering catch handlers.
+
+        Edges are recorded both as ordinary code_refs (reachability / block split)
+        and as typed exception_edges in function metadata.
+        """
         applied = False
+        exception_edges = metadata.setdefault("exception_edges", [])
+        seen = metadata.setdefault("_exception_edge_keys", set())
         for try_block in try_blocks:
             if not (try_block["start_addr"] <= instruction_addr < try_block["end_addr"]):
                 continue
@@ -503,11 +823,40 @@ class DalvikDisassembler:
                 state.addCodeRef(instruction_addr, target_addr)
                 state.addBlockStart(target_addr)
                 state.addBlockToQueue(target_addr)
+                key = (instruction_addr, target_addr, handler["type_idx"], False)
+                if key not in seen:
+                    seen.add(key)
+                    exception_edges.append(
+                        {
+                            "from_addr": instruction_addr,
+                            "to_addr": target_addr,
+                            "kind": "exception",
+                            "type_idx": handler["type_idx"],
+                            "type_name": handler["type_name"],
+                            "catch_all": False,
+                            "mnemonic": decoded.mnemonic,
+                        }
+                    )
                 applied = True
             if try_block["catch_all_addr"] is not None:
-                state.addCodeRef(instruction_addr, try_block["catch_all_addr"])
-                state.addBlockStart(try_block["catch_all_addr"])
-                state.addBlockToQueue(try_block["catch_all_addr"])
+                target_addr = try_block["catch_all_addr"]
+                state.addCodeRef(instruction_addr, target_addr)
+                state.addBlockStart(target_addr)
+                state.addBlockToQueue(target_addr)
+                key = (instruction_addr, target_addr, None, True)
+                if key not in seen:
+                    seen.add(key)
+                    exception_edges.append(
+                        {
+                            "from_addr": instruction_addr,
+                            "to_addr": target_addr,
+                            "kind": "exception",
+                            "type_idx": None,
+                            "type_name": "<catch-all>",
+                            "catch_all": True,
+                            "mnemonic": decoded.mnemonic,
+                        }
+                    )
                 applied = True
         return applied
 
@@ -559,6 +908,7 @@ class DalvikDisassembler:
                 "insns_size_units": code_item_header["insns_size"],
                 "exception_handler_count": len(exception_handlers),
                 "exception_handlers": exception_handlers,
+                "exception_edges": [],
                 "try_ranges": try_ranges,
                 "heuristics": [],
                 "reference_counts": {
@@ -618,16 +968,25 @@ class DalvikDisassembler:
         ):
             heuristics.append("string-staging")
 
-    def _buildValidInstructionStarts(self, bytecode):
-        """Linear sweep (pass 1) that records all legal instruction-start byte offsets.
+    # Safety bound for the fixed-point payload discovery; each pass either
+    # discovers a new payload range or the loop terminates.
+    _MAX_PAYLOAD_DISCOVERY_PASSES = 256
+    # Orphan scan: cap full-stream decode attempts (not just accepts).
+    _MAX_ORPHAN_DECODE_ATTEMPTS = 256
+    _MAX_ORPHAN_CANDIDATES = 64
 
-        This is intentionally cheap: no CFG, no operand resolution, no side effects.
-        The result is used in the recursive CFG pass (pass 2) to reject externally-
-        derived targets (switch tables, exception handlers) that land mid-instruction
-        or outside the method, preventing phantom CFG nodes from adversarial DEX.
+    def _sweepInstructionStarts(self, bytecode, seed_payload_ranges=None):
+        """One linear sweep with optional pre-seeded payload ranges excluded as data.
+
+        Returns (valid_starts, payload_ranges, had_backward_payload) where
+        payload_ranges is a list of (start, end) byte offsets and
+        had_backward_payload is True if any 31t pointed to a range at/before
+        the discovering instruction (only then is a re-sweep required).
         """
         valid = set()
-        payload_ranges = []
+        payload_ranges = list(seed_payload_ranges or [])
+        seen_ranges = set(payload_ranges)
+        had_backward_payload = False
         idx = 0
         null_resolve = lambda ref_kind, ref_index: ""  # noqa: E731
         # Dalvik instructions are 16-bit aligned (one "code unit"), so always
@@ -646,9 +1005,42 @@ class DalvikDisassembler:
             if decoded.payload_idx is not None:
                 payload_size = self._getPayloadSize(bytecode, decoded.payload_idx)
                 if payload_size:
-                    payload_ranges.append((decoded.payload_idx, decoded.payload_idx + payload_size))
+                    range_pair = (decoded.payload_idx, decoded.payload_idx + payload_size)
+                    if range_pair not in seen_ranges:
+                        payload_ranges.append(range_pair)
+                        seen_ranges.add(range_pair)
+                        # Backward or self-overlapping payload relative to this insn.
+                        if decoded.payload_idx <= idx:
+                            had_backward_payload = True
             idx += decoded.size_bytes
-        return valid
+        return valid, payload_ranges, had_backward_payload
+
+    def _buildValidInstructionStarts(self, bytecode):
+        """Fixed-point linear sweep of legal instruction-start offsets.
+
+        Real compilers place switch/array payloads after the referencing 31t
+        instruction, so a single forward pass is enough for legitimate DEX.
+        Adversarial DEX can use a *backward* signed payload offset, which a
+        single pass will have already mis-decoded as code. Re-sweep only when
+        a backward payload is observed.
+
+        Returns (valid_starts, payload_ranges).
+        """
+        payload_ranges = []
+        valid = set()
+        for pass_num in range(self._MAX_PAYLOAD_DISCOVERY_PASSES):
+            valid, new_ranges, had_backward = self._sweepInstructionStarts(bytecode, payload_ranges)
+            if len(new_ranges) == len(payload_ranges):
+                payload_ranges = new_ranges
+                break
+            payload_ranges = new_ranges
+            # Forward payloads are discovered at their 31t before the sweep
+            # reaches them and are excluded within the same pass; only a
+            # backward payload can have been mis-decoded as code already,
+            # so only that case requires a re-sweep.
+            if pass_num == 0 and not had_backward:
+                break
+        return valid, payload_ranges
 
     def _addStructuralViolation(self, metadata, violation_type, **fields):
         violation = {"type": violation_type}
@@ -693,9 +1085,15 @@ class DalvikDisassembler:
             )
         return sanitized, structural_violations
 
-    def _validateBranchTarget(self, metadata, source_addr, source_idx, target_idx, valid_instruction_starts):
+    def _validateBranchTarget(
+        self, metadata, source_addr, source_idx, target_idx, valid_instruction_starts, mnemonic=None
+    ):
         target_addr = source_addr + (target_idx - source_idx)
         if target_idx == source_idx:
+            # AOSP dalvik-bytecode: goto and goto/16 must not use offset 0;
+            # goto/32 may (infinite-loop idiom used by packers).
+            if mnemonic == "goto/32":
+                return target_addr
             self._addStructuralViolation(
                 metadata,
                 "zero_branch_offset",
@@ -732,8 +1130,8 @@ class DalvikDisassembler:
             code_item_header["tries_size"],
         )
 
-        # Pass 1: build a set of legal instruction-start byte offsets for target validation.
-        valid_instruction_starts = self._buildValidInstructionStarts(bytecode)
+        # Pass 1: fixed-point legal instruction starts + payload ranges.
+        valid_instruction_starts, seed_payload_ranges = self._buildValidInstructionStarts(bytecode)
 
         try_blocks, target_violations = self._sanitizeTryBlocks(try_blocks, bytecode_offset, valid_instruction_starts)
 
@@ -755,15 +1153,26 @@ class DalvikDisassembler:
                 state.addBlockToQueue(ca_addr)
 
         visited_offsets = set()
-        payload_ranges = []
+        # Seed the CFG pass with every payload range discovered by the fixed-point
+        # sweep so a backward 31t reference cannot be walked as code.
+        payload_ranges = list(seed_payload_ranges)
+        payload_range_set = set(payload_ranges)
 
         while state.hasUnprocessedBlocks():
             block_start_addr = state.chooseNextBlock()
+            if block_start_addr is None:
+                break
             idx = block_start_addr - bytecode_offset
             while 0 <= idx < len(bytecode):
                 if any(start <= idx < end for start, end in payload_ranges):
                     break
                 if idx in visited_offsets:
+                    break
+                # Linear fall-through must land on a fixed-point-valid start (keeps
+                # us out of payload / mid-instruction). Explicitly queued block
+                # entries still get one decode attempt so decode errors surface.
+                is_block_entry = idx == (block_start_addr - bytecode_offset)
+                if not is_block_entry and idx not in valid_instruction_starts:
                     break
                 visited_offsets.add(idx)
 
@@ -801,7 +1210,10 @@ class DalvikDisassembler:
                 if decoded.payload_idx is not None:
                     payload_size = self._getPayloadSize(bytecode, decoded.payload_idx)
                     if payload_size:
-                        payload_ranges.append((decoded.payload_idx, decoded.payload_idx + payload_size))
+                        range_pair = (decoded.payload_idx, decoded.payload_idx + payload_size)
+                        if range_pair not in payload_range_set:
+                            payload_ranges.append(range_pair)
+                            payload_range_set.add(range_pair)
                         payload_addr = bytecode_offset + decoded.payload_idx
                         state.addDataRef(i_address, payload_addr, size=payload_size)
                         if decoded.payload_kind in ("packed-switch", "sparse-switch"):
@@ -819,16 +1231,27 @@ class DalvikDisassembler:
                                 state.addCodeRef(i_address, target_addr, by_jump=True)
                                 state.addBlockStart(target_addr)
                                 state.addBlockToQueue(target_addr)
+                        # Sequential fallthrough must land on a real instruction
+                        # start, never into a payload immediately after a 31t.
+                        fallthrough_idx = idx + i_size
+                        if fallthrough_idx not in valid_instruction_starts:
+                            state.setNextInstructionReachable(False)
+                        elif decoded.payload_kind in ("packed-switch", "sparse-switch"):
                             fallthrough = i_address + i_size
                             state.addBlockStart(fallthrough)
                             state.addBlockToQueue(fallthrough)
-                    self._updateHeuristics(metadata, decoded, payload_size)
+                    self._updateHeuristics(metadata, decoded, payload_size if payload_size else 0)
                 else:
                     self._updateHeuristics(metadata, decoded, 0)
 
                 if i_mnemonic.startswith("goto"):
                     target_addr = self._validateBranchTarget(
-                        metadata, i_address, idx, decoded.branch_target_idx, valid_instruction_starts
+                        metadata,
+                        i_address,
+                        idx,
+                        decoded.branch_target_idx,
+                        valid_instruction_starts,
+                        mnemonic=i_mnemonic,
                     )
                     if target_addr is not None:
                         state.addCodeRef(i_address, target_addr, by_jump=True)
@@ -836,7 +1259,12 @@ class DalvikDisassembler:
                         state.addBlockToQueue(target_addr)
                 elif decoded.is_conditional and decoded.branch_target_idx is not None:
                     target_addr = self._validateBranchTarget(
-                        metadata, i_address, idx, decoded.branch_target_idx, valid_instruction_starts
+                        metadata,
+                        i_address,
+                        idx,
+                        decoded.branch_target_idx,
+                        valid_instruction_starts,
+                        mnemonic=i_mnemonic,
                     )
                     if target_addr is not None:
                         state.addCodeRef(i_address, target_addr, by_jump=True)
@@ -861,7 +1289,7 @@ class DalvikDisassembler:
                         self._updateApiInformation(i_address, call_name)
 
                 if self._instructionCanThrow(decoded) and try_blocks:
-                    has_exception_edges = self._applyExceptionEdges(state, i_address, decoded, try_blocks)
+                    has_exception_edges = self._applyExceptionEdges(state, i_address, decoded, try_blocks, metadata)
                     if has_exception_edges and state.is_next_instruction_reachable:
                         fallthrough = i_address + i_size
                         fallthrough_idx = idx + i_size
@@ -875,10 +1303,217 @@ class DalvikDisassembler:
                     break
             state.endBlock()
 
-        state.label = resolver.formatMethod(method)
+        # Surface valid instruction starts never reached by the CFG walk (dead
+        # code / opaque predicates); check against the final payload_ranges since
+        # the CFG pass may have discovered more than the seed.
+        unreached = sorted(
+            bytecode_offset + off
+            for off in valid_instruction_starts
+            if off not in visited_offsets and not any(s <= off < e for s, e in payload_ranges)
+        )
+        if unreached:
+            metadata["unreached_instruction_starts"] = unreached
+            metadata["unreached_instruction_count"] = len(unreached)
+            if "unreachable-code-surface" not in metadata["heuristics"]:
+                metadata["heuristics"].append("unreachable-code-surface")
+
+        # Prefer a clean orphan label over formatMethod's fallback for synthetic methods.
+        orphan_name = getattr(method, "name", None)
+        if orphan_name and str(orphan_name).startswith("orphan_code_item@"):
+            state.label = orphan_name
+        else:
+            state.label = resolver.formatMethod(method)
+        # Drop internal dedupe set before finalizing (not part of public metadata).
+        metadata.pop("_exception_edge_keys", None)
         state.finalizeAnalysis()
         self._logMethodDiagnostics(state)
         return state
+
+    # AOSP dex-format map_item type code for code_item
+    _TYPE_CODE_ITEM = 0x2001
+
+    def _codeItemSectionBounds(self, raw_data, data_off, data_end):
+        """(start, end) of the map-declared code_item section, or (None, None)."""
+        sections = parse_map_sections(raw_data)
+        code_section = sections.get(self._TYPE_CODE_ITEM)
+        if not code_section:
+            return None, None
+        code_off = code_section[0]
+        if not (data_off <= code_off < data_end):
+            # Map lies about the code section — distrust it entirely.
+            return None, None
+        # Map entries are sorted by offset (AOSP), so the section ends at the
+        # next section's offset; guard against forged/unsorted maps anyway.
+        following = [offset for offset, _size in sections.values() if code_off < offset <= data_end]
+        code_end = min(following) if following else data_end
+        return code_off, code_end
+
+    def _claimCodeItemRange(self, claimed_intervals, header_off, insns_size_units):
+        """Mark [header, header+16+insns) as occupied for orphan-scan skipping."""
+        end = header_off + 16 + insns_size_units * 2
+        claimed_intervals.append((header_off, end))
+
+    def _intervalContains(self, claimed_intervals, point):
+        return any(start <= point < end for start, end in claimed_intervals)
+
+    def _intervalOverlaps(self, claimed_intervals, start, end):
+        return any(start < b and a < end for a, b in claimed_intervals)
+
+    def _discoverOrphanCodeItems(self, raw_data, known_code_offsets, max_candidates=None):
+        """
+        Bounded scan for plausible code_item headers not referenced by LIEF methods.
+
+        code_item is 4-byte aligned (AOSP dex-format). Conservative filters keep
+        false positives low while recovering hidden/orphaned method bodies used
+        by some packers (completeness-over-precision, intel gap-scan analogue).
+        """
+        if max_candidates is None:
+            max_candidates = self._MAX_ORPHAN_CANDIDATES
+        if not raw_data or len(raw_data) < 0x70 + 16:
+            return []
+        header = DexFileLoader.parseBinary(raw_data)
+        if not header:
+            return []
+        data_off = header.get("data_off") or 0x70
+        data_end = data_off + (header.get("data_size") or 0)
+        if data_end <= data_off or data_end > len(raw_data):
+            data_off = 0x70
+            data_end = len(raw_data)
+        # Scope the scan to the map-declared code_item section (the analogue of
+        # intel's executable-sections-only gap search); string/annotation bytes
+        # outside it are never legal code_items. Fall back to the whole data
+        # region if the map is absent or forged.
+        code_off, code_end = self._codeItemSectionBounds(raw_data, data_off, data_end)
+        if code_off is not None:
+            data_off, data_end = code_off, code_end
+
+        # Claim full known code_item ranges (header + insn stream) so interiors of
+        # real methods cannot be re-parsed as orphan headers.
+        claimed_intervals = []
+        for code_offset in known_code_offsets:
+            header_off = code_offset - 16
+            if header_off < 0 or header_off + 16 > len(raw_data):
+                continue
+            try:
+                hdr = parse_code_item_header(raw_data, header_off)
+            except ValueError:
+                claimed_intervals.append((header_off, code_offset + 2))
+                continue
+            self._claimCodeItemRange(claimed_intervals, header_off, hdr["insns_size"])
+
+        candidates = []
+        decode_attempts = 0
+        scan = data_off + ((4 - (data_off % 4)) % 4)
+        # Sort intervals for linear skip advancement.
+        claimed_intervals.sort()
+        while scan + 16 <= data_end and len(candidates) < max_candidates:
+            if decode_attempts >= self._MAX_ORPHAN_DECODE_ATTEMPTS:
+                break
+            advanced = False
+            for a, b in claimed_intervals:
+                if a <= scan < b:
+                    scan = b if b % 4 == 0 else b + (4 - (b % 4))
+                    advanced = True
+                    break
+                if a > scan:
+                    break
+            if advanced:
+                continue
+            # Cheap header filter before counting a decode attempt.
+            try:
+                hdr = parse_code_item_header(raw_data, scan)
+            except ValueError:
+                scan += 4
+                continue
+            # Tight cheap filters: large insns_size on random data is the main cost driver.
+            if (
+                hdr["insns_size"] == 0
+                or hdr["insns_size"] > 0x200
+                or hdr["registers_size"] < hdr["ins_size"]
+                or hdr["registers_size"] > 0x100
+                or hdr["tries_size"] != 0
+                or hdr["outs_size"] > hdr["registers_size"]
+            ):
+                scan += 4
+                continue
+            code_offset = scan + 16
+            if code_offset + hdr["insns_size"] * 2 > len(raw_data):
+                scan += 4
+                continue
+            # First unit must look like a real opcode (not map/string noise).
+            first_op = raw_data[code_offset]
+            if first_op not in OPCODES:
+                scan += 4
+                continue
+            decode_attempts += 1
+            accepted = self._tryAcceptOrphanCodeItem(raw_data, scan, claimed_intervals, known_code_offsets)
+            if accepted is not None:
+                candidates.append(accepted)
+                self._claimCodeItemRange(claimed_intervals, scan, hdr["insns_size"])
+                claimed_intervals.sort()
+            scan += 4
+        return candidates
+
+    def _tryAcceptOrphanCodeItem(self, raw_data, header_off, claimed_intervals, known_code_offsets):
+        """Return code_offset if header_off looks like a valid unclaimed code_item."""
+        try:
+            hdr = parse_code_item_header(raw_data, header_off)
+        except ValueError:
+            return None
+        insns_size = hdr["insns_size"]
+        registers_size = hdr["registers_size"]
+        ins_size = hdr["ins_size"]
+        tries_size = hdr["tries_size"]
+        if insns_size == 0 or insns_size > 0x200:
+            return None
+        if registers_size < ins_size or registers_size > 0x100:
+            return None
+        if tries_size != 0:
+            return None
+        if hdr["outs_size"] > registers_size:
+            return None
+        code_offset = header_off + 16
+        insns_bytes = insns_size * 2
+        if code_offset + insns_bytes > len(raw_data):
+            return None
+        if code_offset in known_code_offsets:
+            return None
+        end = header_off + 16 + insns_bytes
+        if self._intervalOverlaps(claimed_intervals, header_off, end):
+            return None
+        disassembly = getattr(self, "disassembly", None)
+        if disassembly is not None:
+            sample_end = min(code_offset + insns_bytes, code_offset + 64)
+            if any(disassembly.isCode(addr) for addr in range(code_offset, sample_end, 2)):
+                return None
+        bytecode = raw_data[code_offset : code_offset + insns_bytes]
+        valid, payload_ranges = self._buildValidInstructionStarts(bytecode)
+        if not valid or 0 not in valid:
+            return None
+        if not self._walksCleanlyToEnd(bytecode, payload_ranges):
+            return None
+        return code_offset
+
+    def _walksCleanlyToEnd(self, bytecode, payload_ranges):
+        """Strict orphan acceptance: a genuine code_item decodes as one clean
+        instruction stream (plus payloads/alignment nops) from offset 0 to
+        exactly insns_size and reaches a terminator — junk data rarely does."""
+        null_resolve = lambda ref_kind, ref_index: ""  # noqa: E731
+        idx = 0
+        saw_terminator = False
+        while idx < len(bytecode):
+            payload = next(((start, end) for start, end in payload_ranges if start <= idx < end), None)
+            if payload is not None:
+                idx = payload[1]
+                continue
+            try:
+                decoded = decode_instruction(bytecode, idx, null_resolve)
+            except ValueError:
+                return False
+            if decoded.is_terminator:
+                saw_terminator = True
+            idx += decoded.size_bytes
+        return idx == len(bytecode) and saw_terminator
 
     def analyzeBuffer(self, binary_info, cbAnalysisTimeout=None):
         self._diag_stubs_suppressed = 0
@@ -893,7 +1528,13 @@ class DalvikDisassembler:
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         self.disassembly.language = "dalvik"
 
-        if not DexFileLoader.isCompatible(binary_info.raw_data):
+        raw_probe = binary_info.raw_data
+        if not isinstance(raw_probe, (bytes, bytearray)):
+            raw_probe = bytes(raw_probe)
+        unsupported = DexFileLoader.unsupportedReason(raw_probe)
+        if unsupported:
+            raise ValueError(unsupported)
+        if not DexFileLoader.isCompatible(raw_probe):
             raise ValueError("Buffer is not a valid DEX file")
 
         dex_file = None
@@ -917,7 +1558,10 @@ class DalvikDisassembler:
             raise ValueError("Failed to parse DEX file")
 
         self.disassembly.binary_info.version = getattr(dex_file, "version", "")
-        resolver = DexReferenceResolver(dex_file)
+        raw_for_resolver = binary_info.raw_data
+        if not isinstance(raw_for_resolver, (bytes, bytearray)):
+            raw_for_resolver = bytes(raw_for_resolver)
+        resolver = DexReferenceResolver(dex_file, raw_data=raw_for_resolver)
         methods = list(dex_file.methods)
         method_counts = {
             "total": len(methods),
@@ -940,6 +1584,7 @@ class DalvikDisassembler:
         LOGGER.info(sep)
 
         analyzed_count = 0
+        known_code_offsets = set()
         for method in methods:
             if cbAnalysisTimeout and cbAnalysisTimeout():
                 break
@@ -952,6 +1597,7 @@ class DalvikDisassembler:
             if getattr(method, "code_offset", 0) < 16:
                 method_counts["skipped_invalid_offset"] += 1
                 continue
+            known_code_offsets.add(getattr(method, "code_offset", 0))
             try:
                 self.analyzeFunction(dex_file, resolver, method)
                 analyzed_count += 1
@@ -970,6 +1616,33 @@ class DalvikDisassembler:
                     "instruction_bytes": "",
                     "message": str(exc),
                 }
+
+        # Recover code_items hidden from the method table (orphans).
+        method_counts["orphans_discovered"] = 0
+        if not (cbAnalysisTimeout and cbAnalysisTimeout()):
+            orphan_offsets = self._discoverOrphanCodeItems(raw_for_resolver, known_code_offsets)
+            for code_offset in orphan_offsets:
+                if cbAnalysisTimeout and cbAnalysisTimeout():
+                    break
+                if code_offset in self.disassembly.functions:
+                    continue
+                # Refuse if primary recovery already claimed any insn bytes.
+                if self.disassembly.isCode(code_offset):
+                    continue
+                orphan = _OrphanCodeItemMethod(code_offset)
+                try:
+                    self.analyzeFunction(dex_file, resolver, orphan)
+                    method_counts["orphans_discovered"] += 1
+                    analyzed_count += 1
+                    meta = self.disassembly.function_metadata.get(code_offset, {})
+                    if "orphan-code-item" not in meta.get("heuristics", []):
+                        meta.setdefault("heuristics", []).append("orphan-code-item")
+                    self.disassembly.function_symbols[code_offset] = orphan.name
+                    meta["method_name"] = orphan.name
+                    meta["class_name"] = "Lsmda/orphan;"
+                except Exception as exc:
+                    reraise_non_operational_exception(exc)
+                    LOGGER.debug("Orphan code_item @0x%x rejected: %s", code_offset, exc)
 
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout and cbAnalysisTimeout():

@@ -63,7 +63,7 @@ python ida_domain_export.py /path/to/sample.i64 -o sample.smda
 
 Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependency. Make sure `IDADIR` points at the IDA installation when it cannot be discovered automatically (see the [getting started guide](https://ida-domain.docs.hex-rays.com/getting_started/)). Standard SMDA installations do not include `ida-domain`.
 
-For Dalvik, the current scope is raw single-DEX inputs. APK, multi-dex container handling, and ODEX/VDEX/CDEX runtime-artifact analysis are not yet first-class workflows in SMDA.
+For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-dex containers are not first-class workflows. ODEX (`dey\n`) and CDEX (`cdex`) are not analysis-compatible (quickened ops / compact `code_item`): with `backend="dalvik"` they raise an explicit error; auto-detect will not select the Dalvik backend for those magics.
 
 The code should be fully compatible with Python 3.10+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
@@ -119,6 +119,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-24: v4.3.6 - Dalvik: format-aware `DalvikInstructionEscaper` for PIC/opc hashing (pool-index/immediate/branch masking), typed exception edges surfaced via `SmdaFunction.getExceptionBlockRefs()`, `method_handle`/`call_site` resolution (DEX 038+), orphan `code_item` discovery, unreachable-code flagging, backward-payload fixed-point sweep, ART-reconciled `can_throw` flags (incl. `fill-array-data`), `goto/32` self-branch accepted, and explicit ODEX/CDEX rejection. (THX: @r0ny123)
  * 2026-07-22: v4.3.5 - Widened Intel PIC-hash escaping to cover 64-bit immediates (`mov r64, imm64` constants were previously truncated to their first 8 hex digits and never escaped, so PicHash was not relocation-invariant on 64-bit binaries). (THX: @r0ny123)
  * 2026-07-22: v4.3.4 - Added a default-off x64 PE pass (`USE_PE_X64_PDATA_ENDS`) that splits already-recovered functions at exact `.pdata` RUNTIME_FUNCTION boundaries when an interior boundary has an external non-fall-through inbound reference. (THX: @r0ny123)
  * 2026-07-22: v4.3.3 - Detect x86/x64 import-jmp thunks (a single `jmp` through a resolved IAT/GOT slot) and populate `num_thunk_functions` in reports. (THX: @r0ny123)
