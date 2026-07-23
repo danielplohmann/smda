@@ -141,6 +141,22 @@ class TestRustDemangler(unittest.TestCase):
         with self.assertRaises(UnableTov0Demangle):
             printer.print_lifetime_from_index(2)
 
+    def test_v0_demangles_impl_path_generic_args(self):
+        """Impl-block/generic-instantiation ("I" tag) paths must demangle correctly.
+
+        Per RFC 2603's v0 grammar, path-generic-args = "I" path {generic-arg} "E" -- the
+        terminating E is mandatory even for an empty generic-arg list, so every legitimate
+        rustc-emitted "I" path already carries it.
+        """
+        self.assertEqual(demangle("_RINvNtC3std3env3varE"), "std::env::var::<>")
+
+    def test_v0_truncated_generic_args_raises_demangle_error_not_uncaught_exception(self):
+        """A truncated "I" path (missing the mandatory terminal E) is undecodable input;
+        it must raise the caught UnableTov0Demangle, not leak some other exception type
+        that RustSymbolProvider's except clause does not catch."""
+        with self.assertRaises(UnableTov0Demangle):
+            demangle("_RINvNtC3std3env3var")
+
     def test_demangle_thread_safety(self):
         """Demangling should be safe when run concurrently."""
 

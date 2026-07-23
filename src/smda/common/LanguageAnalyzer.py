@@ -7,6 +7,7 @@ from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvi
 from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
 from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ class LanguageAnalyzer:
     def __init__(self, disassembly):
         self.disassembly = disassembly
         self.go_resolver = GoSymbolProvider(None)
+        self.rust_resolver = RustSymbolProvider(None)
         self.delphi_kb_resolver = DelphiKbSymbolProvider(None)
         self.delphi_pythia_resolver = DelphiPythiaProvider(None)
         self.delphi_resym_resolver = DelphiReSymProvider(None)
@@ -112,6 +114,15 @@ class LanguageAnalyzer:
     def checkGo(self):
         return self.getGoScore() > 0.5
 
+    def getRustScore(self):
+        rust_score = 0.0
+        if self.rust_resolver.is_rust_binary(self.disassembly.binary_info):
+            rust_score = 0.6
+        return rust_score
+
+    def checkRust(self):
+        return self.getRustScore() > 0.5
+
     def parseDelphiString(self, buffer):
         parsed_string = ""
         if len(buffer) > 0:
@@ -174,6 +185,8 @@ class LanguageAnalyzer:
         result["visualbasic"] = self.getVisualBasicScore()
         # GO
         result["go"] = self.getGoScore()
+        # RUST
+        result["rust"] = self.getRustScore()
         # C++
         # check if there is a high number of the following patterns
         # in relation to the number off all functions (->the size of the sample)
@@ -206,6 +219,10 @@ class LanguageAnalyzer:
             # here (identify()) before any function exists, so it always divides by 1 and can
             # spuriously outscore a real Go binary (see rescore()).
             guess = "go"
+        if result.get("rust", 0) > 0.5:
+            # same rationale as the Go override above: a Rust mangled-symbol/signature match
+            # is unambiguous evidence that must win over the c++ thiscall score.
+            guess = "rust"
         return guess
 
     def rescore(self, result, function_count):
