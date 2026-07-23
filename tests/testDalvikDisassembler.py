@@ -307,13 +307,14 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         functions_with_tries = [
             function
             for function in self.file_disassembly.getFunctions()
-            if function.architecture_metadata.get("try_ranges")
+            if function.architecture_metadata.get("exception_handler_count", 0) >= 1
         ]
         self.assertTrue(functions_with_tries)
         function = functions_with_tries[0]
         self.assertIn("debug_info_off", function.architecture_metadata)
         self.assertIsInstance(function.architecture_metadata["exception_handlers"], list)
         self.assertGreaterEqual(function.architecture_metadata["exception_handler_count"], 1)
+        self.assertTrue(function.architecture_metadata.get("try_ranges"))
         self.assertIn(function.offset, function.blockrefs)
 
     def testReportRoundTrip(self):
@@ -399,7 +400,16 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         disassembler = DalvikDisassembler(config)
         by_mnemonic = {spec.mnemonic: opcode for opcode, spec in OPCODES.items()}
 
+        # Subset of AOSP continue|throw flags (bytecode.txt reconciled with ART
+        # dex_instruction_list.h kThrow, e.g. fill-array-data).
         throwable_mnemonics = [
+            "fill-array-data",
+            "const-string",
+            "const-string/jumbo",
+            "const-class",
+            "instance-of",
+            "const-method-handle",
+            "const-method-type",
             "sget",
             "sget-wide",
             "sget-object",
@@ -436,7 +446,16 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
                 self.assertTrue(decoded.can_throw)
                 self.assertTrue(disassembler._instructionCanThrow(decoded))
 
-        non_throwing_mnemonics = ["add-int", "mul-int", "add-long", "div-float", "rem-double", "shl-int/lit8"]
+        non_throwing_mnemonics = [
+            "add-int",
+            "mul-int",
+            "add-long",
+            "div-float",
+            "rem-double",
+            "shl-int/lit8",
+            "nop",
+            "move",
+        ]
         for mnemonic in non_throwing_mnemonics:
             with self.subTest(mnemonic=mnemonic):
                 opcode = by_mnemonic[mnemonic]
@@ -452,6 +471,8 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
             ("div-int", bytes.fromhex("93000102")),
             ("div-int/2addr", bytes.fromhex("b300")),
             ("div-int/lit8", bytes.fromhex("db000001")),
+            ("instance-of", bytes.fromhex("20000000")),
+            ("const-string", bytes.fromhex("1a000000")),
         ]
         for mnemonic, protected_instruction in cases:
             with self.subTest(mnemonic=mnemonic):
@@ -465,6 +486,32 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
                 handler_addr = func_addr + handler_addr_units * 2
 
                 self.assertIn(handler_addr, disassembly.code_refs_from[func_addr])
+                edges = disassembly.function_metadata[func_addr].get("exception_edges", [])
+                self.assertTrue(edges, f"expected typed exception edges for {mnemonic}")
+                self.assertTrue(all(edge["kind"] == "exception" for edge in edges))
+                self.assertTrue(any(edge["to_addr"] == handler_addr for edge in edges))
+                self.assertTrue(any(edge["mnemonic"] == mnemonic for edge in edges))
+
+    def testFillArrayDataEmitsExceptionEdgesPerArt(self):
+        """ART dex_instruction_list.h: fill-array-data is kContinue|kThrow (NPE on null array)."""
+        # 0: fill-array-data v0, +3 units (payload at byte 6, inside the try range)
+        # 6: fill-array-data-payload, width 1, size 0 (8 bytes)
+        # 14: return-void
+        fill_insn = bytes.fromhex("260003000000")
+        payload = struct.pack("<HHI", 0x0300, 1, 0)
+        insns = fill_insn + payload + bytes.fromhex("0e00")
+        handler_units = len(fill_insn) // 2
+        code_item = build_code_item(
+            insns,
+            tries=[(0, handler_units, 1)],
+            handlers_blob=bytes([1, 0, (len(fill_insn) + len(payload)) // 2]),
+        )
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        edges = disassembly.function_metadata[func_addr].get("exception_edges", [])
+        self.assertTrue(
+            any(edge.get("mnemonic") == "fill-array-data" for edge in edges),
+            "fill-array-data must produce exception edges (ART kContinue|kThrow)",
+        )
 
     def testDisassembleBufferDexAutodetect(self):
         generic_disasm = Disassembler(config)
@@ -506,18 +553,25 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
             instruction.getDetailed()
 
     def testOdexCdexFormatDetection(self):
-        # Build a minimal valid ODEX header (same structure as DEX, different magic)
+        # ODEX/CDEX are recognized as unsupported runtime artifacts, not analysis-compatible.
         odex_header = bytearray(build_dex_header(version=b"039"))
         odex_header[:4] = b"dey\n"
-        self.assertTrue(DexFileLoader.isCompatible(bytes(odex_header)))
+        self.assertFalse(DexFileLoader.isCompatible(bytes(odex_header)))
+        self.assertTrue(DexFileLoader.isRecognizedUnsupported(bytes(odex_header)))
+        self.assertIn("ODEX", DexFileLoader.unsupportedReason(bytes(odex_header)))
 
-        # CDEX: only magic-byte check, no strict structure validation
         cdex_header = b"cdex001\x00" + b"\x00" * 0x70
-        self.assertTrue(DexFileLoader.isCompatible(cdex_header))
+        self.assertFalse(DexFileLoader.isCompatible(cdex_header))
+        self.assertTrue(DexFileLoader.isRecognizedUnsupported(cdex_header))
+        self.assertIn("CDEX", DexFileLoader.unsupportedReason(cdex_header))
 
-        # Sanity: non-DEX/ODEX/CDEX magic still rejected
+        # Sanity: non-DEX magic still rejected
         self.assertFalse(DexFileLoader.isCompatible(b"MZ\x90\x00" + b"\x00" * 0x70))
         self.assertFalse(DexFileLoader.isCompatible(b"\x7fELF" + b"\x00" * 0x70))
+
+        report = Disassembler(config, backend="dalvik").disassembleUnmappedBuffer(bytes(odex_header))
+        self.assertEqual(report.status, "error")
+        self.assertIn("ODEX", report.message or "")
 
     def testConstHigh16SignedDisplay(self):
         # 15 00 FF FF  →  const/high16 v0, #0xFFFF0000  (= -65536 as int32)
@@ -668,66 +722,484 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertIsInstance(reconstructed_function.stringrefs, list)
         self.assertIsNone(reconstructed_function.stringrefs[0]["data_addr"])
 
-    def testThrowableOpcodesCarryCanThrowFlag(self):
-        # const-string, const-string/jumbo, instance-of, fill-array-data,
-        # const-method-handle, const-method-type all carry kThrow in AOSP's
-        # dex_instruction_list.h, so a try-protected use of any of them must be
-        # able to raise an exception edge into its handler.
-        for opcode in (0x1A, 0x1B, 0x20, 0x26, 0xFE, 0xFF):
-            self.assertTrue(OPCODES[opcode].can_throw, f"opcode 0x{opcode:02x} must be marked can_throw")
-
-    def testBackwardPayloadReferenceExcludedFromValidInstructionStarts(self):
+    def testBackwardPayloadFixedPointExcludesPayloadFromValidStarts(self):
+        """A backward 31t payload offset must not leave payload bytes as valid starts."""
         from smda.dalvik.DalvikDisassembler import DalvikDisassembler
 
-        # fill-array-data-payload: ident(2) + element_width(2) + size(4) + data(2) = 10 bytes,
-        # placed BEFORE the instruction that references it (backward branch offset).
-        payload = struct.pack("<HHI", 0x0300, 2, 1) + b"\x00\x00"
-        nop = b"\x00\x00"
-        # fill-array-data (0x26, format 31t) at byte offset 12, branch offset in
-        # 16-bit code units pointing backward to the payload at offset 0.
-        branch_offset_code_units = (0 - 12) // 2
-        instruction = bytes([0x26, 0x00]) + struct.pack("<i", branch_offset_code_units)
-        bytecode = payload + nop + instruction
-
-        disasm = DalvikDisassembler.__new__(DalvikDisassembler)
-        valid_starts, _ = disasm._buildValidInstructionStarts(bytecode)
-
-        self.assertFalse(
-            any(0 <= offset < 10 for offset in valid_starts),
-            f"payload bytes [0, 10) must not be misdecoded as instruction starts: {sorted(valid_starts)}",
-        )
-        self.assertEqual(valid_starts, {10, 12})
-
-    def testBackwardPayloadReferenceExcludedFromRecursiveWalk(self):
-        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
-
-        # Method entry (nop) at raw 0x10, a 10-byte fill-array-data payload at raw [18, 28),
-        # and the 31t fill-array-data instruction at raw 28 that references it BACKWARD. The
-        # entry nop's fallthrough lands inside the payload region. Before the recursive CFG
-        # pass seeded its payload_ranges from the fixed-point sweep (PAT-SMDA-029 recursive
-        # sibling), the walk reached that fallthrough before decoding the 31t and misdecoded
-        # the payload's raw bytes as instructions.
-        nop = b"\x00\x00"
-        payload = struct.pack("<HHI", 0x0300, 2, 1) + b"\x00\x00"
-        branch_offset_units = (18 - 28) // 2  # 31t at raw 28, target raw 18
-        fill_array_data = bytes([0x26, 0x00]) + struct.pack("<i", branch_offset_units)
-        ret = bytes([0x0E, 0x00])
-        code_item = build_code_item(nop + payload + fill_array_data + ret)
+        # packed-switch-payload at offset 0 (12 bytes), packed-switch insn at 12 pointing backward.
+        payload = struct.pack("<HHii", 0x0100, 1, 0, 1)  # size=1, first_key=0, target=+1 unit
+        # signed unit offset: (0 - 12) / 2 = -6
+        switch = bytes([0x2B, 0x00]) + struct.pack("<i", -6)
+        bytecode = payload + switch
+        self.assertEqual(len(payload), 12)
 
         disassembler = DalvikDisassembler(config)
-        disassembler.disassembly = DisassemblyResult()
-        binary_info = BinaryInfo(code_item)
-        binary_info.raw_data = code_item
-        binary_info.architecture = "dalvik"
-        disassembler.disassembly.binary_info = binary_info
-        state = disassembler.analyzeFunction(None, SyntheticDalvikResolver(), SyntheticDalvikMethod())
+        single_valid, _, _ = disassembler._sweepInstructionStarts(bytecode, seed_payload_ranges=None)
+        # Naive single pass mis-decodes payload head as nop (opcode 0x00).
+        self.assertIn(0, single_valid)
 
-        instr_addrs = [ins[0] for ins in state.instructions]
-        self.assertIn(16, instr_addrs)
-        self.assertFalse(
-            any(18 <= addr < 28 for addr in instr_addrs),
-            f"payload bytes [18, 28) must not be misdecoded as instructions: {instr_addrs}",
+        valid, ranges = disassembler._buildValidInstructionStarts(bytecode)
+        self.assertIn((0, 12), ranges)
+        for offset in range(0, 12, 2):
+            self.assertNotIn(offset, valid, f"payload offset {offset} must not be a valid start")
+        self.assertIn(12, valid)
+
+    def testBackwardPayloadNotDecodedAsInstructionsInCfgPass(self):
+        # Method layout (realistic entry + adversarial backward 31t):
+        #   0: goto/16 -> switch
+        #   4: packed-switch-payload (12 bytes)
+        #  16: packed-switch pointing backward to payload at 4
+        #  22: return-void
+        payload = struct.pack("<HHii", 0x0100, 1, 0, 1)
+        switch = bytes([0x2B, 0x00]) + struct.pack("<i", -6)  # payload at 16-12=4
+        # goto/16 from 0 to switch at 16: +8 code units
+        goto = bytes([0x29, 0x00]) + struct.pack("<h", 8)
+        ret = bytes.fromhex("0e00")
+        insns = goto + payload + switch + ret
+        self.assertEqual(len(goto), 4)
+        self.assertEqual(len(payload), 12)
+
+        disassembly, func_addr = self._analyzeSyntheticMethod(build_code_item(insns))
+        payload_start = func_addr + 4
+        payload_end = func_addr + 16
+        for ins_addr in disassembly.instructions:
+            if payload_start <= ins_addr < payload_end:
+                self.fail(f"instruction wrongly recovered inside payload at 0x{ins_addr:x}")
+        self.assertIn(func_addr, disassembly.instructions)
+        self.assertEqual(disassembly.instructions[func_addr][0], "goto/16")
+        self.assertIn(func_addr + 16, disassembly.instructions)
+        self.assertEqual(disassembly.instructions[func_addr + 16][0], "packed-switch")
+
+    def testMethodHandleAndCallSiteResolutionFromMap(self):
+        """Parse AOSP method_handle_item + call_site_id_item via map_list."""
+        from smda.dalvik.DalvikDisassembler import DexReferenceResolver
+
+        class _FakeMethod:
+            def __init__(self, index):
+                self.index = index
+                self.name = "run"
+                self.cls = "LBootstrap;"
+                self.prototype = None
+                self.code_offset = 0
+                self.code_info = None
+
+        class _FakeField:
+            def __init__(self, index):
+                self.index = index
+                self.name = "VALUE"
+                self.cls = "LConst;"
+                self.type = "I"
+
+        class _FakeProto:
+            def __init__(self, index):
+                self.index = index
+                self.parameters_type = []
+                self.return_type = "V"
+
+        class _FakeDex:
+            strings = ["run", "bootstrapName"]
+            methods = [_FakeMethod(0)]
+            fields = [_FakeField(0)]
+            types = []
+            prototypes = [_FakeProto(0)]
+            classes = []
+
+        # Layout: header(0x70) | method_handles(8) | call_site_ids(4) | call_site_item | map
+        header = bytearray(0x70)
+        header[:8] = b"dex\n039\x00"
+        struct.pack_into("<I", header, 0x24, 0x70)
+        struct.pack_into("<I", header, 0x28, 0x12345678)
+
+        mh_off = 0x70
+        # invoke-static (0x04) -> method_id 0
+        method_handle = struct.pack("<HHHH", 0x04, 0, 0, 0)
+        cs_id_off = mh_off + 8
+        call_site_item_off = cs_id_off + 4
+        # encoded_array size=3: method_handle@0, string@0, proto@0
+        call_site_item = bytes(
+            [
+                0x03,  # size uleb128 = 3
+                0x16,
+                0x00,  # VALUE_METHOD_HANDLE, 1-byte index 0
+                0x17,
+                0x00,  # VALUE_STRING, index 0 ("run")
+                0x15,
+                0x00,  # VALUE_METHOD_TYPE / proto index 0
+            ]
         )
+        call_site_id = struct.pack("<I", call_site_item_off)
+        map_off = call_site_item_off + len(call_site_item)
+        # align map to 4 bytes
+        pad = (4 - (map_off % 4)) % 4
+        map_off += pad
+        map_list = struct.pack("<I", 2)
+        map_list += struct.pack("<HHII", 0x0008, 0, 1, mh_off)  # METHOD_HANDLE
+        map_list += struct.pack("<HHII", 0x0007, 0, 1, cs_id_off)  # CALL_SITE_ID
+
+        raw = bytearray(header)
+        raw += method_handle
+        raw += call_site_id
+        raw += call_site_item
+        raw += b"\x00" * pad
+        raw += map_list
+        struct.pack_into("<I", raw, 0x20, len(raw))
+        struct.pack_into("<I", raw, 0x34, map_off)
+
+        resolver = DexReferenceResolver(_FakeDex(), raw_data=bytes(raw))
+        self.assertEqual(len(resolver.method_handles), 1)
+        self.assertEqual(resolver.method_handles[0]["type_name"], "invoke-static")
+        mh_display = resolver.formatMethodHandle(0)
+        self.assertIn("invoke-static", mh_display)
+        self.assertIn("run", mh_display)
+
+        self.assertEqual(len(resolver.call_sites), 1)
+        cs_display = resolver.formatCallSite(0)
+        self.assertIn("call_site@0:", cs_display)
+        self.assertIn("invoke-static", cs_display)
+        self.assertIn("run", cs_display)
+        # invoke-custom operand pretty-print path
+        self.assertEqual(resolver.formatRef("call_site", 0), cs_display)
+        self.assertEqual(resolver.formatRef("method_handle", 0), mh_display)
+
+    def testEncodedValueExtensionRulesPerAosp(self):
+        """encoded_value: byte/short/int/long sign-extend, char zero-extends, float/double right-zero-extend."""
+        from smda.dalvik.DalvikDisassembler import DexReferenceResolver
+
+        class _EmptyDex:
+            strings = []
+            methods = []
+            fields = []
+            types = []
+            prototypes = []
+            classes = []
+
+        resolver = DexReferenceResolver(_EmptyDex(), raw_data=b"")
+        cases = [
+            (bytes([0x00, 0xFF]), -1),  # VALUE_BYTE 0xff -> -1
+            (bytes([0x02 | (1 << 5), 0x00, 0x80]), -32768),  # VALUE_SHORT 2 bytes
+            (bytes([0x03 | (1 << 5), 0xFF, 0xFF]), 0xFFFF),  # VALUE_CHAR zero-extends
+            (bytes([0x04, 0xFF]), -1),  # VALUE_INT, 1-byte encoding sign-extends
+            (bytes([0x06, 0x80]), -128),  # VALUE_LONG, 1-byte encoding
+            (bytes([0x10 | (1 << 5), 0x80, 0x3F]), 1.0),  # VALUE_FLOAT 0x3F800000, low zeros dropped
+            (bytes([0x11 | (1 << 5), 0xF0, 0x3F]), 1.0),  # VALUE_DOUBLE 0x3FF0000000000000
+        ]
+        for blob, expected in cases:
+            with self.subTest(blob=blob.hex()):
+                value, end = resolver._readEncodedValue(blob, 0)
+                self.assertEqual(value, expected)
+                self.assertEqual(end, len(blob))
+        # Bootstrap-arg rendering: negative int and float must not show as raw bit patterns.
+        self.assertEqual(resolver._formatBootstrapArg(-1), "-0x1")
+        self.assertEqual(resolver._formatBootstrapArg(1.0), "1.0")
+
+    def testTypedExceptionEdgesSurfaceOnSmdaFunction(self):
+        """Typed exception_edges metadata surfaces via getExceptionBlockRefs()."""
+        # monitor-enter (can_throw) then return-void; handler with move-exception+return
+        code_item = build_code_item(
+            bytes.fromhex("1d000e000d010e00"),
+            tries=[(0, 1, 1)],
+            handlers_blob=b"\x01\x00\x02",
+        )
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        metadata = disassembly.function_metadata[func_addr]
+        self.assertGreaterEqual(len(metadata.get("exception_edges", [])), 1)
+        edge = metadata["exception_edges"][0]
+        self.assertEqual(edge["kind"], "exception")
+        self.assertEqual(edge["from_addr"], func_addr)
+        self.assertIn("type_name", edge)
+        self.assertIn("mnemonic", edge)
+
+        smda_fn = SmdaFunction(disassembly, func_addr, config=config)
+        typed = smda_fn.getExceptionEdges()
+        self.assertTrue(typed)
+        blockrefs = smda_fn.getExceptionBlockRefs()
+        self.assertTrue(blockrefs)
+        # Source block at function entry should list the handler block
+        self.assertIn(func_addr, blockrefs)
+        handler_addr = edge["to_addr"]
+        self.assertIn(handler_addr, blockrefs[func_addr])
+
+        # Round-trip: exception_edges live in architecture_metadata
+        as_dict = smda_fn.toDict()
+        self.assertIn("exception_edges", as_dict.get("architecture_metadata", {}))
+        restored = SmdaFunction.fromDict(as_dict)
+        self.assertTrue(restored.getExceptionEdges())
+        self.assertEqual(restored.getExceptionBlockRefs()[func_addr], blockrefs[func_addr])
+
+    def testArtThrowFlagsMatchBytecodeTxtSubset(self):
+        """Guard: can_throw flags follow AOSP bytecode.txt reconciled with ART kThrow."""
+        # Spot-check flags where the legacy dalvik table and ART differ or lag.
+        self.assertTrue(OPCODES[0x1A].can_throw)  # const-string
+        self.assertTrue(OPCODES[0x1B].can_throw)  # const-string/jumbo
+        self.assertTrue(OPCODES[0x20].can_throw)  # instance-of
+        self.assertTrue(OPCODES[0x26].can_throw)  # fill-array-data (ART kContinue|kThrow)
+        self.assertTrue(OPCODES[0xFE].can_throw)  # const-method-handle
+        self.assertTrue(OPCODES[0xFF].can_throw)  # const-method-type
+
+    def testDalvikInstructionEscaperMasksPoolIndices(self):
+        """Pool indices/immediates/branch offsets are wild-carded for PIC hashing."""
+        from smda.common.SmdaInstruction import SmdaInstruction
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        # const-string v0, string@0x1234  → 1a 00 34 12
+        ins = SmdaInstruction([0, "1a003412", "const-string", 'v0, "x"'])
+        escaped = DalvikInstructionEscaper.escapeBinary(ins, escape_intraprocedural_jumps=True)
+        self.assertEqual(escaped[:2], "1a")
+        self.assertIn("?", escaped)
+        self.assertEqual(escaped[4:], "????")
+
+        # invoke-static {} method@0xABCD  → 71 00 cd ab 00 00 (35c, 0 args)
+        ins = SmdaInstruction([0, "7100cdab0000", "invoke-static", "{}, method@?"])
+        escaped = DalvikInstructionEscaper.escapeBinary(ins, escape_intraprocedural_jumps=True)
+        self.assertEqual(escaped[:2], "71")
+        self.assertEqual(escaped[4:8], "????")
+
+        # opc-only keeps first opcode byte
+        opc = DalvikInstructionEscaper.escapeToOpcodeOnly(ins)
+        self.assertEqual(opc[:2], "71")
+        self.assertTrue(all(c == "?" for c in opc[2:]))
+
+        self.assertEqual(DalvikInstructionEscaper.escapeMnemonic("invoke-static"), "C")
+        self.assertEqual(DalvikInstructionEscaper.escapeMnemonic("add-int"), "A")
+        self.assertIs(SmdaFunction.getInstructionEscaper("dalvik"), DalvikInstructionEscaper)
+
+    def testDalvikEscaperPreservesRegisterOnLit8(self):
+        """22b: byte 2 is reg_b (kept), only byte 3 (lit8) is masked.
+
+        add-int/lit8 v0, v1, #5  →  d8 01 05 00  (last byte reg_b, literal 5)
+        add-int/lit8 v0, v2, #9  →  d8 02 09 00  (different reg_b, same opcode)
+        Only the literal byte (index 3) must differ between the two escapes.
+        """
+        from smda.common.SmdaInstruction import SmdaInstruction
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        ins_a = SmdaInstruction([0, "d8010500", "add-int/lit8", "v0, v1, #5"])
+        ins_b = SmdaInstruction([0, "d8020900", "add-int/lit8", "v0, v2, #9"])
+        esc_a = DalvikInstructionEscaper.escapeBinary(ins_a, escape_intraprocedural_jumps=True)
+        esc_b = DalvikInstructionEscaper.escapeBinary(ins_b, escape_intraprocedural_jumps=True)
+        # opcode + reg_a/reg_b kept; literal byte (index 3 → chars 6:8) masked
+        self.assertEqual(esc_a[:6], "d80105")
+        self.assertEqual(esc_b[:6], "d80209")
+        self.assertEqual(esc_a[6:], "??")
+        self.assertEqual(esc_b[6:], "??")
+        # reg_b distinguishes the two even though only the literal differs
+        self.assertNotEqual(esc_a, esc_b)
+
+    def testDalvikEscaperPICPreservesBranchOffsets(self):
+        """PIC hash (escape_intraprocedural_jumps=True) keeps intra-procedural branch offsets."""
+        from smda.common.SmdaInstruction import SmdaInstruction
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        # goto +2 units  → 28 01 ; goto +4 units → 28 02
+        ins_short = SmdaInstruction([0, "2801", "goto", "2"])
+        ins_far = SmdaInstruction([0, "2802", "goto", "4"])
+        pic_short = DalvikInstructionEscaper.escapeBinary(ins_short, escape_intraprocedural_jumps=True)
+        pic_far = DalvikInstructionEscaper.escapeBinary(ins_far, escape_intraprocedural_jumps=True)
+        self.assertEqual(pic_short, "2801")
+        self.assertEqual(pic_far, "2802")
+        # Cross-binary compare (False) masks the branch offset.
+        cmp_short = DalvikInstructionEscaper.escapeBinary(ins_short, escape_intraprocedural_jumps=False)
+        cmp_far = DalvikInstructionEscaper.escapeBinary(ins_far, escape_intraprocedural_jumps=False)
+        self.assertEqual(cmp_short, "28??")
+        self.assertEqual(cmp_far, "28??")
+
+    def testDalvikPicHashStableAcrossStringIndexShift(self):
+        """Same method body with different string indices → same PicHash."""
+        from smda.common.SmdaInstruction import SmdaInstruction
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        # Two const-string with different indices then return-void
+        blocks_a = {
+            0x1000: [
+                SmdaInstruction([0x1000, "1a000100", "const-string", 'v0, "a"']),
+                SmdaInstruction([0x1004, "0e00", "return-void", ""]),
+            ]
+        }
+        blocks_b = {
+            0x1000: [
+                SmdaInstruction([0x1000, "1a00ff0f", "const-string", 'v0, "b"']),
+                SmdaInstruction([0x1004, "0e00", "return-void", ""]),
+            ]
+        }
+
+        def _pic_seq(blocks):
+            fn = SmdaFunction(None)
+            fn.blocks = blocks
+            fn._sorted_block_keys = sorted(blocks)
+            fn._escaper = DalvikInstructionEscaper
+            return fn.getPicHashSequence(type("BI", (), {"base_addr": 0, "binary_size": 0x10000})())
+
+        self.assertEqual(_pic_seq(blocks_a), _pic_seq(blocks_b))
+        self.assertIn(b"?", _pic_seq(blocks_a))
+
+    def testGoto32SelfBranchIsLegal(self):
+        """AOSP allows goto/32 offset 0 as an infinite-loop idiom."""
+        # goto/32 +0 (self): 2a 00 00 00 00 00
+        insns = bytes.fromhex("2a0000000000")
+        code_item = build_code_item(insns)
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        metadata = disassembly.function_metadata[func_addr]
+        self.assertFalse(
+            any(v["type"] == "zero_branch_offset" for v in metadata.get("structural_violations", [])),
+            "goto/32 self-branch must not be recorded as zero_branch_offset",
+        )
+        self.assertIn(func_addr, disassembly.code_refs_from.get(func_addr, set()))
+
+    def testUnreachedValidStartsRecordedInMetadata(self):
+        """Dead code after an unconditional goto is flagged, not attached to the CFG."""
+        # 0: goto/16 to +3 units (byte 6)
+        # 4: const/4 v0, #0   (dead: valid start, never reached)
+        # 6: return-void
+        insns = bytes([0x29, 0x00]) + struct.pack("<h", 3) + bytes.fromhex("12000e00")
+        code_item = build_code_item(insns)
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        metadata = disassembly.function_metadata[func_addr]
+        unreached = metadata.get("unreached_instruction_starts", [])
+        self.assertTrue(unreached, "expected unreached valid starts after goto")
+        self.assertIn("unreachable-code-surface", metadata.get("heuristics", []))
+        # Dead const/4 at func_addr+4 must not be a recovered instruction
+        self.assertNotIn(func_addr + 4, disassembly.instructions)
+
+    def testOrphanCodeItemDiscovery(self):
+        """A plausible unlisted code_item is recovered as orphan_code_item@…"""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        # Minimal orphan: registers=1, ins=0, outs=0, tries=0, debug=0, insns=1 → return-void
+        code_item = build_code_item(bytes.fromhex("0e00"))
+        # Place it at a known offset inside a fake data region of a minimal DEX header.
+        header = bytearray(build_dex_header(version=b"039", file_size=0x200, data_off=0x100, data_size=0x100))
+        raw = bytearray(0x200)
+        raw[:0x70] = header[:0x70]
+        orphan_header_off = 0x100
+        raw[orphan_header_off : orphan_header_off + len(code_item)] = code_item
+        # Fix file_size / data fields
+        struct.pack_into("<I", raw, 0x20, len(raw))
+        struct.pack_into("<I", raw, 0x68, 0x100)
+        struct.pack_into("<I", raw, 0x6C, 0x100)
+
+        disassembler = DalvikDisassembler(config)
+        found = disassembler._discoverOrphanCodeItems(bytes(raw), known_code_offsets=set())
+        self.assertIn(orphan_header_off + 16, found)
+
+    def testOrphanWithSwitchPayloadAccepted(self):
+        """An orphan body with packed-switch + payload must not be rejected."""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        # 0: packed-switch v0, +4 units (payload at byte 8)
+        # 6: return-void (default fallthrough)
+        # 8: packed-switch-payload, size=1
+        switch = bytes([0x2B, 0x00]) + struct.pack("<i", 4)
+        ret = bytes.fromhex("0e00")
+        payload = struct.pack("<HHii", 0x0100, 1, 0, 1)
+        insns = switch + ret + payload
+        code_item = build_code_item(insns)
+        header = bytearray(build_dex_header(version=b"039", file_size=0x300, data_off=0x100, data_size=0x200))
+        raw = bytearray(0x300)
+        raw[:0x70] = header[:0x70]
+        orphan_header_off = 0x100
+        raw[orphan_header_off : orphan_header_off + len(code_item)] = code_item
+        struct.pack_into("<I", raw, 0x20, len(raw))
+        struct.pack_into("<I", raw, 0x68, 0x200)
+        struct.pack_into("<I", raw, 0x6C, 0x100)
+
+        disassembler = DalvikDisassembler(config)
+        found = disassembler._discoverOrphanCodeItems(bytes(raw), known_code_offsets=set())
+        self.assertIn(orphan_header_off + 16, found)
+
+    def testOrphanScanScopedToMapCodeItemSection(self):
+        """Orphan scan honors the map's TYPE_CODE_ITEM bounds; data-section junk is skipped."""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        code_item = build_code_item(bytes.fromhex("0e00"))
+        raw = bytearray(0x300)
+        raw[:0x70] = build_dex_header(version=b"039", file_size=0x300, data_off=0x100, data_size=0x200)
+        # Orphan inside the declared code_item section at 0x100.
+        raw[0x100 : 0x100 + len(code_item)] = code_item
+        # Identical bytes OUTSIDE the code section (string-data territory) at 0x200.
+        raw[0x200 : 0x200 + len(code_item)] = code_item
+        # map_list at 0x2C0: code_items @0x100, string_data @0x200 (next section bounds the scan).
+        map_off = 0x2C0
+        map_list = struct.pack("<I", 2)
+        map_list += struct.pack("<HHII", 0x2001, 0, 1, 0x100)  # TYPE_CODE_ITEM
+        map_list += struct.pack("<HHII", 0x2002, 0, 1, 0x200)  # TYPE_STRING_DATA_ITEM
+        raw[map_off : map_off + len(map_list)] = map_list
+        struct.pack_into("<I", raw, 0x20, len(raw))
+        struct.pack_into("<I", raw, 0x34, map_off)
+        struct.pack_into("<I", raw, 0x68, 0x200)
+        struct.pack_into("<I", raw, 0x6C, 0x100)
+
+        disassembler = DalvikDisassembler(config)
+        found = disassembler._discoverOrphanCodeItems(bytes(raw), known_code_offsets=set())
+        self.assertIn(0x100 + 16, found)
+        self.assertNotIn(0x200 + 16, found)
+
+    def testOrphanRejectsJunkThatDoesNotDecodeCleanly(self):
+        """Strict acceptance: chain must decode error-free to insns end with a terminator."""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        disassembler = DalvikDisassembler(config)
+        # return-void then a trailing undefined opcode unit (0x3e is unused per AOSP).
+        self.assertFalse(disassembler._walksCleanlyToEnd(bytes.fromhex("0e003e00"), []))
+        # No terminator at all.
+        self.assertFalse(disassembler._walksCleanlyToEnd(bytes.fromhex("01000100"), []))
+        # Clean: move + return-void.
+        self.assertTrue(disassembler._walksCleanlyToEnd(bytes.fromhex("01000e00"), []))
+
+    def testThrowTerminatorRecordsExceptionEdge(self):
+        # throw v0; handler at unit 1: move-exception + return-object
+        code_item = build_code_item(
+            bytes.fromhex("27000d010e00"),
+            tries=[(0, 1, 1)],
+            handlers_blob=b"\x01\x00\x01",
+        )
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        edges = disassembly.function_metadata[func_addr]["exception_edges"]
+        self.assertTrue(any(e["mnemonic"] == "throw" for e in edges))
+        # handler is reached only via exception edge (throw is a terminator)
+        self.assertTrue(any(e["to_addr"] == func_addr + 2 for e in edges))
+        self.assertEqual(disassembly.code_refs_from.get(func_addr, set()), {func_addr + 2})
+
+    def testTypedCatchHandlerExceptionEdge(self):
+        # encoded_size = +1 typed handler (type_idx=0, addr=2), no catch-all
+        # sleb128 +1 = 0x01; type 0 uleb; addr 2 uleb
+        handlers = bytes([0x01, 0x01, 0x00, 0x02])
+        code_item = build_code_item(
+            bytes.fromhex("1d000e000d010e00"),
+            tries=[(0, 1, 1)],
+            handlers_blob=handlers,
+        )
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        edges = disassembly.function_metadata[func_addr]["exception_edges"]
+        self.assertTrue(edges)
+        self.assertFalse(edges[0]["catch_all"])
+        self.assertEqual(edges[0]["type_idx"], 0)
+
+    def testSwitchFallthroughDoesNotRefPayload(self):
+        # packed-switch immediately followed by its payload (no default insn between)
+        payload = struct.pack("<HHii", 0x0100, 1, 0, 1)
+        switch = bytes([0x2B, 0x00]) + struct.pack("<i", 3)  # payload at +6 bytes
+        # After switch (6 bytes) is payload — no fallthrough code
+        insns = switch + payload + bytes.fromhex("0e00")
+        code_item = build_code_item(insns)
+        disassembly, func_addr = self._analyzeSyntheticMethod(code_item)
+        # Must not have a code_ref from switch into payload start (func_addr+6)
+        refs = disassembly.code_refs_from.get(func_addr, set())
+        self.assertNotIn(func_addr + 6, refs)
+
+    def testEscapeOperandsInvokeRegisterList(self):
+        from smda.common.SmdaInstruction import SmdaInstruction
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        ins = SmdaInstruction([0, "6e10abcd1020", "invoke-virtual", "{v0, v1}, LFoo;->bar()V"])
+        escaped = DalvikInstructionEscaper.escapeOperands(ins)
+        self.assertIn("{REG, REG}", escaped)
+        self.assertIn("PTR", escaped)
+
+    def testCdexAnalyzeErrorMessage(self):
+        cdex = b"cdex001\x00" + b"\x00" * 0x70
+        report = Disassembler(config, backend="dalvik").disassembleUnmappedBuffer(cdex)
+        self.assertEqual(report.status, "error")
+        self.assertIn("CDEX", report.message or "")
 
 
 if __name__ == "__main__":

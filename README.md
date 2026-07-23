@@ -63,7 +63,7 @@ python ida_domain_export.py /path/to/sample.i64 -o sample.smda
 
 Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependency. Make sure `IDADIR` points at the IDA installation when it cannot be discovered automatically (see the [getting started guide](https://ida-domain.docs.hex-rays.com/getting_started/)). Standard SMDA installations do not include `ida-domain`.
 
-For Dalvik, the current scope is raw single-DEX inputs. APK, multi-dex container handling, and ODEX/VDEX/CDEX runtime-artifact analysis are not yet first-class workflows in SMDA.
+For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-dex containers are not first-class workflows. ODEX (`dey\n`) and CDEX (`cdex`) are not analysis-compatible (quickened ops / compact `code_item`): with `backend="dalvik"` they raise an explicit error; auto-detect will not select the Dalvik backend for those magics.
 
 The code should be fully compatible with Python 3.10+.
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
@@ -119,6 +119,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-24: v4.3.10 - Dalvik: format-aware DalvikInstructionEscaper for PIC/OPC hashing (pool-index/immediate/branch masking), typed exception edges surfaced via SmdaFunction.getExceptionBlockRefs(), method_handle/call_site resolution (DEX 038+), orphan code_item discovery, unreachable-code flagging, backward-payload fixed-point sweep, ART-reconciled can_throw flags (incl. fill-array-data), goto/32 self-branch accepted, and explicit ODEX/CDEX rejection. (THX: @r0ny123)
  * 2026-07-24: v4.3.9 - Common: surface Rust detection in the language-guess heuristic (wire RustSymbolProvider.is_rust_binary() into LanguageAnalyzer so Rust binaries guess "rust" instead of "c++", and harden _get_binary_data() against missing raw_data/file_path). (THX: @r0ny123)
  * 2026-07-24: v4.3.8 - CIL: complete opcode coverage in the CIL instruction escaper by deriving mnemonic grouping and binary token/branch escaping directly from dncil's opcode table (instead of a hand-maintained list), and add a CIL pic_hash recalculation gate for older reports. (THX: @r0ny123)
  * 2026-07-24: v4.3.7 - Performance: cross-backend hot-path pass hoisting repeated lookups and avoiding redundant allocations (setdefault->get+conditional-set, zero-copy memoryview word scans in Aarch64 candidate discovery, skipped capstone re-decode in _recordDataRefs, debug-f-string gating, frozenset mnemonic membership in the intel backend). (THX: @r0ny123)
