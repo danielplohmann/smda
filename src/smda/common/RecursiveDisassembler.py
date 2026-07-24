@@ -377,7 +377,6 @@ class RecursiveDisassembler:
             binary_info.binary_size,
             binary_info.base_addr,
         )
-        self._updateLabelProviders(binary_info)
         self._symbol_cache = {}
         self._api_cache = {}
         self.disassembly = DisassemblyResult()
@@ -399,6 +398,9 @@ class RecursiveDisassembler:
         if self._forced_bitness:
             self.disassembly.binary_info.bitness = self._forced_bitness
             LOGGER.debug("Forced Bitness override to: %d", self.disassembly.binary_info.bitness)
+
+        # update providers after bitness is finalized: some (e.g. DelphiPythiaProvider) key parsing on it
+        self._updateLabelProviders(self.disassembly.binary_info)
 
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = self.backend.createIndirectCallAnalyzer(self)
