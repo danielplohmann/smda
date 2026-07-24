@@ -119,6 +119,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-24: v4.3.7 - Performance: cross-backend hot-path pass hoisting repeated lookups and avoiding redundant allocations (setdefault->get+conditional-set, zero-copy memoryview word scans in Aarch64 candidate discovery, skipped capstone re-decode in _recordDataRefs, debug-f-string gating, frozenset mnemonic membership in the intel backend). (THX: @r0ny123)
  * 2026-07-24: v4.3.6 - Cross-backend correctness sweep: intel prefix normalization and xadd clobber fixes, Aarch64 LSL shift propagation, CIL/Dalvik exception-flow and throwable-opcode handling plus DEX payload hardening, and label-provider/type-surface fixes. (THX: @r0ny123)
  * 2026-07-22: v4.3.5 - Widened Intel PIC-hash escaping to cover 64-bit immediates (`mov r64, imm64` constants were previously truncated to their first 8 hex digits and never escaped, so PicHash was not relocation-invariant on 64-bit binaries). (THX: @r0ny123)
  * 2026-07-22: v4.3.4 - Added a default-off x64 PE pass (`USE_PE_X64_PDATA_ENDS`) that splits already-recovered functions at exact `.pdata` RUNTIME_FUNCTION boundaries when an interior boundary has an external non-fall-through inbound reference. (THX: @r0ny123)
