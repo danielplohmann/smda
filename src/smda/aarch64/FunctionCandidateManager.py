@@ -28,6 +28,7 @@ iterate-step; for a statically linked ELF there is no PLT to recover.
 import contextlib
 import logging
 import struct
+import sys
 
 import lief
 
@@ -499,6 +500,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         base = binary_info.base_addr
         binary = binary_info.binary
         bit_mask = self.getBitMask()
+        words = self._wordsView()
 
         def in_exec(addr):
             return any(start <= addr < end for start, end in exec_ranges)
@@ -530,7 +532,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if offset < 0 or offset + INSTRUCTION_SIZE > len(binary):
                     addr += INSTRUCTION_SIZE
                     continue
-                word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
+                if offset % INSTRUCTION_SIZE == 0:
+                    word = words[offset // INSTRUCTION_SIZE]
+                else:
+                    word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
                 if (word & ADRP_MASK) == ADRP_VALUE:
                     pages[rd_field(word)] = adrp_page_value(word, addr)
                 elif (word & ADRP_MASK) == ADR_VALUE:
@@ -578,15 +583,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # AArch64 direct calls are BL (100101 + imm26). Scan the mapped image
         # word-by-word, resolve each BL's PC-relative target and register it as a
         # call-reference candidate — the AArch64 analogue of the base 0xE8 scan.
-        binary = self.disassembly.binary_info.binary
         base = self.disassembly.binary_info.base_addr
-        for match_count, offset in enumerate(range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE)):
+        for match_count, word in enumerate(self._wordsView()):
             if match_count % 4096 == 0 and self._candidateTimeoutTripped():
                 return
-            word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
             if (word & BL_MASK) != BL_VALUE:
                 continue
-            source = base + offset
+            source = base + match_count * INSTRUCTION_SIZE
             if not self._passesCodeFilter(source):
                 continue
             imm = word & BL_IMM_MASK
@@ -602,15 +605,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # image word-by-word for the recognized function-entry prologues
         # (frame-record store, callee-saved pair save, link-register save, PAC/BTI);
         # see definitions.is_function_prologue for the exact encodings.
-        binary = self.disassembly.binary_info.binary
         base = self.disassembly.binary_info.base_addr
-        for match_count, offset in enumerate(range(0, len(binary) - (INSTRUCTION_SIZE - 1), INSTRUCTION_SIZE)):
+        for match_count, word in enumerate(self._wordsView()):
             if match_count % 4096 == 0 and self._candidateTimeoutTripped():
                 return
-            word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
             if not is_function_prologue(word):
                 continue
-            addr = (base + offset) & self.getBitMask()
+            addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
             if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
                 continue
             if not self._passesCodeFilter(addr):
@@ -641,6 +642,40 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self._exec_ranges = ranges
         return ranges
 
+    def _wordsView(self):
+        """Zero-copy little-endian 4-byte word view of the mapped image, shared by
+        the word-at-a-time scan passes (reference/prologue discovery, gap sweep).
+
+        memoryview.cast uses native byte order, so on big-endian hosts fall back to
+        materialized little-endian words; the view is rebuilt if the binary buffer
+        is replaced (e.g. by a relocation-applying language pass)."""
+        binary = self.disassembly.binary_info.binary
+        words = getattr(self, "_word_view", None)
+        if words is None or getattr(self, "_word_view_source", None) is not binary:
+            if sys.byteorder == "little":
+                usable = len(binary) - (len(binary) % INSTRUCTION_SIZE)
+                words = memoryview(binary[:usable]).cast("I")
+            else:
+                words = [
+                    int.from_bytes(binary[o : o + INSTRUCTION_SIZE], "little")
+                    for o in range(0, len(binary) - (len(binary) % INSTRUCTION_SIZE), INSTRUCTION_SIZE)
+                ]
+            self._word_view = words
+            self._word_view_source = binary
+        return words
+
+    def _wordAtOffset(self, offset):
+        """Word at byte offset, matching int.from_bytes(binary[o:o+4], "little")."""
+        if offset >= 0 and offset % INSTRUCTION_SIZE == 0:
+            words = self._wordsView()
+            if offset // INSTRUCTION_SIZE < len(words):
+                return words[offset // INSTRUCTION_SIZE]
+            return None
+        binary = self.disassembly.binary_info.binary
+        if offset < 0 or offset + INSTRUCTION_SIZE > len(binary):
+            return None
+        return int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
+
     def _gapRunFlowsIntoInterior(self, start):
         # G3: decode the straight-line run from `start` to its first terminator. If it
         # ends in an unconditional `b` into the interior of already-mapped code (a
@@ -648,11 +683,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # a mid-function tail rather than a new function — so suppress it.
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size
-        binary = self.disassembly.binary_info.binary
+        words = self._wordsView()
         addr = start
         limit = start + 0x400
         while addr + INSTRUCTION_SIZE <= base + size and addr < limit:
-            word = int.from_bytes(binary[addr - base : addr - base + INSTRUCTION_SIZE], "little")
+            word = words[(addr - base) // INSTRUCTION_SIZE]
             if (word & B_MASK) == B_VALUE:
                 imm = word & 0x03FFFFFF
                 if imm & 0x02000000:
@@ -678,7 +713,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if offset < INSTRUCTION_SIZE or offset > len(binary):
             return False
 
-        prev_word = int.from_bytes(binary[offset - INSTRUCTION_SIZE : offset], "little")
+        prev_word = self._wordAtOffset(offset - INSTRUCTION_SIZE)
         if prev_word in (0, NOP):
             return False
         auth_or_exception_return = prev_word in {
@@ -714,8 +749,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self.gap_pointer = start_gap_pointer
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size
-        binary = self.disassembly.binary_info.binary
         exec_ranges = self._cachedExecutableSectionRanges()
+        words = self._wordsView()
 
         def in_exec(addr):
             return any(start <= addr < end for start, end in exec_ranges)
@@ -737,7 +772,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if exec_ranges and not in_exec(self.gap_pointer):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
-            word = int.from_bytes(binary[offset : offset + INSTRUCTION_SIZE], "little")
+            word = words[offset // INSTRUCTION_SIZE]
             if word in (0, NOP):  # inter-function padding
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue

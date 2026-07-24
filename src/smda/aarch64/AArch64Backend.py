@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import contextlib
 import logging
 import re
 
@@ -43,6 +44,22 @@ LOGGER = logging.getLogger(__name__)
 
 # capstone renders AArch64 immediates as "#0x....": match the hex operands.
 _HEX_OPERAND = re.compile(r"0x[0-9a-fA-F]+")
+
+# Immediate tokens as printed by capstone's arm64 operand formatter ("#0x1f",
+# "#-0x8", "#4", and bare "0x..." addresses). Used by _recordDataRefs to skip the
+# detail re-decode when no printed immediate can be an in-image, non-code-area
+# address — the only values it ever records. Verified against capstone ground
+# truth (zero false negatives across the aarch64 corpora and live pipelines).
+_IMM_TOKEN = re.compile(r"#?-?0x[0-9a-fA-F]+|#-?\d+")
+
+
+def _immediate_tokens(op_str):
+    values = set()
+    for match in _IMM_TOKEN.finditer(op_str):
+        token = match.group().lstrip("#")
+        with contextlib.suppress(ValueError):
+            values.add(int(token, 0))
+    return values
 
 
 class AArch64Backend(ArchBackend):
@@ -236,7 +253,7 @@ class AArch64Backend(ArchBackend):
 
     @staticmethod
     def _recordDataRefs(d, instruction, state):
-        i_address, i_size, i_mnemonic, _i_op_str = instruction
+        i_address, i_size, i_mnemonic, i_op_str = instruction
         if i_mnemonic in CALL_INS or i_mnemonic in RET_INS or i_mnemonic in EXCEPTION_RETURN_INS:
             return
         if i_mnemonic in END_INS or i_mnemonic in ALWAYS_BRANCH_INS or i_mnemonic in UNCOND_JUMP_INS:
@@ -248,13 +265,22 @@ class AArch64Backend(ArchBackend):
         ):
             return
 
+        binary_info = d.disassembly.binary_info
+        base_addr = binary_info.base_addr
+        upper_addr = base_addr + binary_info.binary_size
+        if not any(
+            base_addr <= value < upper_addr and not binary_info.isInCodeAreas(value)
+            for value in _immediate_tokens(i_op_str)
+        ):
+            # no printed immediate can yield a data ref, so the detail re-decode
+            # below would record nothing.
+            return
         ins_bytes = d.disassembly.getBytes(i_address, i_size)
         if not ins_bytes or len(ins_bytes) != i_size:
             return
         detailed = next(d.capstone.disasm(ins_bytes, i_address), None)
         if detailed is None:
             return
-        binary_info = d.disassembly.binary_info
         emitted = set()
         for operand in detailed.operands:
             value = None

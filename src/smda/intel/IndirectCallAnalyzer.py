@@ -71,14 +71,17 @@ class IndirectCallAnalyzer:
             LOGGER.debug("already processed block 0x%08x; skipping", block[0][0])
             return False
         processed.append(block)
-        LOGGER.debug(
-            "start processing block: 0x%08x\nlooking for register %s",
-            block[0][0],
-            register_name,
-        )
+        debug_logging = LOGGER.isEnabledFor(logging.DEBUG)
+        if debug_logging:
+            LOGGER.debug(
+                "start processing block: 0x%08x\nlooking for register %s",
+                block[0][0],
+                register_name,
+            )
         abs_value_found = False
         for ins in reversed(block):
-            LOGGER.debug("0x%08x: %s %s", ins[0], ins[2], ins[3])
+            if debug_logging:
+                LOGGER.debug("0x%08x: %s %s", ins[0], ins[2], ins[3])
             if ins[2] == "mov":
                 # mov <reg>, <reg>
                 match1 = self.RE_MOV_REG_REG.match(ins[3])

@@ -213,8 +213,16 @@ class DisassemblyResult:
         return None
 
     def addCodeRefs(self, addr_from, addr_to):
-        self.code_refs_from.setdefault(addr_from, set()).add(addr_to)
-        self.code_refs_to.setdefault(addr_to, set()).add(addr_from)
+        refs_from = self.code_refs_from.get(addr_from)
+        if refs_from is None:
+            self.code_refs_from[addr_from] = {addr_to}
+        else:
+            refs_from.add(addr_to)
+        refs_to = self.code_refs_to.get(addr_to)
+        if refs_to is None:
+            self.code_refs_to[addr_to] = {addr_from}
+        else:
+            refs_to.add(addr_from)
 
     def removeCodeRefs(self, addr_from, addr_to):
         refs_from = self.code_refs_from.get(addr_from, set())
@@ -225,8 +233,16 @@ class DisassemblyResult:
         self.code_refs_to[addr_to] = refs_to
 
     def addDataRefs(self, addr_from, addr_to):
-        self.data_refs_from.setdefault(addr_from, set()).add(addr_to)
-        self.data_refs_to.setdefault(addr_to, set()).add(addr_from)
+        refs_from = self.data_refs_from.get(addr_from)
+        if refs_from is None:
+            self.data_refs_from[addr_from] = {addr_to}
+        else:
+            refs_from.add(addr_to)
+        refs_to = self.data_refs_to.get(addr_to)
+        if refs_to is None:
+            self.data_refs_to[addr_to] = {addr_from}
+        else:
+            refs_to.add(addr_from)
 
     def removeDataRefs(self, addr_from, addr_to):
         refs_from = self.data_refs_from.get(addr_from, set())
@@ -266,27 +282,26 @@ class DisassemblyResult:
 
     def getOutRefs(self, func_addr):
         ins_addrs = set()
-        code_refs = []
+        code_refs_from = self.code_refs_from
+        for block in self.functions[func_addr]:
+            for ins in block:
+                ins_addrs.add(ins[0])
+        # function may be recursive
+        ins_addrs.discard(func_addr)
         out_refs = {}
+        # reduce outrefs to addresses within the memory image
+        base_addr = self.binary_info.base_addr
+        max_addr = base_addr + self.binary_info.binary_size
         for block in self.functions[func_addr]:
             for ins in block:
                 ins_addr = ins[0]
-                ins_addrs.add(ins_addr)
-                if ins_addr in self.code_refs_from:
-                    for to_addr in self.code_refs_from[ins_addr]:
-                        code_refs.append([ins_addr, to_addr])
-        # function may be recursive
-        if func_addr in ins_addrs:
-            ins_addrs.remove(func_addr)
-        # reduce outrefs to addresses within the memory image
-        max_addr = self.binary_info.base_addr + self.binary_info.binary_size
-        image_refs = [ref for ref in code_refs if self.binary_info.base_addr <= ref[1] < max_addr]
-        for ref in image_refs:
-            if ref[1] in ins_addrs:
-                continue
-            if ref[0] not in out_refs:
-                out_refs[ref[0]] = []
-            out_refs[ref[0]].append(ref[1])
+                if ins_addr in code_refs_from:
+                    for to_addr in code_refs_from[ins_addr]:
+                        if base_addr <= to_addr < max_addr and to_addr not in ins_addrs:
+                            if ins_addr in out_refs:
+                                out_refs[ins_addr].append(to_addr)
+                            else:
+                                out_refs[ins_addr] = [to_addr]
         return {src: sorted(dst) for src, dst in out_refs.items()}
 
     def isRecursiveFunction(self, func_addr):
