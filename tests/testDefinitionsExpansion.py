@@ -56,6 +56,26 @@ class TestDefinitionsExpansion(unittest.TestCase):
         # Existing ws2_32.dll entries still resolve
         self.assertEqual(OrdinalHelper.resolveOrdinal("ws2_32.dll", 23), "socket")
 
+    def test_ordinal_expansion_stable_winsock(self):
+        # Winsock 1.1 classic ordinals (frozen ABI, shared by ws2_32 and wsock32)
+        self.assertEqual(OrdinalHelper.resolveOrdinal("ws2_32.dll", 115), "WSAStartup")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("ws2_32.dll", 151), "__WSAFDIsSet")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("wsock32.dll", 1), "accept")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("wsock32.dll", 116), "WSACleanup")
+        # wsock32 MSWSOCK forwarders (stable legacy ordinals)
+        self.assertEqual(OrdinalHelper.resolveOrdinal("wsock32.dll", 1140), "TransmitFile")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("wsock32.dll", 1141), "AcceptEx")
+
+    def test_ordinal_expansion_oleaut32_conversions(self):
+        # oleaut32 exports its Var*/SafeArray* helpers by ordinal only
+        self.assertEqual(OrdinalHelper.resolveOrdinal("oleaut32.dll", 15), "SafeArrayCreate")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("oleaut32.dll", 318), "VarCat")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("oleaut32.dll", 161), "LoadTypeLib")
+
+    def test_ordinal_unknown_returns_empty(self):
+        self.assertEqual(OrdinalHelper.resolveOrdinal("ws2_32.dll", 99999), "")
+        self.assertEqual(OrdinalHelper.resolveOrdinal("nonexistent.dll", 1), "")
+
 
 if __name__ == "__main__":
     unittest.main()
