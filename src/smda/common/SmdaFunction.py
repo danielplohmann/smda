@@ -34,6 +34,13 @@ AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 2, 0]
 # in-image mov r64, imm64 constant was never escaped and stayed relocation-variant).
 INTEL_PIC_HASH_ESCAPE_VERSION = [4, 3, 5]
 
+# CIL PIC hashing changed in 4.3.6 when escapeBinary was made operand-type-driven,
+# CIL PIC hashing changed in 4.3.8 when escapeBinary was made operand-type-driven,
+# adding token wildcarding for ldstr/cpobj/ldelema/ldelem/stelem/ldvirtftn/sizeof
+# and branch wildcarding for leave/leave.s. Older reports have metadata-token bytes
+# leaking into pic_hash and need to be recomputed.
+CIL_PIC_HASH_ESCAPE_VERSION = [4, 3, 8]
+
 
 class LazyIntKeyDict(dict):
     def __new__(cls, data=None):
@@ -610,6 +617,8 @@ class SmdaFunction:
                 and function_architecture == "intel"
                 and version < INTEL_PIC_HASH_ESCAPE_VERSION
             ):
+                recalculate_pic_hash = True
+            if not recalculate_pic_hash and function_architecture == "cil" and version < CIL_PIC_HASH_ESCAPE_VERSION:
                 recalculate_pic_hash = True
             if recalculate_pic_hash:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
