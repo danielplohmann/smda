@@ -18,6 +18,7 @@ from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.Tarjan import Tarjan
+from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 from .SmdaInstruction import SmdaInstruction
@@ -34,12 +35,16 @@ AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 2, 0]
 # in-image mov r64, imm64 constant was never escaped and stayed relocation-variant).
 INTEL_PIC_HASH_ESCAPE_VERSION = [4, 3, 5]
 
-# CIL PIC hashing changed in 4.3.6 when escapeBinary was made operand-type-driven,
 # CIL PIC hashing changed in 4.3.8 when escapeBinary was made operand-type-driven,
 # adding token wildcarding for ldstr/cpobj/ldelema/ldelem/stelem/ldvirtftn/sizeof
 # and branch wildcarding for leave/leave.s. Older reports have metadata-token bytes
 # leaking into pic_hash and need to be recomputed.
 CIL_PIC_HASH_ESCAPE_VERSION = [4, 3, 8]
+
+# Dalvik PIC hashing introduced format-aware pool/imm/branch masking via
+# DalvikInstructionEscaper. Reports at or before this version stored raw-byte
+# (or None-escaper) hashes and must recalculate on import.
+DALVIK_PIC_HASH_ESCAPE_VERSION = [4, 3, 10]
 
 
 class LazyIntKeyDict(dict):
@@ -160,6 +165,7 @@ class SmdaFunction:
         self.smda_report = smda_report
         self.nesting_depth = 0
         self._normalized_blockrefs = None
+        self._exception_blockrefs = None
         self._basic_blocks = None
         if disassembly is not None and function_offset is not None:
             self._escaper = self.getInstructionEscaper(disassembly.binary_info.architecture)
@@ -221,6 +227,8 @@ class SmdaFunction:
             return AArch64InstructionEscaper
         if architecture == "cil":
             return CilInstructionEscaper
+        if architecture == "dalvik":
+            return DalvikInstructionEscaper
         return None
 
     @property
@@ -530,6 +538,40 @@ class SmdaFunction:
         self._normalized_blockrefs = result
         return result
 
+    def getExceptionEdges(self):
+        """Instruction-level typed exception edges from architecture_metadata (Dalvik)."""
+        if not self.architecture_metadata:
+            return []
+        return list(self.architecture_metadata.get("exception_edges") or [])
+
+    def getExceptionBlockRefs(self):
+        """
+        Block-level map: source_block_start -> sorted list of exception successor blocks.
+
+        Built from typed exception_edges (kind=exception) rather than ordinary blockrefs,
+        so consumers can distinguish exceptional control flow from normal/branch edges.
+        """
+        if getattr(self, "_exception_blockrefs", None) is not None:
+            return self._exception_blockrefs
+        exception_blockrefs = {}
+        for edge in self.getExceptionEdges():
+            if not isinstance(edge, dict) or edge.get("kind") != "exception":
+                continue
+            from_addr = edge.get("from_addr")
+            to_addr = edge.get("to_addr")
+            if from_addr is None or to_addr is None:
+                continue
+            src_block = self._getContainingBlockStart(from_addr)
+            if src_block is None:
+                src_block = from_addr
+            dst_block = self._getContainingBlockStart(to_addr)
+            if dst_block is None:
+                dst_block = to_addr
+            exception_blockrefs.setdefault(src_block, set()).add(dst_block)
+        result = {block: sorted(targets) for block, targets in sorted(exception_blockrefs.items())}
+        self._exception_blockrefs = result
+        return result
+
     def toDotGraph(self, with_api=False):
         dot_graph = f'digraph "CFG for 0x{self.offset:x}" {{\n'
         dot_graph += f'  label="CFG for 0x{self.offset:x}";\n'
@@ -619,6 +661,13 @@ class SmdaFunction:
             ):
                 recalculate_pic_hash = True
             if not recalculate_pic_hash and function_architecture == "cil" and version < CIL_PIC_HASH_ESCAPE_VERSION:
+                recalculate_pic_hash = True
+            if (
+                not recalculate_pic_hash
+                and function_architecture == "dalvik"
+                and version < DALVIK_PIC_HASH_ESCAPE_VERSION
+            ):
+                recalculate_pic_hash = True
                 recalculate_pic_hash = True
             if recalculate_pic_hash:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()

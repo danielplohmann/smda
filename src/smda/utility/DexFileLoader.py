@@ -2,25 +2,52 @@ import struct
 
 
 class DexFileLoader:
+    """Loader for standard single-DEX files (magic ``dex\\n``).
+
+    ODEX (``dey\\n``) and CDEX (``cdex``) magics are *recognized* but not
+    analysis-compatible: ODEX wraps a different outer layout and often carries
+    quickened opcodes (0xE3–0xF9); CDEX uses a compact variable-size code_item.
+    Both would be silently mis-parsed by the standard DEX pipeline, so they are
+    rejected from ``isCompatible`` (analysis path) while remaining detectable via
+    ``isRecognizedUnsupported``.
+    """
+
     SUPPORTED_VERSIONS = {b"035", b"037", b"038", b"039", b"040"}
     HEADER_SIZE = 0x70
     ENDIAN_CONSTANT = 0x12345678
     REVERSE_ENDIAN_CONSTANT = 0x78563412
 
     @classmethod
+    def isRecognizedUnsupported(cls, data):
+        """True for ODEX/CDEX containers that SMDA will not analyze as DEX."""
+        return cls.unsupportedReason(data) is not None
+
+    @classmethod
+    def unsupportedReason(cls, data):
+        if not data or len(data) < 4:
+            return None
+        if data[:4] == b"dey\n":
+            return (
+                "ODEX (dey\\n) is not supported: outer layout differs from DEX and "
+                "code may use quickened opcodes 0xE3-0xF9. Provide a standard DEX (dex\\n)."
+            )
+        if data[:4] == b"cdex":
+            return (
+                "CDEX (cdex) is not supported: compact code_item layout is not "
+                "parsed by SMDA. Provide a standard DEX (dex\\n)."
+            )
+        return None
+
+    @classmethod
     def _parseHeader(cls, data):
         if len(data) < cls.HEADER_SIZE:
             return None
         magic = data[:8]
-        # Standard DEX (dex\n) or ODEX (dey\n): same structure, same version table
-        if magic.startswith((b"dex\n", b"dey\n")) and magic[7] == 0:
-            version = magic[4:7]
-            if version not in cls.SUPPORTED_VERSIONS:
-                return None
-        # CDEX (ART Compact DEX): cdex<ver>\0 — reduced validation; LIEF handles details
-        elif data[:4] == b"cdex":
-            return {"version": "cdex", "file_size": len(data), "data_off": 0, "data_size": len(data)}
-        else:
+        # Standard DEX only — ODEX/CDEX intentionally excluded (see class docstring).
+        if not (magic.startswith(b"dex\n") and magic[7] == 0):
+            return None
+        version = magic[4:7]
+        if version not in cls.SUPPORTED_VERSIONS:
             return None
         file_size = struct.unpack_from("<I", data, 0x20)[0]
         header_size = struct.unpack_from("<I", data, 0x24)[0]
