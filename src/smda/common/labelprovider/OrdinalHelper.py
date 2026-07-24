@@ -1,9 +1,6 @@
 class OrdinalHelper:
     # Central mapping for DLL ordinals to function names.
     # Only include mappings that are stable across Windows versions (XP, Win7, Win10+).
-    # These are the explicitly-assigned (fixed) export ordinals for legacy DLLs whose
-    # ordinal ABI is frozen for backwards compatibility; sourced from the ReactOS .spec
-    # definitions which mirror the Windows ordinal assignments.
     ORDINALS = {
         "ws2_32.dll": {
             1: "accept",
