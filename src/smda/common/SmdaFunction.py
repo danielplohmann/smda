@@ -35,10 +35,11 @@ AARCH64_PIC_HASH_ESCAPE_VERSION = [4, 2, 0]
 INTEL_PIC_HASH_ESCAPE_VERSION = [4, 3, 5]
 
 # CIL PIC hashing changed in 4.3.6 when escapeBinary was made operand-type-driven,
+# CIL PIC hashing changed in 4.3.8 when escapeBinary was made operand-type-driven,
 # adding token wildcarding for ldstr/cpobj/ldelema/ldelem/stelem/ldvirtftn/sizeof
 # and branch wildcarding for leave/leave.s. Older reports have metadata-token bytes
 # leaking into pic_hash and need to be recomputed.
-CIL_PIC_HASH_ESCAPE_VERSION = [4, 3, 6]
+CIL_PIC_HASH_ESCAPE_VERSION = [4, 3, 8]
 
 
 class LazyIntKeyDict(dict):
