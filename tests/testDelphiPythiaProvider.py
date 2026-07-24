@@ -125,6 +125,17 @@ class TestDelphiPythiaProvider(unittest.TestCase):
         self.assertEqual(symbols[0x4013B0], "DoIt")
         self.assertEqual(symbols[0x401360], "")
 
+    def test_provider_registered_as_engine_symbol_provider(self):
+        from smda.common.RecursiveDisassembler import RecursiveDisassembler
+        from smda.intel.X86Backend import X86Backend
+        from smda.SmdaConfig import SmdaConfig
+
+        engine = RecursiveDisassembler(SmdaConfig(), X86Backend())
+        provider_types = {type(provider) for provider in engine.symbol_providers}
+
+        self.assertIn(DelphiPythiaProvider, provider_types)
+        self.assertNotIn(DelphiPythiaProvider, {type(provider) for provider in engine.api_providers})
+
 
 if __name__ == "__main__":
     unittest.main()
