@@ -7,6 +7,7 @@ from bisect import bisect_right
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
+from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
 from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
@@ -63,6 +64,7 @@ class RecursiveDisassembler:
         self._registerLabelProvider(GoSymbolProvider(self.config))
         self._registerLabelProvider(DelphiKbSymbolProvider(self.config))
         self._registerLabelProvider(DelphiReSymProvider(self.config))
+        self._registerLabelProvider(DelphiPythiaProvider(self.config))
         # Generic binary format providers (fallback)
         self._registerLabelProvider(ElfSymbolProvider(self.config))
         self._registerLabelProvider(PeSymbolProvider(self.config))
