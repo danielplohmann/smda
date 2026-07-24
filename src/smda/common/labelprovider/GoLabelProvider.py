@@ -135,7 +135,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         elif marker == 0xFFFFFFF1:
             version = "1.20"
         else:
-            raise ValueError(f"Could not recognize Golang version marker: 0x{marker}")
+            raise ValueError(f"Could not recognize Golang version marker: 0x{marker:08X}")
 
         bitness_indicator = struct.unpack("B", pclntab_buffer[7:8])[0]
         bitness = None
@@ -144,7 +144,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         elif bitness_indicator == 4:
             bitness = 32
         else:
-            raise ValueError(f"Could not recognize Golang bitness marker: 0x{bitness_indicator}")
+            raise ValueError(f"Could not recognize Golang bitness marker: 0x{bitness_indicator:02X}")
 
         field_size = 8 if bitness == 64 else 4
         field_indicator = "Q" if bitness == 64 else "I"
