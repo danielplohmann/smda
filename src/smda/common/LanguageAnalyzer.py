@@ -11,6 +11,7 @@ from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.ItaniumDemangler import is_itanium_cpp_symbol, is_msvc_cpp_symbol
 from smda.common.labelprovider.RustSymbolEvidence import is_rust_language_evidence
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
+from smda.utility.MachoBinary import get_active_macho_binary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,7 +66,16 @@ class LanguageAnalyzer:
         except Exception as exc:
             reraise_non_operational_exception(exc)
             lief_binary = None
-        imported_libraries = {library.lower() for library in getattr(lief_binary, "imported_libraries", []) or []}
+        try:
+            libraries = list(getattr(lief_binary, "imported_libraries", []) or [])
+        except (AttributeError, UnicodeDecodeError):
+            libraries = []
+        imported_libraries = set()
+        for library in libraries:
+            try:
+                imported_libraries.add(library.lower())
+            except (AttributeError, UnicodeDecodeError):
+                continue
         if "msvbvm60.dll" in imported_libraries:
             return 0.9
         # A copied string is not proof that the program uses the VB6 runtime.
@@ -152,6 +162,13 @@ class LanguageAnalyzer:
         except Exception as exc:
             reraise_non_operational_exception(exc)
             return 0.0, 0
+        if not lief_binary:
+            return 0.0, 0
+        lief_binary = get_active_macho_binary(
+            lief_binary,
+            bitness=self.disassembly.binary_info.bitness,
+            architecture=self.disassembly.binary_info.architecture,
+        )
         if not lief_binary:
             return 0.0, 0
 

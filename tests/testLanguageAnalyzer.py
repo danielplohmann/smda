@@ -26,6 +26,17 @@ class _MalformedSymbolListBinary:
         raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
 
+class _MalformedImportedLibrariesBinary:
+    @property
+    def imported_libraries(self):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
+class _MalformedLibraryName:
+    def lower(self):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
 class TestLanguageAnalyzer(unittest.TestCase):
     def test_identify_prefers_cpp_itanium_symbols_over_generic_c_asm(self):
         analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32, functions={}))
@@ -118,6 +129,46 @@ class TestLanguageAnalyzer(unittest.TestCase):
         analyzer.disassembly.binary_info.getLiefBinary = lambda: SimpleNamespace(imported_libraries=["MSVBVM60.DLL"])
 
         self.assertEqual(analyzer.getVisualBasicScore(), 0.9)
+
+    def test_visualbasic_score_falls_back_when_imported_libraries_are_malformed(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"MSVBVM60.DLL", functions={}))
+        analyzer.disassembly.binary_info.getLiefBinary = lambda: _MalformedImportedLibrariesBinary()
+
+        self.assertEqual(analyzer.getVisualBasicScore(), 0.2)
+
+    def test_visualbasic_score_skips_a_malformed_library_name(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"", functions={}))
+        analyzer.disassembly.binary_info.getLiefBinary = lambda: SimpleNamespace(
+            imported_libraries=[_MalformedLibraryName(), "MSVBVM60.DLL"]
+        )
+
+        self.assertEqual(analyzer.getVisualBasicScore(), 0.9)
+
+    def test_cpp_symbol_scoring_selects_the_active_macho_slice(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32, functions={}))
+        analyzer.disassembly.binary_info.bitness = 64
+        analyzer.disassembly.binary_info.architecture = "aarch64"
+        fat_binary = object()
+        macho_slice = SimpleNamespace(
+            exported_functions=[],
+            exported_symbols=[],
+            symtab_symbols=[],
+            dynamic_symbols=[
+                SimpleNamespace(name="__Z3foov"),
+                SimpleNamespace(name="__ZN1AC1Ev"),
+                SimpleNamespace(name="__ZTV1A"),
+            ],
+        )
+        analyzer.disassembly.binary_info.getLiefBinary = lambda: fat_binary
+
+        with mock.patch(
+            "smda.common.LanguageAnalyzer.get_active_macho_binary",
+            return_value=macho_slice,
+        ) as select_active:
+            score, count = analyzer.getCppSymbolScore()
+
+        self.assertEqual((score, count), (0.8, 3))
+        select_active.assert_called_once_with(fat_binary, bitness=64, architecture="aarch64")
 
     def test_validated_go_pclntab_outweighs_a_build_id_string(self):
         pclntab = b"\xf1\xff\xff\xff\x00\x00\x01\x08"
