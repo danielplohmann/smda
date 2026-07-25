@@ -4,6 +4,7 @@ capstone
 dncil
 dnfile
 lief>=0.16.0
+pycxxfilt>=0.1.0
 ruff
 pre-commit
 build

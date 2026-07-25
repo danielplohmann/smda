@@ -6,6 +6,7 @@ import lief
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import parse_elf_relocation_imports
+from .ItaniumDemangler import demangle_itanium_symbol
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
@@ -56,16 +57,62 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def parseExports(self, binary):
         function_symbols = {}
         for function in binary.exported_functions:
-            function_symbols[function.address] = function.name
+            function_name = self._formatSymbolName(function)
+            if function_name:
+                function_symbols[function.address] = function_name
         return function_symbols
+
+    @staticmethod
+    def _isDefinedSymbol(symbol):
+        """Return whether an ELF symbol is defined rather than a PLT-backed import."""
+        shndx = getattr(symbol, "shndx", None)
+        if shndx is not None:
+            return shndx != 0  # SHN_UNDEF
+        # Keep compatibility with older LIEF objects and the lightweight test
+        # doubles that do not expose shndx.
+        return bool(getattr(symbol, "value", 0)) and not getattr(symbol, "imported", False)
+
+    @staticmethod
+    def _getSymbolName(symbol):
+        try:
+            raw_name = symbol.name
+        except (AttributeError, UnicodeDecodeError):
+            return ""
+        return raw_name if isinstance(raw_name, str) else ""
+
+    @classmethod
+    def _formatSymbolName(cls, symbol):
+        raw_name = cls._getSymbolName(symbol)
+        if not raw_name:
+            return ""
+        try:
+            demangled_name = getattr(symbol, "demangled_name", None)
+        except (AttributeError, UnicodeDecodeError):
+            demangled_name = None
+        if demangled_name and demangled_name != raw_name:
+            return demangled_name
+        return demangle_itanium_symbol(raw_name)
+
+    def parseExportedSymbols(self, binary):
+        """Return every named, defined dynamic ELF symbol, including data exports."""
+        if not isinstance(binary, lief.ELF.Binary):
+            return {}
+        exported_symbols = {}
+        for symbol in binary.dynamic_symbols:
+            if symbol is None or not self._isDefinedSymbol(symbol):
+                continue
+            symbol_name = self._formatSymbolName(symbol)
+            if symbol_name:
+                exported_symbols[symbol.value] = symbol_name
+        return exported_symbols
 
     def parseSymbols(self, symbols):
         function_symbols = {}
         for symbol in symbols:
-            if symbol is not None and symbol.is_function and symbol.value != 0:
-                func_name = ""
-                func_name = getattr(symbol, "demangled_name", None) or symbol.name
-                function_symbols[symbol.value] = func_name
+            if symbol is not None and symbol.is_function and symbol.value != 0 and self._isDefinedSymbol(symbol):
+                symbol_name = self._formatSymbolName(symbol)
+                if symbol_name:
+                    function_symbols[symbol.value] = symbol_name
         return function_symbols
 
     def parseImports(self, lief_binary):
@@ -74,6 +121,8 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def collectSymbols(self, lief_binary):
         if not isinstance(lief_binary, lief.ELF.Binary):
             return {}
+        # Keep this legacy map function-only. Data exports are available from
+        # BinaryInfo.getExportedSymbols() and SmdaReport.xmetadata["exported_symbols"].
         symbols = {}
         symbols.update(self.parseExports(lief_binary))
         symbols.update(self.parseSymbols(lief_binary.symtab_symbols))

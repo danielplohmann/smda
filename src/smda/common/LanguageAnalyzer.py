@@ -3,10 +3,13 @@ import logging
 import re
 import struct
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
 from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
 from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.ItaniumDemangler import is_itanium_cpp_symbol, is_msvc_cpp_symbol
+from smda.common.labelprovider.RustSymbolEvidence import is_rust_language_evidence
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
 LOGGER = logging.getLogger(__name__)
@@ -21,6 +24,9 @@ class LanguageAnalyzer:
         self.delphi_pythia_resolver = DelphiPythiaProvider(None)
         self.delphi_resym_resolver = DelphiReSymProvider(None)
         self.strings = None
+        self._cpp_symbol_count = 0
+        self._guess = None
+        self._delphi_objects = None
 
     def validPEHeader(self):
         is_pe = self.disassembly.binary_info.binary[0:2] == b"\x4d\x5a"
@@ -53,11 +59,17 @@ class LanguageAnalyzer:
         return self.strings
 
     def getVisualBasicScore(self):
-        # check for the typical import of msvbvm60.dll
-        vb_score = 0.0
-        if b"MSVBVM60.DLL" in self.getStrings():
-            vb_score = 0.5
-        return vb_score
+        """Score VB6 using its runtime import, with a weak string-only fallback."""
+        try:
+            lief_binary = self.disassembly.binary_info.getLiefBinary()
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+            lief_binary = None
+        imported_libraries = {library.lower() for library in getattr(lief_binary, "imported_libraries", []) or []}
+        if "msvbvm60.dll" in imported_libraries:
+            return 0.9
+        # A copied string is not proof that the program uses the VB6 runtime.
+        return 0.2 if b"MSVBVM60.DLL" in self.getStrings() else 0.0
 
     def getDotNetScore(self):
         dot_net_score = 0.0
@@ -85,9 +97,9 @@ class LanguageAnalyzer:
         delphi_score = 0.0
         # Check if Delphi-Locales are present in strings
         if b"Borland\\locales" in self.getStrings():
-            delphi_score = max(delphi_score, 0.5)
+            delphi_score = max(delphi_score, 0.25)
         if self._getPETimestamp() == 0x2A425E19:
-            delphi_score = 0.5
+            delphi_score = max(delphi_score, 0.25)
         # Find "Delphi-Saved" Strings
         delphi_strings = [
             match.group("string")
@@ -100,7 +112,15 @@ class LanguageAnalyzer:
         ]
         if len(delphi_strings) > 100:
             LOGGER.info("Detected %d Delphi-like strings.", len(delphi_strings))
-            delphi_score = max(delphi_score, 0.8)
+            delphi_score = max(delphi_score, 0.35)
+        # A validated VMT is structural compiler evidence. Strings and a PE
+        # timestamp are only hints and must not enable Delphi-only recovery.
+        if b"TObject" in self.disassembly.binary_info.binary:
+            delphi_objects = self.getDelphiObjects()
+            if len(delphi_objects) >= 5:
+                delphi_score = max(delphi_score, 0.9)
+            elif delphi_objects:
+                delphi_score = max(delphi_score, 0.6)
         return delphi_score
 
     def getGoScore(self):
@@ -108,6 +128,8 @@ class LanguageAnalyzer:
         strings = self.getStrings()
         if any(b"Go build ID" in s for s in strings):
             go_score = max(go_score, 0.6)
+        if self.go_resolver.getPcLntabInfo(self.disassembly.binary_info):
+            go_score = max(go_score, 0.9)
 
         return go_score
 
@@ -122,6 +144,47 @@ class LanguageAnalyzer:
 
     def checkRust(self):
         return self.getRustScore() > 0.5
+
+    def getCppSymbolScore(self):
+        """Return C++ evidence from validated Itanium or MSVC decorated symbols."""
+        try:
+            lief_binary = self.disassembly.binary_info.getLiefBinary()
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+            return 0.0, 0
+        if not lief_binary:
+            return 0.0, 0
+
+        cpp_symbol_names = set()
+        for symbol_list_name in (
+            "exported_functions",
+            "exported_symbols",
+            "symtab_symbols",
+            "dynamic_symbols",
+            "symbols",
+        ):
+            try:
+                symbols = getattr(lief_binary, symbol_list_name, []) or []
+            except (AttributeError, UnicodeDecodeError):
+                continue
+            for symbol in symbols:
+                try:
+                    symbol_name = symbol.name
+                except (AttributeError, UnicodeDecodeError):
+                    continue
+                if (
+                    symbol_name
+                    and not is_rust_language_evidence(symbol_name)
+                    and (is_itanium_cpp_symbol(symbol_name) or is_msvc_cpp_symbol(symbol_name))
+                ):
+                    cpp_symbol_names.add(symbol_name)
+
+        cpp_symbol_count = len(cpp_symbol_names)
+        if cpp_symbol_count >= 3:
+            return 0.8, cpp_symbol_count
+        if cpp_symbol_count:
+            return 0.4, cpp_symbol_count
+        return 0.0, 0
 
     def parseDelphiString(self, buffer):
         parsed_string = ""
@@ -140,8 +203,10 @@ class LanguageAnalyzer:
         The return format intentionally remains unchanged:
             {absolute_function_address: optional_function_name}
         """
-        self.delphi_pythia_resolver.update(self.disassembly.binary_info)
-        return self.delphi_pythia_resolver.getFunctionSymbols()
+        if self._delphi_objects is None:
+            self.delphi_pythia_resolver.update(self.disassembly.binary_info)
+            self._delphi_objects = self.delphi_pythia_resolver.getFunctionSymbols()
+        return self._delphi_objects
 
     def getGoObjects(self):
         self.go_resolver.update(self.disassembly.binary_info)
@@ -166,19 +231,10 @@ class LanguageAnalyzer:
         result = {
             # programming language : probability
             "c/asm": 0.1,  # if no other language matches, c/asm will
-            "_count_thiscalls": 0,
-            "_count_delphi_objects": 0,
         }
         # DELPHI
         result["delphi"] = self.getDelphiScore()
-        if self.checkDelphi():
-            t_objects = self.getDelphiObjects()
-            functions = sum(len(t_string) for t_string in t_objects.values())
-            # result["_delphi_objects"] = t_objects.keys()
-            result["_count_delphi_objects"] = len(t_objects)
-            if len(t_objects) > 5 and functions > 10:
-                result["delphi"] = max(result.get("delphi", 0), 0.9)
-        result["delphi_kb_file"] = self.getDelphiKbScore()
+        result["delphi"] = max(result["delphi"], self.getDelphiKbScore())
         # .NET
         result[".net"] = self.getDotNetScore()
         # VISUALBASIC
@@ -187,25 +243,19 @@ class LanguageAnalyzer:
         result["go"] = self.getGoScore()
         # RUST
         result["rust"] = self.getRustScore()
-        # C++
-        # check if there is a high number of the following patterns
-        # in relation to the number off all functions (->the size of the sample)
-        patterns = []
-        # mov ecx, <stack_offset>; call XYZ
-        patterns.append(b"\x8b\x4d[\\S\\s]\xe8[\\S\\s]{3}(\x00|\xff)")
-        # mov ecx, <reg>; call XYZ
-        patterns.append(b"\x8b[\xc8-\xcf]\xe8[\\S\\s]{3}(\x00|\xff)")
-        thiscall_count = sum(len(re.findall(pattern, self.disassembly.binary_info.binary)) for pattern in patterns)
-        result["c++"] = min(
-            1,
-            6.0 * thiscall_count / max(1, len(self.disassembly.functions)),
-        )
-        result["_count_thiscalls"] = thiscall_count
+        # C++: thiscall-like instruction sequences are ABI-level patterns, not
+        # language identity. They are deliberately not scored as C++ evidence.
+        cpp_symbol_score, cpp_symbol_count = self.getCppSymbolScore()
+        result["c++"] = cpp_symbol_score
+        self._cpp_symbol_count = cpp_symbol_count
 
         # guess the programming language and
         # return dict with probabilities for the use of certain programming languages
-        result["_guess"] = self._deriveGuess(result)
+        self._guess = self._deriveGuess(result)
         return result
+
+    def getGuess(self):
+        return self._guess
 
     @staticmethod
     def _deriveGuess(result):
@@ -214,25 +264,25 @@ class LanguageAnalyzer:
             if not (guess and result[guess] > result[lang]):
                 guess = lang
         if result.get("go", 0) > 0.5:
-            # an exact "Go build ID" string match is unambiguous evidence that must win over
-            # any other heuristic score -- especially the c++ thiscall score, which is called
-            # here (identify()) before any function exists, so it always divides by 1 and can
-            # spuriously outscore a real Go binary (see rescore()).
+            # A Go build ID or a validated pclntab header is stronger evidence
+            # than scores derived from optional language-specific metadata.
             guess = "go"
         if result.get("rust", 0) > 0.5:
-            # same rationale as the Go override above: a Rust mangled-symbol/signature match
-            # is unambiguous evidence that must win over the c++ thiscall score.
+            # A validated Rust symbol or runtime marker is stronger evidence
+            # than scores derived from optional language-specific metadata.
             guess = "rust"
         return guess
 
     def rescore(self, result, function_count):
         """
-        Re-normalize scores that depend on the function count, which is only known once
-        disassembly has finished (identify() runs at candidate-discovery time, before any
-        function exists). Called once analysis completes so the exported SmdaReport.language
-        reflects the true function count instead of identify()'s pre-disassembly snapshot.
+        Refresh symbol-derived C++ evidence once disassembly has completed.
+
+        ``function_count`` remains part of this method's compatibility
+        signature; language scores no longer infer C++ from calling-convention
+        instruction patterns or function counts.
         """
-        thiscall_count = result.get("_count_thiscalls", 0)
-        result["c++"] = min(1, 6.0 * thiscall_count / max(1, function_count))
-        result["_guess"] = self._deriveGuess(result)
+        cpp_symbol_score, cpp_symbol_count = self.getCppSymbolScore()
+        result["c++"] = cpp_symbol_score
+        self._cpp_symbol_count = cpp_symbol_count
+        self._guess = self._deriveGuess(result)
         return result

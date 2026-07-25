@@ -429,7 +429,7 @@ class X86Backend(ArchBackend):
             instruction_bytes = d._getDisasmWindowBuffer(i_address)
             instruction_sequence = list(d.capstone.disasm_lite(instruction_bytes, i_address))
             has_alignment_sequence = d.fc_manager.isAlignmentSequence(instruction_sequence, instruction_bytes)
-            is_alignment_evidence = d.disassembly.language["_guess"] != "go" and has_alignment_sequence
+            is_alignment_evidence = getattr(d.disassembly, "language_guess", None) != "go" and has_alignment_sequence
             is_candidate_evidence = d.fc_manager.isFunctionCandidate(i_address)
             if is_alignment_evidence and not is_candidate_evidence and d.disassembly.binary_info._getLiefType() == "PE":
                 if d.fc_manager.isHotpatchPrologue(instruction_bytes[:5]):

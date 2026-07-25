@@ -2,6 +2,7 @@
 
 import lief
 
+from smda.common.labelprovider.ItaniumDemangler import demangle_itanium_symbol
 from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 
 
@@ -69,6 +70,12 @@ def parse_elf_relocation_imports(lief_binary):
             continue
         if not symbol.imported or not symbol.is_function:
             continue
+        try:
+            symbol_name = symbol.name
+        except (AttributeError, UnicodeDecodeError):
+            continue
+        if not symbol_name:
+            continue
 
         lib = None
         symbol_version = getattr(symbol, "symbol_version", None)
@@ -76,7 +83,7 @@ def parse_elf_relocation_imports(lief_binary):
             aux = symbol_version.symbol_version_auxiliary
             lib = aux.name if aux else None
 
-        import_symbols[relocation.address] = (lib, symbol.name)
+        import_symbols[relocation.address] = (lib, demangle_itanium_symbol(symbol_name))
     return import_symbols
 
 
