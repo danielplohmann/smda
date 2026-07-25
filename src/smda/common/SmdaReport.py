@@ -98,7 +98,7 @@ class SmdaReport:
             self.identified_alignment = disassembly.identified_alignment
             self.is_library = disassembly.binary_info.is_library
             self.is_buffer = disassembly.binary_info.is_buffer
-            self.language = disassembly.language
+            self.language = self._normalizeLanguage(disassembly.language)
             self.message = "Analysis finished regularly."
             self.oep = disassembly.binary_info.getOep()
             self.sha256 = disassembly.binary_info.sha256
@@ -124,6 +124,7 @@ class SmdaReport:
                 self.data_refs_to.setdefault(dst, []).append(src)
             self.xmetadata = {
                 "exported_functions": disassembly.binary_info.getExportedFunctions(),
+                "exported_symbols": disassembly.binary_info.getExportedSymbols(),
                 "imported_functions": disassembly.binary_info.getImportedFunctions(),
                 "symbols": disassembly.binary_info.getSymbols(),
             }
@@ -259,6 +260,33 @@ class SmdaReport:
             raise FileNotFoundError
         return SmdaReport.fromDict(smda_json)
 
+    @staticmethod
+    def _normalizeLanguage(language):
+        """Normalize legacy report values to the score-only language contract."""
+        if isinstance(language, str):
+            language_name = language.strip().lower()
+            if not language_name:
+                return {}
+            if language_name == "cil":
+                language_name = ".net"
+            return {language_name: 1.0}
+        if not isinstance(language, dict):
+            return {}
+
+        normalized = {}
+        for language_name, score in language.items():
+            if not isinstance(language_name, str) or language_name.startswith("_"):
+                continue
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                continue
+            score = float(score)
+            if language_name == "delphi_kb_file":
+                language_name = "delphi"
+            elif language_name == "cil":
+                language_name = ".net"
+            normalized[language_name] = max(normalized.get(language_name, 0.0), score)
+        return normalized
+
     @classmethod
     def fromDict(cls, report_dict) -> Optional["SmdaReport"]:
         smda_report = cls(None)
@@ -289,7 +317,7 @@ class SmdaReport:
             if "is_library" in report_dict["metadata"]:
                 smda_report.is_library = report_dict["metadata"]["is_library"]
             if "language" in report_dict["metadata"]:
-                smda_report.language = report_dict["metadata"]["language"]
+                smda_report.language = cls._normalizeLanguage(report_dict["metadata"]["language"])
             if "version" in report_dict["metadata"]:
                 smda_report.version = report_dict["metadata"]["version"]
             smda_report.is_buffer = report_dict["metadata"].get("is_buffer", False)

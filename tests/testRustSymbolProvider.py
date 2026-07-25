@@ -34,6 +34,15 @@ class MockSymbol:
         return self._demangled_name
 
 
+class MalformedNameSymbol:
+    is_function = True
+    value = 0x3000
+
+    @property
+    def name(self):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
 class MockLiefBinary:
     def __init__(self, symbols, exported_functions=None):
         self.header = type("obj", (object,), {"entrypoint": 0})
@@ -219,7 +228,7 @@ class TestRustSymbolProvider(unittest.TestCase):
         """Test that RustSymbolProvider correctly parses and demangles Rust symbols."""
         provider = RustSymbolProvider(None)
 
-        sym_legacy = MockSymbol("_ZN3foo3barE", 0x1000)
+        sym_legacy = MockSymbol("_ZN3foo3bar17h0123456789abcdefE", 0x1000)
         sym_v0 = MockSymbol("_RNvC6_123foo3bar", 0x2000)
         sym_normal = MockSymbol("main", 0x3000)
 
@@ -231,6 +240,12 @@ class TestRustSymbolProvider(unittest.TestCase):
         self.assertEqual(results[0x2000], "123foo::bar")
         # Non-Rust symbols should not be included
         self.assertNotIn(0x3000, results)
+
+    def test_rust_elf_symbols_skip_malformed_names(self):
+        provider = RustSymbolProvider(None)
+        symbols = [MalformedNameSymbol(), MockSymbol("_ZN3foo3barE", 0x4000)]
+
+        self.assertEqual(provider._parse_lief_symbols(symbols), {0x4000: "foo::bar"})
 
     def test_is_rust_symbol_detection(self):
         """Test _is_rust_symbol correctly identifies Rust mangled symbols."""
@@ -250,6 +265,30 @@ class TestRustSymbolProvider(unittest.TestCase):
         self.assertFalse(provider._is_rust_symbol("main"))
         self.assertFalse(provider._is_rust_symbol("printf"))
         self.assertFalse(provider._is_rust_symbol("_start"))
+
+    def test_rust_language_evidence_requires_v0_or_hashed_legacy_symbol(self):
+        provider = RustSymbolProvider(None)
+
+        self.assertTrue(provider._is_rust_language_evidence("_RNvC6_123foo3bar"))
+        self.assertTrue(provider._is_rust_language_evidence("_ZN3foo3bar17h0123456789abcdefE"))
+        self.assertFalse(provider._is_rust_language_evidence("_ZN3foo3barE"))
+        self.assertFalse(provider._is_rust_language_evidence("_ZNSs6appendEPKcm"))
+
+    def test_elf_cpp_symbol_does_not_activate_rust_language_detection(self):
+        cxx_binary = MockLiefBinary([MockSymbol("_ZNSs6appendEPKcm", 0x1000)])
+        binary_info = BinaryInfo(b"C++ binary without Rust marker strings")
+        provider = RustSymbolProvider(None)
+
+        with mock.patch.object(binary_info, "getLiefBinary", return_value=cxx_binary):
+            self.assertFalse(provider.is_rust_binary(binary_info))
+
+    def test_elf_hashed_legacy_symbol_activates_rust_language_detection(self):
+        rust_binary = MockLiefBinary([MockSymbol("_ZN3foo3bar17h0123456789abcdefE", 0x1000)])
+        binary_info = BinaryInfo(b"binary without fallback Rust marker strings")
+        provider = RustSymbolProvider(None)
+
+        with mock.patch.object(binary_info, "getLiefBinary", return_value=rust_binary):
+            self.assertTrue(provider.is_rust_binary(binary_info))
 
     def test_is_api_provider(self):
         """Test that RustSymbolProvider correctly reports it is not an API provider."""
@@ -432,7 +471,7 @@ class TestElfSymbolProviderWithoutRustDemangling(unittest.TestCase):
         provider = ElfSymbolProvider(None)
 
         # Rust symbols should be returned as-is (raw names)
-        sym_legacy = MockSymbol("_ZN3foo3barE", 0x1000)
+        sym_legacy = MockSymbol("_ZN3foo3bar17h0123456789abcdefE", 0x1000)
         sym_v0 = MockSymbol("_RNvC6_123foo3bar", 0x2000)
         sym_normal = MockSymbol("main", 0x3000)
 
@@ -441,7 +480,7 @@ class TestElfSymbolProviderWithoutRustDemangling(unittest.TestCase):
         results = provider.parseSymbols(symbols)
 
         # Raw Rust names should be preserved (no demangling)
-        self.assertEqual(results[0x1000], "_ZN3foo3barE")
+        self.assertEqual(results[0x1000], "_ZN3foo3bar17h0123456789abcdefE")
         self.assertEqual(results[0x2000], "_RNvC6_123foo3bar")
         self.assertEqual(results[0x3000], "main")
 

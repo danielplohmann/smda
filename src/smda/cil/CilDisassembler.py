@@ -249,7 +249,9 @@ class CilDisassembler:
         self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = "cil"
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
-        self.disassembly.language = "cil"
+        # CIL metadata is language-neutral, but it proves that this is a
+        # managed .NET/CLI module. Keep the public report contract score-only.
+        self.disassembly.language = {".net": 1.0}
 
         LOGGER.debug("Starting parser-based analysis.")
         pe = dnfile.dnPE(data=binary_info.raw_data)

@@ -249,14 +249,10 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertIn(0x1028, result.functions)
         self.assertIn(0x1028, result.code_refs_from.get(0x100C, set()))
 
-    def test_language_rescore_uses_real_function_count_after_analysis(self):
-        # LanguageAnalyzer.identify() runs before any function exists (candidate-discovery
-        # time), so its c++ score always divides by max(1, 0) == 1. RecursiveDisassembler
-        # must re-normalize it once real functions are known, so report-visible language
-        # reflects the true function count, not the pre-disassembly zero-function artifact.
+    def test_language_score_does_not_claim_cpp_from_thiscall_instruction_patterns(self):
         func = b"\x55\x48\x89\xe5\x5d\xc3"  # push rbp; mov rbp, rsp; pop rbp; ret
         code = func * 10
-        thiscall_tail = b"\x8b\x4d\x04\xe8\x01\x02\x03\x00"  # one thiscall-shaped pattern hit
+        thiscall_tail = b"\x8b\x4d\x04\xe8\x01\x02\x03\x00"
         buf = code + thiscall_tail
         binary_info = BinaryInfo(buf)
         binary_info.base_addr = 0x1000
@@ -267,10 +263,8 @@ class TestIntelDisassembler(unittest.TestCase):
         result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
 
         self.assertGreater(len(result.functions), 1)
-        thiscall_count = result.language["_count_thiscalls"]
-        expected_cpp = min(1, 6.0 * thiscall_count / len(result.functions))
-        self.assertEqual(result.language["c++"], expected_cpp)
-        self.assertLess(result.language["c++"], 1)  # proves it's not the pre-disassembly artifact
+        self.assertEqual(result.language["c++"], 0.0)
+        self.assertEqual(result.language_guess, "c/asm")
 
     def test_direct_import_stub_calls_resolve_at_original_caller(self):
         base = 0x1000
@@ -989,7 +983,7 @@ class TestIntelDisassembler(unittest.TestCase):
 
         d = SimpleNamespace(
             capstone=capstone,
-            disassembly=SimpleNamespace(binary_info=binary_info, language={"_guess": "msvc"}),
+            disassembly=SimpleNamespace(binary_info=binary_info, language_guess="msvc"),
             fc_manager=fc_manager,
             _getDisasmWindowBuffer=_get_window,
         )

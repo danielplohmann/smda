@@ -10,15 +10,13 @@ from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import resolve_pe_base_addr
 from .rust_demangler import demangle
-from .rust_demangler.rust import TypeNotFoundError
-from .rust_demangler.rust_legacy import UnableToLegacyDemangle
-from .rust_demangler.rust_v0 import UnableTov0Demangle
 from .rust_demangler.utils import remove_bad_spaces
+from .RustSymbolEvidence import RUST_DEMANGLE_ERRORS, is_rust_language_evidence
 
 LOGGER = logging.getLogger(__name__)
 
 # Specific exceptions that can be raised during Rust demangling
-_DEMANGLE_ERRORS = (TypeNotFoundError, UnableTov0Demangle, UnableToLegacyDemangle)
+_DEMANGLE_ERRORS = RUST_DEMANGLE_ERRORS
 
 
 class RustSymbolProvider(AbstractLabelProvider):
@@ -70,9 +68,6 @@ class RustSymbolProvider(AbstractLabelProvider):
         try:
             lief_binary = binary_info.getLiefBinary()
             if lief_binary:
-                # Mach-O Itanium C++ also uses __ZN; only treat Rust v0 (_R/__R) as
-                # symbol-table evidence there. ELF/PE keep legacy _ZN as well.
-                is_macho = isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary))
                 symbol_binary = lief_binary
                 if isinstance(lief_binary, lief.MachO.FatBinary):
                     symbol_binary = get_active_macho_binary(
@@ -80,7 +75,6 @@ class RustSymbolProvider(AbstractLabelProvider):
                         bitness=getattr(binary_info, "bitness", None),
                         architecture=getattr(binary_info, "architecture", "") or "",
                     )
-                rust_prefixes = ("_R", "__R") if is_macho else ("_ZN", "_R", "__ZN", "__R")
                 symbol_lists = []
                 if hasattr(symbol_binary, "exported_functions"):
                     symbol_lists.append(symbol_binary.exported_functions)
@@ -98,7 +92,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                             sym_name = sym.name
                         except (UnicodeDecodeError, AttributeError):
                             continue
-                        if sym_name and sym_name.startswith(rust_prefixes):
+                        if self._is_rust_language_evidence(sym_name):
                             binary_info._is_rust = True
                             return True
         except Exception as exc:
@@ -115,6 +109,10 @@ class RustSymbolProvider(AbstractLabelProvider):
         is_rust = any(sig in data for sig in signatures)
         binary_info._is_rust = is_rust
         return is_rust
+
+    @staticmethod
+    def _is_rust_language_evidence(name):
+        return is_rust_language_evidence(name)
 
     def _get_binary_data(self, binary_info):
         """Safely retrieves binary data from either raw_data or a file path."""
@@ -197,7 +195,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                         demangled = remove_bad_spaces(demangled)
                         self._func_symbols[active_base + function.address] = demangled
             except _DEMANGLE_ERRORS as exc:
-                LOGGER.debug("Failed to demangle Rust symbol %s: %s", function.name, exc)
+                LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
 
         # working example: 3969e1a88a063155a6f61b0ca1ac33114c1a39151f3c7dd019084abd30553eab
         # Parse PE symbols (COFF) if available and LIEF extracted them
@@ -222,7 +220,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                             if function_offset not in self._func_symbols:
                                 self._func_symbols[function_offset] = demangled
                 except _DEMANGLE_ERRORS as exc:
-                    LOGGER.debug("Failed to demangle Rust symbol %s: %s", symbol.name, exc)
+                    LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
 
     def _parse_lief_symbols(self, symbols):
         # working example: 3298d203c2acb68c474e5fdad8379181890b4403d6491c523c13730129be3f75
@@ -230,7 +228,10 @@ class RustSymbolProvider(AbstractLabelProvider):
         for symbol in symbols:
             if symbol is not None and symbol.is_function and symbol.value != 0:
                 # We want the raw name to check for Rust mangling
-                raw_name = symbol.name
+                try:
+                    raw_name = symbol.name
+                except (UnicodeDecodeError, AttributeError):
+                    continue
                 if self._is_rust_symbol(raw_name):
                     try:
                         demangled = demangle(raw_name)

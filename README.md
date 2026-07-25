@@ -65,7 +65,12 @@ Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependenc
 
 For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-dex containers are not first-class workflows. ODEX (`dey\n`) and CDEX (`cdex`) are not analysis-compatible (quickened ops / compact `code_item`): with `backend="dalvik"` they raise an explicit error; auto-detect will not select the Dalvik backend for those magics.
 
-The code should be fully compatible with Python 3.10+.
+The code requires Python 3.11+.
+`SmdaReport.metadata.language` is always a score map (`language name -> float`). Internal guesses and evidence
+counters are not serialized; loading an older report normalizes its legacy string/private-key form to this contract.
+For ELF files, `xmetadata.exported_symbols` contains all defined dynamic exports (functions and data), while the
+legacy `exported_functions` and `symbols` maps remain function-only.
+
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 
 To take full advantage of SMDA's capabilities, make sure to (optionally) install:
@@ -119,6 +124,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-26: v4.4.0 - Labels/reporting: recover and demangle ELF function/data exports and relocation imports, add `xmetadata.exported_symbols`, normalize `metadata.language` to score-only maps (including legacy report loading), replace host C++ demangler tools with the bundled `pycxxfilt` LLVM demangler, and require Python 3.11+. (THX: @r0ny123)
  * 2026-07-24: v4.3.10 - Dalvik: format-aware DalvikInstructionEscaper for PIC/OPC hashing (pool-index/immediate/branch masking), typed exception edges surfaced via SmdaFunction.getExceptionBlockRefs(), method_handle/call_site resolution (DEX 038+), orphan code_item discovery, unreachable-code flagging, backward-payload fixed-point sweep, ART-reconciled can_throw flags (incl. fill-array-data), goto/32 self-branch accepted, and explicit ODEX/CDEX rejection. (THX: @r0ny123)
  * 2026-07-24: v4.3.9 - Common: surface Rust detection in the language-guess heuristic (wire RustSymbolProvider.is_rust_binary() into LanguageAnalyzer so Rust binaries guess "rust" instead of "c++", and harden _get_binary_data() against missing raw_data/file_path). (THX: @r0ny123)
  * 2026-07-24: v4.3.8 - CIL: complete opcode coverage in the CIL instruction escaper by deriving mnemonic grouping and binary token/branch escaping directly from dncil's opcode table (instead of a hand-maintained list), and add a CIL pic_hash recalculation gate for older reports. (THX: @r0ny123)

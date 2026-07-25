@@ -18,7 +18,7 @@ from tests.testPeSymbolProvider import (
 
 
 def _expected_xmetadata_keys():
-    return {"exported_functions", "imported_functions", "symbols"}
+    return {"exported_functions", "exported_symbols", "imported_functions", "symbols"}
 
 
 class TestXmetadataShape(unittest.TestCase):
@@ -38,12 +38,14 @@ class TestXmetadataShape(unittest.TestCase):
         ):
             xmetadata = {
                 "exported_functions": binary_info.getExportedFunctions(),
+                "exported_symbols": binary_info.getExportedSymbols(),
                 "imported_functions": binary_info.getImportedFunctions(),
                 "symbols": binary_info.getSymbols(),
             }
 
         self.assertEqual(set(xmetadata), _expected_xmetadata_keys())
         self.assertIn(0x401000, xmetadata["exported_functions"])
+        self.assertIn(0x401000, xmetadata["exported_symbols"])
         self.assertIn(0x401000, xmetadata["symbols"])
         self.assertIn(0x402000, xmetadata["imported_functions"])
 
@@ -56,12 +58,14 @@ class TestXmetadataShape(unittest.TestCase):
         ):
             xmetadata = {
                 "exported_functions": binary_info.getExportedFunctions(),
+                "exported_symbols": binary_info.getExportedSymbols(),
                 "imported_functions": binary_info.getImportedFunctions(),
                 "symbols": binary_info.getSymbols(),
             }
 
         self.assertEqual(set(xmetadata), _expected_xmetadata_keys())
         self.assertEqual(xmetadata["exported_functions"][0x1000], "exported_func")
+        self.assertEqual(xmetadata["exported_symbols"][0x3000], "dyn_defined")
         self.assertEqual(xmetadata["symbols"][0x1000], "exported_func")
         self.assertNotIn(0x4000, xmetadata["symbols"])
         self.assertIn(0x4000, xmetadata["imported_functions"])
@@ -86,6 +90,7 @@ class TestXmetadataRoundtrip(unittest.TestCase):
     def test_smda_report_preserves_xmetadata_dicts(self):
         xmetadata = {
             "exported_functions": {0x401000: "exported_func"},
+            "exported_symbols": {0x401000: "exported_func"},
             "imported_functions": {0x402000: ("kernel32.dll", "ExitProcess")},
             "symbols": {0x401000: "exported_func", 0x401200: "local_func"},
         }

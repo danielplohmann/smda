@@ -122,6 +122,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         njrat_unmapped_disassembly = disasm.disassembleUnmappedBuffer(njrat_binary)
         assert njrat_unmapped_disassembly.num_functions == 64
         assert len([f.function_name for f in njrat_unmapped_disassembly.getFunctions() if f.function_name]) == 64
+        assert njrat_unmapped_disassembly.language == {".net": 1.0}
 
     def testMacOsParsingWithKomplex(self):
         disasm = Disassembler(config, backend="intel")
@@ -244,11 +245,19 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
         self.assertEqual(symbol_provider.parseSymbols(lief_binary), {})
 
-    def test_go_pclntab_offset_returns_numeric_zero(self):
+    def test_go_pclntab_header_returns_numeric_zero_and_validated_metadata(self):
         provider = GoSymbolProvider(None)
-        pclntab = b"\x00\xff\xff\xff\x00\x00\x01\x04"
+        pclntab = b"\xf1\xff\xff\xff\x00\x00\x01\x04"
 
         self.assertEqual(provider.getPcLntabOffset(pclntab), 0)
+        self.assertEqual(provider.getPcLntabInfo(pclntab), {"offset": 0, "version": "1.20", "bitness": 32})
+
+    def test_go_pclntab_header_rejects_invalid_pc_quantum(self):
+        provider = GoSymbolProvider(None)
+        pclntab = b"\xf1\xff\xff\xff\x00\x00\x03\x04"
+
+        self.assertIsNone(provider.getPcLntabOffset(pclntab))
+        self.assertIsNone(provider.getPcLntabInfo(pclntab))
 
     def test_cil_disassembler_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"MZ")
@@ -258,6 +267,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             result = CilDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
 
         self.assertFalse(result.analysis_timeout)
+        self.assertEqual(result.language, {".net": 1.0})
 
     def test_cil_jmp_records_edge_without_aborting_function_analysis(self):
         class FakeInstruction:

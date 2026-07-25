@@ -29,6 +29,7 @@ class DisassemblyResult:
         self.instructions = {}
         self.ins2fn = {}
         self.language = {}
+        self.language_guess = None
         self.data_refs_from = {}
         self.data_refs_to = {}
         self.code_refs_from = {}

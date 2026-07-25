@@ -490,6 +490,7 @@ class RecursiveDisassembler:
             self.disassembly.language = lang_analyzer.rescore(
                 self.disassembly.language, len(self.disassembly.functions)
             )
+            self.disassembly.language_guess = lang_analyzer.getGuess()
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
         if cbAnalysisTimeout and cbAnalysisTimeout():
             self.disassembly.analysis_timeout = True

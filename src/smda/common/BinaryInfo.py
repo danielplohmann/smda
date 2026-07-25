@@ -18,7 +18,7 @@ class BinaryInfo:
     Two label views (do not conflate them):
 
     1. **xmetadata** (``SmdaReport.xmetadata``) — static format tables only:
-       ``exported_functions``, ``imported_functions``, and ``symbols`` from the
+       ``exported_functions``, ``exported_symbols``, ``imported_functions``, and ``symbols`` from the
        PE/ELF/Mach-O providers. Addresses follow the conventions below. This is
        the dump of import/export/symbol tables, not the final CFG labels.
 
@@ -28,14 +28,15 @@ class BinaryInfo:
        have a non-empty ``function_name`` that does not appear in xmetadata
        (e.g. Go/Rust), and xmetadata may list symbols that never became FEPs.
 
-    xmetadata address conventions (via getExportedFunctions/getImportedFunctions/getSymbols):
+    xmetadata address conventions (via getExportedFunctions/getExportedSymbols/getImportedFunctions/getSymbols):
     - PE: active ``base_addr`` (dump VA); falls back to LIEF imagebase when unset.
     - ELF: absolute virtual addresses from LIEF (relocation import slots included).
     - Mach-O: LIEF addresses adjusted to the active mapping via slice/base_addr offset.
 
-    ``exported_functions`` holds the export table; ``symbols`` merges exports with
-    symtab/COFF/defined function symbols. Overlap between the two dicts is expected
-    when an export also appears in the symbol table.
+    ``exported_functions`` holds function exports for candidate recovery.
+    ``exported_symbols`` holds every defined dynamic export, including data symbols.
+    ``symbols`` merges exports with symtab/COFF/defined function symbols. Overlap
+    between the dictionaries is expected when an export also appears in a symbol table.
     """
 
     architecture = ""
@@ -56,6 +57,7 @@ class BinaryInfo:
     md5 = ""
     version = ""
     exported_functions = None
+    exported_symbols = None
     imported_functions = None
     symbols = None
     oep = None
@@ -136,6 +138,19 @@ class BinaryInfo:
             elif lief_type in ("ELF", "MACH_O"):
                 self.exported_functions = self._symbol_provider.parseExports(lief_result)
         return self.exported_functions
+
+    def getExportedSymbols(self):
+        if self.exported_symbols is None:
+            lief_result = self.getLiefBinary()
+            lief_type = self._getLiefType()
+            if lief_type == "ELF":
+                self.exported_symbols = self._symbol_provider.parseExportedSymbols(lief_result)
+            else:
+                # PE and Mach-O providers currently expose function exports only;
+                # retain that established contract while ELF additionally records
+                # its dynamic data exports.
+                self.exported_symbols = dict(self.getExportedFunctions() or {})
+        return self.exported_symbols
 
     def getImportedFunctions(self):
         if self.imported_functions is None:
