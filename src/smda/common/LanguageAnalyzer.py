@@ -61,6 +61,9 @@ class LanguageAnalyzer:
 
     def getVisualBasicScore(self):
         """Score VB6 using its runtime import, with a weak string-only fallback."""
+        # No format gate here on purpose: a memory dump of a VB6 process often starts
+        # below the MZ header, so validPEHeader() is False for exactly the inputs this
+        # score matters for. Non-PE inputs simply expose no imported libraries.
         try:
             lief_binary = self.disassembly.binary_info.getLiefBinary()
         except Exception as exc:
@@ -125,6 +128,8 @@ class LanguageAnalyzer:
             delphi_score = max(delphi_score, 0.35)
         # A validated VMT is structural compiler evidence. Strings and a PE
         # timestamp are only hints and must not enable Delphi-only recovery.
+        # The scan is memoized and shared with Delphi candidate recovery, so a real
+        # Delphi image pays for it once either way.
         if b"TObject" in self.disassembly.binary_info.binary:
             delphi_objects = self.getDelphiObjects()
             if len(delphi_objects) >= 5:
@@ -155,8 +160,17 @@ class LanguageAnalyzer:
     def checkRust(self):
         return self.getRustScore() > 0.5
 
+    # Distinct validated C++ symbols needed for strong evidence. The scan stops here:
+    # the score saturates, and the symbol lists below overlap heavily, so counting the
+    # rest would only re-demangle names that cannot change the outcome.
+    CPP_SYMBOL_EVIDENCE_THRESHOLD = 3
+
     def getCppSymbolScore(self):
-        """Return C++ evidence from validated Itanium or MSVC decorated symbols."""
+        """Return C++ evidence from validated Itanium or MSVC decorated symbols.
+
+        The returned count is capped at ``CPP_SYMBOL_EVIDENCE_THRESHOLD``; it reports
+        how much evidence was needed, not how many C++ symbols the binary holds.
+        """
         try:
             lief_binary = self.disassembly.binary_info.getLiefBinary()
         except Exception as exc:
@@ -195,9 +209,11 @@ class LanguageAnalyzer:
                     and (is_itanium_cpp_symbol(symbol_name) or is_msvc_cpp_symbol(symbol_name))
                 ):
                     cpp_symbol_names.add(symbol_name)
+                    if len(cpp_symbol_names) >= self.CPP_SYMBOL_EVIDENCE_THRESHOLD:
+                        return 0.8, len(cpp_symbol_names)
 
         cpp_symbol_count = len(cpp_symbol_names)
-        if cpp_symbol_count >= 3:
+        if cpp_symbol_count >= self.CPP_SYMBOL_EVIDENCE_THRESHOLD:
             return 0.8, cpp_symbol_count
         if cpp_symbol_count:
             return 0.4, cpp_symbol_count

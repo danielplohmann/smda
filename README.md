@@ -68,8 +68,13 @@ For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-
 The code requires Python 3.11+.
 `SmdaReport.metadata.language` is always a score map (`language name -> float`). Internal guesses and evidence
 counters are not serialized; loading an older report normalizes its legacy string/private-key form to this contract.
-For ELF files, `xmetadata.exported_symbols` contains all defined dynamic exports (functions and data), while the
-legacy `exported_functions` and `symbols` maps remain function-only.
+To pick a single language from the map, take the highest score, except that `go` and `rust` win outright when their
+score exceeds 0.5 — a build ID, pclntab header, or demangled Rust symbol is conclusive, while the other scores are
+graded evidence.
+For ELF files, `xmetadata.exported_symbols` contains all defined dynamic exports (functions and data) keyed by
+virtual address, while the legacy `exported_functions` and `symbols` maps remain function-only. C++ names are
+demangled in these label maps; API references (`SmdaFunction.apirefs`) keep the undecorated import name so they
+stay comparable across PE, ELF, and Mach-O.
 
 Further explanation on the innerworkings follow in separate publications but will be referenced here.
 

@@ -8,6 +8,7 @@ from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .ElfSymbolProvider import is_defined_elf_symbol
 from .import_parsers import resolve_pe_base_addr
 from .rust_demangler import demangle
 from .rust_demangler.utils import remove_bad_spaces
@@ -226,7 +227,7 @@ class RustSymbolProvider(AbstractLabelProvider):
         # working example: 3298d203c2acb68c474e5fdad8379181890b4403d6491c523c13730129be3f75
         function_symbols = {}
         for symbol in symbols:
-            if symbol is not None and symbol.is_function and symbol.value != 0:
+            if symbol is not None and symbol.is_function and symbol.value != 0 and is_defined_elf_symbol(symbol):
                 # We want the raw name to check for Rust mangling
                 try:
                     raw_name = symbol.name

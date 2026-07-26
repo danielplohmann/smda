@@ -100,6 +100,36 @@ class TestLanguageAnalyzer(unittest.TestCase):
         self.assertEqual(result["c++"], 0.8)
         self.assertEqual(analyzer.getGuess(), "c++")
 
+    def test_identify_recognizes_msvc_decorated_data_symbols(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32, functions={}))
+        analyzer.disassembly.binary_info.getLiefBinary = lambda: SimpleNamespace(
+            exported_functions=[],
+            exported_symbols=[],
+            symtab_symbols=[],
+            dynamic_symbols=[],
+            symbols=[
+                SimpleNamespace(name="?value@Cls@@2HA"),
+                SimpleNamespace(name="?counter@ns@@3HA"),
+                SimpleNamespace(name="?table@@3PAHA"),
+            ],
+        )
+
+        self.assertEqual(analyzer.identify()["c++"], 0.8)
+
+    def test_cpp_symbol_scan_stops_once_the_score_saturates(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32, functions={}))
+        names = [f"_Z{len(f'foo{index}')}foo{index}v" for index in range(50)]
+        analyzer.disassembly.binary_info.getLiefBinary = lambda: SimpleNamespace(
+            exported_functions=[],
+            exported_symbols=[],
+            symtab_symbols=[],
+            dynamic_symbols=[SimpleNamespace(name=name) for name in names],
+        )
+
+        score, count = analyzer.getCppSymbolScore()
+
+        self.assertEqual((score, count), (0.8, LanguageAnalyzer.CPP_SYMBOL_EVIDENCE_THRESHOLD))
+
     def test_identify_scores_single_validated_cpp_symbol_as_weak_evidence(self):
         analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32, functions={}))
         analyzer.disassembly.binary_info.getLiefBinary = lambda: SimpleNamespace(

@@ -24,8 +24,10 @@ _PCLNTAB_VERSIONS = {
     0xFFFFFFF0: "1.18",
     0xFFFFFFF1: "1.20",
 }
+# The magic is written in the target's byte order, so accept both spellings: Go also
+# targets big-endian platforms (s390x, ppc64, mips).
 _PCLNTAB_HEADER_RE = re.compile(
-    b"(?:\xfb\xff\xff\xff|\xfa\xff\xff\xff|\xf0\xff\xff\xff|\xf1\xff\xff\xff)\x00\x00[\x01\x02\x04][\x04\x08]"
+    b"(?:(?:\xfb|\xfa|\xf0|\xf1)\xff\xff\xff|\xff\xff\xff(?:\xfb|\xfa|\xf0|\xf1))\x00\x00[\x01\x02\x04][\x04\x08]"
 )
 
 
@@ -100,8 +102,9 @@ class GoSymbolProvider(AbstractLabelProvider):
         if pclntab_offset is None or pclntab_offset < 0 or pclntab_offset + 8 > len(binary_bytes):
             return None
         header = binary_bytes[pclntab_offset : pclntab_offset + 8]
-        marker = struct.unpack("<I", header[:4])[0]
-        if marker not in _PCLNTAB_VERSIONS:
+        markers = (struct.unpack("<I", header[:4])[0], struct.unpack(">I", header[:4])[0])
+        marker = next((value for value in markers if value in _PCLNTAB_VERSIONS), None)
+        if marker is None:
             return None
         if header[4:6] != b"\x00\x00" or header[6] not in (1, 2, 4) or header[7] not in (4, 8):
             return None

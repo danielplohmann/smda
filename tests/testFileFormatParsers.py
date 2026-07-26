@@ -252,6 +252,13 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         self.assertEqual(provider.getPcLntabOffset(pclntab), 0)
         self.assertEqual(provider.getPcLntabInfo(pclntab), {"offset": 0, "version": "1.20", "bitness": 32})
 
+    def test_go_pclntab_header_accepts_big_endian_targets(self):
+        provider = GoSymbolProvider(None)
+        pclntab = b"\xff\xff\xff\xf1\x00\x00\x01\x08"
+
+        self.assertEqual(provider.getPcLntabOffset(pclntab), 0)
+        self.assertEqual(provider.getPcLntabInfo(pclntab), {"offset": 0, "version": "1.20", "bitness": 64})
+
     def test_go_pclntab_header_rejects_invalid_pc_quantum(self):
         provider = GoSymbolProvider(None)
         pclntab = b"\xf1\xff\xff\xff\x00\x00\x03\x04"
