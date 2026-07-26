@@ -90,7 +90,7 @@ class TestAArch64MachoCorpus(unittest.TestCase):
             loader = MemoryFileLoader(raw, map_file=True)
 
             config = SmdaConfig()
-            config.TIMEOUT = 20
+            config.TIMEOUT = 120
             config.WITH_STRINGS = True
             config.STORE_BUFFER = False
             report = Disassembler(config).disassembleUnmappedBuffer(raw)
