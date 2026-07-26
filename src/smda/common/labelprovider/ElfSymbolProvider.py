@@ -14,6 +14,27 @@ LOGGER = logging.getLogger(__name__)
 # Backward-compatible alias for tests and callers that imported the old helper name.
 parse_relocation_imports = parse_elf_relocation_imports
 
+# Section indexes at or above SHN_LORESERVE do not denote a real section: SHN_ABS holds
+# absolute values and SHN_COMMON holds tentative definitions that the linker has not
+# placed yet. Neither is a defined function or a laid-out data export.
+SHN_UNDEF = 0
+SHN_LORESERVE = 0xFF00
+_TLS_SYMBOL_TYPE = getattr(lief.ELF.Symbol.TYPE, "TLS", None)
+
+
+def is_defined_elf_symbol(symbol):
+    """Return whether an ELF symbol is defined rather than a PLT-backed import.
+
+    LIEF can report a nonzero PLT address for an undefined dynamic symbol, so the
+    section index is the only reliable discriminator.
+    """
+    shndx = getattr(symbol, "shndx", None)
+    if shndx is not None:
+        return SHN_UNDEF < shndx < SHN_LORESERVE
+    # Keep compatibility with older LIEF objects and the lightweight test
+    # doubles that do not expose shndx.
+    return bool(getattr(symbol, "value", 0)) and not getattr(symbol, "imported", False)
+
 
 class ElfSymbolProvider(AbstractLabelProvider):
     """Minimal resolver for ELF symbols"""
@@ -62,15 +83,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
                 function_symbols[function.address] = function_name
         return function_symbols
 
-    @staticmethod
-    def _isDefinedSymbol(symbol):
-        """Return whether an ELF symbol is defined rather than a PLT-backed import."""
-        shndx = getattr(symbol, "shndx", None)
-        if shndx is not None:
-            return shndx != 0  # SHN_UNDEF
-        # Keep compatibility with older LIEF objects and the lightweight test
-        # doubles that do not expose shndx.
-        return bool(getattr(symbol, "value", 0)) and not getattr(symbol, "imported", False)
+    _isDefinedSymbol = staticmethod(is_defined_elf_symbol)
 
     @staticmethod
     def _getSymbolName(symbol):
@@ -93,17 +106,35 @@ class ElfSymbolProvider(AbstractLabelProvider):
             return demangled_name
         return demangle_itanium_symbol(raw_name)
 
+    @staticmethod
+    def _isThreadLocalSymbol(symbol):
+        """Return whether the symbol's value is a TLS-block offset instead of an address."""
+        symbol_type = getattr(symbol, "type", None)
+        if _TLS_SYMBOL_TYPE is None or symbol_type is None:
+            return False
+        try:
+            return symbol_type == _TLS_SYMBOL_TYPE
+        except TypeError:
+            # LIEF's enum comparison rejects foreign types outright.
+            return False
+
     def parseExportedSymbols(self, binary):
-        """Return every named, defined dynamic ELF symbol, including data exports."""
+        """Return every named, defined dynamic ELF symbol, including data exports.
+
+        Keys are virtual addresses, so thread-local symbols are excluded: their value
+        is an offset inside the TLS block, not an address in the mapped image. Aliases
+        that share one address (for example the C1/C2 constructor pair) keep the first
+        name the dynamic symbol table spells, so repeated runs agree.
+        """
         if not isinstance(binary, lief.ELF.Binary):
             return {}
         exported_symbols = {}
         for symbol in binary.dynamic_symbols:
-            if symbol is None or not self._isDefinedSymbol(symbol):
+            if symbol is None or not self._isDefinedSymbol(symbol) or self._isThreadLocalSymbol(symbol):
                 continue
             symbol_name = self._formatSymbolName(symbol)
             if symbol_name:
-                exported_symbols[symbol.value] = symbol_name
+                exported_symbols.setdefault(symbol.value, symbol_name)
         return exported_symbols
 
     def parseSymbols(self, symbols):
@@ -116,7 +147,15 @@ class ElfSymbolProvider(AbstractLabelProvider):
         return function_symbols
 
     def parseImports(self, lief_binary):
-        return parse_elf_relocation_imports(lief_binary)
+        """Return relocation-backed imports with demangled, human-readable names.
+
+        Only this label view is demangled. ElfApiResolver consumes the undecorated
+        map so API references keep matching PE and Mach-O import names.
+        """
+        return {
+            address: (lib, demangle_itanium_symbol(name))
+            for address, (lib, name) in parse_elf_relocation_imports(lief_binary).items()
+        }
 
     def collectSymbols(self, lief_binary):
         if not isinstance(lief_binary, lief.ELF.Binary):

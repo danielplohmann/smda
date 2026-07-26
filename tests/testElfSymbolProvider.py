@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+import lief
+
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
@@ -15,13 +17,23 @@ class _MockExport:
 
 
 class _MockSymbol:
-    def __init__(self, name, value=0, is_function=True, imported=False, shndx=None, demangled_name=None):
+    def __init__(
+        self,
+        name,
+        value=0,
+        is_function=True,
+        imported=False,
+        shndx=None,
+        demangled_name=None,
+        symbol_type=None,
+    ):
         self.name = name
         self.demangled_name = demangled_name
         self.value = value
         self.is_function = is_function
         self.imported = imported
         self.shndx = shndx
+        self.type = symbol_type
         self.has_version = False
 
 
@@ -242,6 +254,58 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
             self.assertEqual(provider.parseSymbols(elf.symtab_symbols), {0x3600: "foo()"})
             self.assertEqual(provider.parseImports(elf), {})
 
+    def test_thread_local_and_reserved_section_symbols_are_not_exported_addresses(self):
+        # A TLS symbol's value is an offset inside the TLS block, and SHN_COMMON /
+        # SHN_ABS entries are not laid out in the image - none of them is an address.
+        tls_symbol = _MockSymbol("tls_var", value=0x8, is_function=False, shndx=7, symbol_type=lief.ELF.Symbol.TYPE.TLS)
+        common_symbol = _MockSymbol("tentative", value=0x10, is_function=False, shndx=0xFFF2)
+        absolute_symbol = _MockSymbol("abs_value", value=0x20, is_function=False, shndx=0xFFF1)
+        data_export = _MockSymbol("real_data", value=0x3700, is_function=False, shndx=7)
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[tls_symbol, common_symbol, absolute_symbol, data_export],
+            relocations=[],
+            entrypoint=0,
+        )
+        provider = ElfSymbolProvider(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            self.assertEqual(provider.parseExportedSymbols(elf), {0x3700: "real_data"})
+
+    def test_exported_symbol_aliases_keep_the_first_dynamic_table_name(self):
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[
+                _MockSymbol("_ZN1AC1Ev", value=0x3800, shndx=7),
+                _MockSymbol("_ZN1AC2Ev", value=0x3800, shndx=7),
+            ],
+            relocations=[],
+            entrypoint=0,
+        )
+        provider = ElfSymbolProvider(None)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            self.assertEqual(provider.parseExportedSymbols(elf), {0x3800: "A::A()"})
+
+    def test_api_resolution_keeps_undecorated_import_names(self):
+        imported = _MockSymbol("_Znwm", imported=True)
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[imported],
+            relocations=[_MockReloc(0x4000, imported)],
+            entrypoint=0,
+        )
+        provider = ElfSymbolProvider(None)
+        resolver = ElfApiResolver(None)
+        binary_info = _binary_info(elf)
+        with mock.patch("lief.ELF.Binary", _MockElfBinary):
+            resolver.update(binary_info)
+            # The human-readable label view demangles ...
+            self.assertEqual(provider.parseImports(elf), {0x4000: (None, "operator new(unsigned long)")})
+        # ... while API references stay comparable with PE and Mach-O import names.
+        self.assertEqual(resolver.getApi(0x4000), (None, "_Znwm"))
+
     def test_elf_exports_and_imports_use_itanium_demangling(self):
         imported = _MockSymbol("_Z3barv", imported=True)
         elf = _MockElfBinary(
@@ -256,11 +320,7 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
             mock.patch("lief.ELF.Binary", _MockElfBinary),
             mock.patch(
                 "smda.common.labelprovider.ElfSymbolProvider.demangle_itanium_symbol",
-                side_effect={"_Z3foov": "foo()"}.get,
-            ),
-            mock.patch(
-                "smda.common.labelprovider.import_parsers.demangle_itanium_symbol",
-                side_effect={"_Z3barv": "bar()"}.get,
+                side_effect={"_Z3foov": "foo()", "_Z3barv": "bar()"}.get,
             ),
         ):
             self.assertEqual(provider.parseExports(elf), {0x1000: "foo()"})

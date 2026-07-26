@@ -8,7 +8,9 @@ import pycxxfilt
 from .RustSymbolEvidence import is_rust_language_evidence
 
 _ITANIUM_PREFIXES = ("__Z", "_Z")
-_MSVC_CPP_DECORATED_NAME = re.compile(r"^\?[^@]+(?:@[^@]+)*@@.+Z$")
+_MSVC_CPP_DECORATED_FUNCTION = re.compile(r"^\?[^@]+(?:@[^@]+)*@@.+Z$")
+# Decorated data: the type code after "@@" is a digit, e.g. "?value@@3HA" (static int).
+_MSVC_CPP_DECORATED_DATA = re.compile(r"^\?[^@]+(?:@[^@]+)*@@[0-9].+$")
 
 
 @lru_cache(maxsize=4096)
@@ -35,8 +37,11 @@ def is_itanium_cpp_symbol(name):
 def is_msvc_cpp_symbol(name):
     """Recognize the documented C++ subset of MSVC decorated names.
 
-    Plain C calling-convention decorations (for example ``_name@8``) are
-    intentionally excluded because Microsoft documents those as C and
-    ``extern \"C\"`` forms too.
+    Covers both decorated functions and decorated data (class statics, globals in a
+    namespace), since a C++ binary may export only the latter. Plain C
+    calling-convention decorations (for example ``_name@8``) are intentionally
+    excluded because Microsoft documents those as C and ``extern \"C\"`` forms too.
     """
-    return bool(name and _MSVC_CPP_DECORATED_NAME.match(name))
+    if not name:
+        return False
+    return bool(_MSVC_CPP_DECORATED_FUNCTION.match(name) or _MSVC_CPP_DECORATED_DATA.match(name))
