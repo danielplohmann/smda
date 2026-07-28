@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "smda"
 description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "BSD 2-Clause"}
 authors = [
     {name = "Daniel Plohmann", email = "daniel.plohmann@mailbox.org"}
@@ -16,7 +16,6 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -30,6 +29,7 @@ dependencies = [
     "dncil",
     "dnfile",
     "lief>=0.16.0",
+    "pycxxfilt>=0.1.0",
 ]
 
 [project.urls]
@@ -99,8 +99,8 @@ directory = "coverage-html"
 # Same as Black.
 line-length = 120
 
-# Assume Python 3.10+
-target-version = "py310"
+# Assume Python 3.11+
+target-version = "py311"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
@@ -121,6 +121,7 @@ ignore = [
     "E501",  # Line too long (handled by formatter)
     "UP006",  # Keep existing typing aliases without broad modernization churn
     "UP007",  # Keep existing Optional/Union annotations without broad modernization churn
+    "UP017",  # Keep existing timezone spelling without broad modernization churn
     "UP035",  # Keep existing typing imports without broad modernization churn
     "UP045",  # Keep existing Optional annotations without broad modernization churn
 ]

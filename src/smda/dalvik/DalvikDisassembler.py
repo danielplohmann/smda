@@ -1526,7 +1526,9 @@ class DalvikDisassembler:
         self.disassembly.binary_info.bitness = 32  # Dalvik VM is always 32-bit
         self.disassembly.binary_info.version = ""
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
-        self.disassembly.language = "dalvik"
+        # A validated DEX header is conclusive format evidence. Keep the
+        # public report contract score-only, like native and CIL reports.
+        self.disassembly.language = {"dalvik": 1.0}
 
         raw_probe = binary_info.raw_data
         if not isinstance(raw_probe, (bytes, bytearray)):

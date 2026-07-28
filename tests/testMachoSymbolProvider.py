@@ -20,6 +20,25 @@ CORPUS_DIR = Path(__file__).resolve().parent / "aarch64_macho_corpus"
 MANIFEST_PATH = CORPUS_DIR / "manifest.json"
 
 
+class _MockMachoSymbol:
+    def __init__(self, name=None, value=0):
+        self._name = name
+        self.value = value
+
+    @property
+    def name(self):
+        if self._name is None:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return self._name
+
+
+class _MockMachoBinary:
+    def __init__(self, symbols):
+        self.symbols = symbols
+        self.exported_symbols = symbols
+        self.sections = []
+
+
 def _xor_fixture(data):
     return bytes(byte ^ (index % 256) for index, byte in enumerate(data))
 
@@ -57,14 +76,14 @@ class TestExportAddressNormalization(unittest.TestCase):
 
 
 class TestMachoDemangler(unittest.TestCase):
-    def test_demangle_cxx_via_host_tool_when_available(self):
+    def test_demangle_cxx_via_pycxxfilt(self):
         with mock.patch(
-            "smda.common.labelprovider.MachoDemangler._demangle_with_tools",
+            "smda.common.labelprovider.MachoDemangler.demangle_itanium_symbol",
             return_value="uid()",
-        ) as demangle_tools:
+        ) as demangle_itanium:
             demangle_macho_symbol.cache_clear()
             self.assertEqual(demangle_macho_symbol("__Z3uidv"), "uid()")
-            demangle_tools.assert_called_once()
+            demangle_itanium.assert_called_once_with("__Z3uidv")
 
     def test_unknown_symbol_is_left_unchanged(self):
         demangle_macho_symbol.cache_clear()
@@ -80,6 +99,16 @@ class TestMachoDemangler(unittest.TestCase):
 
 
 class TestMachoSymbolProviderBehavior(unittest.TestCase):
+    def test_malformed_symbol_name_does_not_drop_later_macho_symbols(self):
+        malformed = _MockMachoSymbol(value=0x1000)
+        valid = _MockMachoSymbol("__Z3foov", value=0x2000)
+        macho = _MockMachoBinary([malformed, valid])
+        provider = MachoSymbolProvider(None)
+
+        with mock.patch("lief.MachO.Binary", _MockMachoBinary):
+            self.assertEqual(provider.parseExports(macho), {0x2000: "foo()"})
+            self.assertEqual(provider.parseSymbols(macho), {0x2000: "foo()"})
+
     def test_collect_symbols_merges_exports_and_symtab(self):
         _, raw, loader = _load_fixture("objective-see/bluenoroff")
         binary_info = _binary_info(raw, loader)

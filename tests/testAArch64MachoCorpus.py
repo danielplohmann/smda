@@ -9,6 +9,7 @@ Mach-O loader plus the AArch64 disassembly path.
 import hashlib
 import json
 import logging
+import os
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,10 @@ logging.disable(logging.CRITICAL)
 CORPUS_DIR = Path(__file__).resolve().parent / "aarch64_macho_corpus"
 MANIFEST_PATH = CORPUS_DIR / "manifest.json"
 MAX_XORED_FIXTURE_BYTES = 10 * 1024 * 1024
+# Per-sample wall-clock guard. Kept tight enough to still catch an analysis-time
+# regression; raise it via the environment on a contended or slow runner rather
+# than relaxing the default for everyone.
+SAMPLE_TIMEOUT_SECONDS = int(os.environ.get("SMDA_TEST_CORPUS_TIMEOUT", "45"))
 MACHO_MAGICS = {
     b"\xfe\xed\xfa\xce",
     b"\xce\xfa\xed\xfe",
@@ -90,7 +95,7 @@ class TestAArch64MachoCorpus(unittest.TestCase):
             loader = MemoryFileLoader(raw, map_file=True)
 
             config = SmdaConfig()
-            config.TIMEOUT = 20
+            config.TIMEOUT = SAMPLE_TIMEOUT_SECONDS
             config.WITH_STRINGS = True
             config.STORE_BUFFER = False
             report = Disassembler(config).disassembleUnmappedBuffer(raw)

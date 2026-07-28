@@ -56,9 +56,23 @@ class MachoSymbolProvider(AbstractLabelProvider):
             architecture=getattr(binary_info, "architecture", "") if binary_info else "",
         )
 
-    def _format_symbol_name(self, symbol):
-        raw_name = symbol.name
-        demangled = getattr(symbol, "demangled_name", None)
+    @staticmethod
+    def _get_symbol_name(symbol):
+        try:
+            raw_name = symbol.name
+        except (AttributeError, UnicodeDecodeError):
+            return ""
+        return raw_name if isinstance(raw_name, str) else ""
+
+    @classmethod
+    def _format_symbol_name(cls, symbol):
+        raw_name = cls._get_symbol_name(symbol)
+        if not raw_name:
+            return ""
+        try:
+            demangled = getattr(symbol, "demangled_name", None)
+        except (AttributeError, UnicodeDecodeError):
+            demangled = None
         if demangled and demangled != raw_name:
             return demangled
         return demangle_macho_symbol(raw_name)
@@ -114,9 +128,10 @@ class MachoSymbolProvider(AbstractLabelProvider):
         exported = {}
         try:
             for symbol in getattr(lief_binary, "exported_symbols", []):
-                if symbol.value != 0 and symbol.name:
+                symbol_name = self._get_symbol_name(symbol)
+                if symbol.value != 0 and symbol_name:
                     adjusted_val = symbol.value + adjustment
-                    exported[adjusted_val] = demangle_macho_symbol(symbol.name)
+                    exported[adjusted_val] = demangle_macho_symbol(symbol_name)
         except Exception as e:
             LOGGER.debug("Failed to parse Mach-O exports: %s", e)
         return exported
@@ -129,9 +144,10 @@ class MachoSymbolProvider(AbstractLabelProvider):
         symbols = {}
         try:
             for symbol in getattr(lief_binary, "symbols", []):
-                if symbol.value != 0 and symbol.name:
+                symbol_name = self._format_symbol_name(symbol)
+                if symbol.value != 0 and symbol_name:
                     adjusted_val = symbol.value + adjustment
-                    symbols[adjusted_val] = self._format_symbol_name(symbol)
+                    symbols[adjusted_val] = symbol_name
         except Exception as e:
             LOGGER.debug("Failed to parse Mach-O symbols: %s", e)
         return symbols

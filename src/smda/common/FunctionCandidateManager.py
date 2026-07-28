@@ -60,6 +60,7 @@ class FunctionCandidateManager:
         self._cb_analysis_timeout = cbAnalysisTimeout
         self.lang_analyzer = LanguageAnalyzer(disassembly)
         self.disassembly.language = self.lang_analyzer.identify()
+        self.disassembly.language_guess = self.lang_analyzer.getGuess()
         self.bitness = disassembly.binary_info.bitness
         self.locateCandidates()
         self.disassembly.identified_alignment = self.identified_alignment

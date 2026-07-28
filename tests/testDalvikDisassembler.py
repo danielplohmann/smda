@@ -518,6 +518,7 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         report = generic_disasm.disassembleBuffer(self.dex_binary, base_addr=0)
         self.assertEqual(report.architecture, "dalvik")
         self.assertEqual(report.bitness, 32)
+        self.assertEqual(report.language, {"dalvik": 1.0})
         self.assertGreater(report.num_functions, 2000)
 
     def testDisassembleBufferExplicitIntelBackendPreservedForDexBytes(self):

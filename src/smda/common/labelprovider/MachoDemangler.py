@@ -5,6 +5,8 @@ import shutil
 import subprocess
 from functools import lru_cache
 
+from .ItaniumDemangler import demangle_itanium_symbol
+
 LOGGER = logging.getLogger(__name__)
 
 _CXX_PREFIXES = ("__Z", "_Z")
@@ -15,13 +17,13 @@ _SWIFT_PREFIXES = ("_$s", "$s", "_$S", "$S")
 def demangle_macho_symbol(name):
     """Best-effort demangling for Mach-O symbol names (C++ Itanium, Swift).
 
-    Uses host tools when available (``c++filt``, ``llvm-cxxfilt``, ``swift demangle``)
-    and returns the original name on failure so analysis stays portable.
+    Uses pycxxfilt's vendored LLVM demangler for C++ and the optional host
+    Swift demangler for Swift symbols. It returns the original name on failure.
     """
     if not name:
         return name
     if name.startswith(_CXX_PREFIXES):
-        demangled = _finalize_demangled(name, _demangle_with_tools(name, ("llvm-cxxfilt", "c++filt"), []))
+        demangled = _finalize_demangled(name, demangle_itanium_symbol(name))
         if demangled:
             return demangled
     if name.startswith(_SWIFT_PREFIXES):

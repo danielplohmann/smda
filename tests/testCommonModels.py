@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import struct
 import unittest
@@ -104,13 +105,39 @@ class TestCommonModels(unittest.TestCase):
         )
 
         self.assertIsInstance(report.language, dict)
-        self.assertIn("_guess", report.language)
+        self.assertEqual(
+            set(report.language),
+            {"c/asm", "delphi", ".net", "visualbasic", "go", "rust", "c++"},
+        )
+        self.assertTrue(all(isinstance(score, float) for score in report.language.values()))
 
         report_dict = report.toDict()
         self.assertEqual(report_dict["metadata"]["language"], report.language)
 
         restored = SmdaReport.fromDict(report_dict)
         self.assertEqual(restored.language, report.language)
+
+        legacy_native = copy.deepcopy(report_dict)
+        legacy_native["metadata"]["language"] = {
+            "_guess": "delphi",
+            "_count_delphi_objects": 5,
+            "_count_thiscalls": 2,
+            "c/asm": 0.1,
+            "delphi": 0.2,
+            "delphi_kb_file": 1.0,
+        }
+        restored_native = SmdaReport.fromDict(legacy_native)
+        self.assertEqual(restored_native.language, {"c/asm": 0.1, "delphi": 1.0})
+
+        legacy_cil = copy.deepcopy(report_dict)
+        legacy_cil["metadata"]["language"] = "cil"
+        restored_cil = SmdaReport.fromDict(legacy_cil)
+        self.assertEqual(restored_cil.language, {".net": 1.0})
+
+        legacy_dalvik = copy.deepcopy(report_dict)
+        legacy_dalvik["metadata"]["language"] = "dalvik"
+        restored_dalvik = SmdaReport.fromDict(legacy_dalvik)
+        self.assertEqual(restored_dalvik.language, {"dalvik": 1.0})
 
     def test_imported_intel_report_recalculates_pic_hash_before_escape_version(self):
         report = _disassemble_intel_bytes(b"\xc3")  # ret

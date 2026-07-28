@@ -124,6 +124,8 @@ class TestDelphiPythiaProvider(unittest.TestCase):
         self.assertEqual(symbols[0x401390], "Init")
         self.assertEqual(symbols[0x4013B0], "DoIt")
         self.assertEqual(symbols[0x401360], "")
+        self.assertEqual(analyzer.getDelphiScore(), 0.9)
+        self.assertTrue(analyzer.checkDelphi())
 
     def test_provider_registered_as_engine_symbol_provider(self):
         from smda.common.RecursiveDisassembler import RecursiveDisassembler

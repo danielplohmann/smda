@@ -18,6 +18,17 @@ LOGGER = logging.getLogger(__name__)
 # truncated/corrupt name table cannot pull the entire (potentially multi-MB) binary tail into
 # one symbol string.
 _MAX_SYMBOL_NAME_LEN = 4096
+_PCLNTAB_VERSIONS = {
+    0xFFFFFFFB: "1.12",
+    0xFFFFFFFA: "1.16",
+    0xFFFFFFF0: "1.18",
+    0xFFFFFFF1: "1.20",
+}
+# The magic is written in the target's byte order, so accept both spellings: Go also
+# targets big-endian platforms (s390x, ppc64, mips).
+_PCLNTAB_HEADER_RE = re.compile(
+    b"(?:(?:\xfb|\xfa|\xf0|\xf1)\xff\xff\xff|\xff\xff\xff(?:\xfb|\xfa|\xf0|\xf1))\x00\x00[\x01\x02\x04][\x04\x08]"
+)
 
 
 class GoSymbolProvider(AbstractLabelProvider):
@@ -71,13 +82,33 @@ class GoSymbolProvider(AbstractLabelProvider):
             reraise_non_operational_exception(exc)
         if pclntab_offset is None:
             # scan for offset of structure
-            pclntab_regex = re.compile(b".\xff\xff\xff\x00\x00\x01(\x04|\x08)")
-            hits = [match.start() for match in re.finditer(pclntab_regex, binary_bytes)]
+            hits = [match.start() for match in _PCLNTAB_HEADER_RE.finditer(binary_bytes)]
             if len(hits) == 1:
                 pclntab_offset = hits[0]
         if binary_info is not None:
             binary_info._go_pclntab_offset = pclntab_offset
         return pclntab_offset
+
+    def getPcLntabInfo(self, binary):
+        """Return validated Go pclntab header information, or ``None``.
+
+        Go's own ``debug/gosym`` parser requires the version magic, two zero
+        padding bytes, a valid PC quantum, and a 4- or 8-byte pointer size.
+        Apply those same inexpensive structural checks before treating a table
+        as language evidence. A bare magic-byte hit is not sufficient.
+        """
+        binary_bytes = binary.binary if hasattr(binary, "binary") else binary
+        pclntab_offset = self.getPcLntabOffset(binary)
+        if pclntab_offset is None or pclntab_offset < 0 or pclntab_offset + 8 > len(binary_bytes):
+            return None
+        header = binary_bytes[pclntab_offset : pclntab_offset + 8]
+        markers = (struct.unpack("<I", header[:4])[0], struct.unpack(">I", header[:4])[0])
+        marker = next((value for value in markers if value in _PCLNTAB_VERSIONS), None)
+        if marker is None:
+            return None
+        if header[4:6] != b"\x00\x00" or header[6] not in (1, 2, 4) or header[7] not in (4, 8):
+            return None
+        return {"offset": pclntab_offset, "version": _PCLNTAB_VERSIONS[marker], "bitness": header[7] * 8}
 
     def update(self, binary_info):
         self._func_symbols = {}

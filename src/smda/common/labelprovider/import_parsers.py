@@ -57,7 +57,13 @@ def parse_pe_delay_imports(lief_binary, base_addr=None):
 
 
 def parse_elf_relocation_imports(lief_binary):
-    """Build import map keyed by relocation slot address: addr -> (lib, name)."""
+    """Build import map keyed by relocation slot address: addr -> (lib, name).
+
+    Names stay exactly as the dynamic symbol table spells them. API resolution is
+    keyed by these names, so they must remain comparable with PE and Mach-O imports,
+    which are equally undecorated. Demangling happens one level up, where the result
+    is only used as a human-readable label.
+    """
     if not isinstance(lief_binary, lief.ELF.Binary):
         return {}
     import_symbols = {}
@@ -69,6 +75,12 @@ def parse_elf_relocation_imports(lief_binary):
             continue
         if not symbol.imported or not symbol.is_function:
             continue
+        try:
+            symbol_name = symbol.name
+        except (AttributeError, UnicodeDecodeError):
+            continue
+        if not symbol_name:
+            continue
 
         lib = None
         symbol_version = getattr(symbol, "symbol_version", None)
@@ -76,7 +88,7 @@ def parse_elf_relocation_imports(lief_binary):
             aux = symbol_version.symbol_version_auxiliary
             lib = aux.name if aux else None
 
-        import_symbols[relocation.address] = (lib, symbol.name)
+        import_symbols[relocation.address] = (lib, symbol_name)
     return import_symbols
 
 
