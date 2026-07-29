@@ -216,7 +216,7 @@ if __name__ == "__main__":
         print("*" * 80)
         print("smda", data["smda"])
         fixed_smda = {}
-        for key, values in data["smda"].items():
+        for key, values in ((data or {}).get("smda") or {}).items():
             fixed_smda[key] = values
             for value in values:
                 if value not in fixed_smda:

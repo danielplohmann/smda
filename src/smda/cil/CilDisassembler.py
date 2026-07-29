@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 if TYPE_CHECKING:
     from dnfile import dnPE
 import dnfile
+import dnfile.mdtable
 from dncil.cil.body import CilMethodBody
 from dncil.cil.body.reader import CilMethodBodyReaderBase
 from dncil.cil.error import MethodBodyFormatError

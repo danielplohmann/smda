@@ -30,8 +30,9 @@ class FileLoader:
 
     def _loadRawFileContent(self):
         binary = b""
-        if os.path.isfile(self._file_path):
-            with open(self._file_path, "rb") as inf:
+        file_path = self._file_path
+        if file_path and os.path.isfile(file_path):
+            with open(file_path, "rb") as inf:
                 binary = inf.read()
         return binary
 

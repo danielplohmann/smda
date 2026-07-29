@@ -70,15 +70,16 @@ class TailcallAnalyzer:
     def __getFunctionIntervals(self, function_state):
         intervals = []
         instructions = sorted(function_state.instructions, key=itemgetter(0))
-        first_instruction = instructions[0] if instructions else None
+        if not instructions:
+            return intervals
+        first_instruction = instructions[0]
         last_instruction = first_instruction
         for instruction in instructions:
             if instruction[0] > last_instruction[0] + last_instruction[1]:
                 intervals.append((first_instruction[0], last_instruction[0]))
                 first_instruction = instruction
             last_instruction = instruction
-        if last_instruction:
-            intervals.append((first_instruction[0], last_instruction[0]))
+        intervals.append((first_instruction[0], last_instruction[0]))
         return intervals
 
     def __getFunctionByStartAddr(self, start_addr):

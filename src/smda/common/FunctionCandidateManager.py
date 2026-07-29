@@ -33,7 +33,7 @@ class FunctionCandidateManager:
         self.bitness = None
         self._code_areas = []
         self.candidates = {}
-        self.candidate_queue = []
+        self.candidate_queue = PriorityQueue()
         self.cached_candidates = None
         self._candidate_offsets = set()
         self.candidate_index = 0
@@ -44,7 +44,7 @@ class FunctionCandidateManager:
         self.delphi_kb_objects = None
         self.language_candidates_only = False
         # gap filling
-        self.function_gaps = None
+        self.function_gaps = []
         self.max_function_addr = 0
         self.gap_pointer = None
         self.previously_analyzed_gap = 0
@@ -74,7 +74,7 @@ class FunctionCandidateManager:
         return True
 
     def getBitMask(self):
-        if self.bitness == 64:
+        if self.bitness is not None and self.bitness == 64:
             return 0xFFFFFFFFFFFFFFFF
         return 0xFFFFFFFF
 
@@ -160,6 +160,8 @@ class FunctionCandidateManager:
         return self._candidate_offsets
 
     def updateFunctionGaps(self):
+        if self.disassembly is None:
+            return
         gaps = []
         prev_ins = 0
         min_code = min(self.disassembly.code_map) if self.disassembly.code_map else self.getBitMask()
@@ -209,7 +211,9 @@ class FunctionCandidateManager:
 
     def getNextGap(self, dont_skip=False):
         next_gap = self.getBitMask()
-        gap_index = bisect.bisect_right(self.function_gaps, self.gap_pointer, key=lambda gap: gap[0])
+        gap_index = bisect.bisect_right(
+            self.function_gaps, self.gap_pointer if self.gap_pointer is not None else 0, key=lambda gap: gap[0]
+        )
         if gap_index < len(self.function_gaps):
             next_gap = self.function_gaps[gap_index][0]
         LOGGER.debug(
@@ -219,7 +223,12 @@ class FunctionCandidateManager:
             next_gap,
         )
         # we potentially just disassembled a function and want to continue directly behind it in case we would otherwise miss more
-        if dont_skip and self.gap_pointer in self.disassembly.code_map:
+        if (
+            dont_skip
+            and self.gap_pointer is not None
+            and self.disassembly is not None
+            and self.gap_pointer in self.disassembly.code_map
+        ):
             function = self.disassembly.ins2fn[self.gap_pointer]
             next_gap = min(next_gap, self.disassembly.function_borders[function][1])
             LOGGER.debug(
@@ -235,6 +244,8 @@ class FunctionCandidateManager:
         raise NotImplementedError
 
     def checkFunctionOverlap(self):
+        if self.disassembly is None:
+            return False
         function_boundaries = []
         for function in self.disassembly.functions:
             min_addr = self.getBitMask()
@@ -265,6 +276,8 @@ class FunctionCandidateManager:
                         cap,
                     )
                     self._candidate_cap_logged = True
+                return False
+            if self.CANDIDATE_CLASS is None:
                 return False
             self.candidates[addr] = self.CANDIDATE_CLASS(self.disassembly.binary_info, addr)
             return True

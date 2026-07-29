@@ -260,7 +260,7 @@ class PeSynthesizer(BinarySynthesizer):
         is_pe32_plus = optional.magic == lief.PE.PE_TYPE.PE32_PLUS
         ptr_size = 8 if is_pe32_plus else 4
 
-        regions = []
+        regions: list[dict] = []
         for section in pe_src.sections:
             raw_size = section.sizeof_raw_data
             if raw_size == 0 and section.virtual_size > 0:
@@ -274,7 +274,9 @@ class PeSynthesizer(BinarySynthesizer):
                 raw = bytearray(raw_size)
             regions.append(
                 {
-                    "name": section.name.rstrip("\x00"),
+                    "name": section.name.rstrip(b"\x00").decode("ascii", errors="replace")
+                    if isinstance(section.name, bytes)
+                    else section.name.rstrip("\x00"),
                     "vaddr": section.virtual_address,
                     "vsize": section.virtual_size,
                     "chars": int(section.characteristics),
@@ -368,7 +370,7 @@ class PeSynthesizer(BinarySynthesizer):
         section_alignment = 0x1000
         file_alignment = 0x200
 
-        regions = []
+        regions: list[dict] = []
         min_rva = min(offset - base for offset in offsets)
         max_rva = max(self._functionExtentEnd(self.report.xcfg[offset]) - base for offset in offsets)
         text_vaddr = max(align_down(min_rva, section_alignment), section_alignment)

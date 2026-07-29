@@ -25,12 +25,12 @@ class SmdaReport:
     abi = None
     base_addr = None
     binary_size = None
-    binweight = None
+    binweight = 0
     bitness = None
     block_locator = None
     buffer = None
     code_areas = None
-    code_sections = None
+    code_sections = []
     component = None
     confidence_threshold = None
     disassembly_errors = None
@@ -52,7 +52,7 @@ class SmdaReport:
     status = None
     timestamp = None
     version = None
-    xcfg = None
+    xcfg = {}
     xheader = None
     pe_header_hash = None
     data_refs_from = None
@@ -234,7 +234,7 @@ class SmdaReport:
                 return section
 
     def isAddrWithinMemoryImage(self, offset):
-        return self.base_addr <= offset < self.base_addr + self.binary_size
+        return self.base_addr <= offset < (self.base_addr or 0) + (self.binary_size or 0)
 
     def initCodeXrefs(self):
         if not self._has_codexrefs:

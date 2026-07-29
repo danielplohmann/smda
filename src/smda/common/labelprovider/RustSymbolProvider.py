@@ -184,6 +184,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                 # forwarder/extern entries redirect to another module's export and have no
                 # local address (LIEF sets .address to 0 for them) - not a local function.
                 continue
+            raw_name = ""
             try:
                 try:
                     raw_name = function.name
@@ -208,6 +209,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                     # section_idx 0/-1/-2 (undefined-external/absolute/debug): not a locally
                     # defined function, its value is not a usable in-image offset.
                     continue
+                raw_name = ""
                 try:
                     try:
                         raw_name = symbol.name

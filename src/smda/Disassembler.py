@@ -74,7 +74,10 @@ class Disassembler:
     def _callbackAnalysisTimeout(self):
         if not self._timeout:
             return False
-        time_diff = datetime.datetime.now(datetime.timezone.utc) - self._start_time
+        start_time = self._start_time
+        if start_time is None:
+            return False
+        time_diff = datetime.datetime.now(datetime.timezone.utc) - start_time
         elapsed_seconds = int(time_diff.total_seconds())
         if elapsed_seconds >= self._timeout:
             LOGGER.debug("Current analysis callback time %s", time_diff)

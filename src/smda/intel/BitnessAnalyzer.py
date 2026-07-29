@@ -36,8 +36,9 @@ class BitnessAnalyzer:
                 sequence_score = COMMON_START_BYTES[bitness].get(candidate_sequence)
                 if sequence_score is not None:
                     score[bitness] += sequence_score * 1.0
-        total_score = max(score["32"] + score["64"], 1)
-        score["32"] /= total_score
-        score["64"] /= total_score
+        total_score = max(score["32"] + score["64"], 0.0)
+        total_score = total_score or 1.0
+        score["32"] = score["32"] / total_score
+        score["64"] = score["64"] / total_score
         LOGGER.debug("Bitness scores: %5.2f (32bit), %5.2f (64bit)", score["32"], score["64"])
         return 64 if score["32"] < score["64"] else 32
