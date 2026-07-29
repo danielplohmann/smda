@@ -103,7 +103,12 @@ def _calculate_base_address(macho_file):
     candidates = [0xFFFFFFFFFFFFFFFF, macho_file.imagebase]
     for section in macho_file.sections:
         if section.virtual_address:
-            candidates.append(section.virtual_address - section.offset)
+            addr = section.virtual_address - section.offset
+            # a negative candidate is not a valid image base; it would shift every reported
+            # VA negative and inflate virtual_size in mapBinary by the same amount
+            # (mirrors ElfFileLoader._calculate_base_address)
+            if addr >= 0:
+                candidates.append(addr)
     if len(candidates) > 1:
         base_addr = min(candidates)
     return base_addr
@@ -263,6 +268,10 @@ class MachoFileLoader:
             if not section.virtual_address:
                 continue
             rva = section.virtual_address - base_addr
+            if rva < 0:
+                # a negative index wraps to the end of mapped_binary and the slice assignment
+                # would then resize it, desynchronizing every later VA->offset translation
+                continue
             LOGGER.debug(
                 "MachO: mapping section of 0x%04x bytes at 0x%08x-0x%08x (0x%08x)",
                 section.size,
@@ -270,8 +279,14 @@ class MachoFileLoader:
                 rva + section.size,
                 section.virtual_address,
             )
-            if len(section.content) == section.size:
-                mapped_binary[rva : rva + section.size] = section.content
+            # zero-pad short content instead of skipping the section entirely (mirrors
+            # ElfFileLoader._map_sections) and clamp to the remaining capacity so both sides
+            # of the assignment always have the same length
+            content_to_be_mapped = bytearray(section.content)
+            if len(content_to_be_mapped) < section.size:
+                content_to_be_mapped += b"\x00" * (section.size - len(content_to_be_mapped))
+            copy_size = min(section.size, max(0, len(mapped_binary) - rva))
+            mapped_binary[rva : rva + copy_size] = content_to_be_mapped[:copy_size]
 
         # map header.
         if min_raw_offset != 0:

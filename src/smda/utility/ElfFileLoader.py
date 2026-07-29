@@ -224,6 +224,11 @@ class ElfFileLoader:
                 if not section.virtual_address:
                     continue
                 rva = section.virtual_address - base_addr
+                if rva < 0:
+                    # a negative index would silently wrap to the end of mapped_binary, and the
+                    # slice assignment below would then resize it (LHS and RHS lengths disagree),
+                    # desynchronizing every later VA->offset translation - mirror _map_segments
+                    continue
                 LOGGER.debug(
                     "ELF: mapping section of 0x%04x bytes (content: 0x%04x bytes) at 0x%08x-0x%08x (0x%08x)",
                     section.size,
@@ -236,7 +241,10 @@ class ElfFileLoader:
                 content_to_be_mapped = bytearray(section.content)
                 if len(section.content) < section.size:
                     content_to_be_mapped += b"\x00" * (section.size - len(section.content))
-                mapped_binary[rva : rva + section.size] = content_to_be_mapped
+                # clamp to the remaining capacity so both sides of the assignment have the same
+                # length and a section extending past the sized buffer cannot grow it
+                copy_size = min(section.size, max(0, len(mapped_binary) - rva))
+                mapped_binary[rva : rva + copy_size] = content_to_be_mapped[:copy_size]
 
     @staticmethod
     def mapBinary(binary, parsed=_NOT_PROVIDED):
