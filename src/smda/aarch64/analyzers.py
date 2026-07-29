@@ -653,7 +653,7 @@ class AArch64JumpTableAnalyzer:
                     cmp_reg_op, cmp_imm_op = ins.operands[0], ins.operands[1]
                 elif mnemonic == "subs" and len(ins.operands) >= 3:
                     cmp_reg_op, cmp_imm_op = ins.operands[1], ins.operands[2]
-                if cmp_reg_op is None or cmp_reg_op.type != 1 or cmp_imm_op.type != 2:
+                if cmp_reg_op is None or cmp_imm_op is None or cmp_reg_op.type != 1 or cmp_imm_op.type != 2:
                     continue
                 reg_name = ins.reg_name(cmp_reg_op.reg).lower()
                 if reg_name in index_regs_to_match:
