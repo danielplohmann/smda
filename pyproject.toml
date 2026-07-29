@@ -38,6 +38,7 @@ Homepage = "https://github.com/danielplohmann/smda"
 [project.optional-dependencies]
 dev = [
     "build",
+    "hypothesis",
     "pre-commit",
     "pytest",
     "pytest-cov",
@@ -128,3 +129,47 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["smda"]
+
+[tool.ty]
+
+[tool.ty.rules]
+# Style-only rules: not worth 100+ source changes
+missing-override-decorator = "ignore"
+missing-type-argument = "ignore"
+# Third-party noise: LIEF's dynamic attributes
+unresolved-attribute = "warn"
+all = "error"
+
+[tool.ty.terminal]
+error-on-warning = false
+
+[[tool.ty.overrides]]
+include = ["src/smda/utility/PeFileLoader.py"]
+rules = { "unresolved-attribute" = "ignore" }
+
+[[tool.ty.overrides]]
+include = ["src/smda/utility/ElfFileLoader.py"]
+rules = { "unresolved-attribute" = "ignore" }
+
+# IDA code paths: cannot be statically typed (IDA SDK dynamic dispatch)
+[[tool.ty.overrides]]
+include = ["src/smda/ida/"]
+rules = { all = "warn" }
+
+# LIEF/dnfile dynamic attribute dispatch: type info unknown to ty
+[[tool.ty.overrides]]
+include = ["src/smda/aarch64/analyzers.py"]
+rules = { "invalid-assignment" = "ignore" }
+
+[[tool.ty.overrides]]
+include = ["src/smda/dalvik/DalvikDisassembler.py"]
+rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
+
+[[tool.ty.overrides]]
+include = ["src/smda/cil/CilDisassembler.py"]
+rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
+
+# The pdbparse dependency is optional; suppress unresolved-import for it
+[[tool.ty.overrides]]
+include = ["src/smda/common/labelprovider/PdbSymbolProvider.py"]
+rules = { "unresolved-import" = "ignore" }

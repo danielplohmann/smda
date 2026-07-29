@@ -37,13 +37,16 @@ jobs:
       - name: Install lint dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff
+          python -m pip install ruff ty
 
       - name: Run ruff linting
         run: python -m ruff check .
 
       - name: Run ruff formatting check
         run: python -m ruff format --check .
+
+      - name: Run ty type checking
+        run: python -m ty check src/smda/
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
