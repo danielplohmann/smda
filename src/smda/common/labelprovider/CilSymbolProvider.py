@@ -48,6 +48,8 @@ class CilSymbolProvider(AbstractLabelProvider):
         if not method_defs:
             return
         for row in method_defs:
+            if not row.Rva or not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
+                continue
             addr = pe.get_offset_from_rva(row.Rva)
             func_name = self.decodeSymbolName(row.Name.value)
             self._addr_to_func_symbols[addr] = func_name

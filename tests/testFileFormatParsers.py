@@ -386,6 +386,32 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
         self.assertFalse(state.isNextInstructionReachable())
 
+    def test_cil_call_to_method_without_disassembled_body_keeps_symbol_operand(self):
+        class FakeInstruction:
+            offset = 0x1000
+            opcode = "call"
+            operand = object()
+
+            def get_bytes(self):
+                return b"\x28\x01\x00\x00\x06"
+
+        class FakeMethodDef:
+            Name = SimpleNamespace(value="AbstractMethod")
+
+        disassembler = CilDisassembler(SmdaConfig())
+        disassembler.disassembly = DisassemblyResult()
+        method_body = SimpleNamespace(offset=0x1000, instructions=[FakeInstruction()])
+
+        with (
+            mock.patch("smda.cil.CilDisassembler.format_operand", return_value="AbstractMethod"),
+            mock.patch("smda.cil.CilDisassembler.resolve_token", return_value=FakeMethodDef()),
+            mock.patch("smda.cil.CilDisassembler.dnfile.mdtable.MethodDefRow", FakeMethodDef),
+        ):
+            state = disassembler.analyzeFunction(None, method_body.offset, method_body)
+
+        self.assertEqual(state.instructions[0][3], "AbstractMethod")
+        self.assertIn(0x1000, disassembler.disassembly.functions)
+
     def test_elf_api_resolver_uses_relocation_slot_address(self):
         resolver = ElfApiResolver(None)
         resolver._api_map["lief"][0x4018] = ("GLIBC_2.2.5", "puts")
@@ -404,6 +430,40 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
         self.assertEqual(provider.getFunctionSymbols(), {})
         self.assertIsNone(provider.getAddress("stale"))
+
+    def test_cil_symbol_provider_only_returns_managed_methods_with_il_bodies(self):
+        def method_def(name, rva, *, is_il=True, is_abstract=False, is_pinvoke=False):
+            return SimpleNamespace(
+                Rva=rva,
+                ImplFlags=SimpleNamespace(miIL=is_il),
+                Flags=SimpleNamespace(mdAbstract=is_abstract, mdPinvokeImpl=is_pinvoke),
+                Name=SimpleNamespace(value=name),
+            )
+
+        method_defs = [
+            method_def("ManagedBody", 0x2000),
+            method_def("AbstractMethod", 0x2100, is_abstract=True),
+            method_def("PInvokeMethod", 0x2200, is_pinvoke=True),
+            method_def("NoBody", 0),
+            method_def("RuntimeMethod", 0x2300, is_il=False),
+        ]
+        get_offset_from_rva = mock.Mock(side_effect=lambda rva: rva + 0x100)
+        fake_pe = SimpleNamespace(
+            net=SimpleNamespace(mdtables=SimpleNamespace(MethodDef=method_defs)),
+            get_offset_from_rva=get_offset_from_rva,
+        )
+        provider = CilSymbolProvider(None)
+
+        with mock.patch("smda.common.labelprovider.CilSymbolProvider.dnfile.dnPE", return_value=fake_pe):
+            provider.update(BinaryInfo(b"MZ"))
+
+        self.assertEqual(provider.getFunctionSymbols(), {0x2100: "ManagedBody"})
+        self.assertEqual(provider.getAddress("ManagedBody"), 0x2100)
+        self.assertIsNone(provider.getAddress("AbstractMethod"))
+        self.assertIsNone(provider.getAddress("PInvokeMethod"))
+        self.assertIsNone(provider.getAddress("NoBody"))
+        self.assertIsNone(provider.getAddress("RuntimeMethod"))
+        get_offset_from_rva.assert_called_once_with(0x2000)
 
     @staticmethod
     def _fake_macho(cpu_type):

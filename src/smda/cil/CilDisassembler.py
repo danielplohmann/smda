@@ -222,7 +222,9 @@ class CilDisassembler:
                     if isinstance(operand, dnfile.mdtable.MethodDefRow):
                         # override operand string with "address" of the method
                         method_name = self.cil_label_provider.decodeSymbolName(operand.Name.value)
-                        i_op_str = f"0x{self.cil_label_provider.getAddress(method_name):x}"
+                        method_addr = self.cil_label_provider.getAddress(method_name)
+                        if method_addr is not None:
+                            i_op_str = f"0x{method_addr:x}"
             if i_mnemonic in ["throw", "rethrow"]:
                 state.setNextInstructionReachable(False)
             if i_mnemonic in ["switch"]:
