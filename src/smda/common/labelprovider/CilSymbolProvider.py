@@ -50,8 +50,15 @@ class CilSymbolProvider(AbstractLabelProvider):
         for row in method_defs:
             if not row.Rva or not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
                 continue
-            addr = pe.get_offset_from_rva(row.Rva)
-            func_name = self.decodeSymbolName(row.Name.value)
+            try:
+                # get_offset_from_rva raises PEFormatError for any RVA outside a section,
+                # trivially reachable from a crafted MethodDef row; skip that row only
+                addr = pe.get_offset_from_rva(row.Rva)
+                func_name = self.decodeSymbolName(row.Name.value)
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
+                LOGGER.debug("Skipping malformed CIL MethodDef row: %s", exc)
+                continue
             self._addr_to_func_symbols[addr] = func_name
             self._func_symbol_to_addr[func_name] = addr
 

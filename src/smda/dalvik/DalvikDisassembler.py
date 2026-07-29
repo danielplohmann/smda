@@ -940,9 +940,12 @@ class DalvikDisassembler:
             and "advanced-dispatch" not in heuristics
         ):
             heuristics.append("advanced-dispatch")
+        # a packed-switch entry is 4 bytes (target only), a sparse-switch entry is 8
+        # (key + target), so a shared 4-byte threshold fired at 16 sparse targets instead of 32
+        entry_size = 8 if decoded.payload_kind == "sparse-switch" else 4
         if (
             decoded.payload_kind in {"packed-switch", "sparse-switch"}
-            and payload_size > self.MAX_SWITCH_TARGETS_FOR_HEURISTIC * 4
+            and payload_size > self.MAX_SWITCH_TARGETS_FOR_HEURISTIC * entry_size
             and "large-switch-payload" not in heuristics
         ):
             heuristics.append("large-switch-payload")
