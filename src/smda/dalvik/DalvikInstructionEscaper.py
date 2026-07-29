@@ -429,17 +429,17 @@ class DalvikInstructionEscaper:
             LOGGER.warning("Dalvik escapeBinary: no mask for format %s", fmt)
             return DalvikInstructionEscaper.escapeToOpcodeOnly(ins)
 
+        # The format mask always covers branch offsets, pool indices and immediates.
+        # escape_intraprocedural_jumps used to CLEAR the mask for the branch-only formats
+        # (10t/20t/21t/22t/30t), which inverted the flag's meaning relative to every other
+        # backend: in Intel and CIL the flag *wildcards* an intra-procedural branch
+        # displacement, so the PIC hash stays position-independent. Retaining the raw
+        # signed offset meant two structurally identical methods whose branch deltas
+        # differed only because an earlier instruction had a different width (const/4 vs
+        # const/16) produced different pic_hash values, defeating PIC matching for every
+        # branching Dalvik method.
+        del escape_intraprocedural_jumps
         mask = list(DalvikInstructionEscaper._FORMAT_MASK_BYTES[fmt])
-        # When PIC-style hashing preserves intra-procedural jump structure
-        # (escape_intraprocedural_jumps=True, the getPicHash path), clear the
-        # branch-only offsets so the control-flow shape stays in the hash; pool
-        # indices and immediates are always masked. When False (cross-binary
-        # compare), apply the full format mask including branch offsets.
-        # 31t payload offsets are always masked (layout-sensitive).
-        if escape_intraprocedural_jumps:
-            branch_only = {"10t", "20t", "21t", "22t", "30t"}
-            if fmt in branch_only:
-                mask = []
 
         return DalvikInstructionEscaper._maskHexBytes(hex_bytes, mask)
 
