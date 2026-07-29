@@ -3,14 +3,15 @@
 import importlib.util
 
 from .IdaDomainInterface import IdaDomainInterface, IdaDomainUnavailableError
-from .IdaIdapythonInterface import Ida73Interface, Ida74Interface, Ida85Interface
+from .IdaIdapythonInterface import Ida84Interface, Ida85Interface
 
 IDA_DOMAIN_MIN_SDK_VERSION = 910
+# SMDA supports IDA 8.4 and newer only; older SDK generations are rejected outright
+IDA_MIN_SDK_VERSION = 840
 
 _IDAPYTHON_BACKENDS = (
     (850, Ida85Interface),
-    (740, Ida74Interface),
-    (0, Ida73Interface),
+    (IDA_MIN_SDK_VERSION, Ida84Interface),
 )
 
 
@@ -39,6 +40,8 @@ def _getDomainInterface():
 def _selectBackend(sdk_version, domain_interface=None):
     if not isinstance(sdk_version, int):
         raise ValueError("Unsupported IDA SDK version")
+    if sdk_version < IDA_MIN_SDK_VERSION:
+        raise ValueError(f"Unsupported IDA SDK version: {sdk_version} (SMDA requires IDA Pro 8.4 or newer)")
     if sdk_version >= IDA_DOMAIN_MIN_SDK_VERSION and domain_interface is not None:
         return domain_interface
     for minimum_sdk_version, backend in _IDAPYTHON_BACKENDS:
