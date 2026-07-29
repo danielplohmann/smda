@@ -1,5 +1,6 @@
 import struct
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 MH_MAGIC = 0xFEEDFACE
@@ -86,10 +87,15 @@ class MachoSynthesizer(BinarySynthesizer):
         offsets = self._resolveFunctionOffsets(function_offsets)
         if not offsets:
             raise ValueError("synthesis requires at least one function in the report")
-        sections = self._collectSections()
-        if not sections:
+        try:
+            sections = self._collectSections()
+            if not sections:
+                return self._synthesizeMinimal(offsets)
+            return self._synthesizeFromSections(sections, offsets, with_imports, with_strings)
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+            self._warn("Mach-O synthesis from sections failed (%s), falling back to minimal layout", exc)
             return self._synthesizeMinimal(offsets)
-        return self._synthesizeFromSections(sections, offsets, with_imports, with_strings)
 
     def _is64(self):
         if self._hasHeader(4):
@@ -192,7 +198,7 @@ class MachoSynthesizer(BinarySynthesizer):
                             segments[-1]["sections"].append(addr)
                         sec_pos += sec_size
             pos += cmdsize
-        if not segments:
+        if not segments or not section_metas:
             return None
         return segments, section_metas
 

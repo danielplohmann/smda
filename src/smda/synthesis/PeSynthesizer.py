@@ -21,6 +21,13 @@ IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x0020
 IMAGE_FILE_RELOCS_STRIPPED = 0x0001
 IMAGE_FILE_32BIT_MACHINE = 0x0100
 
+OPT_HDR_SIZE_OF_CODE = 4
+OPT_HDR_SIZE_OF_INIT_DATA = 8
+OPT_HDR_SIZE_OF_IMAGE = 56
+OPT_HDR_SIZE_OF_HEADERS = 60
+DATA_DIR_BASE_PE32 = 96
+DATA_DIR_BASE_PE32_PLUS = 112
+
 MACHINE_I386 = 0x014C
 MACHINE_AMD64 = 0x8664
 MACHINE_ARM64 = 0xAA64
@@ -125,7 +132,14 @@ class PeSynthesizer(BinarySynthesizer):
         idescs = bytearray(20 * (len(dll_funcs) + 1))
         return dll_funcs, idescs, hint_buf, dll_strs, dll_str_offsets, hint_offsets
 
-    def _writeThunks(self, regions, import_rvas, sec_vaddr, hint_off, hint_offsets, ptr_size):
+    def _writeThunkAt(self, regions, rva, value, ptr_size):
+        for region in regions:
+            if region["vaddr"] <= rva and rva + ptr_size <= region["vaddr"] + len(region["raw"]):
+                struct.pack_into("<I" if ptr_size == 4 else "<Q", region["raw"], rva - region["vaddr"], value)
+                return True
+        return False
+
+    def _writeThunks(self, regions, import_rvas, dll_funcs, sec_vaddr, hint_off, hint_offsets, ptr_size):
         ordinal_flag = 1 << (ptr_size * 8 - 1)
         for rva, (dll, func) in import_rvas.items():
             ordinal = self._parseOrdinal(func)
@@ -133,12 +147,29 @@ class PeSynthesizer(BinarySynthesizer):
                 thunk_value = ordinal_flag | ordinal
             else:
                 thunk_value = sec_vaddr + hint_off + hint_offsets[(dll or "unknown.dll", func)]
-            for region in regions:
-                if region["vaddr"] <= rva and rva + ptr_size <= region["vaddr"] + len(region["raw"]):
-                    struct.pack_into("<I" if ptr_size == 4 else "<Q", region["raw"], rva - region["vaddr"], thunk_value)
-                    break
-            else:
+            if not self._writeThunkAt(regions, rva, thunk_value, ptr_size):
                 self._warn("import thunk 0x%x (%s.%s) outside all sections", rva, dll, func)
+
+        all_rvas = set(import_rvas.keys())
+        for dll_name, funcs in dll_funcs:
+            if not funcs:
+                continue
+            first = min(rva for rva, _ in funcs)
+            last = max(rva for rva, _ in funcs)
+            padded = 0
+            va = first
+            while va <= last:
+                if va in all_rvas:
+                    va += ptr_size
+                    continue
+                if self._writeThunkAt(regions, va, ordinal_flag, ptr_size):
+                    padded += 1
+                va += ptr_size
+            if padded:
+                self._warn("%d gap slot(s) in IAT group for %s padded with ordinal-0 thunks", padded, dll_name)
+            terminator = last + ptr_size
+            if terminator not in all_rvas:
+                self._writeThunkAt(regions, terminator, 0, ptr_size)
 
     def _patchDescriptors(self, raw, dll_funcs, sec_vaddr, idesc_off, dll_off, dll_str_offsets, hint_off):
         for index, (dll_name, funcs) in enumerate(dll_funcs):
@@ -177,7 +208,7 @@ class PeSynthesizer(BinarySynthesizer):
         raw[hint_off : hint_off + len(hint_buf)] = hint_buf
         raw[dll_off : dll_off + len(dll_strs)] = dll_strs
         self._patchDescriptors(raw, dll_funcs, sec_vaddr, 0, dll_off, dll_str_offsets, hint_off)
-        self._writeThunks(regions, import_rvas, sec_vaddr, hint_off, hint_offsets, ptr_size)
+        self._writeThunks(regions, import_rvas, dll_funcs, sec_vaddr, hint_off, hint_offsets, ptr_size)
 
         regions.append(
             {
@@ -270,17 +301,17 @@ class PeSynthesizer(BinarySynthesizer):
 
         size_of_code = sum(len(r["raw"]) for r in regions if r["executable"])
         size_init_data = sum(len(r["raw"]) for r in regions if int(r["chars"]) & IMAGE_SCN_CNT_INITIALIZED_DATA)
-        struct.pack_into("<I", optional_header, 4, size_of_code)
-        struct.pack_into("<I", optional_header, 8, size_init_data)
+        struct.pack_into("<I", optional_header, OPT_HDR_SIZE_OF_CODE, size_of_code)
+        struct.pack_into("<I", optional_header, OPT_HDR_SIZE_OF_INIT_DATA, size_init_data)
         image_end = align_up(max(r["vaddr"] + r["vsize"] for r in regions), section_alignment)
-        struct.pack_into("<I", optional_header, 56, image_end)
+        struct.pack_into("<I", optional_header, OPT_HDR_SIZE_OF_IMAGE, image_end)
 
         needed_headers = align_up(0x40 + 4 + 20 + size_opt + 40 * len(regions), file_alignment)
         size_of_headers = max(optional.sizeof_headers or 0, needed_headers)
-        struct.pack_into("<I", optional_header, 60, size_of_headers)
+        struct.pack_into("<I", optional_header, OPT_HDR_SIZE_OF_HEADERS, size_of_headers)
 
         if import_dir is not None:
-            dir_base = 112 if is_pe32_plus else 96
+            dir_base = DATA_DIR_BASE_PE32_PLUS if is_pe32_plus else DATA_DIR_BASE_PE32
             struct.pack_into("<I", optional_header, dir_base + 8 * IMAGE_DIRECTORY_ENTRY_IMPORT, import_dir[0])
             struct.pack_into("<I", optional_header, dir_base + 8 * IMAGE_DIRECTORY_ENTRY_IMPORT + 4, import_dir[1])
 
@@ -296,14 +327,14 @@ class PeSynthesizer(BinarySynthesizer):
 
     def _buildMinimalOptionalHeader(self, regions, bitness, size_of_headers, image_end, entry_rva, import_dir):
         is_64 = bitness == 64
-        dir_base = 112 if is_64 else 96
+        dir_base = DATA_DIR_BASE_PE32_PLUS if is_64 else DATA_DIR_BASE_PE32
         size = 0xF0 if is_64 else 0xE0
         opt = bytearray(size)
         struct.pack_into("<H", opt, 0, 0x20B if is_64 else 0x10B)
         size_of_code = sum(len(r["raw"]) for r in regions if r["executable"])
         size_init_data = sum(len(r["raw"]) for r in regions if not r["executable"])
-        struct.pack_into("<I", opt, 4, size_of_code)
-        struct.pack_into("<I", opt, 8, size_init_data)
+        struct.pack_into("<I", opt, OPT_HDR_SIZE_OF_CODE, size_of_code)
+        struct.pack_into("<I", opt, OPT_HDR_SIZE_OF_INIT_DATA, size_init_data)
         struct.pack_into("<I", opt, 16, entry_rva)
         text_rva = min((r["vaddr"] for r in regions if r["executable"]), default=0)
         struct.pack_into("<I", opt, 20, text_rva)
@@ -315,8 +346,8 @@ class PeSynthesizer(BinarySynthesizer):
             struct.pack_into("<I", opt, 24, data_rva)
         struct.pack_into("<II", opt, 32, 0x1000, 0x200)
         struct.pack_into("<HHHHHH", opt, 40, 6, 0, 0, 0, 6, 0)
-        struct.pack_into("<I", opt, 56, image_end)
-        struct.pack_into("<I", opt, 60, size_of_headers)
+        struct.pack_into("<I", opt, OPT_HDR_SIZE_OF_IMAGE, image_end)
+        struct.pack_into("<I", opt, OPT_HDR_SIZE_OF_HEADERS, size_of_headers)
         struct.pack_into("<H", opt, 68, 3)
         struct.pack_into("<H", opt, 70, 0x8000)
         if is_64:

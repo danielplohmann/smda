@@ -1,5 +1,6 @@
 import struct
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 PT_LOAD = 1
@@ -76,10 +77,15 @@ class ElfSynthesizer(BinarySynthesizer):
         offsets = self._resolveFunctionOffsets(function_offsets)
         if not offsets:
             raise ValueError("synthesis requires at least one function in the report")
-        sections = self._collectSections()
-        if not sections:
+        try:
+            sections = self._collectSections()
+            if not sections:
+                return self._synthesizeMinimal(offsets)
+            return self._synthesizeFromSections(sections, offsets, with_imports, with_strings)
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+            self._warn("ELF synthesis from sections failed (%s), falling back to minimal layout", exc)
             return self._synthesizeMinimal(offsets)
-        return self._synthesizeFromSections(sections, offsets, with_imports, with_strings)
 
     def _getBitness(self):
         return 64 if self.report.bitness == 64 else 32

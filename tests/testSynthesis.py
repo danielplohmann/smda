@@ -7,9 +7,11 @@ re-parsing the synthesized bytes with LIEF; planted bytes are verified per basic
 block because blocks of a function are not necessarily contiguous.
 """
 
+import copy
 import json
 import logging
 import os
+import struct
 import unittest
 from pathlib import Path
 
@@ -38,6 +40,27 @@ def _load_macho_fixture(fixture_id):
     fixture = next(entry for entry in manifest["fixtures"] if entry["id"] == fixture_id)
     raw = (CORPUS_DIR / fixture["path"]).read_bytes()
     return bytes(byte ^ (index % 256) for index, byte in enumerate(raw))
+
+
+def _build_empty_segment_macho():
+    """A 64-bit Mach-O header whose only LC_SEGMENT_64 has nsects == 0."""
+    magic = 0xFEEDFACF
+    header = struct.pack("<IIIIIIII", magic, 0x01000007, 0, 2, 1, 72, 0, 0)
+    lc = struct.pack(
+        "<II16sQQQQiiII",
+        0x19,
+        72,
+        b"\x00" * 16,
+        0x1000,
+        0x1000,
+        0,
+        0,
+        7,
+        7,
+        0,
+        0,
+    )
+    return header + lc
 
 
 def _verify_planted_blocks(report, sections):
@@ -124,6 +147,20 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
     def testPeSynthesisDeterministic(self):
         assert self.pe_report.synthesizeBinary() == self.pe_report.synthesizeBinary()
 
+    def testPeSynthesisNonContiguousImports(self):
+        report = SmdaReport.fromDict(self.pe_report.toDict())
+        imports = report.xmetadata["imported_functions"]
+        sample_dll = next(dll for dll, _ in imports.values() if dll)
+        base_slot = next(int(k) for k, v in imports.items() if v[0] == sample_dll)
+        report.xmetadata["imported_functions"] = {
+            str(base_slot): (sample_dll, "AAASynthFuncA"),
+            str(base_slot + 0x10): (sample_dll, "AAASynthFuncB"),
+        }
+        synthesized = report.synthesizeBinary()
+        parsed = lief.parse(synthesized)
+        synthesized_names = {entry.name for imported in parsed.imports for entry in imported.entries if entry.name}
+        assert {"AAASynthFuncA", "AAASynthFuncB"} <= synthesized_names
+
     def testElfSynthesisFromSections(self):
         report = self.elf_report
         synthesized = report.synthesizeBinary()
@@ -193,6 +230,13 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         assert expected_names <= symbol_names
         expected_libs = {lib for lib, _ in report_imports.values() if lib}
         assert {library.name for library in parsed.libraries} == expected_libs
+
+    def testMachoSynthesisNsectsZero(self):
+        report = copy.deepcopy(self.macho_report)
+        report.xheader = _build_empty_segment_macho()
+        synthesized = report.synthesizeBinary()
+        assert isinstance(synthesized, bytes)
+        assert len(synthesized) > 0
 
     def testMachoSynthesisDeterministic(self):
         assert self.macho_report.synthesizeBinary() == self.macho_report.synthesizeBinary()

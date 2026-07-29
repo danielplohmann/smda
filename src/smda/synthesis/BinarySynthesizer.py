@@ -44,10 +44,6 @@ class BinarySynthesizer:
         return resolved
 
     @staticmethod
-    def _collectFunctionBytes(smda_function):
-        return b"".join(bytes.fromhex(instruction.bytes) for instruction in smda_function.getInstructions())
-
-    @staticmethod
     def _iterFunctionChunks(smda_function):
         """Yields (block_offset, block_bytes) per basic block.
 
@@ -85,16 +81,5 @@ class BinarySynthesizer:
                     continue
                 yield data_addr, string.encode("ascii", errors="ignore") + b"\x00"
 
-    def _getPointerSize(self):
-        return 8 if self.report.bitness == 64 else 4
-
     def _hasHeader(self, min_length=0x40):
         return bool(self.report.xheader) and len(self.report.xheader) >= min_length
-
-    def _plantInto(self, regions, addr, content):
-        for region in regions:
-            if region["va_start"] <= addr and addr + len(content) <= region["va_end"]:
-                offset = addr - region["va_start"]
-                region["raw"][offset : offset + len(content)] = content
-                return True
-        return False
