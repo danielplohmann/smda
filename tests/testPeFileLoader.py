@@ -1,5 +1,7 @@
+import struct
 import unittest
 
+from smda.SmdaConfig import SmdaConfig
 from smda.utility.PeFileLoader import PeFileLoader
 
 
@@ -96,6 +98,34 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         expected_len = max(virt_size + virt_offset, raw_size + virt_offset)
         self.assertEqual(len(mapped), expected_len)
         self.assertEqual(mapped[0:total_len], binary[0:total_len])
+
+    def test_map_binary_returns_empty_for_malformed_mz_without_sections(self):
+        # isCompatible() only checks the "MZ" magic, so a DOS-stub-only file reaches
+        # mapBinary. It has no usable section data, which used to raise
+        # ValueError("PE file larger than MAX_IMAGE_SIZE") - a message stating the
+        # opposite of the actual condition, and uncaught on the FileLoader path, so a
+        # single malformed MZ file aborted analysis of a whole directory. ELF and Mach-O
+        # both return b"" for the analogous case.
+        binary = bytearray(b"MZ" + b"\x00" * 0x3E)
+        binary[0x3C:0x40] = struct.pack("<I", 0x40)  # e_lfanew pointing past the stub
+
+        self.assertTrue(PeFileLoader.isCompatible(bytes(binary)))
+        self.assertEqual(PeFileLoader.mapBinary(bytes(binary)), b"")
+
+    def test_map_binary_still_raises_for_oversized_image(self):
+        # the MAX_IMAGE_SIZE guard must remain intact for a genuinely oversized image
+        pe_offset = 0x40
+        binary = bytearray(b"MZ" + b"\x00" * (pe_offset + 0xF8 + 0x28))
+        binary[0x3C:0x40] = struct.pack("<I", pe_offset)
+        binary[pe_offset : pe_offset + 4] = b"PE\x00\x00"
+        binary[pe_offset + 4 : pe_offset + 6] = struct.pack("<H", 0x014C)  # i386
+        binary[pe_offset + 6 : pe_offset + 8] = struct.pack("<H", 1)  # one section
+        section = pe_offset + 0xF8
+        # virt_size + virt_offset well beyond MAX_IMAGE_SIZE
+        binary[section + 0x8 : section + 0x18] = struct.pack("IIII", SmdaConfig.MAX_IMAGE_SIZE, 0x1000, 0, 0x200)
+
+        with self.assertRaises(ValueError):
+            PeFileLoader.mapBinary(bytes(binary))
 
     def test_mergeCodeAreas(self):
         test_cases = [

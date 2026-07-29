@@ -71,16 +71,23 @@ class PeFileLoader:
                     )
                     if section_info["raw_offset"] > 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
+            # isCompatible() only checks for the "MZ" magic, so a DOS-stub-only binary, a
+            # corrupted PE, or one with a garbage e_lfanew reaches this point with no usable
+            # section data. That is not an oversized image - report it the way the ELF and
+            # Mach-O loaders report the same condition, by returning no mapped data, instead
+            # of raising a ValueError that claims the opposite of what happened.
+            if not max_virt_section_offset:
+                LOGGER.debug("PE: no section data")
+                return b""
             # support up to 100MB for now.
-            if max_virt_section_offset and max_virt_section_offset <= SmdaConfig.MAX_IMAGE_SIZE:
-                mapped_binary = bytearray([0] * max_virt_section_offset)
-                # clamp to both the raw file's actual length and mapped_binary's capacity so this
-                # header-copy slice assignment can never resize mapped_binary (same length on
-                # both sides of the assignment, mirroring the per-section copy clamp below)
-                header_copy_len = min(min_raw_section_offset, len(binary), len(mapped_binary))
-                mapped_binary[0:header_copy_len] = binary[0:header_copy_len]
-            else:
+            if max_virt_section_offset > SmdaConfig.MAX_IMAGE_SIZE:
                 raise ValueError("PE file larger than MAX_IMAGE_SIZE")
+            mapped_binary = bytearray([0] * max_virt_section_offset)
+            # clamp to both the raw file's actual length and mapped_binary's capacity so this
+            # header-copy slice assignment can never resize mapped_binary (same length on
+            # both sides of the assignment, mirroring the per-section copy clamp below)
+            header_copy_len = min(min_raw_section_offset, len(binary), len(mapped_binary))
+            mapped_binary[0:header_copy_len] = binary[0:header_copy_len]
 
             for section_info in section_infos:
                 # clamp the copy length to the bytes actually available in the raw file so a

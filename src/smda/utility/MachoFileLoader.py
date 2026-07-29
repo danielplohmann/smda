@@ -252,15 +252,22 @@ class MachoFileLoader:
                 rva + segment.file_size,
                 segment.virtual_address,
             )
-            if len(segment.content) != segment.file_size:
-                raise ValueError(
-                    f"Segment content size mismatch: expected {segment.file_size}, got {len(segment.content)}"
-                )
             # mapped_binary's capacity is sized from virtual_size, but lief.parse() never
             # validates file_size against virtual_size (only an explicit lief.MachO.check_layout()
             # call does, which this loader never makes); clamp the write extent so a crafted/
             # corrupted Mach-O with file_size > virtual_size can't write past the buffer.
             copy_size = min(segment.file_size, max(0, len(mapped_binary) - rva))
+            # a truncated Mach-O (common for carved samples) used to abort the whole run here;
+            # warn and zero-pad the shortfall instead, mirroring ElfFileLoader._map_segments
+            if len(segment.content) != segment.file_size:
+                LOGGER.warning("MachO: Mismatch in segment content vs. header-specified file size!")
+                if len(segment.content) < segment.file_size:
+                    LOGGER.warning("MachO: Padding to file size with zeroes!")
+                    content_copy_size = min(len(segment.content), copy_size)
+                    mapped_binary[rva : rva + content_copy_size] = segment.content[:content_copy_size]
+                    mapped_binary[rva + content_copy_size : rva + copy_size] = b"\x00" * (copy_size - content_copy_size)
+                    continue
+                LOGGER.warning("MachO: More content than file size, truncating to the header-specified size.")
             mapped_binary[rva : rva + copy_size] = segment.content[:copy_size]
 
         # map sections.
