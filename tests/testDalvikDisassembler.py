@@ -986,8 +986,17 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         # reg_b distinguishes the two even though only the literal differs
         self.assertNotEqual(esc_a, esc_b)
 
-    def testDalvikEscaperPICPreservesBranchOffsets(self):
-        """PIC hash (escape_intraprocedural_jumps=True) keeps intra-procedural branch offsets."""
+    def testDalvikEscaperPICMasksBranchOffsets(self):
+        """PIC hash must be position-independent, so branch offsets are masked.
+
+        escape_intraprocedural_jumps used to CLEAR the mask for branch-only formats,
+        which inverted the flag relative to the Intel and CIL escapers - there the flag
+        *wildcards* an intra-procedural branch displacement. Retaining the raw signed
+        offset made pic_hash position-DEPENDENT: two structurally identical methods whose
+        branch deltas differed only because an earlier instruction had a different width
+        (const/4 vs const/16) hashed differently. Changed in 4.4.2; see
+        DALVIK_PIC_HASH_ESCAPE_VERSION.
+        """
         from smda.common.SmdaInstruction import SmdaInstruction
         from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
 
@@ -996,13 +1005,34 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         ins_far = SmdaInstruction([0, "2802", "goto", "4"])
         pic_short = DalvikInstructionEscaper.escapeBinary(ins_short, escape_intraprocedural_jumps=True)
         pic_far = DalvikInstructionEscaper.escapeBinary(ins_far, escape_intraprocedural_jumps=True)
-        self.assertEqual(pic_short, "2801")
-        self.assertEqual(pic_far, "2802")
-        # Cross-binary compare (False) masks the branch offset.
+        self.assertEqual(pic_short, "28??")
+        self.assertEqual(pic_far, "28??")
+        # the same two instructions must now be indistinguishable on the PIC path
+        self.assertEqual(pic_short, pic_far)
+        # Cross-binary compare (False) masks the branch offset as before.
         cmp_short = DalvikInstructionEscaper.escapeBinary(ins_short, escape_intraprocedural_jumps=False)
         cmp_far = DalvikInstructionEscaper.escapeBinary(ins_far, escape_intraprocedural_jumps=False)
         self.assertEqual(cmp_short, "28??")
         self.assertEqual(cmp_far, "28??")
+
+    def testDalvikPicEscapingStableAcrossBranchDeltaShift(self):
+        """A conditional branch whose delta shifted must escape identically on the PIC path.
+
+        This is the real-world shape: an earlier const/4 becoming a const/16 shifts every
+        later branch delta by one code unit without changing the method's structure.
+        """
+        from smda.common.SmdaInstruction import SmdaInstruction
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        escaped = [
+            DalvikInstructionEscaper.escapeBinary(
+                SmdaInstruction([0x1000, "3800" + delta, "if-eqz", "v0, +x"]),
+                escape_intraprocedural_jumps=True,
+            )
+            for delta in ("0800", "0900")
+        ]
+
+        self.assertEqual(escaped[0], escaped[1])
 
     def testDalvikPicHashStableAcrossStringIndexShift(self):
         """Same method body with different string indices → same PicHash."""
