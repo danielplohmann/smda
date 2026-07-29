@@ -48,6 +48,11 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
     def is_active(self):
         return bool(self._func_symbols)
 
+    @staticmethod
+    def _boundedTableCount(declared_count, fh, binary, record_size):
+        max_records = max(0, (len(binary) - fh.tell()) // record_size)
+        return min(declared_count, max_records)
+
     def parseKbBuffer(self, binary, base_addr):
         result = {}
         fh = BytesIO(binary)
@@ -56,6 +61,7 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
         # process modules
         len_mod_data_table = int.from_bytes(fh.read(4), byteorder="little")
         fh.read(4)
+        len_mod_data_table = self._boundedTableCount(len_mod_data_table, fh, binary, 16)
         modules = {}
         for _i in range(len_mod_data_table):
             offset = int.from_bytes(fh.read(4), byteorder="little")
@@ -78,7 +84,7 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
                     actual_mod_id,
                 )
             len_name = int.from_bytes(fh.read(2), byteorder="little")
-            modules[modID]["name"] = fh.read(len_name).decode()
+            modules[modID]["name"] = fh.read(len_name).decode("latin-1", errors="ignore")
             modules[modID]["functions"] = []
         fh.seek(temp_off)
         # process functions and their code
@@ -86,6 +92,7 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
             fh.seek(int.from_bytes(fh.read(4), byteorder="little") * 16 + fh.tell() + 4)
         len_fun_data_table = int.from_bytes(fh.read(4), byteorder="little")
         fh.read(4)
+        len_fun_data_table = self._boundedTableCount(len_fun_data_table, fh, binary, 16)
         for _i in range(len_fun_data_table):
             offset = int.from_bytes(fh.read(4), byteorder="little")
             temp_off = fh.tell()
@@ -93,7 +100,7 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
             function_info = {}
             function_info["modId"] = int.from_bytes(fh.read(2), byteorder="little")
             len_name = int.from_bytes(fh.read(2), byteorder="little")
-            function_info["name"] = fh.read(len_name).decode()
+            function_info["name"] = fh.read(len_name).decode("latin-1", errors="ignore")
             fh.read(9)
             len_type = int.from_bytes(fh.read(2), byteorder="little")
             fh.read(len_type)
@@ -107,6 +114,9 @@ class DelphiKbSymbolProvider(AbstractLabelProvider):
             function_info["reloc"] = fh.read(function_info["dump_size"])
             for match in re.finditer(b"\xff\xff\xff\xff", function_info["reloc"]):
                 self._relocations[function_code_start_offset + match.start()] = 0
-            modules[function_info["modId"]]["functions"].append(function_info)
+            if function_info["modId"] in modules:
+                modules[function_info["modId"]]["functions"].append(function_info)
+            else:
+                LOGGER.warning("Function record references unknown module id %d", function_info["modId"])
             fh.seek(temp_off + 12)
         return result
