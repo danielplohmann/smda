@@ -80,12 +80,6 @@ stay comparable across PE, ELF, and Mach-O.
 
 SMDA can rebuild fictive PE, ELF, and Mach-O files from a recovered CFG via `SmdaReport.synthesizeBinary()`. The output plants function bytes per basic block at their original VAs and fuses import metadata, producing binaries that parse cleanly with LIEF and can be loaded into analysis tools (e.g. IDA, Ghidra Binary Ninja). This feature is experimental and works on well-formed reports but has not been hardened against pathological or adversarial inputs. Synthesis is deterministic from report content only and does not require the stored buffer.
 
-The code should be fully compatible with Python 3.10+.
-Further explanation on the innerworkings follow in separate publications but will be referenced here.
-
-To take full advantage of SMDA's capabilities, make sure to (optionally) install:
- * lief
- * pdbparse (currently as fork from https://github.com/VPaulV/pdbparse to support Python3)
 
 ## Development
 
@@ -134,6 +128,7 @@ make test
 ```
 ´
 ## Version History
+ * 2026-07-29: v4.4.1 - Experimental binary synthesis: `SmdaReport.synthesizeBinary()` rebuilds fictive PE/ELF/Mach-O files from a recovered CFG, planting bytes per basic block at their original VAs and fusing import metadata (new `smda/synthesis/` package with `BinarySynthesizer`, `PeSynthesizer`, `ElfSynthesizer`, `MachoSynthesizer`). Includes review-hardening fixes: graceful fallbacks for malformed/headerless inputs, non-contiguous IAT gap handling, and removal of dead base-class helpers. (No new runtime deps.)
  * 2026-07-26: v4.4.0 - Labels/reporting: recover and demangle ELF function/data exports and relocation imports, add `xmetadata.exported_symbols`, normalize `metadata.language` to score-only maps (including legacy report loading), replace host C++ demangler tools with the bundled `pycxxfilt` LLVM demangler, and require Python 3.11+. (THX: @r0ny123)
  * 2026-07-28: v4.3.11 - Labels: tier-1 symbol recovery — apply `DelphiPythiaProvider` names via the engine (register it as a symbol provider so recovered VMT/method-table names land on functions), format Go pclntab marker error messages as hex, and expand `OrdinalHelper` with stable Winsock (`ws2_32`/`wsock32`) and `oleaut32` ordinals for more accurate API name resolution. (THX: @r0ny123)
  * 2026-07-24: v4.3.10 - Dalvik: format-aware DalvikInstructionEscaper for PIC/OPC hashing (pool-index/immediate/branch masking), typed exception edges surfaced via SmdaFunction.getExceptionBlockRefs(), method_handle/call_site resolution (DEX 038+), orphan code_item discovery, unreachable-code flagging, backward-payload fixed-point sweep, ART-reconciled can_throw flags (incl. fill-array-data), goto/32 self-branch accepted, and explicit ODEX/CDEX rejection. (THX: @r0ny123)
