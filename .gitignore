@@ -33,3 +33,9 @@ profiling/output/
 .dockerignore
 # Validation scripts and data
 /validation
+
+# Fuzzing artifacts
+/corpus/
+crash-*
+oom-*
+timeout-*
