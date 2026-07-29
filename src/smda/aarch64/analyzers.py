@@ -11,6 +11,8 @@ import struct
 from collections import Counter
 from copy import deepcopy
 
+from capstone.arm64_const import ARM64_SFT_LSL
+
 from .dataflow import (
     _applyConstantWrite,
     gatherContextInstructions,
@@ -539,6 +541,7 @@ class AArch64JumpTableAnalyzer:
         entry_size = 8
         is_signed = False
         is_relative = False
+        entry_shift = 0
 
         for idx in range(len(detailed_insns) - 1, -1, -1):
             ins = detailed_insns[idx]
@@ -562,13 +565,18 @@ class AArch64JumpTableAnalyzer:
                     reg2 = norm_reg(ins.reg_name(op2.reg))
                     tracked_regs.add(reg1)
                     tracked_regs.add(reg2)
-                    # Detect relative base
+                    # Detect relative base and capture the index register's shift
+                    index_op = None
                     if reg1 in constants:
                         table_base = constants[reg1]
                         is_relative = True
+                        index_op = op2
                     elif reg2 in constants:
                         table_base = constants[reg2]
                         is_relative = True
+                        index_op = op1
+                    if index_op is not None and index_op.shift.type == ARM64_SFT_LSL:
+                        entry_shift = index_op.shift.value
                 elif op1.type == 1 and op2.type == 2:  # REG + IMM
                     reg1 = norm_reg(ins.reg_name(op1.reg))
                     tracked_regs.add(reg1)
@@ -681,7 +689,7 @@ class AArch64JumpTableAnalyzer:
             else:
                 break
 
-            target = table_base + val & d.getBitMask() if is_relative else val & d.getBitMask()
+            target = (table_base + (val << entry_shift)) & d.getBitMask() if is_relative else val & d.getBitMask()
 
             if not d.disassembly.isAddrWithinMemoryImage(target):
                 break
