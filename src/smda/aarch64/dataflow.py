@@ -40,8 +40,37 @@ def movImmediateValue(op):
     return op.imm << shift, shift
 
 
+def _invalidateWritebackBase(cap_ins, constants):
+    """Pop the base register of any addressing-mode writeback (pre/post-index).
+
+    ``ldr x0, [x1], #8`` / ``ldr x0, [x1, #8]!`` / ``str x0, [x1, #8]!`` /
+    ``stp ..., [x1, #-16]!`` all mutate the *memory operand's base* register, which
+    capstone reports as a MEM operand (type 3) - so neither the modelled ldr/add/mov
+    branches (which only write ``operands[0]``) nor the generic CS_AC_WRITE fallback
+    (which only pops ``op.type == 1`` register operands) ever invalidated it, and the
+    stale pre-increment value survived into later resolutions.
+
+    The post-increment amount is modellable, but this pass stays conservative and drops
+    the register instead: an unresolved base is correct-by-omission, whereas a stale one
+    silently yields a wrong call target or jump-table base.
+    """
+    if not getattr(cap_ins, "writeback", False):
+        return
+    for op in cap_ins.operands:
+        if op.type == 3 and op.mem.base:  # MEM
+            constants.pop(norm_reg(cap_ins.reg_name(op.mem.base)), None)
+
+
 def _applyConstantWrite(cap_ins, constants, disassembler):
     """Apply one instruction's effect (if any) to a dest-register -> value map, in place."""
+    _applyRegisterWrite(cap_ins, constants, disassembler)
+    # after the instruction's own effect: a post-index load still reads the base's
+    # pre-increment value, so the invalidation must not run before it is resolved
+    _invalidateWritebackBase(cap_ins, constants)
+
+
+def _applyRegisterWrite(cap_ins, constants, disassembler):
+    """Apply the register-destination effect of one instruction, in place."""
     d = disassembler
     if not cap_ins.operands:
         return

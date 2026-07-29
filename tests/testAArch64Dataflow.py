@@ -16,6 +16,20 @@ def _decode(cs, words, base=0x1000):
     return instructions
 
 
+class _NoImageDisassembler:
+    """Minimal disassembler stub for the ldr branch: nothing is inside the image, so no
+    load ever resolves and only register invalidation is exercised."""
+
+    class disassembly:
+        @staticmethod
+        def isAddrWithinMemoryImage(addr):
+            return False
+
+        @staticmethod
+        def getBytes(addr, size):
+            return None
+
+
 class AArch64DataflowTestSuite(unittest.TestCase):
     """Regression tests for _applyConstantWrite: the add-with-shift handling (immediate
     and register forms) and the fallback invalidation for unmodeled mnemonics that
@@ -64,6 +78,43 @@ class AArch64DataflowTestSuite(unittest.TestCase):
         constants = propagateConstants(instructions, None)
 
         self.assertNotIn("x0", constants)
+
+    def test_post_index_load_invalidates_writeback_base(self):
+        # mov x1, #0x100 ; ldr x0, [x1], #8 -- the post-index form increments x1 to 0x108.
+        # The base register is a MEM operand, so neither the ldr branch (which writes only
+        # operands[0]) nor the CS_AC_WRITE fallback (which pops only REG operands) touched
+        # it, and x1 stayed stale at 0x100.
+        words = [0xD2802001, 0xF8408420]
+        instructions = _decode(self.cs, words)
+        self.assertEqual(instructions[1].op_str, "x0, [x1], #8")
+        self.assertTrue(instructions[1].writeback)
+
+        constants = propagateConstants(instructions, _NoImageDisassembler())
+
+        self.assertNotIn("x1", constants)
+
+    def test_pre_index_store_invalidates_writeback_base(self):
+        # mov x1, #0x100 ; str x0, [x1, #8]! -- str never reaches the ldr branch at all,
+        # and the generic clobber loop skips the MEM operand carrying the writeback.
+        words = [0xD2802001, 0xF8008C20]
+        instructions = _decode(self.cs, words)
+        self.assertEqual(instructions[1].op_str, "x0, [x1, #8]!")
+        self.assertTrue(instructions[1].writeback)
+
+        constants = propagateConstants(instructions, None)
+
+        self.assertNotIn("x1", constants)
+
+    def test_plain_offset_load_keeps_base_register(self):
+        # mov x1, #0x100 ; ldr x0, [x1, #8] -- no writeback, so x1 must survive intact
+        words = [0xD2802001, 0xF9400420]
+        instructions = _decode(self.cs, words)
+        self.assertEqual(instructions[1].op_str, "x0, [x1, #8]")
+        self.assertFalse(instructions[1].writeback)
+
+        constants = propagateConstants(instructions, _NoImageDisassembler())
+
+        self.assertEqual(constants.get("x1"), 0x100)
 
 
 if __name__ == "__main__":
