@@ -5,6 +5,7 @@ import os
 import re
 
 from .BackendInterface import BackendInterface
+from .segment_mapping import assembleSegmentBuffer
 
 _IDA_DOMAIN_MISSING = (
     "ida-domain is not available. Install it with 'pip install \"smda[ida]\"' and "
@@ -142,12 +143,10 @@ class IdaDomainInterface(BackendInterface):
         return int((segment_starts[0] // 0x10000) * 0x10000)
 
     def getBinary(self):
-        result = b""
-        for segment in sorted(self.db.segments.get_all(), key=lambda current: current.start_ea):
-            segment_bytes = self.db.bytes.get_bytes_at(segment.start_ea, self.db.segments.get_size(segment))
-            if segment_bytes:
-                result += segment_bytes
-        return result
+        # must be addressable as buffer[addr - getBaseAddr()]; see segment_mapping
+        segments = list(self.db.segments.get_all())
+        ranges = [(segment.start_ea, segment.start_ea + self.db.segments.get_size(segment)) for segment in segments]
+        return assembleSegmentBuffer(self.getBaseAddr(), ranges, self.db.bytes.get_bytes_at)
 
     def getApiMap(self):
         api_map = {}

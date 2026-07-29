@@ -5,7 +5,7 @@ from unittest import mock
 from smda.ida import IdaDomainInterface as ida_domain_backend
 from smda.ida import IdaInterface as ida_compatibility
 from smda.ida.IdaDomainInterface import IdaDomainInterface
-from smda.ida.IdaIdapythonInterface import Ida73Interface, Ida74Interface, Ida85Interface
+from smda.ida.IdaIdapythonInterface import Ida84Interface, Ida85Interface
 
 
 class TestIdaBackendSelection(unittest.TestCase):
@@ -13,11 +13,16 @@ class TestIdaBackendSelection(unittest.TestCase):
         ida_compatibility.IdaInterface.instance = None
 
     def test_legacy_sdk_boundaries(self):
-        self.assertIs(ida_compatibility._selectBackend(739), Ida73Interface)
-        self.assertIs(ida_compatibility._selectBackend(740), Ida74Interface)
-        self.assertIs(ida_compatibility._selectBackend(849), Ida74Interface)
+        self.assertIs(ida_compatibility._selectBackend(840), Ida84Interface)
+        self.assertIs(ida_compatibility._selectBackend(849), Ida84Interface)
         self.assertIs(ida_compatibility._selectBackend(850), Ida85Interface)
         self.assertIs(ida_compatibility._selectBackend(900), Ida85Interface)
+
+    def test_sdk_versions_below_8_4_are_rejected(self):
+        # SMDA supports IDA Pro 8.4 and newer only
+        for sdk_version in (0, 700, 739, 740, 800, 839):
+            with self.assertRaisesRegex(ValueError, "requires IDA Pro 8.4 or newer"):
+                ida_compatibility._selectBackend(sdk_version)
 
     def test_domain_is_preferred_only_for_supported_sdk_versions(self):
         class DomainBackend:
@@ -209,7 +214,14 @@ class TestIdaDomainInterface(unittest.TestCase):
         self.assertEqual(interface.getCodeOutRefs(0x1000), [(0x1000, 0x1100)])
         self.assertEqual(interface.getFunctionSymbols(), {0x1000: "named_function"})
         self.assertEqual(interface.getBaseAddr(), 0x10000)
-        self.assertEqual(interface.getBinary(), b"\x90\x90\x90\x90")
+        # getBinary() is addressable as buffer[addr - getBaseAddr()]: the fake segment sits
+        # at 0x12345 with the base rounded down to 0x10000, so its 4 bytes must land at
+        # offset 0x2345 with the leading gap zero-filled - a bare concatenation would put
+        # them at offset 0 and skew every consumer's address arithmetic by 0x2345
+        binary = interface.getBinary()
+        self.assertEqual(len(binary), 0x2349)
+        self.assertEqual(binary[0x2345:0x2349], b"\x90\x90\x90\x90")
+        self.assertEqual(binary[:0x2345], b"\x00" * 0x2345)
 
     def test_domain_maps_aarch64_and_rejects_arm32(self):
         self.assertEqual(IdaDomainInterface(database=_FakeDatabase("ARM", 64)).getArchitecture(), "aarch64")
