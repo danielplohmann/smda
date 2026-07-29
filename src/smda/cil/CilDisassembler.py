@@ -152,9 +152,26 @@ class CilDisassembler:
                 return
             self.disassembly.addr_to_api[from_addr] = api_function
 
+    @staticmethod
+    def _seedExceptionHandlerBlocks(state, method_body):
+        """Seed try/handler/filter entries as block starts.
+
+        A catch/finally/filter entry has no intra-method branch pointing at it, so
+        getBlocks() - which starts blocks only at code_start_addr and jump_targets - would
+        never open a block there. dncil reports these offsets relative to the start of the
+        code, while instruction offsets are absolute, so rebase them onto code_start_addr.
+        """
+        handlers = getattr(method_body, "exception_handlers", None) or []
+        code_start = state.code_start_addr
+        for handler in handlers:
+            for offset in (handler.try_start, handler.handler_start, getattr(handler, "filter_start", -1)):
+                if offset is not None and offset >= 0:
+                    state.jump_targets.add(code_start + offset)
+
     def analyzeFunction(self, pe, start_addr, method_body):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         state = FunctionAnalysisState(start_addr, method_body.instructions[0].offset, self.disassembly)
+        self._seedExceptionHandlerBlocks(state, method_body)
         for insn in method_body.instructions:
             state.setNextInstructionReachable(True)
             i_bytes = insn.get_bytes()
@@ -203,6 +220,11 @@ class CilDisassembler:
             ]:
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
+                # an unconditional branch does not fall through; leaving reachability set
+                # emitted a bogus edge to the next instruction, which addCodeRef then also
+                # registered as a jump target (is_jmp was just set by the branch itself)
+                if i_mnemonic in ["br", "br.s", "leave", "leave.s"]:
+                    state.setNextInstructionReachable(False)
             if i_mnemonic in ["jmp"]:
                 # jmp's operand is InlineMethod (a tail-jump to another method), not a
                 # same-function branch offset, so i_op_str is usually a method name/token
