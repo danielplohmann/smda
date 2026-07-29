@@ -348,6 +348,8 @@ class SmdaFunction:
         return self.pic_hash
 
     def getPicHashAsHex(self):
+        if self.pic_hash is None:
+            return None
         return struct.pack("<Q", self.pic_hash).hex()
 
     def getInstructions(self):
