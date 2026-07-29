@@ -13,6 +13,7 @@ from dncil.cil.error import MethodBodyFormatError
 from dncil.clr.token import InvalidToken, StringToken, Token
 from dnfile.enums import MetadataTables
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.labelprovider.CilSymbolProvider import CilSymbolProvider
 from smda.DisassemblyResult import DisassemblyResult
 
@@ -130,7 +131,11 @@ class CilDisassembler:
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
-            provider.update(binary_info)
+            try:
+                provider.update(binary_info)
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
+                LOGGER.error("Label provider %s failed to update: %r", provider.__class__.__name__, exc)
 
     def resolveSymbol(self, address):
         for provider in self.label_providers:

@@ -229,6 +229,13 @@ class LanguageAnalyzer:
                 parsed_string = "<invalid>"
         return parsed_string
 
+    def _safeResolverUpdate(self, resolver):
+        try:
+            resolver.update(self.disassembly.binary_info)
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+            LOGGER.error("Symbol resolver %s failed to update: %r", resolver.__class__.__name__, exc)
+
     def getDelphiObjects(self):
         """
         Extract Delphi object methods using a Pythia-style VMT scan.
@@ -237,12 +244,12 @@ class LanguageAnalyzer:
             {absolute_function_address: optional_function_name}
         """
         if self._delphi_objects is None:
-            self.delphi_pythia_resolver.update(self.disassembly.binary_info)
+            self._safeResolverUpdate(self.delphi_pythia_resolver)
             self._delphi_objects = self.delphi_pythia_resolver.getFunctionSymbols()
         return self._delphi_objects
 
     def getGoObjects(self):
-        self.go_resolver.update(self.disassembly.binary_info)
+        self._safeResolverUpdate(self.go_resolver)
         return self.go_resolver.getFunctionSymbols()
 
     def getDelphiKbScore(self):
@@ -252,12 +259,12 @@ class LanguageAnalyzer:
         return self.getDelphiKbScore() == 1
 
     def getDelphiKbObjects(self):
-        self.delphi_kb_resolver.update(self.disassembly.binary_info)
+        self._safeResolverUpdate(self.delphi_kb_resolver)
         return self.delphi_kb_resolver.getFunctionSymbols()
 
     def getDelphiReSymObjects(self):
         """Extract Delphi symbols using DelphiReSym metadata parsing."""
-        self.delphi_resym_resolver.update(self.disassembly.binary_info)
+        self._safeResolverUpdate(self.delphi_resym_resolver)
         return self.delphi_resym_resolver.getFunctionSymbols()
 
     def identify(self):
