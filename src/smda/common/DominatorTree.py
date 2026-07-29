@@ -37,18 +37,26 @@ class DominatorTree:
             self.bucket[v] = set()
 
     def depth_first_search(self, v):
-        stack = [v]
+        stack = [(v, iter(self.succ[v]))]
+        n = 0
+        self.semi[v] = n
+        self.vertex.append(v)
+        n += 1
         while stack:
-            v = stack.pop()
-            n = len(self.vertex)
-            self.semi[v] = n
-            self.vertex.append(v)
-            for w in self.succ[v]:
-                self.pred[w].add(v)
+            node, successors = stack[-1]
+            discovered = False
+            for w in successors:
+                self.pred[w].add(node)
                 if w not in self.semi:
-                    self.parent[w] = v
-                    self.semi[w] = None  # temporarily
-                    stack.append(w)
+                    self.parent[w] = node
+                    self.semi[w] = n
+                    self.vertex.append(w)
+                    n += 1
+                    stack.append((w, iter(self.succ[w])))
+                    discovered = True
+                    break
+            if not discovered:
+                stack.pop()
 
     def LINK(self, v, w):
         self.ancestor[w] = v
