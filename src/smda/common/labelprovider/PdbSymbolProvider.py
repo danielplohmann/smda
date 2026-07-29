@@ -87,7 +87,9 @@ class PdbSymbolProvider(AbstractLabelProvider):
         for sym in gsyms.globals:
             try:
                 off = sym.offset
-                if len(sects) < sym.segment:
+                # segment is 1-based and PDB uses segment 0 for absolute symbols; guarding
+                # only the upper bound let sects[0 - 1] wrap to the last section
+                if not 1 <= sym.segment <= len(sects):
                     continue
                 virt_base = sects[sym.segment - 1].VirtualAddress
                 function_address = self._base_addr + omap.remap(off + virt_base)

@@ -536,6 +536,12 @@ class ElfSynthesizer(BinarySynthesizer):
         for offset in offsets:
             for block_offset, chunk in self._iterFunctionChunks(self.report.xcfg[offset]):
                 start = block_offset - va_start
+                # va_start derives from function entries only, so a block below its own entry
+                # yields a negative start that would wrap to the end of the bytearray, and an
+                # over-long chunk would grow it - desynchronizing va_end from len(raw).
+                # Every other planting site in the repo has this containment check.
+                if start < 0 or start + len(chunk) > len(section["raw"]):
+                    continue
                 section["raw"][start : start + len(chunk)] = chunk
         segments = self._mergeSegments([section])
         return self._assembleFile([section], segments, bitness)

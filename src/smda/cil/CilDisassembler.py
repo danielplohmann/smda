@@ -216,7 +216,11 @@ class CilDisassembler:
                     state.addCodeRef(i_address, target, by_jump=True)
             if i_mnemonic in ["ldstr"]:
                 # we possibly want to extract and collect these and put them in the stringref part of SmdaFunction
-                self.disassembly.addStringRef(start_addr, i_address, i_op_str[1:-1])
+                # format_operand only wraps the operand in quotes when the resolved user string
+                # is a str; an unreadable #US entry falls through to str(InvalidToken), where
+                # the unconditional [1:-1] would chop two real characters off the string ref
+                string_ref = i_op_str[1:-1] if i_op_str.startswith('"') and i_op_str.endswith('"') else i_op_str
+                self.disassembly.addStringRef(start_addr, i_address, string_ref)
             if i_mnemonic in ["call", "calli", "callvirt"]:
                 self._updateApiInformation(i_address, i_bytes, i_op_str)
                 # https://blog.objektkultur.de/about-tail-recursion-in-.net/

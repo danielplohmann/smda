@@ -459,7 +459,10 @@ def _format_registers(registers):
 
 
 def _decode_register_list_35c(raw_bytes):
-    count = (raw_bytes[1] >> 4) & 0x0F
+    # the nibble can hold up to 15, but the DEX spec caps format 35c at 5 registers; without
+    # this clamp a malformed count silently produced a truncated 5-element list reported as
+    # a larger count
+    count = min((raw_bytes[1] >> 4) & 0x0F, 5)
     reg_g = raw_bytes[1] & 0x0F
     word = int.from_bytes(raw_bytes[4:6], byteorder="little")
     reg_c = word & 0x0F
