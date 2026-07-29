@@ -1,0 +1,98 @@
+name: Fuzzing
+
+on:
+  push:
+    paths:
+      - "fuzzing/**"
+      - "src/smda/**"
+      - ".github/workflows/fuzzing.yml"
+  pull_request:
+    paths:
+      - "fuzzing/**"
+      - "src/smda/**"
+      - ".github/workflows/fuzzing.yml"
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      max_total_time:
+        description: "Seconds of fuzzing per target"
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fuzz_loaders
+            max_len: 262144
+          - target: fuzz_disassembler
+            max_len: 65536
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install SMDA and atheris
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install atheris
+
+      - name: Generate seed corpus
+        run: python fuzzing/generate_seeds.py corpus
+
+      - name: Determine fuzzing duration
+        id: duration
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "seconds=900" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "seconds=${{ inputs.max_total_time }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "seconds=120" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run fuzz target
+        run: |
+          mkdir -p artifacts
+          python fuzzing/${{ matrix.target }}.py corpus \
+            -max_total_time=${{ steps.duration.outputs.seconds }} \
+            -max_len=${{ matrix.max_len }} \
+            -timeout=60 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix=artifacts/ \
+            -print_final_stats=1
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: artifacts/
+          if-no-files-found: ignore
