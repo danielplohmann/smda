@@ -59,8 +59,10 @@ class LazyIntKeyDict(dict):
 
     def __init__(self, data=None):
         if data:
-            self._raw_data = data
-            self._is_converted = False
+            for k, v in data.items():
+                dict.__setitem__(self, int(k), v)
+            self._is_converted = True
+            self._raw_data = None
         else:
             dict.__init__(self)
             self._is_converted = True
