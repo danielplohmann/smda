@@ -23,7 +23,14 @@ class FunctionCandidate:
         self.bitness = binary_info.bitness
         self.addr = addr
         rel_start_addr = addr - binary_info.base_addr
-        self.bytes = binary_info.binary[rel_start_addr : rel_start_addr + self.BYTE_WINDOW_SIZE]
+        if rel_start_addr < 0:
+            # candidate lies below the mapped image start (e.g. a raw memory dump with no
+            # code_areas, where _passesCodeFilter defaults True): a negative slice start would
+            # wrap to the *end* of the image and score an unrelated window. There are no valid
+            # bytes for this candidate, so leave the window empty.
+            self.bytes = b""
+        else:
+            self.bytes = binary_info.binary[rel_start_addr : rel_start_addr + self.BYTE_WINDOW_SIZE]
         self.lang_spec = None
         # set, not list: addCallRef / removeCallRefs do membership tests in the inner
         # CFG-recovery loop. Order is never read externally (only len + truthiness).
