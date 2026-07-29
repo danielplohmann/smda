@@ -377,7 +377,9 @@ class SmdaReport:
         smda_report._num_instructions = sum(f.num_instructions for f in smda_report.xcfg.values())
         smda_report.xheader = bytes.fromhex(report_dict["xheader"]) if "xheader" in report_dict else None
         smda_report.pe_header_hash = report_dict.get("pe_header_hash") or None
-        smda_report.xmetadata = report_dict.get("xmetadata", None)
+        # fromDict mirrors __init__'s xmetadata = {} (not None) so downstream
+        # consumers (e.g. BinarySynthesizer) never hit a TypeError on xmetadata["..."].
+        smda_report.xmetadata = report_dict.get("xmetadata") or {}
         # buffer is only present when the report was serialized with STORE_BUFFER enabled;
         # older reports omit it and keep buffer == None for backward compatibility.
         if report_dict.get("buffer") is not None:
