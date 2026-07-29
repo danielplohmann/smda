@@ -43,6 +43,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "ty",
     "tqdm",
     "twine",
 ]
