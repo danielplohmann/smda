@@ -24,15 +24,21 @@ class BlockLocator:
         return last_ins.offset + len(last_ins.bytes) // 2  # bytes is actuall a hex string
 
     def findBlockByContainedAddress(self, inner_address):
+        sorted_addresses = self.sorted_blocks_addresses
+        if sorted_addresses is None:
+            return None
         # do a binary search to find the closest address to the left of inner_address
-        block_num = bisect.bisect(self.sorted_blocks_addresses, inner_address) - 1
+        block_num = bisect.bisect(sorted_addresses, inner_address) - 1
 
         if block_num == -1:
             # target address is smaller than first block. return none
             return None
 
-        block_start = self.sorted_blocks_addresses[block_num]
-        block = self.blocks_dict[block_start]
+        block_start = sorted_addresses[block_num]
+        blocks_dict = self.blocks_dict
+        if blocks_dict is None:
+            return None
+        block = blocks_dict[block_start]
         block_end = self._get_block_end(block)
 
         # make sure inner_address falls within the selected block

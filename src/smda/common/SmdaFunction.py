@@ -4,7 +4,7 @@ import hashlib
 import logging
 import re
 import struct
-from typing import List
+from typing import List, Optional
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
 from smda.aarch64.definitions import CALL_INS as AARCH64_CALL_INS
@@ -71,7 +71,7 @@ class LazyIntKeyDict(dict):
             self._is_converted = True
 
     def _convert(self):
-        if not self._is_converted:
+        if not self._is_converted and self._raw_data is not None:
             for k, v in self._raw_data.items():
                 dict.__setitem__(self, int(k), v)
             self._is_converted = True
@@ -95,7 +95,7 @@ class LazyIntKeyDict(dict):
 
     def __len__(self):
         if not self._is_converted:
-            return len(self._raw_data)
+            return len(self._raw_data) if self._raw_data is not None else 0
         return dict.__len__(self)
 
     def __contains__(self, key):
@@ -142,23 +142,22 @@ class LazyIntKeyDict(dict):
 class SmdaFunction:
     smda_report = None
     offset = None
-    blocks = None
-    _sorted_block_keys = None
-    apirefs = None
-    stringrefs = None
-    blockrefs = None
+    blocks = {}
+    _sorted_block_keys = []
+    apirefs = {}
+    stringrefs = {}
+    blockrefs = {}
     _blockrefs_reverse = None
     _normalized_blockrefs = None
-    inrefs = None
-    outrefs = None
+    inrefs = []
+    outrefs = {}
     code_inrefs = None
     code_outrefs = None
-    is_exported = None
-    architecture_metadata = None
-    # metadata
+    is_exported = False
+    architecture_metadata = {}
     binweight = 0
-    characteristics = ""
-    confidence = 0.0
+    characteristics: Optional[str] = ""
+    confidence: Optional[float] = 0.0
     function_name = ""
     pic_hash = None
     opc_hash = None
@@ -173,7 +172,10 @@ class SmdaFunction:
         self._exception_blockrefs = None
         self._basic_blocks = None
         if disassembly is not None and function_offset is not None:
-            self._escaper = self.getInstructionEscaper(disassembly.binary_info.architecture)
+            binary_info = disassembly.binary_info
+            if binary_info is None:
+                return
+            self._escaper = self.getInstructionEscaper(binary_info.architecture)
             self.offset = function_offset
             self._parseBlocks(disassembly.getBlocksAsDict(function_offset))
             self.apirefs = disassembly.getApiRefs(function_offset)
@@ -183,7 +185,6 @@ class SmdaFunction:
             self.is_exported = self.offset in disassembly.exported_functions
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
             self.blockrefs = self.getNormalizedBlockRefs()
-            # metadata
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             self.characteristics = (
                 disassembly.candidates[function_offset].getCharacteristics()
@@ -200,21 +201,17 @@ class SmdaFunction:
                 if function_offset in disassembly.candidates
                 else None
             )
-            # DEX strings are part of the parsed file structure, so they're always
-            # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
-            # cost. For other architectures, honor WITH_STRINGS as usual.
-            is_dalvik_with_strings = (
-                disassembly.binary_info.architecture == "dalvik"
-                and disassembly.getStringRefsForFunction(function_offset)
+            is_dalvik_with_strings = binary_info.architecture == "dalvik" and disassembly.getStringRefsForFunction(
+                function_offset
             )
             if (config and config.WITH_STRINGS) or is_dalvik_with_strings:
                 self.stringrefs = (
                     self._normalizeDalvikStringRefs(disassembly.getStringRefsForFunction(function_offset))
-                    if disassembly.binary_info.architecture == "dalvik"
+                    if binary_info.architecture == "dalvik"
                     else disassembly.getStringRefsForFunction(function_offset)
                 )
             if config and config.CALCULATE_HASHING:
-                self.pic_hash = self.getPicHash(disassembly.binary_info)
+                self.pic_hash = self.getPicHash(binary_info)
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
             if config and config.CALCULATE_NESTING:
@@ -310,6 +307,8 @@ class SmdaFunction:
             return self._isAArch64ApiThunk()
         if self.num_instructions != 1:
             return False
+        if self.offset is None:
+            return False
         block = self.blocks.get(self.offset)
         if not block:
             return False
@@ -362,6 +361,8 @@ class SmdaFunction:
     def getInstructionsForBlock(self, offset) -> List["SmdaInstruction"]:
         if offset is None:
             offset = self.offset
+        if offset is None:
+            return []
         if offset not in self.blocks:
             return []
         return self.blocks[offset]
@@ -439,7 +440,7 @@ class SmdaFunction:
         for offset, block in block_dict.items():
             instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
             self.blocks[int(offset)] = instructions
-            self.binweight += sum(len(ins.bytes) / 2 for ins in instructions)
+            self.binweight += sum(len(ins.bytes or "") / 2 for ins in instructions)
         self._sorted_block_keys = sorted(self.blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
         self._basic_blocks = None
@@ -454,7 +455,7 @@ class SmdaFunction:
             return [
                 {
                     "string": string_value,
-                    "ins_addr": int(referencing_addr),
+                    "ins_addr": int(str(referencing_addr)),
                     "data_addr": None,
                     "type": "dex",
                 }
@@ -470,7 +471,7 @@ class SmdaFunction:
             block_start = self._sorted_block_keys[idx - 1]
             block = self.blocks[block_start]
             if block:
-                block_end = block[-1].offset + (len(block[-1].bytes) // 2)
+                block_end = (block[-1].offset or 0) + (len(block[-1].bytes or "") // 2)
                 if instruction_addr < block_end:
                     return block_start
         return None
@@ -529,9 +530,16 @@ class SmdaFunction:
         for block_start, block in self.blocks.items():
             successors = set(current_blockrefs.get(block_start, []))
             if block:
-                block_end = block[-1].offset + (len(block[-1].bytes) // 2)
+                block_end = (block[-1].offset or 0) + (len(block[-1].bytes or "") // 2)
                 for r in active_try_ranges:
-                    if r["start"] < block_end and block_start < r["end"]:
+                    r_start = r.get("start", 0)
+                    r_end = r.get("end", 0)
+                    if (
+                        isinstance(r_start, int)
+                        and isinstance(r_end, int)
+                        and r_start < block_end
+                        and block_start < r_end
+                    ):
                         successors.update(r["targets"])
             normalized_blockrefs[block_start] = sorted(successors)
 

@@ -32,13 +32,19 @@ class SmdaInstruction:
             self.operands = ins_list[3]
 
     def getDataRefs(self):
-        if getattr(self, "_data_refs", None) is not None:
-            yield from self._data_refs
+        data_refs_cached = getattr(self, "_data_refs", None)
+        if data_refs_cached is not None:
+            yield from data_refs_cached
             return
 
         data_refs = []
         emitted = set()
-        smda_report = self.smda_function.smda_report
+        smda_function = self.smda_function
+        if smda_function is None:
+            return
+        smda_report = smda_function.smda_report
+        if smda_report is None:
+            return
         if smda_report.data_refs_from is not None and self.offset in smda_report.data_refs_from:
             for value in smda_report.data_refs_from[self.offset]:
                 if value not in emitted:
@@ -52,7 +58,7 @@ class SmdaInstruction:
             detailed = self.getDetailed()
             if len(detailed.operands) > 0:
                 for i in detailed.operands:
-                    value = None
+                    value = 0
                     if i.type == X86_OP_IMM:
                         value = i.imm
                     if i.type == X86_OP_MEM:
@@ -102,8 +108,10 @@ class SmdaInstruction:
         if arch is not None and arch not in {"intel", "aarch64"}:
             raise NotImplementedError(f"getDetailed() is only available for Intel and AArch64, not '{arch}'")
         if self.detailed is None:
+            if self.smda_function is None or self.smda_function.smda_report is None:
+                raise ValueError("SmdaFunction or SmdaReport not set on instruction")
             capstone = self.smda_function.smda_report.getCapstone()
-            with_details = list(capstone.disasm(bytes.fromhex(self.bytes), self.offset))
+            with_details = list(capstone.disasm(bytes.fromhex(self.bytes or ""), self.offset))
             if not with_details:
                 raise ValueError(f"Capstone could not disassemble stored bytes '{self.bytes}' at 0x{self.offset:x}")
             if len(with_details) == 1:

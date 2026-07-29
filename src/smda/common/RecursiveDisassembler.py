@@ -143,7 +143,8 @@ class RecursiveDisassembler:
         return list(symbol_offsets)
 
     def getBitMask(self):
-        if self.disassembly.binary_info.bitness == 64:
+        binary_info = self.disassembly.binary_info
+        if binary_info is not None and binary_info.bitness == 64:
             return 0xFFFFFFFFFFFFFFFF
         return 0xFFFFFFFF
 
@@ -202,9 +203,12 @@ class RecursiveDisassembler:
         self.disassembly.addApiReference(to_addr, from_addr, dll, api)
 
     def _getDisasmWindowBuffer(self, addr):
-        relative_start = addr - self.disassembly.binary_info.base_addr
+        binary_info = self.disassembly.binary_info
+        if binary_info is None:
+            return b""
+        relative_start = addr - binary_info.base_addr
         relative_end = relative_start + self.backend.max_instruction_size
-        return self.disassembly.binary_info.binary[relative_start:relative_end]
+        return binary_info.binary[relative_start:relative_end]
 
     def _revertGapFunction(self, colliding_addr, current_start_addr):
         """When a tailcall-discovered candidate's analysis reaches bytes already
@@ -244,6 +248,9 @@ class RecursiveDisassembler:
 
     def analyzeFunction(self, start_addr, as_gap=False):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
+        binary_info = self.disassembly.binary_info
+        if binary_info is None:
+            return None
         self.tailcall_analyzer.initFunction()
         i = None
         state = self.backend.createAnalysisState(start_addr, self.disassembly)
@@ -276,8 +283,8 @@ class RecursiveDisassembler:
                     i_address, i_size, i_mnemonic, i_op_str = i
 
                     i_op_str = i_op_str.strip()
-                    i_relative_address = i_address - self.disassembly.binary_info.base_addr
-                    i_bytes = self.disassembly.binary_info.binary[i_relative_address : i_relative_address + i_size]
+                    i_relative_address = i_address - binary_info.base_addr
+                    i_bytes = binary_info.binary[i_relative_address : i_relative_address + i_size]
                     if debug_logging:
                         LOGGER.debug(
                             "  analyzeFunction() now processing instruction @0x%08x: %s",
@@ -358,6 +365,7 @@ class RecursiveDisassembler:
                 break
             if not state.isBlockEndingInstruction():
                 if i is not None:
+                    i_address, i_size, i_mnemonic, i_op_str = i
                     LOGGER.debug(
                         "No block submitted, last instruction: 0x%08x -> 0x%08x %s || %s",
                         start_addr,
@@ -402,22 +410,22 @@ class RecursiveDisassembler:
         # CONFIDENCE_THRESHOLD so report filtering actually sees the configured value.
         self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
         self.disassembly.setBinaryInfo(binary_info)
-        self.disassembly.binary_info.architecture = self.backend.name
+        binary_info.architecture = self.backend.name
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
-        if self.disassembly.binary_info.bitness not in [32, 64]:
-            self.disassembly.binary_info.bitness = self.backend.probeBitness(self.disassembly)
+        if binary_info.bitness not in [32, 64]:
+            binary_info.bitness = self.backend.probeBitness(self.disassembly)
             LOGGER.debug(
                 "Automatically Recognized Bitness as: %d",
-                self.disassembly.binary_info.bitness,
+                binary_info.bitness,
             )
         else:
-            LOGGER.debug("Using defined Bitness as: %d", self.disassembly.binary_info.bitness)
+            LOGGER.debug("Using defined Bitness as: %d", binary_info.bitness)
         if self._forced_bitness:
-            self.disassembly.binary_info.bitness = self._forced_bitness
-            LOGGER.debug("Forced Bitness override to: %d", self.disassembly.binary_info.bitness)
+            binary_info.bitness = self._forced_bitness
+            LOGGER.debug("Forced Bitness override to: %d", binary_info.bitness)
 
         # update providers after bitness is finalized: some (e.g. DelphiPythiaProvider) key parsing on it
-        self._updateLabelProviders(self.disassembly.binary_info)
+        self._updateLabelProviders(binary_info)
 
         self.tailcall_analyzer = TailcallAnalyzer()
         self.indcall_analyzer = self.backend.createIndirectCallAnalyzer(self)
@@ -430,8 +438,8 @@ class RecursiveDisassembler:
         if binary_info.oep is not None:
             self.fc_manager.symbol_addresses.append(binary_info.base_addr + binary_info.oep)
         self.fc_manager.init(self.disassembly, cbAnalysisTimeout)
-        self.capstone = self.backend.createCapstone(self.disassembly.binary_info.bitness)
-        self._tfidf = self.backend.createTfIdf(self.disassembly.binary_info.bitness)
+        self.capstone = self.backend.createCapstone(binary_info.bitness)
+        self._tfidf = self.backend.createTfIdf(binary_info.bitness)
         LOGGER.debug("Starting heuristical analysis.")
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
         for candidate in self.fc_manager.getNextFunctionStartCandidate():
@@ -611,7 +619,7 @@ class RecursiveDisassembler:
             if self._isApiJumpThunk(instructions):
                 self.disassembly.thunk_functions.add(segment_start)
 
-            candidate = self.fc_manager.candidates.get(segment_start)
+            candidate = (self.fc_manager.candidates if self.fc_manager else {}).get(segment_start)
             if candidate is not None:
                 candidate.analysis_aborted = False
                 candidate.abortion_reason = ""

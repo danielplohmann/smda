@@ -865,6 +865,7 @@ class Printer:
 
         char_val = "0x"
         char_val += hex_val
+        c = ""
         try:
             c = chr(int(char_val, 16))
         except (OverflowError, ValueError):

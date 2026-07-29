@@ -83,6 +83,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         super().init(disassembly, cbAnalysisTimeout)
 
     def hasCommonPrologue(self, addr):
+        if self.disassembly.binary_info is None:
+            return False
         return FunctionCandidate(self.disassembly.binary_info, addr).hasCommonFunctionStart()
 
     def locateCandidates(self):
@@ -506,6 +508,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return any(start <= addr < end for start, end in exec_ranges)
 
         def seed(target, source):
+            if target is None:
+                return
             target &= bit_mask
             if target % INSTRUCTION_SIZE != 0 or not in_exec(target):
                 return
@@ -549,14 +553,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 elif (word & ADD_IMM64_MASK) == ADD_IMM64_VALUE:
                     rn = rn_field(word)
                     if rn in pages:
-                        seed(pages[rn] + ((word >> 10) & 0xFFF), addr)
+                        seed((pages[rn] or 0) + ((word >> 10) & 0xFFF), addr)
                     pages.pop(rd_field(word), None)
                 elif (word & LDR_UNSIGNED_64_MASK) == LDR_UNSIGNED_64_VALUE:  # ldr Xt, [Xn, #imm]
                     rn = rn_field(word)
                     rd = rd_field(word)
                     if rn in pages:
                         imm = ((word >> 10) & 0xFFF) * 8
-                        slot_addr = pages[rn] + imm
+                        slot_addr = (pages[rn] or 0) + imm
                         if macho_fixup_state is not None:
                             val = self._resolveMachoStoredPointer(slot_addr - adjustment, adjustment, macho_fixup_state)
                             if val is not None:
@@ -746,9 +750,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
         # real argument, not "unset", so a truthiness check would wrongly drop it.
         if start_gap_pointer is not None:
-            self.gap_pointer = start_gap_pointer
+            self.gap_pointer = start_gap_pointer or 0
         base = self.disassembly.binary_info.base_addr
-        size = self.disassembly.binary_info.binary_size
+        size = self.disassembly.binary_info.binary_size or 0
         exec_ranges = self._cachedExecutableSectionRanges()
         words = self._wordsView()
 
@@ -759,7 +763,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if base + size < self.gap_pointer:
                 return None
             # align to the instruction stride
-            self.gap_pointer = (self.gap_pointer + (INSTRUCTION_SIZE - 1)) & ~(INSTRUCTION_SIZE - 1)
+            self.gap_pointer = ((self.gap_pointer or 0) + (INSTRUCTION_SIZE - 1)) & ~(INSTRUCTION_SIZE - 1)
             offset = self.gap_pointer - base
             if offset < 0 or offset + INSTRUCTION_SIZE > size:
                 return None

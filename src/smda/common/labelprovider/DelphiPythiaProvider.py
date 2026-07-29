@@ -252,7 +252,7 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         self, profile: DelphiVmtProfile, candidate_offset: int, range_end_offset: int
     ) -> Optional[DelphiClassInfo]:
         """Validate a VMT candidate and extract its metadata."""
-        class_name_addr = self._read_ptr(candidate_offset + profile.class_name_field_offset, profile.ptr_size)
+        class_name_addr = self._read_ptr(candidate_offset + profile.class_name_field_offset, profile.ptr_size) or 0
         instance_size = self._read_ptr(candidate_offset + profile.instance_size_field_offset, profile.ptr_size)
         parent_vmt_addr = self._read_ptr(candidate_offset + profile.parent_field_offset, profile.ptr_size) or 0
         method_table_addr = self._read_ptr(candidate_offset + profile.method_table_field_offset, profile.ptr_size) or 0

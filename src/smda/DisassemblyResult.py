@@ -58,7 +58,7 @@ class DisassemblyResult:
     def _normalize_export_addresses(exported, base_addr):
         if not exported:
             return set()
-        addresses = set(exported.keys()) if isinstance(exported, dict) else set(exported)
+        addresses = {int(a) for a in (exported.keys() if isinstance(exported, dict) else exported)}
         if not addresses or not base_addr:
             return addresses
         if max(addresses) >= base_addr:
@@ -66,21 +66,33 @@ class DisassemblyResult:
         return {address + base_addr for address in addresses}
 
     def getByte(self, addr):
+        binary_info = self.binary_info
+        if binary_info is None:
+            return None
         if self.isAddrWithinMemoryImage(addr):
-            return self.binary_info.binary[addr - self.binary_info.base_addr]
+            return binary_info.binary[addr - binary_info.base_addr]
         return None
 
     def getRawByte(self, offset):
-        return self.binary_info.binary[offset]
+        binary_info = self.binary_info
+        if binary_info is None:
+            return None
+        return binary_info.binary[offset]
 
     def getBytes(self, addr, num_bytes):
+        binary_info = self.binary_info
+        if binary_info is None:
+            return None
         if self.isAddrWithinMemoryImage(addr):
-            rel_start_addr = addr - self.binary_info.base_addr
-            return self.binary_info.binary[rel_start_addr : rel_start_addr + num_bytes]
+            rel_start_addr = addr - binary_info.base_addr
+            return binary_info.binary[rel_start_addr : rel_start_addr + num_bytes]
         return None
 
     def getRawBytes(self, offset, num_bytes):
-        return self.binary_info.binary[offset : offset + num_bytes]
+        binary_info = self.binary_info
+        if binary_info is None:
+            return None
+        return binary_info.binary[offset : offset + num_bytes]
 
     def setConfidenceThreshold(self, threshold):
         self._confidence_threshold = threshold
