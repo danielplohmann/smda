@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import mergeCodeAreas
+from smda.utility.lief_helper import safe_lief_parse
 from smda.utility.MachoBinary import get_active_macho_binary
 
 LOGGER = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ class MachoFileLoader:
         # parent in some LIEF versions. Direct one-off accessor calls therefore
         # use LIEF's owned active Binary result; FileLoader/BinaryInfo pass a
         # retained FatBinary through ``parsed`` for explicit slice selection.
-        macho_file = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        macho_file = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         return get_active_macho_binary(macho_file)
 
     @staticmethod
