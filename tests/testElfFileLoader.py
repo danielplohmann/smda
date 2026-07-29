@@ -139,6 +139,56 @@ class TestElfFileLoader(unittest.TestCase):
         # (0x2000 - 0x1FF0 == 0x10) should have been copied
         self.assertEqual(mapped[0x1FF0:0x2000], b"\x33" * 0x10)
 
+    def test_map_binary_skips_sections_below_the_base_address(self):
+        # the section at 0x8000 (offset 0) fixes the computed base address at 0x8000;
+        # the second section's own base candidate is negative and therefore filtered,
+        # so it survives to _map_sections with rva == -0x100. An unguarded negative
+        # slice start wraps to the end of the buffer and the length-mismatched slice
+        # assignment then *inserts* the section's bytes, growing mapped_binary and
+        # desynchronizing every later VA->offset translation.
+        anchor = SimpleNamespace(
+            virtual_address=0x8000,
+            size=0x100,
+            alignment=0,
+            flags=0,
+            file_offset=0,
+            offset=0,
+            content=b"\x11" * 0x100,
+        )
+        below_base = SimpleNamespace(
+            virtual_address=0x7F00,
+            size=0x200,
+            alignment=0,
+            flags=0,
+            file_offset=0x8000,
+            offset=0x8000,
+            content=b"\x22" * 0x200,
+        )
+        parsed = _HashableNamespace(sections=[anchor, below_base], segments=[])
+
+        mapped = ElfFileLoader.mapBinary(b"", parsed=parsed)
+
+        self.assertEqual(len(mapped), 0x1000)  # align(0x100, 0x1000), not grown to 0x1200
+        self.assertNotIn(b"\x22", mapped)
+
+    def test_map_binary_clamps_section_size_to_buffer_capacity(self):
+        section = SimpleNamespace(
+            virtual_address=0x1FF0,
+            size=0x500,
+            alignment=0,
+            flags=0,
+            file_offset=0,
+            offset=0x1FF0,  # keeps the computed base address at 0
+            content=b"\x44" * 0x500,
+        )
+        parsed = _HashableNamespace(sections=[section], segments=[])
+
+        mapped = ElfFileLoader.mapBinary(b"", parsed=parsed)
+
+        expected_len = 0x3000  # align(0x24F0, 0x1000)
+        self.assertEqual(len(mapped), expected_len)
+        self.assertEqual(mapped[0x1FF0 : 0x1FF0 + 0x500], b"\x44" * 0x500)
+
 
 if __name__ == "__main__":
     unittest.main()

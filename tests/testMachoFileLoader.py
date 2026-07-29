@@ -46,6 +46,30 @@ class _Section:
         self.alignment = alignment
 
 
+class _MappableSection(SimpleNamespace):
+    """Section double carrying the fields MachoFileLoader.mapBinary actually reads."""
+
+    def __init__(self, virtual_address, size, offset, content, alignment=1, flags=0):
+        super().__init__(
+            virtual_address=virtual_address,
+            size=size,
+            offset=offset,
+            content=content,
+            alignment=alignment,
+            flags=SimpleNamespace(value=flags),
+        )
+
+
+class _MappableSlice(SimpleNamespace):
+    # the loader's helpers are @lru_cache-decorated on the parsed object, so it must be
+    # hashable; SimpleNamespace's structural __eq__ otherwise makes it unhashable
+    def __init__(self, sections, segments, imagebase=0x8000):
+        super().__init__(sections=sections, segments=segments, imagebase=imagebase)
+
+    def __hash__(self):
+        return id(self)
+
+
 def _decode_xored_fixture(path):
     xored = path.read_bytes()
     return bytes(byte ^ (index % 256) for index, byte in enumerate(xored))
@@ -344,6 +368,45 @@ class TestMachoFileLoader(unittest.TestCase):
         self.assertEqual(unmapped.getFunction(unmapped.base_addr + unmapped.oep).function_name, "_main")
         self.assertEqual(controlled.num_functions, unmapped.num_functions)
         self.assertEqual(controlled.xmetadata, unmapped.xmetadata)
+
+    def test_calculate_base_address_rejects_negative_candidates(self):
+        # a section whose offset exceeds its virtual address yields a negative base
+        # candidate; accepting it would make getBaseAddress() negative, shifting every
+        # reported VA and inflating mapBinary's virtual_size by the same amount.
+        sections = [
+            _MappableSection(virtual_address=0x8000, size=0x100, offset=0, content=b"\x11" * 0x100),
+            _MappableSection(virtual_address=0x7F00, size=0x200, offset=0x8000, content=b"\x22" * 0x200),
+        ]
+        macho = _MappableSlice(sections=sections, segments=[])
+
+        self.assertEqual(MachoFileLoader.getBaseAddress(b"", parsed=macho), 0x8000)
+
+    def test_map_binary_skips_sections_below_the_base_address(self):
+        # with the negative candidate filtered, the base stays 0x8000 and the second
+        # section maps at rva == -0x100. An unguarded negative slice start wraps to the
+        # end of the buffer and the length-mismatched assignment grows mapped_binary.
+        sections = [
+            _MappableSection(virtual_address=0x8000, size=0x100, offset=0, content=b"\x11" * 0x100),
+            _MappableSection(virtual_address=0x7F00, size=0x200, offset=0x8000, content=b"\x22" * 0x200),
+        ]
+        macho = _MappableSlice(sections=sections, segments=[])
+
+        mapped = MachoFileLoader.mapBinary(b"", parsed=macho)
+
+        self.assertEqual(len(mapped), 0x1000)
+        self.assertNotIn(b"\x22", mapped)
+
+    def test_map_binary_zero_pads_short_section_content(self):
+        # short content used to skip the section entirely; ELF zero-pads it instead
+        sections = [
+            _MappableSection(virtual_address=0x1000, size=0x100, offset=0x1000, content=b"\x55" * 0x40),
+        ]
+        macho = _MappableSlice(sections=sections, segments=[])
+
+        mapped = MachoFileLoader.mapBinary(b"", parsed=macho)
+
+        self.assertEqual(mapped[0x1000:0x1040], b"\x55" * 0x40)
+        self.assertEqual(mapped[0x1040:0x1100], b"\x00" * 0xC0)
 
 
 if __name__ == "__main__":
