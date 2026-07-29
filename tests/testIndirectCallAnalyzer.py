@@ -227,6 +227,33 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         called_args = analyzer.processBlock.call_args[0]
         self.assertEqual(called_args[1], resolvable_block)
 
+    def test_per_block_call_cap_does_not_abandon_later_blocks(self):
+        disassembler = MagicMock()
+        disassembler.config = MagicMock(spec=[])
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.processBlock = MagicMock()
+
+        cap = 50
+        block_a = [(0x401000 + 2 * i, 2, "call", "eax") for i in range(cap + 2)]
+        block_b = [(0x402000, 2, "call", "ebx")]
+
+        analysis_state = MagicMock()
+        analysis_state.start_addr = 0x401000
+        analysis_state.call_register_ins = [ins[0] for ins in block_a] + [ins[0] for ins in block_b]
+
+        def searchBlock_side_effect(state, addr):
+            return block_b if addr == 0x402000 else block_a
+
+        analyzer.searchBlock = MagicMock(side_effect=searchBlock_side_effect)
+
+        analyzer.resolveRegisterCalls(analysis_state)
+
+        # the cap on block A must skip only block A's surplus call sites, not
+        # abandon block B's independent call site
+        processed_starts = [call[0][1][0][0] for call in analyzer.processBlock.call_args_list]
+        self.assertIn(0x402000, processed_starts)
+        self.assertEqual(sum(1 for addr in processed_starts if addr == 0x401000), cap)
+
 
 if __name__ == "__main__":
     unittest.main()

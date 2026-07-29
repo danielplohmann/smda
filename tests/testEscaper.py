@@ -196,6 +196,22 @@ class DisassemblyTestSuite(unittest.TestCase):
                 "bitness": 64,
                 "expected_opc": "48a3????????????????",
             },
+            # LOCK (0xf0) is a prefix: opcode-only escaping must keep the prefix AND the
+            # real opcode byte, wildcarding only the operand bytes (previously 0xf0 was
+            # treated as the opcode itself, wildcarding the real opcode)
+            {
+                "ins": (
+                    0,
+                    "f0010578563412",
+                    "lock add",
+                    "dword ptr [0x12345678], eax",
+                ),
+                "lower": 0x12000000,
+                "upper": 0x13000000,
+                "expected_bin": "f00105????????",
+                "bitness": 32,
+                "expected_opc": "f001??????????",
+            },
             # a full 64-bit immediate ("movabs reg, imm64") landing inside the mapped image's
             # address range must be fully escaped, not truncated to its first 8 hex digits and
             # left un-escaped (the previous regex/struct.pack("I", ...) could not match or pack

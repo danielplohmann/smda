@@ -25,6 +25,15 @@ class TestBitnessAnalyzer(unittest.TestCase):
         self.assertEqual(bitness, 64)
         self.assertEqual(finditer_calls, [(b"\xe8", bytes(binary))])
 
+    def test_call_occupying_exact_final_five_bytes_is_scored(self):
+        # the only scoring evidence is a 5-byte E8 rel32 occupying exactly the
+        # last 5 bytes, targeting a 64-bit-typical first byte (0x48)
+        binary = b"\x00\x48" + b"\x00" * 9 + b"\xe8" + struct.pack("<i", 1 - 16)
+
+        bitness = BitnessAnalyzer().determineBitness(binary)
+
+        self.assertEqual(bitness, 64)
+
 
 if __name__ == "__main__":
     unittest.main()
