@@ -60,6 +60,11 @@ class Disassembler:
         elif architecture == "dalvik":
             self.disassembler = DalvikDisassembler(self.config)
         else:
+            # Unsupported architecture: do not keep a stale backend from a previous
+            # analyze call on a reused instance, or it would silently disassemble
+            # foreign-ISA bytes and stamp the report with the wrong architecture.
+            self.disassembler = None
+            self._active_architecture = None
             return
         self._active_architecture = architecture
 
