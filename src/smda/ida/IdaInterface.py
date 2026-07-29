@@ -65,6 +65,22 @@ class IdaInterface:
     def __getattr__(self, name):
         return getattr(self.instance, name)
 
+    def close(self):
+        """Close the shared backend and drop the cached singleton.
+
+        ``instance`` is class-level, process-global state, so without clearing it a
+        backend closed through this facade stayed cached: every later attribute access
+        reached a closed database, and a fresh ``IdaInterface()`` handed back the same
+        dead object instead of opening a new one. Defined explicitly rather than reached
+        through ``__getattr__``, which would delegate to the backend and leave the cache
+        untouched.
+        """
+        instance = IdaInterface.instance
+        IdaInterface.instance = None
+        close = getattr(instance, "close", None)
+        if close is not None:
+            close()
+
     @classmethod
     def fromPath(cls, input_path, save_on_close=False):
         domain_interface = _getDomainInterface()

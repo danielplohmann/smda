@@ -76,8 +76,18 @@ class IdaExporter:
 
     def analyzeBuffer(self, binary_info, cb_analysis_timeout=None):
         """instead of performing a full analysis, simply collect all data from IDA and convert it into a report"""
+        # every other backend re-allocates here (common/RecursiveDisassembler.analyzeBuffer,
+        # cil/CilDisassembler, dalvik/DalvikDisassembler). Reusing the instance built in
+        # __init__ made a second analyzeBuffer/disassembleFile on the same exporter merge the
+        # previous database's functions, instructions, code_refs_*, addr_to_api, errors,
+        # recursive_functions and leaf_functions into the new report - and a
+        # Disassembler(backend="IDA") is pinned, so it is never rebuilt between runs.
+        self.disassembly = DisassemblyResult()
+        self.disassembly.smda_version = self.config.VERSION
+        self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
-        self.disassembly.binary_info = binary_info
+        # setBinaryInfo (not a bare assignment) so exported_functions and oep get populated
+        self.disassembly.setBinaryInfo(binary_info)
         self.disassembly.binary_info.architecture = self.ida_interface.getArchitecture()
         if not self.disassembly.binary_info.base_addr:
             self.disassembly.binary_info.base_addr = self.ida_interface.getBaseAddr()

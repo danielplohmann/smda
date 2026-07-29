@@ -71,8 +71,10 @@ class IdaExporterTimeoutTestSuite(unittest.TestCase):
         # it; a tripping callback must stop function collection and flag the report
         from smda.DisassemblyResult import DisassemblyResult
         from smda.ida.IdaExporter import IdaExporter
+        from smda.SmdaConfig import SmdaConfig
 
         exporter = IdaExporter.__new__(IdaExporter)  # no IDA environment available
+        exporter.config = SmdaConfig()  # analyzeBuffer re-allocates the DisassemblyResult
         exporter.bitness = 64
         exporter.architecture = "intel"
         exporter.capstone = None
