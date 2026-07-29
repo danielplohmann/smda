@@ -106,6 +106,21 @@ class TestRustDemangler(unittest.TestCase):
         with self.assertRaises(TypeNotFoundError):
             demangle("RNvC6_123foo3bar")
 
+    def test_v0_unnamed_closure_has_no_stray_colon(self):
+        # unnamed closures/shims must render as {closure#N}, not {closure:#N}
+        self.assertEqual(demangle("_RNCNvC8rustc_v01fs_0"), "rustc_v0::f::{closure#1}")
+
+    def test_v0_empty_const_hex_nibbles_raise_demangler_error(self):
+        # `Kh_` (u8 const with zero hex nibbles) previously escaped as a bare
+        # ValueError from int("", 16) instead of the demangler's own error type
+        with self.assertRaises(UnableTov0Demangle):
+            demangle("_RIC1aKh_E")
+
+    def test_v0_non_c_abi_fn_type_demangles(self):
+        # the skip-pass abi validation was inverted, rejecting every valid
+        # non-C abi (e.g. extern "system") fn-type symbol
+        self.assertEqual(demangle("_RIC1aFK6systemuEuE"), 'a::<extern "system"fn(())>')
+
     def test_legacy_strict_hash(self):
         """Test that hash segments are properly handled in legacy symbols."""
         # Strict hash checking: 17h + 16 hex digits

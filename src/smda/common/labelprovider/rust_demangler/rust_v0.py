@@ -423,7 +423,7 @@ class Parser:
                 c_abi = self.eat("C")
                 if not c_abi:
                     abi = self.ident()
-                    if abi.ascii or (not abi.punycode):
+                    if not abi.ascii or abi.punycode:
                         raise UnableTov0Demangle(self.inn)
             while not self.eat("E"):
                 self.skip_type()
@@ -606,7 +606,7 @@ class Printer:
                         self.out += "shim"
                     else:
                         self.out += ns
-                    if not name.ascii or (not name.punycode):
+                    if name.ascii or name.punycode:
                         self.out += ":"
                         name.display()
                         self.out += name.disp
@@ -806,6 +806,8 @@ class Printer:
 
     def print_const_uint(self):
         hex_val = self.parser_mut().hex_nibbles()
+        if not hex_val:
+            self.invalid()
 
         if len(hex_val) > 16:
             self.out += "0x"
