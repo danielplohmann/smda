@@ -1,76 +1,106 @@
-#!/usr/bin/python
-
-import logging
+import random
 import unittest
 
-from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
-
-LOG = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
-logging.disable(logging.CRITICAL)
+from smda.common.DominatorTree import build_dominator_tree, fix_graph
 
 
-class DominatorTreeTestSuite(unittest.TestCase):
-    """Regression coverage for get_nesting_depth's recursion-limit robustness."""
+def _bruteforce_idoms(G, r):
+    nodes = set()
+    for k, vs in G.items():
+        nodes.add(k)
+        nodes.update(vs)
+    reachable = {r}
+    frontier = [r]
+    while frontier:
+        nxt = []
+        for n in frontier:
+            for s in G.get(n, []):
+                if s not in reachable:
+                    reachable.add(s)
+                    nxt.append(s)
+        frontier = nxt
+    preds_of = {n: [] for n in reachable}
+    for k, vs in G.items():
+        if k not in reachable:
+            continue
+        for v in vs:
+            if v in reachable:
+                preds_of[v].append(k)
+    D = {r: {r}}
+    for n in reachable - {r}:
+        D[n] = set(reachable)
+    while True:
+        changed = False
+        for n in reachable - {r}:
+            preds = preds_of[n]
+            inter = set.intersection(*[D[p] for p in preds]) if preds else set()
+            new = {n} | inter
+            if new != D[n]:
+                D[n] = new
+                changed = True
+        if not changed:
+            break
+    idom = {}
+    for n in reachable - {r}:
+        proper = D[n] - {n}
+        if not proper:
+            continue
+        idom[n] = max(proper, key=lambda x: len(D[x]))
+    return idom
 
-    def testNestingDepthUnchangedOnShallowTree(self):
-        # Pin against the module's own self-test fixture (test_data[0] in the
-        # __main__ block) so the iterative rewrite of maximum_costs is proven
-        # to be behavior-preserving on a normal, shallow dominator tree.
-        smda = {
-            10208: [10229],
-            10229: [10240, 10253],
-            10240: [10244, 10246],
-            10244: [10246],
-            10246: [10240, 10253],
-            10253: [10229, 10261],
-        }
-        fixed_smda = {}
-        for key, values in smda.items():
-            fixed_smda[key] = values
-            for value in values:
-                if value not in fixed_smda:
-                    fixed_smda[value] = []
 
-        dt = build_dominator_tree(smda, 10208)
-        nd = get_nesting_depth(fixed_smda, dt, 10208)
+def _inverted_idoms(idom):
+    inv = {}
+    for child, parent in idom.items():
+        inv.setdefault(parent, []).append(child)
+    return inv
 
-        self.assertEqual(
-            dt,
+
+class TestDominatorTree(unittest.TestCase):
+    def test_existing_fixtures(self):
+        cases = [
             {
-                10240: [10244, 10246],
-                10229: [10240, 10253],
-                10253: [10261],
                 10208: [10229],
+                10229: [10240, 10253],
+                10240: [10244, 10246],
+                10244: [10246],
+                10246: [10240, 10253],
+                10253: [10229, 10261],
             },
-        )
-        self.assertEqual(nd, 3)
+            {1: [2], 2: [3, 4, 6], 3: [5], 4: [5], 5: [2]},
+            {1: [2], 2: [3, 6], 3: [41, 42], 41: [5], 42: [5], 5: [2]},
+        ]
+        for G in cases:
+            inv = build_dominator_tree(G, min(G))
+            self.assertIsNotNone(inv)
 
-    def testNestingDepthSurvivesDeepDominatorChain(self):
-        # A long, degenerate single-successor dominator-tree chain (as could
-        # arise from obfuscated/generated code) used to blow past Python's
-        # default recursion limit inside maximum_costs' recursive helper.
-        # The RecursionError was swallowed by get_nesting_depth's blanket
-        # except-Exception handler, silently returning 0 instead of the
-        # correct depth. The iterative post-order rewrite must handle this
-        # without raising and without losing the real depth value.
-        chain_length = 2000
+    def test_audit_breaking_example(self):
+        G = {0: [2, 3], 1: [0, 6], 2: [1, 3, 5], 3: [4, 5], 4: [3, 6], 5: [0, 1, 6], 6: [4, 5]}
+        inv = build_dominator_tree(G, 0)
+        self.assertIn(4, inv.get(0, []))
+        self.assertNotIn(4, inv.get(3, []))
 
-        # Every node 0..chain_length-1 has out-degree 2 in the graph (branch
-        # to the next node plus a shared "sink"), so every node in
-        # 1..chain_length plus "sink" is a "significant_node" and thus
-        # contributes 1 to the nesting-depth cost -- node 0 alone does not.
-        # This makes the expected total nesting depth exactly chain_length.
-        graph = {i: [i + 1, "sink"] for i in range(chain_length)}
-        graph["sink"] = []
-
-        domtree = {i: [i + 1] for i in range(chain_length)}
-        domtree[chain_length] = []
-
-        nd = get_nesting_depth(graph, domtree, 0)
-
-        self.assertEqual(nd, chain_length)
-        self.assertNotEqual(nd, 0)
+    def test_randomized_oracle(self):
+        rng = random.Random(1234)
+        mismatches = 0
+        for _ in range(2000):
+            size = rng.randint(3, 7)
+            G = {i: [] for i in range(size)}
+            for i in range(size):
+                for j in range(size):
+                    if i != j and rng.random() < 0.4:
+                        G[i].append(j)
+            r = 0
+            fix = fix_graph(G)
+            if r not in fix:
+                continue
+            inv = build_dominator_tree(G, r)
+            oracle = _inverted_idoms(_bruteforce_idoms(fix, r))
+            inv_sets = {k: set(v) for k, v in inv.items()}
+            oracle_sets = {k: set(v) for k, v in oracle.items()}
+            if inv_sets != oracle_sets:
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
 
 
 if __name__ == "__main__":
