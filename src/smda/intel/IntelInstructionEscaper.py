@@ -2041,7 +2041,7 @@ class IntelInstructionEscaper:
         "tr7",
     ]
 
-    _PREFIXES = {"26", "2e", "36", "3e", "64", "65", "66", "67", "f2", "f3"}
+    _PREFIXES = {"26", "2e", "36", "3e", "64", "65", "66", "67", "f0", "f2", "f3"}
 
     @staticmethod
     def escapeMnemonic(mnemonic):

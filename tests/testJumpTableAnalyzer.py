@@ -44,6 +44,19 @@ class JumpTableAnalyzerTestSuite(unittest.TestCase):
 
         self.assertEqual(result, set())
 
+    def test_findJumpTables_matches_displacement_containing_newline_byte(self):
+        # `lea r11, [rip + 0xa1234]; movsxd` — the displacement contains 0x0a,
+        # which a bytes regex without re.DOTALL never matches ('.' excludes \n),
+        # silently dropping the jump table from table_offsets.
+        binary = b"\x4c\x8d\x1d\x34\x12\x0a\x00\x48\x63\xc0"
+        analyzer = _makeAnalyzer(binary=binary, base_addr=0x1000)
+        analyzer.disassembly.getRawBytes = MagicMock(return_value=b"\x34\x12\x0a\x00")
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(return_value=True)
+
+        result = analyzer._findJumpTables()
+
+        self.assertEqual(result, {0x1000 + 0xA1234 + 7})
+
     def test_extractDirectTableOffsets_none_bytes_does_not_raise(self):
         analyzer = _makeAnalyzer()
         analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(return_value=True)

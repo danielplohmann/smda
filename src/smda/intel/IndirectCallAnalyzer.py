@@ -251,7 +251,7 @@ class IndirectCallAnalyzer:
                 else 50
             )
             if calls_per_block[start_block[0]] > max_calls:
-                break
+                continue
             LOGGER.debug(
                 "For this block, we can still analyze %d indirect calls.",
                 max_calls_per_block - calls_per_block[start_block[0]],
