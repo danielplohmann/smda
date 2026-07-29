@@ -156,7 +156,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         pclntab_buffer = binary[pclntab_offset:]
 
         # marker are defined here https://go.dev/src/debug/gosym/pclntab.go
-        marker = struct.unpack("I", pclntab_buffer[0:4])[0]
+        marker = struct.unpack("<I", pclntab_buffer[0:4])[0]
         if marker == 0xFFFFFFFB:
             version = "1.12"
         elif marker == 0xFFFFFFFA:
@@ -168,7 +168,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         else:
             raise ValueError(f"Could not recognize Golang version marker: 0x{marker:08X}")
 
-        bitness_indicator = struct.unpack("B", pclntab_buffer[7:8])[0]
+        bitness_indicator = struct.unpack("<B", pclntab_buffer[7:8])[0]
         bitness = None
         if bitness_indicator == 8:
             bitness = 64
@@ -180,18 +180,18 @@ class GoSymbolProvider(AbstractLabelProvider):
         field_size = 8 if bitness == 64 else 4
         field_indicator = "Q" if bitness == 64 else "I"
         if version == "1.12":
-            number_of_functions = struct.unpack("I", pclntab_buffer[8:12])[0]
+            number_of_functions = struct.unpack("<I", pclntab_buffer[8:12])[0]
             function_name_offset = pclntab_offset
             weird_table_offset = pclntab_offset + 16 if bitness == 64 else pclntab_offset + 12
             start_text = 0
         elif version == "1.16":
-            parsed_pclntab_fields = struct.unpack(7 * field_indicator, pclntab_buffer[8 : 8 + 7 * field_size])
+            parsed_pclntab_fields = struct.unpack("<" + 7 * field_indicator, pclntab_buffer[8 : 8 + 7 * field_size])
             number_of_functions = parsed_pclntab_fields[0]
             function_name_offset = pclntab_offset + parsed_pclntab_fields[2]
             weird_table_offset = pclntab_offset + parsed_pclntab_fields[6]
             start_text = 0
         elif version == "1.18" or version == "1.20":
-            parsed_pclntab_fields = struct.unpack(8 * field_indicator, pclntab_buffer[8 : 8 + 8 * field_size])
+            parsed_pclntab_fields = struct.unpack("<" + 8 * field_indicator, pclntab_buffer[8 : 8 + 8 * field_size])
             number_of_functions = parsed_pclntab_fields[0]
             start_text = parsed_pclntab_fields[2]
             function_name_offset = pclntab_offset + parsed_pclntab_fields[3]
@@ -206,25 +206,25 @@ class GoSymbolProvider(AbstractLabelProvider):
             # need to parse a second table in this case
             if version == "1.12":
                 offsets[index] = struct.unpack(
-                    field_indicator,
+                    "<" + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
                 )[0]
                 read_offset += field_size
                 func_info_offsets[index] = struct.unpack(
-                    field_indicator,
+                    "<" + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
                 )[0]
                 read_offset += field_size
             # advance element pointer
             if version == "1.16":
                 offsets[index] = struct.unpack(
-                    field_indicator,
+                    "<" + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
                 )[0]
                 read_offset += 2 * field_size
             # here we have a more compact structure for both x86/x64, no need to skip
             if version == "1.18" or version == "1.20":
-                offsets[index] = struct.unpack("I", table_buffer[read_offset : read_offset + 4])[0]
+                offsets[index] = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
                 read_offset += 8
 
         functions = {}
@@ -234,7 +234,7 @@ class GoSymbolProvider(AbstractLabelProvider):
             for index, info_offset in func_info_offsets.items():
                 function_offset = offsets[index]
                 name_offset = struct.unpack(
-                    field_indicator,
+                    "<" + field_indicator,
                     pclntab_buffer[info_offset + field_size : info_offset + 2 * field_size],
                 )[0]
                 # only take lower 32bit in case of 64bit binaries.
@@ -246,20 +246,21 @@ class GoSymbolProvider(AbstractLabelProvider):
             for offset, function_offset in offsets.items():
                 if delete:
                     offsets2.pop(offset)
-                bytes_read = struct.unpack("I", table_buffer[read_offset : read_offset + 4])[0]
-                read_offset += 4
+                    continue
                 try:
+                    bytes_read = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
+                    read_offset += 4
                     while bytes_read != function_offset:
-                        bytes_read = struct.unpack("I", table_buffer[read_offset : read_offset + 4])[0]
+                        bytes_read = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
                         read_offset += 4
-                except ValueError:
+                    if version == "1.16" and bitness == 64:
+                        read_offset += 4
+                    name_offset = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
+                    read_offset += 4
+                except struct.error:
                     delete = True
                     offsets2.pop(offset)
                     continue
-                if version == "1.16" and bitness == 64:
-                    read_offset += 4
-                name_offset = struct.unpack("I", table_buffer[read_offset : read_offset + 4])[0]
                 function_name = self._readUtf8(function_name_buffer[name_offset:])
-                read_offset += 4
                 functions[function_offset + start_text] = function_name
         return functions
