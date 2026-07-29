@@ -396,6 +396,25 @@ class TestMachoFileLoader(unittest.TestCase):
         self.assertEqual(len(mapped), 0x1000)
         self.assertNotIn(b"\x22", mapped)
 
+    def test_map_binary_zero_pads_truncated_segment_instead_of_raising(self):
+        # a truncated Mach-O (common for carved samples) used to abort the entire run with
+        # ValueError; ElfFileLoader warns and zero-pads the same condition
+        segment = SimpleNamespace(
+            virtual_address=0x1000,
+            virtual_size=0x100,
+            file_size=0x100,
+            file_offset=0,
+            content=b"\x66" * 0x40,  # short of the header-specified file_size
+            init_protection=0,
+        )
+        macho = _MappableSlice(sections=[], segments=[segment], imagebase=0x1000)
+
+        mapped = MachoFileLoader.mapBinary(b"", parsed=macho)
+
+        # base_addr == imagebase == 0x1000, so the segment maps at rva 0
+        self.assertEqual(mapped[0x00:0x40], b"\x66" * 0x40)
+        self.assertEqual(mapped[0x40:0x100], b"\x00" * 0xC0)
+
     def test_map_binary_zero_pads_short_section_content(self):
         # short content used to skip the section entirely; ELF zero-pads it instead
         sections = [
