@@ -373,9 +373,17 @@ class RecursiveDisassembler:
                     )
         state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis(as_gap)
-        if analysis_result and self.config.RESOLVE_REGISTER_CALLS:
-            self.indcall_analyzer.resolveRegisterCalls(state)
-            self.tailcall_analyzer.finalizeFunction(state)
+        if analysis_result:
+            if self.config.RESOLVE_REGISTER_CALLS:
+                self.indcall_analyzer.resolveRegisterCalls(state)
+            # finalizeFunction is the only place that flushes TailcallAnalyzer's per-function
+            # jumps into its cross-function state, and initFunction() clears them at the start
+            # of every function - so gating it on RESOLVE_REGISTER_CALLS made RESOLVE_TAILCALLS
+            # a silent no-op whenever register-call resolution was off (the third pass then
+            # iterated empty structures and recovered nothing). The two flags are documented as
+            # independent; the accumulated state has no consumer other than resolveTailcalls.
+            if self.config.RESOLVE_TAILCALLS:
+                self.tailcall_analyzer.finalizeFunction(state)
         self.fc_manager.updateAnalysisFinished(start_addr)
         self.fc_manager.updateCandidates(state)
         return state
