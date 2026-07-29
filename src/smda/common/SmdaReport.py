@@ -209,6 +209,25 @@ class SmdaReport:
     def getInstructionEscaper(self):
         return SmdaFunction.getInstructionEscaper(self.architecture)
 
+    def synthesizeBinary(
+        self, output_format=None, function_offsets=None, with_imports=True, with_strings=True
+    ) -> bytes:
+        """Experimental: rebuild a fictive unmapped binary file (PE/ELF/Mach-O) from this report.
+
+        Recovered function bytes are planted at their original virtual addresses, referenced
+        strings at their data addresses, and import metadata is fused into a loadable import
+        structure. ``output_format`` ("pe", "elf", "macho") defaults to sniffing the stored
+        xheader; it is required for headerless reports (e.g. shellcode buffers).
+        """
+        from smda.synthesis import createSynthesizer
+
+        if self.architecture in ("cil", "dalvik"):
+            raise NotImplementedError(f"binary synthesis is not supported for '{self.architecture}' reports")
+        synthesizer = createSynthesizer(self, output_format)
+        return synthesizer.synthesize(
+            function_offsets=function_offsets, with_imports=with_imports, with_strings=with_strings
+        )
+
     def getSection(self, offset):
         for section in self.code_sections:
             if section[1] <= offset < section[2]:
