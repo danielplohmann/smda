@@ -47,10 +47,12 @@ def _registerValue(reg_name, constants):
 def _isSpWriteback(op_str):
     """Whether op_str shows an sp-based pre/post-index writeback (mutates sp).
 
-    Capstone's python binding exposes no `.writeback` flag on this build, so this
-    matches its op_str syntax directly: pre-index ends the operand string with a
-    trailing `!` (e.g. "x29, x30, [sp, #-16]!"); post-index appends an immediate
-    after the closing bracket (e.g. "x29, x30, [sp], #16").
+    Matches capstone's op_str syntax directly: pre-index ends the operand string with a
+    trailing `!` (e.g. "x29, x30, [sp, #-16]!"); post-index appends an immediate after
+    the closing bracket (e.g. "x29, x30, [sp], #16"). The installed capstone does expose
+    an instruction-level `.writeback` flag, but it does not say *which* operand's base is
+    written back, so an sp-specific check still has to inspect the operands themselves;
+    this text form is kept because callers here only have an op_str to work from.
     """
     if "[sp" not in op_str:
         return False
