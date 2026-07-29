@@ -27,30 +27,30 @@ def _disassemble_intel_bytes(code):
 
 class TestCommonModels(unittest.TestCase):
     def test_lazy_int_key_dict_materializes_for_comparison_and_repr(self):
+        # LazyIntKeyDict converts eagerly on construction (see finding 1): the data
+        # is materialized into the real storage so JSON serialization sees it.
         expected = {1: "one", 2: "two"}
 
         lazy = LazyIntKeyDict({"1": "one", "2": "two"})
-        self.assertFalse(lazy._is_converted)
-        self.assertEqual(lazy, expected)
         self.assertTrue(lazy._is_converted)
+        self.assertEqual(lazy, expected)
 
         lazy = LazyIntKeyDict({"1": "one", "2": "two"})
         self.assertEqual(expected, lazy)
-        self.assertTrue(lazy._is_converted)
 
         left = LazyIntKeyDict({"1": "one", "2": "two"})
         right = LazyIntKeyDict({"1": "one", "2": "two"})
         self.assertEqual(left, right)
-        self.assertTrue(left._is_converted)
-        self.assertTrue(right._is_converted)
 
         lazy = LazyIntKeyDict({"1": "one", "2": "two"})
         self.assertFalse(lazy != expected)
-        self.assertTrue(lazy._is_converted)
 
         lazy = LazyIntKeyDict({"1": "one", "2": "two"})
         self.assertEqual(repr(lazy), "{1: 'one', 2: 'two'}")
-        self.assertTrue(lazy._is_converted)
+
+        # int-key access/pop works after eager conversion
+        lazy = LazyIntKeyDict({"16": "foo"})
+        self.assertEqual(lazy.pop(16, "MISSING"), "foo")
 
     def test_empty_basic_block_string_is_safe(self):
         self.assertEqual(str(SmdaBasicBlock([])), "0x????????: (   0)")
