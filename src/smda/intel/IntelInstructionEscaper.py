@@ -2250,16 +2250,23 @@ class IntelInstructionEscaper:
         addr_match = re.search(r"\[(rip (\+|\-) )?(?P<dword_offset>0x[a-fA-F0-9]+)\]", ins.operands)
         if addr_match:
             offset = int(addr_match.group("dword_offset"), 16)
-            if "rip -" in ins.operands:
-                offset = 0x100000000 - offset
-            pack_format = "<I"
+            disp_size = 4
             try:
                 if ins.getDetailed().disp_size == 8:
-                    pack_format = "<Q"
+                    disp_size = 8
             except (AttributeError, AssertionError, NotImplementedError, ValueError):
                 # ValueError: getDetailed() raises it when the stored bytes do not decode;
-                # fall back to the default 32-bit pack_format rather than crash here.
+                # fall back to the default 32-bit displacement rather than crash here.
                 pass
+            pack_format = "<Q" if disp_size == 8 else "<I"
+            if "rip -" in ins.operands:
+                # two's complement must use the displacement's own width; hardcoding
+                # 0x100000000 here would produce a value that cannot be packed with "<Q".
+                # Not currently reachable: x86-64 RIP-relative addressing is always
+                # ModRM mod=00/rm=101 with a disp32, while disp_size == 8 occurs only for
+                # moffs64 forms (movabs), whose operand string contains no "rip". Kept
+                # width-correct so the two branches cannot disagree if either changes.
+                offset = (1 << (disp_size * 8)) - offset
             try:
                 packed_hex = str(codecs.encode(struct.pack(pack_format, offset), "hex").decode("ascii"))
             except struct.error:
