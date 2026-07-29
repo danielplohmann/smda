@@ -46,7 +46,9 @@ class JumpTableAnalyzer:
             raw_offset_bytes = self.disassembly.getRawBytes(match_offset.start() + 3, 4)
             if len(raw_offset_bytes) < 4:
                 continue
-            rel_table_offset = struct.unpack("I", raw_offset_bytes)[0]
+            # the lea disp32 is signed; a backward-referencing lea (e.g. -0x1000) must
+            # unpack as a signed value or the table offset overflows and gets dropped.
+            rel_table_offset = struct.unpack("<i", raw_offset_bytes)[0]
             ins_offset = self.disassembly.binary_info.base_addr + match_offset.start()
             table_offset = ins_offset + rel_table_offset + 7
             if self.disassembly.isAddrWithinMemoryImage(table_offset):
@@ -129,12 +131,16 @@ class JumpTableAnalyzer:
                 raw_entry_bytes = self.disassembly.getRawBytes(rebased + index * 4, 4)
                 if len(raw_entry_bytes) < 4:
                     continue
-                entry = struct.unpack("I", raw_entry_bytes)[0]
+                # relative entries are target - table_base as int32 and are negative
+                # whenever the switch bodies precede the table; unpack signed so the
+                # real offset is recovered, then mask before the bounds check (line 140
+                # already masks when building the target).
+                entry = struct.unpack("<i", raw_entry_bytes)[0]
                 # check if we are hitting a known jump table
                 if index and (off_jumptable + index * 4) in self.table_offsets:
                     # print("  Hit limit for jump table: 0x%x" % (off_jumptable + index * 4))
                     break
-                if not self.disassembly.isAddrWithinMemoryImage(jump_base + entry):
+                if not self.disassembly.isAddrWithinMemoryImage((jump_base + entry) & self.disassembler.getBitMask()):
                     break
                 if entry:
                     target = (jump_base + entry) & self.disassembler.getBitMask()
