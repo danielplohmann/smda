@@ -6,6 +6,7 @@ import re
 from bisect import bisect_right
 
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
 from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
 from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
@@ -80,7 +81,11 @@ class RecursiveDisassembler:
 
     def _updateLabelProviders(self, binary_info):
         for provider in self.label_providers:
-            provider.update(binary_info)
+            try:
+                provider.update(binary_info)
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
+                LOGGER.error("Label provider %s failed to update: %r", provider.__class__.__name__, exc)
         self.active_api_providers = [p for p in self.api_providers if p.is_active()]
         self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
@@ -91,7 +96,11 @@ class RecursiveDisassembler:
             pdb_info.file_path = pdb_path
             pdb_info.base_addr = binary_info.base_addr
             for provider in self.label_providers:
-                provider.update(pdb_info)
+                try:
+                    provider.update(pdb_info)
+                except Exception as exc:
+                    reraise_non_operational_exception(exc)
+                    LOGGER.error("Label provider %s failed to update: %r", provider.__class__.__name__, exc)
             self.active_api_providers = [p for p in self.api_providers if p.is_active()]
             self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
