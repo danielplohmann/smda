@@ -7,6 +7,7 @@ import lief
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.utility.lief_helper import safe_lief_parse
 from smda.utility.MachoFileLoader import MachoFileLoader
 
 LOGGER = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class BinaryInfo:
             if MachoFileLoader.isCompatible(binary_data):
                 self._lief_binary = MachoFileLoader.parseBinary(binary_data)
             else:
-                self._lief_binary = lief.parse(binary_data)
+                self._lief_binary = safe_lief_parse(binary_data)
         return self._lief_binary
 
     def getOep(self):

@@ -7,6 +7,7 @@ import lief
 
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import mergeCodeAreas
+from smda.utility.lief_helper import safe_lief_parse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -159,11 +160,11 @@ class ElfFileLoader:
     def parseBinary(binary):
         # Single lief.parse entry point so FileLoader can share one parse
         # across all accessors instead of each accessor re-parsing.
-        return lief.parse(binary)
+        return safe_lief_parse(binary)
 
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not elffile:
             return 0
         return _calculate_base_address(elffile)
@@ -252,7 +253,7 @@ class ElfFileLoader:
         map the ELF file sections and segments into a contiguous bytearray
         as if into virtual memory with the given base address.
         """
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         if not elffile:
             return b""
         base_addr = ElfFileLoader.getBaseAddress(binary, parsed=elffile)
@@ -309,7 +310,7 @@ class ElfFileLoader:
     def getAbi(binary, parsed=_NOT_PROVIDED):
         abi = ""
         try:
-            elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+            elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
             if elffile:
                 abi = elffile.header.identity_os_abi.name
         except lief.bad_file as exc:
@@ -318,17 +319,17 @@ class ElfFileLoader:
 
     @staticmethod
     def getArchitecture(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         return _resolve_elf_machine(elffile)[0]
 
     @staticmethod
     def getBitness(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         return _resolve_elf_machine(elffile)[1]
 
     @staticmethod
     def getHasBackend(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         return _resolve_elf_machine(elffile)[2]
 
     @staticmethod
@@ -337,7 +338,7 @@ class ElfFileLoader:
 
     @staticmethod
     def getCodeAreas(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         if elffile is None:
             return []
         code_areas = []
@@ -371,7 +372,7 @@ class ElfFileLoader:
 
     @staticmethod
     def getPltRanges(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         if elffile is None:
             return []
 
@@ -384,7 +385,7 @@ class ElfFileLoader:
 
     @staticmethod
     def getGotBases(binary, parsed=_NOT_PROVIDED):
-        elffile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         if elffile is None:
             return []
 

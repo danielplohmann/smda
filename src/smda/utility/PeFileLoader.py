@@ -5,6 +5,7 @@ import lief
 
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import mergeCodeAreas
+from smda.utility.lief_helper import safe_lief_parse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class PeFileLoader:
     def parseBinary(binary):
         # Single lief.parse entry point so FileLoader can share one parse
         # across all accessors instead of each accessor re-parsing.
-        return lief.parse(binary)
+        return safe_lief_parse(binary)
 
     @staticmethod
     def mapBinary(binary, parsed=_NOT_PROVIDED):
@@ -166,7 +167,7 @@ class PeFileLoader:
     @staticmethod
     def getArchitecture(binary, parsed=_NOT_PROVIDED):
         architecture = PeFileLoader.ARCHITECTURE_MAP.get(PeFileLoader.getMachineType(binary), "")
-        pefile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        pefile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         if pefile:
             for d in pefile.data_directories:
                 if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER and d.size > 0:
@@ -183,7 +184,7 @@ class PeFileLoader:
 
     @staticmethod
     def getCodeAreas(binary, parsed=_NOT_PROVIDED):
-        pefile = lief.parse(binary) if parsed is _NOT_PROVIDED else parsed
+        pefile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
         code_areas = []
         base_address = PeFileLoader.getBaseAddress(binary)
         if pefile and pefile.sections:

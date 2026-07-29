@@ -7,6 +7,7 @@ from collections import OrderedDict
 import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.utility.lief_helper import safe_lief_parse
 from smda.utility.MachoBinary import get_active_macho_binary
 
 from .AbstractLabelProvider import AbstractLabelProvider
@@ -57,7 +58,7 @@ class GoSymbolProvider(AbstractLabelProvider):
             if binary_info is not None:
                 lief_binary = binary_info.getLiefBinary()
             if lief_binary is None:
-                lief_binary = lief.parse(binary_bytes)
+                lief_binary = safe_lief_parse(binary_bytes)
             if lief_binary is not None:
                 if isinstance(lief_binary, lief.ELF.Binary):
                     section = lief_binary.get_section(".gopclntab")
