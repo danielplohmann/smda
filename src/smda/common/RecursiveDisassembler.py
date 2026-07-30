@@ -619,7 +619,7 @@ class RecursiveDisassembler:
             if self._isApiJumpThunk(instructions):
                 self.disassembly.thunk_functions.add(segment_start)
 
-            candidate = (self.fc_manager.candidates if self.fc_manager else {}).get(segment_start)
+            candidate = self.fc_manager.candidates.get(segment_start)
             if candidate is not None:
                 candidate.analysis_aborted = False
                 candidate.abortion_reason = ""
