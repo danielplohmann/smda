@@ -117,8 +117,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return None
         if self.gap_pointer is None:
             self.initGapSearch()
+        # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
+        # real argument, not "unset", so a truthiness check would wrongly drop it.
         if start_gap_pointer is not None:
-            self.gap_pointer = start_gap_pointer or 0
+            self.gap_pointer = start_gap_pointer
+        if self.gap_pointer is None:
+            return None
         LOGGER.debug(
             "nextGapCandidate() finding new gap candidate, current gap_ptr: 0x%08x",
             self.gap_pointer,
@@ -159,7 +163,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     run,
                     self.gap_pointer,
                 )
-                self.gap_pointer = (self.gap_pointer or 0) + (run if run else 1)
+                self.gap_pointer += run if run else 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
             ins_buf = list(self.capstone.disasm_lite(get_window_slice(gap_offset, 15), gap_offset))
@@ -174,7 +178,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                         nop_length,
                         self.gap_pointer,
                     )
-                    self.gap_pointer = (self.gap_pointer or 0) + nop_length
+                    self.gap_pointer += nop_length
                     continue
             # try to find effective NOPs and skip them.
             found_multi_byte_nop = False
@@ -191,7 +195,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                         gap_length,
                         self.gap_pointer,
                     )
-                    self.gap_pointer = (self.gap_pointer or 0) + gap_length
+                    self.gap_pointer += gap_length
                     found_multi_byte_nop = True
                     break
             if found_multi_byte_nop:
@@ -202,7 +206,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     "nextGapCandidate() gap_ptr is already inside data map: 0x%08x",
                     self.gap_pointer,
                 )
-                self.gap_pointer = (self.gap_pointer or 0) + 1
+                self.gap_pointer += 1
                 continue
             if self.gap_pointer in self.disassembly.code_map:
                 LOGGER.debug(

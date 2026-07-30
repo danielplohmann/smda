@@ -74,7 +74,7 @@ class FunctionCandidateManager:
         return True
 
     def getBitMask(self):
-        if self.bitness is not None and self.bitness == 64:
+        if self.bitness == 64:
             return 0xFFFFFFFFFFFFFFFF
         return 0xFFFFFFFF
 

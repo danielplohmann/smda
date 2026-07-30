@@ -58,7 +58,7 @@ class DisassemblyResult:
     def _normalize_export_addresses(exported, base_addr):
         if not exported:
             return set()
-        addresses = {int(a) for a in (exported.keys() if isinstance(exported, dict) else exported)}
+        addresses: set = set(exported.keys()) if isinstance(exported, dict) else set(exported)
         if not addresses or not base_addr:
             return addresses
         if max(addresses) >= base_addr:

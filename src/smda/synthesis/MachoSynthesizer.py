@@ -1,4 +1,5 @@
 import struct
+from typing import Any, Dict, List
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
@@ -253,16 +254,15 @@ class MachoSynthesizer(BinarySynthesizer):
     def _buildSegmentsHeuristic(self, sections):
         """Groups sections into same-class VA runs; sections sharing a page with a
         different class are merged into one segment with unioned permissions."""
-        segments = []
+        segments: List[Dict[str, Any]] = []
         for section in sections:
-            perms: int = VM_PROT_READ | (VM_PROT_EXECUTE if section["segment"] == "__TEXT" else VM_PROT_WRITE)
+            perms = VM_PROT_READ | (VM_PROT_EXECUTE if section["segment"] == "__TEXT" else VM_PROT_WRITE)
             if segments and (
                 segments[-1]["segment"] == section["segment"] or section["va_start"] < segments[-1]["page_end"]
             ):
                 segment = segments[-1]
                 segment["sections"].append(section)
-                prev_perms = segment.get("perms", 0)
-                segment["perms"] = (prev_perms if isinstance(prev_perms, int) else 0) | perms
+                segment["perms"] |= perms
                 segment["va_end"] = max(segment["va_end"], section["va_end"])
                 segment["page_end"] = align_up(segment["va_end"], PAGE_SIZE)
             else:

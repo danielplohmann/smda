@@ -170,6 +170,11 @@ rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
 include = ["src/smda/cil/CilDisassembler.py"]
 rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
 
+# LIEF's type stubs declare PE Section.name as bytes; the runtime returns str.
+[[tool.ty.overrides]]
+include = ["src/smda/synthesis/PeSynthesizer.py"]
+rules = { "invalid-argument-type" = "ignore" }
+
 # The pdbparse dependency is optional; suppress unresolved-import for it
 [[tool.ty.overrides]]
 include = ["src/smda/common/labelprovider/PdbSymbolProvider.py"]

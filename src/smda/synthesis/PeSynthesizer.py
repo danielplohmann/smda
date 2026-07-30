@@ -274,9 +274,7 @@ class PeSynthesizer(BinarySynthesizer):
                 raw = bytearray(raw_size)
             regions.append(
                 {
-                    "name": section.name.rstrip(b"\x00").decode("ascii", errors="replace")
-                    if isinstance(section.name, bytes)
-                    else section.name.rstrip("\x00"),
+                    "name": section.name.rstrip("\x00"),
                     "vaddr": section.virtual_address,
                     "vsize": section.virtual_size,
                     "chars": int(section.characteristics),
