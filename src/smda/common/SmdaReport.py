@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import zipfile
-from typing import Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
 
@@ -30,7 +30,8 @@ class SmdaReport:
     block_locator = None
     buffer = None
     code_areas = None
-    code_sections = []
+    # immutable-by-convention sentinel: __init__ always rebinds this to a fresh list
+    code_sections: List[Any] = []
     component = None
     confidence_threshold = None
     disassembly_errors = None
@@ -52,7 +53,8 @@ class SmdaReport:
     status = None
     timestamp = None
     version = None
-    xcfg = {}
+    # likewise a sentinel only; every construction path assigns a fresh dict below
+    xcfg: Dict[int, "SmdaFunction"] = {}
     xheader = None
     pe_header_hash = None
     data_refs_from = None
@@ -77,6 +79,8 @@ class SmdaReport:
         # likewise keep xmetadata serializable on reports without a disassembly
         # (it has no class-level default), so toDict()/toFile() never raise.
         self.xmetadata = {}
+        # never leave this pointing at the shared class-level sentinel
+        self.code_sections = []
         if disassembly is not None:
             self.architecture = disassembly.binary_info.architecture
             self.abi = disassembly.binary_info.abi
@@ -234,7 +238,8 @@ class SmdaReport:
                 return section
 
     def isAddrWithinMemoryImage(self, offset):
-        return self.base_addr <= offset < (self.base_addr or 0) + (self.binary_size or 0)
+        base_addr = self.base_addr or 0
+        return base_addr <= offset < base_addr + (self.binary_size or 0)
 
     def initCodeXrefs(self):
         if not self._has_codexrefs:

@@ -4,7 +4,7 @@ import hashlib
 import logging
 import re
 import struct
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
 from smda.aarch64.definitions import CALL_INS as AARCH64_CALL_INS
@@ -141,20 +141,25 @@ class LazyIntKeyDict(dict):
 
 class SmdaFunction:
     smda_report = None
-    offset = None
-    blocks = {}
-    _sorted_block_keys = []
-    apirefs = {}
-    stringrefs = {}
-    blockrefs = {}
+    offset: Optional[int] = None
+    # Class-level defaults are immutable sentinels only; every real instance rebinds
+    # these to fresh containers in __init__ (a mutable class default would be shared
+    # by every SmdaFunction). They stay declared here because tests build instances
+    # via __new__, bypassing __init__.
+    blocks: Dict[int, List[Any]] = {}
+    _sorted_block_keys: List[int] = []
+    apirefs: Dict[int, Any] = {}
+    stringrefs: Dict[int, Any] = {}
+    blockrefs: Dict[int, Any] = {}
     _blockrefs_reverse = None
     _normalized_blockrefs = None
-    inrefs = []
-    outrefs = {}
+    inrefs: List[int] = []
+    outrefs: Dict[int, Any] = {}
     code_inrefs = None
     code_outrefs = None
     is_exported = False
-    architecture_metadata = {}
+    architecture_metadata: Dict[str, Any] = {}
+    # metadata
     binweight = 0
     characteristics: Optional[str] = ""
     confidence: Optional[float] = 0.0
@@ -171,11 +176,19 @@ class SmdaFunction:
         self._normalized_blockrefs = None
         self._exception_blockrefs = None
         self._basic_blocks = None
+        # fresh per-instance containers, never the shared class-level defaults
+        self.blocks = {}
+        self._sorted_block_keys = []
+        self.apirefs = {}
+        self.stringrefs = {}
+        self.blockrefs = {}
+        self.inrefs = []
+        self.outrefs = {}
+        self.architecture_metadata = {}
         if disassembly is not None and function_offset is not None:
             binary_info = disassembly.binary_info
-            if binary_info is None:
-                return
-            self._escaper = self.getInstructionEscaper(binary_info.architecture)
+            architecture = binary_info.architecture if binary_info is not None else None
+            self._escaper = self.getInstructionEscaper(architecture)
             self.offset = function_offset
             self._parseBlocks(disassembly.getBlocksAsDict(function_offset))
             self.apirefs = disassembly.getApiRefs(function_offset)
@@ -201,16 +214,17 @@ class SmdaFunction:
                 if function_offset in disassembly.candidates
                 else None
             )
-            is_dalvik_with_strings = binary_info.architecture == "dalvik" and disassembly.getStringRefsForFunction(
-                function_offset
-            )
+            # DEX strings are part of the parsed file structure, so they're always
+            # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
+            # cost. For other architectures, honor WITH_STRINGS as usual.
+            is_dalvik_with_strings = architecture == "dalvik" and disassembly.getStringRefsForFunction(function_offset)
             if (config and config.WITH_STRINGS) or is_dalvik_with_strings:
                 self.stringrefs = (
                     self._normalizeDalvikStringRefs(disassembly.getStringRefsForFunction(function_offset))
-                    if binary_info.architecture == "dalvik"
+                    if architecture == "dalvik"
                     else disassembly.getStringRefsForFunction(function_offset)
                 )
-            if config and config.CALCULATE_HASHING:
+            if config and config.CALCULATE_HASHING and binary_info is not None:
                 self.pic_hash = self.getPicHash(binary_info)
             if config and config.CALCULATE_SCC:
                 self.strongly_connected_components = self._calculateSccs()
@@ -446,20 +460,21 @@ class SmdaFunction:
         self._basic_blocks = None
 
     @staticmethod
-    def _normalizeDalvikStringRefs(stringrefs):
+    def _normalizeDalvikStringRefs(stringrefs: Any):
         if not stringrefs:
             return []
         if isinstance(stringrefs, list):
             return stringrefs
         if isinstance(stringrefs, dict):
+            items: List[Any] = sorted(stringrefs.items())
             return [
                 {
                     "string": string_value,
-                    "ins_addr": int(str(referencing_addr)),
+                    "ins_addr": int(referencing_addr),
                     "data_addr": None,
                     "type": "dex",
                 }
-                for referencing_addr, string_value in sorted(stringrefs.items())
+                for referencing_addr, string_value in items
             ]
         return stringrefs
 
@@ -503,7 +518,7 @@ class SmdaFunction:
 
         # 1. Preprocess active try ranges and prepare all normalized targets
         try_ranges = self.architecture_metadata.get("try_ranges", []) if self.architecture_metadata else []
-        active_try_ranges = []
+        active_try_ranges: List[Dict[str, Any]] = []
         for try_range in try_ranges:
             raw_targets = []
             for handler in try_range.get("handlers", []):
@@ -532,14 +547,7 @@ class SmdaFunction:
             if block:
                 block_end = (block[-1].offset or 0) + (len(block[-1].bytes or "") // 2)
                 for r in active_try_ranges:
-                    r_start = r.get("start", 0)
-                    r_end = r.get("end", 0)
-                    if (
-                        isinstance(r_start, int)
-                        and isinstance(r_end, int)
-                        and r_start < block_end
-                        and block_start < r_end
-                    ):
+                    if r["start"] < block_end and block_start < r["end"]:
                         successors.update(r["targets"])
             normalized_blockrefs[block_start] = sorted(successors)
 

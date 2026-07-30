@@ -123,10 +123,10 @@ class BinaryInfo:
                 if self.base_addr and entrypoint >= self.base_addr:
                     entrypoint -= self.base_addr
                 self.oep = entrypoint
-            if lief_type == "MACH_O":
+            elif lief_type == "MACH_O":
                 symbol_provider = self._symbol_provider
                 if symbol_provider is None:
-                    return None
+                    return self.oep
                 macho_binary = symbol_provider._get_macho_binary(lief_result)
                 if macho_binary and hasattr(macho_binary, "entrypoint"):
                     adjustment = symbol_provider._get_address_adjustment(macho_binary)
@@ -137,12 +137,12 @@ class BinaryInfo:
         if self.exported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type == "OTHER":
-                return None
             symbol_provider = self._symbol_provider
-            if isinstance(symbol_provider, PeSymbolProvider):
+            if symbol_provider is None:
+                return self.exported_functions
+            if lief_type == "PE" and isinstance(symbol_provider, PeSymbolProvider):
                 self.exported_functions = symbol_provider.parseExports(lief_result, self.base_addr)
-            else:
+            elif lief_type in ("ELF", "MACH_O"):
                 self.exported_functions = symbol_provider.parseExports(lief_result)
         return self.exported_functions
 
@@ -150,12 +150,13 @@ class BinaryInfo:
         if self.exported_symbols is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type == "OTHER":
-                return None
             symbol_provider = self._symbol_provider
-            if isinstance(symbol_provider, ElfSymbolProvider) and symbol_provider is not None:
+            if lief_type == "ELF" and isinstance(symbol_provider, ElfSymbolProvider):
                 self.exported_symbols = symbol_provider.parseExportedSymbols(lief_result)
             else:
+                # PE and Mach-O providers currently expose function exports only;
+                # retain that established contract while ELF additionally records
+                # its dynamic data exports.
                 self.exported_symbols = dict(self.getExportedFunctions() or {})
         return self.exported_symbols
 
@@ -163,12 +164,12 @@ class BinaryInfo:
         if self.imported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type == "OTHER":
-                return None
             symbol_provider = self._symbol_provider
-            if isinstance(symbol_provider, PeSymbolProvider):
+            if symbol_provider is None:
+                return self.imported_functions
+            if lief_type == "PE" and isinstance(symbol_provider, PeSymbolProvider):
                 self.imported_functions = symbol_provider.parseImports(lief_result, self.base_addr)
-            else:
+            elif lief_type in ("ELF", "MACH_O"):
                 self.imported_functions = symbol_provider.parseImports(lief_result)
         return self.imported_functions
 
@@ -176,14 +177,12 @@ class BinaryInfo:
         if self.symbols is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
-            if lief_type == "OTHER":
-                return None
             symbol_provider = self._symbol_provider
-            if isinstance(symbol_provider, PeSymbolProvider):
+            if lief_type == "PE" and isinstance(symbol_provider, PeSymbolProvider):
                 self.symbols = symbol_provider.collectSymbols(lief_result, self.base_addr)
-            elif isinstance(symbol_provider, ElfSymbolProvider):
+            elif lief_type == "ELF" and isinstance(symbol_provider, ElfSymbolProvider):
                 self.symbols = symbol_provider.collectSymbols(lief_result)
-            elif isinstance(symbol_provider, MachoSymbolProvider):
+            elif lief_type == "MACH_O" and isinstance(symbol_provider, MachoSymbolProvider):
                 symbols = symbol_provider.collectSymbols(lief_result)
                 self.symbols = symbol_provider._filter_symbols_to_code(symbols, self)
         return self.symbols
