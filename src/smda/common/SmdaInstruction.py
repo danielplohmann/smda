@@ -58,15 +58,18 @@ class SmdaInstruction:
             detailed = self.getDetailed()
             if len(detailed.operands) > 0:
                 for i in detailed.operands:
-                    value = 0
                     if i.type == X86_OP_IMM:
                         value = i.imm
-                    if i.type == X86_OP_MEM:
+                    elif i.type == X86_OP_MEM:
                         value = i.mem.disp
                         if detailed.reg_name(i.mem.base) == "rip":
                             # add RIP value
                             value += detailed.address + detailed.size
-                    if value is not None and value not in emitted and smda_report.isAddrWithinMemoryImage(value):
+                    else:
+                        # register/other operand kinds carry no address to dereference;
+                        # a 0 placeholder would be a valid in-image address on a base-0 dump
+                        continue
+                    if value not in emitted and smda_report.isAddrWithinMemoryImage(value):
                         emitted.add(value)
                         data_refs.append(value)
         elif (
@@ -104,12 +107,12 @@ class SmdaInstruction:
         yield from self._data_refs
 
     def getDetailed(self):
+        if self.smda_function is None or self.smda_function.smda_report is None:
+            raise ValueError("SmdaFunction or SmdaReport not set on instruction")
         arch = self.smda_function.smda_report.architecture
         if arch is not None and arch not in {"intel", "aarch64"}:
             raise NotImplementedError(f"getDetailed() is only available for Intel and AArch64, not '{arch}'")
         if self.detailed is None:
-            if self.smda_function is None or self.smda_function.smda_report is None:
-                raise ValueError("SmdaFunction or SmdaReport not set on instruction")
             capstone = self.smda_function.smda_report.getCapstone()
             with_details = list(capstone.disasm(bytes.fromhex(self.bytes or ""), self.offset))
             if not with_details:

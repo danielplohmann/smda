@@ -83,11 +83,16 @@ class RecursiveDescentParser:
         return char
 
     def _parse_namespace_component(self) -> str:
+        """
+        Parses a single namespace component (identifier).
+        Valid characters: letters, digits, underscores, parentheses.
+        """
         result = []
         while True:
             char = self._peek()
             if char is None:
                 break
+            # Valid namespace characters: alphanumeric, underscore, parentheses
             if char.isalnum() or char in "_()":
                 result.append(self._consume())
             else:
@@ -307,8 +312,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
     def _read_byte(self, offset: int) -> Optional[int]:
         """Read a byte at the given offset."""
         if 0 <= offset < len(self._binary):
-            return None
-        return self._binary[offset]
+            return self._binary[offset]
+        return None
 
     def _read_short(self, offset: int) -> Optional[int]:
         """Read a 16-bit value at the given offset."""
