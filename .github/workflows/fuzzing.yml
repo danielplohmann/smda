@@ -82,6 +82,12 @@ jobs:
           python -m pip install -e .
           python -m pip install "atheris==${ATHERIS_VERSION}"
 
+      - name: Record dependency versions
+        # `pip install -e .` resolves the newest allowed capstone/lief, which can
+        # differ from a developer's pinned environment; a finding must be
+        # attributable to the versions that produced it.
+        run: python -c "import capstone, lief; print('capstone', capstone.__version__); print('lief', lief.__version__)"
+
       - name: Restore accumulated corpus
         id: corpus-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
