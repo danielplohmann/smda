@@ -16,6 +16,8 @@ works anywhere without atheris.
 | `generate_seeds.py` | builds a per-target seed corpus from the test fixtures |
 | `smda.dict` | libFuzzer dictionary of magics, section names, report keys |
 | `replay.py` | runs a target over files on disk, no atheris needed |
+| `minimize.py` | delta-debugs a crashing input to a small reproducer |
+| `prune_corpus.py` | bounds the cached corpus by file count and total size |
 
 ## Targets
 
@@ -51,8 +53,19 @@ Download the `fuzz-artifacts-<target>` artifact from the failed run, then:
 python fuzzing/replay.py <target> artifacts/crash-*
 ```
 
-Once confirmed, minimize it and pin it as a regression test — see
-`tests/fuzz_regressions/README.md`.
+Once confirmed, minimize it and pin it as a regression test:
+
+```
+python fuzzing/minimize.py <target> artifacts/crash-<hash>
+```
+
+See `tests/fuzz_regressions/README.md` for how to commit the reproducer.
+
+Note that libFuzzer's own `-merge=1` and `-minimize_crash=1` are unusable under
+atheris: both re-execute `argv[0]` to run their inner passes, which here is the
+bare Python interpreter without the harness script, so they process nothing and
+report zero results. `minimize.py` and `prune_corpus.py` replace them and work
+on every platform.
 
 ## Running locally (Linux x86_64 only)
 

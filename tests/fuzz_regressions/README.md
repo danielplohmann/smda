@@ -10,8 +10,8 @@ Rules:
 - Name it `<target>_<short-slug>_xored`, where `<target>` is one of the keys in
   `fuzzing/targets.py` (`loaders`, `formats`, `disassembler`, `buffer`,
   `report`) — `tests/testFuzzRegressions.py` dispatches on that prefix.
-- Keep it minimized (`-minimize_crash=1`) and small; these run on every test
-  invocation.
+- Keep it minimized (`python fuzzing/minimize.py <target> <artifact>`) and small;
+  these run on every test invocation.
 
 To reproduce one locally, no atheris required:
 

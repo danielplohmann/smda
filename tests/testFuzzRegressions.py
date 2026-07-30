@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,8 @@ logging.disable(logging.CRITICAL)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "fuzzing"))
 
+from minimize import failure_type, shrink  # noqa: E402
+from prune_corpus import prune  # noqa: E402
 from targets import TARGETS  # noqa: E402
 
 REGRESSION_DIR = Path(__file__).resolve().parent / "fuzz_regressions"
@@ -95,6 +98,44 @@ class SmdaFuzzTargetSmokeTest(unittest.TestCase):
         workflow = (REPO_ROOT / ".github" / "workflows" / "fuzzing.yml").read_text()
         for target_name in TARGETS:
             self.assertIn(f"fuzz_{target_name}", workflow, f"target {target_name} is not fuzzed in CI")
+
+
+class SmdaFuzzToolingTest(unittest.TestCase):
+    """The atheris-free crash-handling tooling, which only ever runs on a finding."""
+
+    def test_shrink_reduces_to_the_failing_core(self):
+        def predicate(candidate):
+            return b"\xde\xad" in candidate
+
+        payload = bytes(64) + b"\xde\xad" + bytes(64)
+        self.assertEqual(shrink(payload, predicate), b"\xde\xad")
+
+    def test_shrink_keeps_input_when_nothing_can_be_removed(self):
+        self.assertEqual(shrink(b"\xde\xad", lambda candidate: b"\xde\xad" in candidate), b"\xde\xad")
+
+    def test_failure_type_classifies_by_exception_type(self):
+        def raiser(_data):
+            raise ValueError("boom")
+
+        self.assertIs(failure_type(raiser, b""), ValueError)
+        self.assertIsNone(failure_type(lambda _data: None, b""))
+
+    def test_prune_caps_file_count_keeping_smallest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp)
+            for size in (10, 20, 30, 40):
+                (corpus / f"input_{size}").write_bytes(bytes(size))
+            kept, kept_bytes, removed = prune(corpus, max_files=2, max_bytes=10**6)
+            self.assertEqual((kept, kept_bytes, removed), (2, 30, 2))
+            self.assertEqual(sorted(path.name for path in corpus.iterdir()), ["input_10", "input_20"])
+
+    def test_prune_caps_total_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp)
+            for size in (10, 20, 30):
+                (corpus / f"input_{size}").write_bytes(bytes(size))
+            kept, kept_bytes, removed = prune(corpus, max_files=100, max_bytes=35)
+            self.assertEqual((kept, kept_bytes, removed), (2, 30, 1))
 
 
 class SmdaFuzzRegressionTest(unittest.TestCase):
