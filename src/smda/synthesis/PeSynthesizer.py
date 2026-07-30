@@ -4,6 +4,7 @@ import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
+from smda.utility.lief_helper import safe_lief_parse
 
 IMAGE_SCN_CNT_CODE = 0x00000020
 IMAGE_SCN_CNT_INITIALIZED_DATA = 0x00000040
@@ -251,7 +252,7 @@ class PeSynthesizer(BinarySynthesizer):
 
     def _synthesizeFromHeader(self, offsets, with_imports, with_strings):
         base = self.report.base_addr
-        pe_src = lief.parse(bytes(self.report.xheader))
+        pe_src = safe_lief_parse(bytes(self.report.xheader))
         if not isinstance(pe_src, lief.PE.Binary):
             raise ValueError("xheader does not parse as PE")
         optional = pe_src.optional_header

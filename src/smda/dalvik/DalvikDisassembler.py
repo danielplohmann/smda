@@ -16,6 +16,7 @@ from smda.dalvik.DalvikOpcodeDecoder import (
 )
 from smda.DisassemblyResult import DisassemblyResult
 from smda.utility.DexFileLoader import DexFileLoader
+from smda.utility.lief_helper import safe_lief_parse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1545,7 +1546,7 @@ class DalvikDisassembler:
         dex_file = None
         if getattr(binary_info, "file_path", "") and not getattr(binary_info, "is_buffer", False):
             with contextlib.suppress(Exception):
-                dex_file = lief.DEX.parse(binary_info.file_path)
+                dex_file = safe_lief_parse(binary_info.file_path, parser=lief.DEX.parse)
         if dex_file is None:
             # Prefer bytes/memoryview: list(raw_data) allocates a PyLong per byte
             # (~30x memory blowup on large DEX). Older LIEF builds only accept
@@ -1554,11 +1555,11 @@ class DalvikDisassembler:
             if not isinstance(raw_data, (bytes, bytearray)):
                 raw_data = bytes(raw_data)
             try:
-                dex_file = lief.DEX.parse(raw_data)
+                dex_file = safe_lief_parse(raw_data, parser=lief.DEX.parse)
             except TypeError:
                 dex_file = None
             if dex_file is None:
-                dex_file = lief.DEX.parse(list(raw_data))
+                dex_file = safe_lief_parse(list(raw_data), parser=lief.DEX.parse)
         if dex_file is None:
             raise ValueError("Failed to parse DEX file")
 
