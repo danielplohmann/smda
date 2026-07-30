@@ -1,0 +1,79 @@
+# libFuzzer dictionary for the SMDA binary-format targets. Mutation almost never
+# invents a valid magic or section name on its own, so the deeper parsing paths
+# are unreachable without these tokens.
+
+# Container magics
+pe_mz="MZ"
+pe_signature="PE\x00\x00"
+elf_magic="\x7fELF"
+macho_magic_64="\xcf\xfa\xed\xfe"
+macho_magic_32="\xce\xfa\xed\xfe"
+macho_cigam_64="\xfe\xed\xfa\xcf"
+macho_fat="\xca\xfe\xba\xbe"
+dex_magic="dex\n035\x00"
+dex_magic_038="dex\n038\x00"
+delphi_kb="\x14\x00\x00\x00Delphi"
+
+# PE optional-header magics and machine types
+pe_opt_pe32="\x0b\x01"
+pe_opt_pe32plus="\x0b\x02"
+machine_i386="\x4c\x01"
+machine_amd64="\x64\x86"
+machine_arm64="\xaa\x64"
+
+# PE/ELF section and directory names
+sec_text=".text"
+sec_data=".data"
+sec_rdata=".rdata"
+sec_pdata=".pdata"
+sec_xdata=".xdata"
+sec_reloc=".reloc"
+sec_rsrc=".rsrc"
+sec_edata=".edata"
+sec_idata=".idata"
+sec_bss=".bss"
+sec_ehframe=".eh_frame"
+sec_ehframehdr=".eh_frame_hdr"
+sec_gopclntab=".gopclntab"
+sec_dynsym=".dynsym"
+sec_symtab=".symtab"
+sec_cil=".cormeta"
+
+# Mach-O load commands / segments
+seg_text="__TEXT"
+seg_data="__DATA"
+sec_macho_text="__text"
+sec_unwind="__unwind_info"
+
+# Go / .NET markers
+go_pclntab_magic="\xfb\xff\xff\xff"
+go_pclntab_magic_118="\xf0\xff\xff\xff"
+go_buildid="Go build ID:"
+cli_header="BSJB"
+
+# ELF program/section header type values
+elf_pt_load="\x01\x00\x00\x00"
+elf_class_64="\x02"
+elf_class_32="\x01"
+
+# Report-JSON keys (report target)
+json_architecture="\"architecture\""
+json_base_addr="\"base_addr\""
+json_binary_size="\"binary_size\""
+json_bitness="\"bitness\""
+json_code_areas="\"code_areas\""
+json_code_sections="\"code_sections\""
+json_confidence="\"confidence_threshold\""
+json_disasm_errors="\"disassembly_errors\""
+json_execution_time="\"execution_time\""
+json_alignment="\"identified_alignment\""
+json_metadata="\"metadata\""
+json_status="\"status\""
+json_summary="\"summary\""
+json_xcfg="\"xcfg\""
+json_blocks="\"blocks\""
+json_instructions="\"instructions\""
+json_apirefs="\"apirefs\""
+json_blockrefs="\"blockrefs\""
+json_inrefs="\"inrefs\""
+json_outrefs="\"outrefs\""
