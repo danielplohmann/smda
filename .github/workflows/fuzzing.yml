@@ -134,23 +134,9 @@ jobs:
             -artifact_prefix=artifacts/ \
             -print_final_stats=1
 
-      - name: Minimize corpus before caching
-        # Success only: on a crash, -merge would re-execute the crashing input
-        # and abort partway, leaving a truncated corpus behind.
-        if: success()
-        continue-on-error: true
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          # Keep the cached corpus bounded: -merge keeps only inputs that add
-          # coverage, so it does not grow without limit across weekly runs.
-          mkdir -p corpus-merged
-          python "fuzzing/${TARGET}.py" -merge=1 -max_total_time=120 corpus-merged corpus
-          if [ -n "$(ls -A corpus-merged)" ]; then
-            rm -rf corpus
-            mv corpus-merged corpus
-          fi
+      - name: Bound the cached corpus
+        if: always()
+        run: python fuzzing/prune_corpus.py corpus
 
       - name: Minimize crash artifacts
         if: failure()
@@ -161,8 +147,7 @@ jobs:
           # regression test. Never mask the original failure.
           shopt -s nullglob
           for artifact in artifacts/crash-* artifacts/oom-* artifacts/timeout-*; do
-            python "fuzzing/${TARGET}.py" -minimize_crash=1 -runs=20000 \
-              -artifact_prefix=artifacts/minimized- "$artifact" || true
+            python fuzzing/minimize.py "${TARGET#fuzz_}" "$artifact" || true
           done
 
       - name: Upload crash artifacts

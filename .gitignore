@@ -36,7 +36,6 @@ profiling/output/
 
 # Fuzzing artifacts
 /corpus/
-/corpus-merged/
 /artifacts/
 crash-*
 oom-*
