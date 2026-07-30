@@ -10,8 +10,8 @@ macho_magic_64="\xcf\xfa\xed\xfe"
 macho_magic_32="\xce\xfa\xed\xfe"
 macho_cigam_64="\xfe\xed\xfa\xcf"
 macho_fat="\xca\xfe\xba\xbe"
-dex_magic="dex\n035\x00"
-dex_magic_038="dex\n038\x00"
+dex_magic="dex\x0a035\x00"
+dex_magic_038="dex\x0a038\x00"
 delphi_kb="\x14\x00\x00\x00Delphi"
 
 # PE optional-header magics and machine types

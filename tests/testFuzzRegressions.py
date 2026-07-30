@@ -14,6 +14,7 @@ one is replayed here and must pass.
 
 import logging
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -62,6 +63,33 @@ class SmdaFuzzTargetSmokeTest(unittest.TestCase):
                 (fuzzing_dir / f"fuzz_{target_name}.py").is_file(),
                 f"missing fuzzing/fuzz_{target_name}.py entry point",
             )
+
+    def test_dictionary_uses_only_libfuzzer_escapes(self):
+        """libFuzzer accepts \\xAB, \\\\ and \\" only; anything else aborts the run at startup."""
+        dictionary = (REPO_ROOT / "fuzzing" / "smda.dict").read_text()
+        for number, line in enumerate(dictionary.splitlines(), 1):
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            match = re.fullmatch(r'[A-Za-z0-9_]+="(.*)"', entry)
+            self.assertIsNotNone(match, f'line {number} is not a name="token" entry: {entry}')
+            body = match.group(1)
+            index = 0
+            while index < len(body):
+                if body[index] != "\\":
+                    index += 1
+                    continue
+                following = body[index + 1 : index + 2]
+                if following == "x":
+                    self.assertRegex(
+                        body[index + 2 : index + 4],
+                        r"^[0-9a-fA-F]{2}$",
+                        f"line {number} has a malformed hex escape: {entry}",
+                    )
+                    index += 4
+                    continue
+                self.assertIn(following, ("\\", '"'), f"line {number} uses unsupported escape: {entry}")
+                index += 2
 
     def test_workflow_covers_every_target(self):
         workflow = (REPO_ROOT / ".github" / "workflows" / "fuzzing.yml").read_text()
