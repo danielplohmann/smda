@@ -67,26 +67,37 @@ def get_modified_files(repo_root="."):
     """
     base_ref = os.environ.get("GITHUB_BASE_REF")
     if base_ref:
-        # We're in a PR context on GitHub Actions
-        subprocess.run(
-            ["git", "fetch", "origin", f"refs/remotes/origin/{base_ref}"],
-            cwd=repo_root,
-            capture_output=True,
-        )
-        result = subprocess.run(
-            ["git", "diff", "--name-only", f"origin/{base_ref}..."],
+        # We're in a PR context on GitHub Actions. actions/checkout may have made a
+        # shallow clone with no base branch, so fetch it explicitly first.
+        fetch = subprocess.run(
+            [
+                "git",
+                "fetch",
+                "--no-tags",
+                "--depth=200",
+                "origin",
+                f"+refs/heads/{base_ref}:refs/remotes/origin/{base_ref}",
+            ],
             cwd=repo_root,
             capture_output=True,
             text=True,
         )
+        if fetch.returncode != 0:
+            print(f"Could not fetch base ref '{base_ref}': {fetch.stderr.strip()}")
+            return set()
+        diff_target = f"origin/{base_ref}..."
     else:
         # Local check: diff against master
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "master..."],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
+        diff_target = "master..."
+    result = subprocess.run(
+        ["git", "diff", "--name-only", diff_target],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Could not diff against '{diff_target}': {result.stderr.strip()}")
+        return set()
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
@@ -111,7 +122,8 @@ def check_siblings(modified):
 
 
 def main():
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # this file lives at <repo>/.github/workflows/scripts/sibling_check.py
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
     os.chdir(repo_root)
 
     modified = get_modified_files(repo_root)
@@ -140,7 +152,8 @@ def main():
         )
         print()
 
-    return 0 if not warnings else 0  # always succeed (warnings only)
+    # Advisory only: a partial sibling group is a prompt to review, never a build failure.
+    return 0
 
 
 if __name__ == "__main__":
