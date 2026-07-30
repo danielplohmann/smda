@@ -12,6 +12,8 @@ on:
       - "src/smda/**"
       - ".github/workflows/fuzzing.yml"
   schedule:
+    # Scheduled workflows do not run in forks unless explicitly re-enabled, so
+    # no repository guard is needed here.
     - cron: "0 3 * * 1"
   workflow_dispatch:
     inputs:
@@ -31,6 +33,11 @@ defaults:
   run:
     shell: bash
 
+env:
+  # atheris ships manylinux x86_64 wheels only; pinned so a release cannot
+  # silently change instrumentation or drop the Python version used here.
+  ATHERIS_VERSION: "3.1.0"
+
 jobs:
   fuzz:
     name: Fuzz (${{ matrix.target }})
@@ -41,9 +48,20 @@ jobs:
       matrix:
         include:
           - target: fuzz_loaders
+            seed_profile: binary
+            max_len: 262144
+          - target: fuzz_formats
+            seed_profile: formats
             max_len: 262144
           - target: fuzz_disassembler
+            seed_profile: binary
             max_len: 65536
+          - target: fuzz_buffer
+            seed_profile: buffer
+            max_len: 65536
+          - target: fuzz_report
+            seed_profile: report
+            max_len: 1048576
 
     steps:
       - name: Checkout code
@@ -62,32 +80,90 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install atheris
+          python -m pip install "atheris==${ATHERIS_VERSION}"
+
+      - name: Restore accumulated corpus
+        id: corpus-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
 
       - name: Generate seed corpus
-        run: python fuzzing/generate_seeds.py corpus
+        run: python fuzzing/generate_seeds.py corpus --profile ${{ matrix.seed_profile }}
 
       - name: Determine fuzzing duration
         id: duration
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_SECONDS: ${{ inputs.max_total_time }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "seconds=900" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "seconds=${{ inputs.max_total_time }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "seconds=120" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            schedule) seconds=900 ;;
+            workflow_dispatch)
+              # Validate rather than interpolating a dispatch input into a shell
+              # command, and keep it inside the job timeout.
+              if [[ ! "$REQUESTED_SECONDS" =~ ^[0-9]{1,4}$ ]] || [ "$REQUESTED_SECONDS" -lt 10 ]; then
+                echo "max_total_time must be an integer between 10 and 9999" >&2
+                exit 1
+              fi
+              seconds="$REQUESTED_SECONDS"
+              ;;
+            *) seconds=120 ;;
+          esac
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
 
       - name: Run fuzz target
+        env:
+          MAX_TOTAL_TIME: ${{ steps.duration.outputs.seconds }}
+          MAX_LEN: ${{ matrix.max_len }}
+          TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           mkdir -p artifacts
-          python fuzzing/${{ matrix.target }}.py corpus \
-            -max_total_time=${{ steps.duration.outputs.seconds }} \
-            -max_len=${{ matrix.max_len }} \
+          python "fuzzing/${TARGET}.py" corpus \
+            -dict=fuzzing/smda.dict \
+            -max_total_time="${MAX_TOTAL_TIME}" \
+            -max_len="${MAX_LEN}" \
             -timeout=60 \
             -rss_limit_mb=4096 \
+            -malloc_limit_mb=2048 \
             -artifact_prefix=artifacts/ \
             -print_final_stats=1
+
+      - name: Minimize corpus before caching
+        # Success only: on a crash, -merge would re-execute the crashing input
+        # and abort partway, leaving a truncated corpus behind.
+        if: success()
+        continue-on-error: true
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          # Keep the cached corpus bounded: -merge keeps only inputs that add
+          # coverage, so it does not grow without limit across weekly runs.
+          mkdir -p corpus-merged
+          python "fuzzing/${TARGET}.py" -merge=1 -max_total_time=120 corpus-merged corpus
+          if [ -n "$(ls -A corpus-merged)" ]; then
+            rm -rf corpus
+            mv corpus-merged corpus
+          fi
+
+      - name: Minimize crash artifacts
+        if: failure()
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          # Best effort: a smaller reproducer is what gets pinned as a
+          # regression test. Never mask the original failure.
+          shopt -s nullglob
+          for artifact in artifacts/crash-* artifacts/oom-* artifacts/timeout-*; do
+            python "fuzzing/${TARGET}.py" -minimize_crash=1 -runs=20000 \
+              -artifact_prefix=artifacts/minimized- "$artifact" || true
+          done
 
       - name: Upload crash artifacts
         if: failure()
@@ -96,3 +172,22 @@ jobs:
           name: fuzz-artifacts-${{ matrix.target }}
           path: artifacts/
           if-no-files-found: ignore
+
+      - name: Upload corpus for reproduction
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: corpus/
+          if-no-files-found: ignore
+
+      - name: Save accumulated corpus
+        # Persist coverage progress even when the run failed, so the inputs that
+        # led to a crash are not lost, and the next run starts warm. Cache
+        # writes are unavailable to fork pull requests, which must not fail the job.
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
