@@ -201,7 +201,7 @@ class MachoFileLoader:
         # Preserve the FatBinary container so every accessor and provider can
         # select the same active slice instead of accepting lief.parse()'s
         # implicit first-slice conversion.
-        return lief.MachO.parse(binary)
+        return safe_lief_parse(binary, parser=lief.MachO.parse)
 
     @staticmethod
     def getBaseAddress(binary, parsed=_NOT_PROVIDED):

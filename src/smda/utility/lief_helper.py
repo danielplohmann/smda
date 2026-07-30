@@ -16,8 +16,16 @@ from __future__ import annotations
 import lief
 
 
-def safe_lief_parse(binary):
+def safe_lief_parse(binary, parser=None):
+    """Parse ``binary``, returning None when lief fails to allocate.
+
+    ``parser`` selects a format-specific entry point (``lief.MachO.parse``,
+    ``lief.DEX.parse``, ...) for callers that must keep the format container
+    rather than lief's generic result; it defaults to ``lief.parse``.
+    """
+    if parser is None:
+        parser = lief.parse
     try:
-        return lief.parse(binary)
+        return parser(binary)
     except MemoryError:
         return None
