@@ -48,6 +48,12 @@ jobs:
       - name: Run ty type checking
         run: python -m ty check src/smda/
 
+      - name: Sibling-pair check (advisory)
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: python .github/workflows/scripts/sibling_check.py
+
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
