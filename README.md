@@ -58,7 +58,7 @@ $ python batch_analyze.py /path/to/corpus -o /path/to/reports
 
 * `-w/--workers` defaults to all usable cores; `-w 1` is the serial reference.
 * `-c/--resume` skips inputs whose report already exists in the output directory.
-* `-m/--max_tasks_per_child` recycles workers to bound memory growth on very large corpora, at the cost of re-paying process warm-up.
+* `-m/--max_tasks_per_child` recycles workers after N files. It defaults to off, and measurement says that is usually right (see memory notes below).
 * `-t/--timeout` sets the per-file analysis timeout; `0` disables it.
 
 Reports are named after the input's path-relative stem, so identically-named samples in different
@@ -67,11 +67,31 @@ that need an explicit base address still belong in `analyze.py -a <base_addr>`.
 
 The same thing is available as a library helper, which yields one summary dict per completed file:
 
+```python
+from smda.utility.BatchProcessor import disassembleParallel
+
+if __name__ == "__main__":  # required: workers are spawned, so they re-import your module
+    for summary in disassembleParallel(["/path/to/corpus"], output_dir="/path/to/reports"):
+        print(summary["path"], summary["status"], summary["num_functions"])
 ```
->>> from smda.utility.BatchProcessor import disassembleParallel
->>> for summary in disassembleParallel(["/path/to/corpus"], output_dir="/path/to/reports"):
-...     print(summary["path"], summary["status"], summary["num_functions"])
-```
+
+Workers use the `spawn` start method, which re-imports the calling module in each child. Calling
+`disassembleParallel` at import time therefore fails with a `multiprocessing` traceback - keep the
+call under a `__main__` guard (or inside a function that a guard invokes).
+
+#### Memory
+
+Peak memory is dominated by the single largest binary in flight, not by how many files a worker has
+already processed. Measured over 136 distinct real PE binaries in one worker: live Python objects
+grew by 9 across 105 files, and resident memory oscillated inside a stable band instead of trending
+up, so there is no per-file accumulation to bound. What is large is the per-file peak - one 3 MB
+binary reached roughly 1.8 GB resident on its own.
+
+Size the run by `workers x per-file peak`: on the same corpus, four workers peaked at about 5.3 GB
+combined. Reduce `--workers` on a memory-constrained machine. Recycling every file
+(`--max_tasks_per_child 1`) cost 30% wall clock (86.6s to 112.3s) while cutting the single-worker
+peak by only 8%, because it reclaims allocator high-water rather than a leak - so leave it off
+unless a specific corpus shows otherwise.
 
 Output does not depend on the number of workers, with one exception: `SmdaConfig.TIMEOUT` is
 wall-clock, so under heavy oversubscription a slow sample can time out where a serial run
