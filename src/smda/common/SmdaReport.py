@@ -197,6 +197,14 @@ class SmdaReport:
         block = self.block_locator.findBlockByContainedAddress(inner_address)
         return block
 
+    def __getstate__(self):
+        # the capstone singleton holds ctypes pointers and cannot be pickled; the class-level
+        # default makes attribute lookup fall through to None after unpickling, so getCapstone()
+        # simply re-creates it on demand
+        state = self.__dict__.copy()
+        state.pop("capstone", None)
+        return state
+
     def getCapstone(self):
         if self.capstone is None:
             if self.architecture is not None and self.architecture not in ("intel", "aarch64"):
