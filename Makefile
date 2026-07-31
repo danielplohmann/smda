@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: init package publish ruff-check ruff-format ruff-fix lint format test test-coverage clean benchmark profile-cpu profile-mem profile-flame
+.PHONY: init package publish ruff-check ruff-format ruff-fix lint format test test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
 
 # Default profiling target fixture; override e.g. `make profile-cpu TARGET=komplex`
 TARGET ?= asprox
@@ -28,6 +28,8 @@ test-coverage:
 	$(PYTHON) -m pytest --cov=smda --cov-report=html:coverage-html tests/
 benchmark:
 	$(PYTHON) .github/workflows/scripts/run_perf_check.py --output benchmark_results.json
+benchmark-determinism:
+	$(PYTHON) .github/workflows/scripts/run_perf_check.py --iterations 2 --call-counts --output benchmark_determinism.json
 profile-cpu:
 	$(PYTHON) -m profiling.profile_smda cpu --target $(TARGET) --line
 profile-mem:

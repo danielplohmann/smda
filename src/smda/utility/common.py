@@ -1,3 +1,20 @@
+import hashlib
+import json
+
+
+def computeReportIdentityHash(report, exclude=("timestamp", "execution_time")):
+    """Canonical content hash of a SmdaReport, ignoring fields that legitimately vary per run.
+
+    Covers the CFG, per-function hashes, statistics, xrefs and xmetadata in one number, because
+    all of them are serialized inside toDict().
+    """
+    as_dict = report.toDict()
+    for field in exclude:
+        as_dict.pop(field, None)
+    serialized = json.dumps(as_dict, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def mergeCodeAreas(code_areas):
     if not code_areas:
         return []

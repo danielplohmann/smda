@@ -14,6 +14,12 @@ def main():
     parser.add_argument(
         "--threshold-fail", type=float, default=0.50, help="Slowdown failure threshold (e.g. 0.50 for 50%)"
     )
+    parser.add_argument(
+        "--fail-on-call-count-change",
+        action="store_true",
+        help="Treat any call-count delta as a failure (useful when bisecting, off by default because "
+        "a legitimate optimization changes it on purpose)",
+    )
     args = parser.parse_args()
 
     try:
@@ -43,6 +49,9 @@ def main():
 
     overall_base_time = 0
     overall_pr_time = 0
+    call_count_rows = []
+    call_count_changed = False
+    skipped_call_counts = []
 
     all_fixtures = set(base_data.keys()).union(pr_data.keys())
     for name in sorted(all_fixtures):
@@ -80,6 +89,11 @@ def main():
         # Check correctness
         corr_status = "MATCH"
         mismatches = []
+
+        base_hash = base.get("report_hash", "")
+        pr_hash = pr.get("report_hash", "")
+        if base_hash and pr_hash and base_hash != pr_hash:
+            mismatches.append(f"Report identity hash mismatch: base={base_hash[:16]}, pr={pr_hash[:16]}")
 
         if base["num_functions"] != pr["num_functions"]:
             mismatches.append(f"Function count mismatch: base={base['num_functions']}, pr={pr['num_functions']}")
@@ -122,6 +136,19 @@ def main():
             if len(mismatches) > 10:
                 print(f"  - ... and {len(mismatches) - 10} more mismatches")
 
+        base_calls = base.get("total_calls")
+        pr_calls = pr.get("total_calls")
+        if base_calls is not None and pr_calls is not None:
+            if base.get("python_version") != pr.get("python_version"):
+                # call counts are only comparable within one interpreter version
+                skipped_call_counts.append(name)
+            else:
+                delta = pr_calls - base_calls
+                pct = (delta / base_calls) * 100 if base_calls else 0
+                call_count_rows.append((name, base_calls, pr_calls, delta, pct))
+                if delta:
+                    call_count_changed = True
+
         print(
             row_fmt.format(
                 name,
@@ -158,9 +185,23 @@ def main():
     )
     print()
 
+    if call_count_rows:
+        print("=== PYTHON CALL COUNTS (informational) ===")
+        cc_fmt = "{:<12} | {:>14} | {:>14} | {:>14} | {:>9}"
+        print(cc_fmt.format("Fixture", "Base Calls", "PR Calls", "Delta", "Change"))
+        print("-" * 74)
+        for cc_name, base_calls, pr_calls, delta, pct in call_count_rows:
+            print(cc_fmt.format(cc_name, base_calls, pr_calls, f"{delta:+d}", f"{pct:+.2f}%"))
+        print()
+    if skipped_call_counts:
+        print(f"Call-count comparison skipped (python version differs): {', '.join(skipped_call_counts)}\n")
+
     # Exit codes
     if correctness_failed:
         print("❌ Correctness checks failed! Output results do not match.", file=sys.stderr)
+        sys.exit(1)
+    if call_count_changed and args.fail_on_call_count_change:
+        print("❌ Call counts changed and --fail-on-call-count-change was requested.", file=sys.stderr)
         sys.exit(1)
     if perf_failed:
         print("❌ Performance checks failed! Severe performance regression detected.", file=sys.stderr)
