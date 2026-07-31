@@ -703,7 +703,6 @@ class SmdaFunction:
                 and version < DALVIK_PIC_HASH_ESCAPE_VERSION
             ):
                 recalculate_pic_hash = True
-                recalculate_pic_hash = True
             if recalculate_pic_hash:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
                 if smda_function._escaper and hash_context:
@@ -751,4 +750,8 @@ class SmdaFunction:
         return self.offset
 
     def __str__(self):
-        return f"0x{self.offset:08x}: (->{self.num_inrefs:>4d}, {self.num_outrefs:>4d}->) {self.num_blocks:>3d} blocks, {self.num_instructions:>4d} instructions."
+        offset = f"0x{self.offset:08x}" if self.offset is not None else "0x????????"
+        return (
+            f"{offset}: (->{self.num_inrefs:>4d}, {self.num_outrefs:>4d}->) "
+            f"{self.num_blocks:>3d} blocks, {self.num_instructions:>4d} instructions."
+        )
