@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import cProfile
 import json
 import logging
 import os
+import platform
+import pstats
 import statistics
 import sys
 import time
@@ -13,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 try:
     from smda.Disassembler import Disassembler
     from smda.SmdaConfig import SmdaConfig
+    from smda.utility.common import computeReportIdentityHash
 except ImportError as e:
     print(f"Error importing SMDA. Make sure you run this script from the repository root: {e}", file=sys.stderr)
     sys.exit(1)
@@ -50,7 +54,34 @@ def merge_results(existing_results, new_results):
     return merged_results
 
 
-def run_benchmark(iterations, output_file, append=False):
+def disassemble_fixture(config, fixture, binary_bytes):
+    disasm = Disassembler(config, backend=fixture["backend"])
+    if fixture["backend"] in ("dalvik", "cil"):
+        return disasm.disassembleUnmappedBuffer(binary_bytes)
+    if fixture["base_addr"] != 0:
+        return disasm.disassembleBuffer(binary_bytes, fixture["base_addr"])
+    return disasm.disassembleUnmappedBuffer(binary_bytes)
+
+
+def count_calls(config, fixture, binary_bytes):
+    """Total/primitive call counts from a dedicated pass, strictly outside the timed loop.
+
+    The first pass of a process carries ~200k one-time calls (ApiScout DB parse, regex
+    compilation, demangler caches), so it is discarded: only the warm pass is reported. Two
+    separate processes then agree to the digit, which is what makes this metric usable at all.
+    """
+    disassemble_fixture(config, fixture, binary_bytes)
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        disassemble_fixture(config, fixture, binary_bytes)
+    finally:
+        profiler.disable()
+    stats = pstats.Stats(profiler)
+    return stats.total_calls, stats.prim_calls
+
+
+def run_benchmark(iterations, output_file, append=False, with_call_counts=False):
     # Disable logging during benchmark to avoid stdout/file write overhead in the timed region
     logging.disable(logging.CRITICAL)
     config = SmdaConfig()
@@ -82,18 +113,23 @@ def run_benchmark(iterations, output_file, append=False):
 
         times = []
         report = None
+        report_hashes = set()
         for _ in range(iterations):
-            disasm = Disassembler(config, backend=fixture["backend"])
             start = time.perf_counter()
-            if fixture["backend"] in ("dalvik", "cil"):
-                report = disasm.disassembleUnmappedBuffer(binary_bytes)
-            else:
-                if fixture["base_addr"] != 0:
-                    report = disasm.disassembleBuffer(binary_bytes, fixture["base_addr"])
-                else:
-                    report = disasm.disassembleUnmappedBuffer(binary_bytes)
+            report = disassemble_fixture(config, fixture, binary_bytes)
             end = time.perf_counter()
             times.append(end - start)
+            # hashed outside the timed region: identical input must yield an identical report,
+            # and a side that disagrees with itself makes any cross-side comparison meaningless
+            report_hashes.add(computeReportIdentityHash(report))
+
+        if len(report_hashes) > 1:
+            print(
+                f"Error: '{fixture['name']}' produced {len(report_hashes)} different report hashes "
+                f"across {iterations} iterations of the same input - the output is non-deterministic.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         num_functions = report.num_functions if report else 0
         num_instructions = report.num_instructions if report else 0
@@ -116,7 +152,14 @@ def run_benchmark(iterations, output_file, append=False):
             "num_instructions": num_instructions,
             "num_blocks": num_blocks,
             "functions": functions_meta,
+            "report_hash": report_hashes.pop() if report_hashes else "",
+            "python_version": platform.python_version(),
         }
+
+        if with_call_counts:
+            total_calls, prim_calls = count_calls(config, fixture, binary_bytes)
+            results[fixture["name"]]["total_calls"] = total_calls
+            results[fixture["name"]]["prim_calls"] = prim_calls
 
     if output_file:
         if append and os.path.exists(output_file):
@@ -142,8 +185,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Merge this pass's timing samples into an existing output file instead of replacing it",
     )
+    parser.add_argument(
+        "--call-counts",
+        action="store_true",
+        help="Also record cProfile call counts (two extra untimed passes per fixture)",
+    )
     args = parser.parse_args()
 
     if args.iterations < 1:
         parser.error("--iterations must be >= 1")
-    run_benchmark(args.iterations, args.output, append=args.append)
+    run_benchmark(args.iterations, args.output, append=args.append, with_call_counts=args.call_counts)
