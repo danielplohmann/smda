@@ -37,6 +37,7 @@ class DisassemblyResult:
         # key: address of API in target DLL, value: {referencing_addr, api_name, dll_name}
         self.apis = {}
         self._api_ref_sources = {}
+        self._api_refs_initialized = False
         self.addr_to_api = {}
         # address:name
         self.function_symbols = {}
@@ -342,6 +343,7 @@ class DisassemblyResult:
         return len(out_refs.difference(ins_addrs)) == 0
 
     def _initApiRefs(self):
+        self._api_refs_initialized = True
         for api_offset in self.apis:
             api = self.apis[api_offset]
             for ref in api["referencing_addr"]:
@@ -362,6 +364,7 @@ class DisassemblyResult:
             ref_sources.add(referencing_addr)
             api_entry["referencing_addr"].append(referencing_addr)
         self.apis[api_addr] = api_entry
+        self._api_refs_initialized = False
 
     def getAllApiRefs(self):
         all_api_refs = {}
@@ -370,7 +373,9 @@ class DisassemblyResult:
         return all_api_refs
 
     def getApiRefs(self, func_addr):
-        if not self.addr_to_api:
+        # an explicit flag, not a truthiness test: the old guard re-walked every API on every
+        # call for a binary with zero APIs, and never refreshed once the map was non-empty
+        if not self._api_refs_initialized:
             self._initApiRefs()
         api_refs = {}
         for block in self.functions[func_addr]:

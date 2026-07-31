@@ -202,4 +202,5 @@ class SmdaInstruction:
         return self.offset
 
     def __str__(self):
-        return f"0x{self.offset:08x}: ({self.bytes:>14s}) - {self.mnemonic} {self.operands}"
+        offset = f"0x{self.offset:08x}" if self.offset is not None else "0x????????"
+        return f"{offset}: ({self.bytes or '':>14s}) - {self.mnemonic} {self.operands}"

@@ -464,7 +464,9 @@ class SmdaReport:
             LOGGER.info(f"SmdaReport saved to: {output_filepath}")
 
     def __str__(self):
+        duration = f"{self.execution_time:>6.3f}s" if self.execution_time is not None else "     ?s"
         if self.status == "error":
-            return f"{self.execution_time:>6.3f}s -> {self.message}"
+            return f"{duration} -> {self.message}"
         arch_str = f"{self.architecture}.{self.bitness}bit" if self.bitness else self.architecture
-        return f"{self.execution_time:>6.3f}s -> (architecture: {arch_str}, base_addr: 0x{self.base_addr:08x}): {len(self.xcfg)} functions"
+        base_addr = f"0x{self.base_addr:08x}" if self.base_addr is not None else "0x????????"
+        return f"{duration} -> (architecture: {arch_str}, base_addr: {base_addr}): {len(self.xcfg)} functions"
