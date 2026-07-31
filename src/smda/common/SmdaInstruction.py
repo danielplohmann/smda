@@ -106,6 +106,14 @@ class SmdaInstruction:
         self._data_refs = data_refs
         yield from self._data_refs
 
+    def __getstate__(self):
+        # the cached capstone CsInsn holds ctypes pointers and cannot be pickled; the class-level
+        # default makes attribute lookup fall through to None after unpickling, so getDetailed()
+        # simply re-creates it on demand
+        state = self.__dict__.copy()
+        state.pop("detailed", None)
+        return state
+
     def getDetailed(self):
         if self.smda_function is None or self.smda_function.smda_report is None:
             raise ValueError("SmdaFunction or SmdaReport not set on instruction")
