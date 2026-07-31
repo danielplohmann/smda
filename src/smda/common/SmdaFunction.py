@@ -190,7 +190,7 @@ class SmdaFunction:
             architecture = binary_info.architecture if binary_info is not None else None
             self._escaper = self.getInstructionEscaper(architecture)
             self.offset = function_offset
-            self._parseBlocks(disassembly.getBlocksAsDict(function_offset))
+            self._parseBlocksFromTuples(disassembly.functions.get(function_offset, []))
             self.apirefs = disassembly.getApiRefs(function_offset)
             self.blockrefs = disassembly.getBlockRefs(function_offset)
             self.inrefs = disassembly.getInRefs(function_offset)
@@ -449,11 +449,23 @@ class SmdaFunction:
                 escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self._escaper))
         return "".join(escaped_binary_seqs).encode("ascii")
 
-    def _parseBlocks(self, block_dict):
+    def _parseBlocksFromTuples(self, disasm_blocks):
+        """Build SmdaInstructions straight from the raw disassembly tuples.
+
+        getBlocksAsDict() allocates one intermediate 4-element list per instruction plus a list
+        and dict entry per block, only to have them consumed immediately here. The transform is
+        inlined rather than removed - the stored bytes remain the same hex string and the str()
+        coercions are preserved, because the IDA path may hand back non-str mnemonics/operands.
+        Precedent for bypassing it: the TF-IDF scoring pass in RecursiveDisassembler.
+        """
         self.blocks = {}
-        for offset, block in block_dict.items():
-            instructions = [SmdaInstruction(ins, smda_function=self) for ins in block]
-            self.blocks[int(offset)] = instructions
+        for block in disasm_blocks:
+            instructions = []
+            for ins_addr, _, ins_mnem, ins_ops, ins_raw_bytes in block:
+                instructions.append(
+                    SmdaInstruction([ins_addr, ins_raw_bytes.hex(), str(ins_mnem), str(ins_ops)], smda_function=self)
+                )
+            self.blocks[instructions[0].offset] = instructions
             self.binweight += sum(len(ins.bytes or "") / 2 for ins in instructions)
         self._sorted_block_keys = sorted(self.blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
