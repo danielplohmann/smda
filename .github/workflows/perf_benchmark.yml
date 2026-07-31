@@ -53,15 +53,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Run benchmark on base branch
+      - name: Verify benchmark imports
         run: |
           PYTHONPATH=base-repo/src python -c "import os, smda; expected = os.path.abspath('base-repo/src'); actual = os.path.abspath(smda.__file__); print('base smda:', actual); assert actual.startswith(expected + os.sep), f'Expected base smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
-          PYTHONPATH=base-repo/src python .github/workflows/scripts/run_perf_check.py --output base_results.json
-
-      - name: Run benchmark on PR branch
-        run: |
           PYTHONPATH=src python -c "import os, smda; expected = os.path.abspath('src'); actual = os.path.abspath(smda.__file__); print('pr smda:', actual); assert actual.startswith(expected + os.sep), f'Expected PR smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
+
+      - name: Run counterbalanced benchmark passes
+        # Base and PR were previously timed once each, base first. Any drift over the
+        # job (a co-tenant VM ramping up, frequency scaling) therefore landed entirely
+        # on the PR side. Running the passes in base/PR/PR/base order cancels linear
+        # drift, and doubling the samples makes the per-fixture median far less
+        # sensitive to a single slow iteration.
+        run: |
+          PYTHONPATH=base-repo/src python .github/workflows/scripts/run_perf_check.py --output base_results.json
           PYTHONPATH=src python .github/workflows/scripts/run_perf_check.py --output pr_results.json
+          PYTHONPATH=src python .github/workflows/scripts/run_perf_check.py --output pr_results.json --append
+          PYTHONPATH=base-repo/src python .github/workflows/scripts/run_perf_check.py --output base_results.json --append
 
       - name: Compare results
         run: |
