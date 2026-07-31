@@ -30,7 +30,27 @@ def decrypt_binary(filepath):
     return bytes(decrypted)
 
 
-def run_benchmark(iterations, output_file):
+def merge_results(existing_results, new_results):
+    """Merge a fresh pass into accumulated results without dropping pass-specific metrics.
+
+    Timing samples accumulate across passes; every other key is carried forward from the
+    existing entry unless the new pass actually produced it.
+    """
+    merged_results = dict(existing_results)
+    for name, new_result in new_results.items():
+        if name not in merged_results:
+            merged_results[name] = dict(new_result)
+            continue
+        merged = dict(merged_results[name])
+        merged.update(new_result)
+        execution_times = merged_results[name]["execution_times"] + new_result["execution_times"]
+        merged["execution_times"] = execution_times
+        merged["median_time"] = statistics.median(execution_times)
+        merged_results[name] = merged
+    return merged_results
+
+
+def run_benchmark(iterations, output_file, append=False):
     # Disable logging during benchmark to avoid stdout/file write overhead in the timed region
     logging.disable(logging.CRITICAL)
     config = SmdaConfig()
@@ -99,6 +119,9 @@ def run_benchmark(iterations, output_file):
         }
 
     if output_file:
+        if append and os.path.exists(output_file):
+            with open(output_file) as f:
+                results = merge_results(json.load(f), results)
         # Create output directory if it doesn't exist
         out_dir = os.path.dirname(os.path.abspath(output_file))
         if out_dir:
@@ -114,8 +137,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run SMDA performance and correctness checks on test fixtures")
     parser.add_argument("--iterations", type=int, default=3, help="Number of benchmark iterations")
     parser.add_argument("--output", type=str, default="", help="Path to write output JSON results")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Merge this pass's timing samples into an existing output file instead of replacing it",
+    )
     args = parser.parse_args()
 
     if args.iterations < 1:
         parser.error("--iterations must be >= 1")
-    run_benchmark(args.iterations, args.output)
+    run_benchmark(args.iterations, args.output, append=args.append)
