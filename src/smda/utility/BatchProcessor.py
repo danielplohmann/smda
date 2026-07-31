@@ -145,18 +145,16 @@ def disassembleParallel(
     worker_count = workers if workers > 0 else getDefaultWorkerCount()
     worker_count = max(1, min(worker_count, len(tasks)))
 
-    executor_kwargs = {
-        "max_workers": worker_count,
+    with ProcessPoolExecutor(
+        max_workers=worker_count,
         # spawn is the strictest context: it re-imports, which proves the task function is
         # importable and the payload picklable instead of relying on a forked address space
-        "mp_context": get_context("spawn"),
-        "initializer": _initWorker,
-        "initargs": (logging.getLogger().level,),
-    }
-    if max_tasks_per_child is not None:
-        executor_kwargs["max_tasks_per_child"] = max_tasks_per_child
-
-    with ProcessPoolExecutor(**executor_kwargs) as executor:
+        mp_context=get_context("spawn"),
+        initializer=_initWorker,
+        initargs=(logging.getLogger().level,),
+        # None is the ProcessPoolExecutor default: a worker lives as long as the executor
+        max_tasks_per_child=max_tasks_per_child,
+    ) as executor:
         futures = {executor.submit(_analyzeOneFile, task): task for task in tasks}
         for future in as_completed(futures):
             task = futures[future]
