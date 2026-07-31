@@ -80,14 +80,21 @@ def format_operand(pe, operand: Any) -> str:
             return f"{str(operand.TypeNamespace)}.{operand.TypeName}::{operand.Name}"
         else:
             return f"{operand.Name}"
-    elif isinstance(operand, dnfile.mdtable.TypeRefRow):
+    elif isinstance(operand, (dnfile.mdtable.TypeRefRow, dnfile.mdtable.TypeDefRow)):
         return f"{str(operand.TypeNamespace)}.{operand.TypeName}"
+    elif isinstance(operand, dnfile.mdtable.TypeSpecRow):
+        # a TypeSpec has no name, only a signature blob; render the blob so distinct
+        # instantiations stay distinguishable without serializing a memory address
+        signature = getattr(operand.Signature, "value", None)
+        return f"TypeSpec({signature.hex()})" if signature else "TypeSpec()"
     elif isinstance(operand, (dnfile.mdtable.FieldRow, dnfile.mdtable.MethodDefRow)):
         return f"{operand.Name}"
     elif operand is None:
         return ""
 
-    return str(operand)
+    # never fall through to str(operand): the default object repr embeds a memory address,
+    # which made every report of the same input serialize differently
+    return f"<{type(operand).__name__}>"
 
 
 class DnfileMethodBodyReader(CilMethodBodyReaderBase):
@@ -149,7 +156,8 @@ class CilDisassembler:
 
     def _updateApiInformation(self, from_addr, ins_bytes, api_function):
         if ins_bytes.endswith(b"\x0a"):
-            if api_function.startswith("<dnfile.mdtable.MemberRefRow"):
+            if api_function.startswith("<"):
+                # format_operand could not resolve the row to a name, so there is no API here
                 return
             self.disassembly.addr_to_api[from_addr] = api_function
 
