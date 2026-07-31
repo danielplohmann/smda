@@ -9,10 +9,10 @@ def main():
     parser.add_argument("pr_results", type=str, help="Path to PR results JSON")
     parser.add_argument("base_results", type=str, help="Path to base results JSON")
     parser.add_argument(
-        "--threshold-warn", type=float, default=0.20, help="Slowdown warning threshold (e.g. 0.20 for 20%)"
+        "--threshold-warn", type=float, default=0.20, help="Slowdown warning threshold (e.g. 0.20 for 20%%)"
     )
     parser.add_argument(
-        "--threshold-fail", type=float, default=0.50, help="Slowdown failure threshold (e.g. 0.50 for 50%)"
+        "--threshold-fail", type=float, default=0.50, help="Slowdown failure threshold (e.g. 0.50 for 50%%)"
     )
     parser.add_argument(
         "--fail-on-call-count-change",

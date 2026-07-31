@@ -461,11 +461,12 @@ class SmdaFunction:
         self.blocks = {}
         for block in disasm_blocks:
             instructions = []
+            block_start = block[0][0]
             for ins_addr, _, ins_mnem, ins_ops, ins_raw_bytes in block:
                 instructions.append(
                     SmdaInstruction([ins_addr, ins_raw_bytes.hex(), str(ins_mnem), str(ins_ops)], smda_function=self)
                 )
-            self.blocks[instructions[0].offset] = instructions
+            self.blocks[block_start] = instructions
             self.binweight += sum(len(ins.bytes or "") / 2 for ins in instructions)
         self._sorted_block_keys = sorted(self.blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
