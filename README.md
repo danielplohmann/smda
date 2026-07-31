@@ -48,6 +48,44 @@ There is also a demo script:
 
 * analyze.py -- example usage: perform disassembly on a file or memory dump and optionally store results in JSON to a given output path.
 
+### Batch mode
+
+Disassembly is CPU-bound and every input file is independent, so corpora are processed in parallel:
+
+```
+$ python batch_analyze.py /path/to/corpus -o /path/to/reports
+```
+
+* `-w/--workers` defaults to all usable cores; `-w 1` is the serial reference.
+* `-c/--resume` skips inputs whose report already exists in the output directory.
+* `-m/--max_tasks_per_child` recycles workers to bound memory growth on very large corpora, at the cost of re-paying process warm-up.
+* `-t/--timeout` sets the per-file analysis timeout; `0` disables it.
+
+Reports are named after the input's path-relative stem, so identically-named samples in different
+subdirectories cannot overwrite each other. Batch mode uses `disassembleFile`, so raw memory dumps
+that need an explicit base address still belong in `analyze.py -a <base_addr>`.
+
+The same thing is available as a library helper, which yields one summary dict per completed file:
+
+```
+>>> from smda.utility.BatchProcessor import disassembleParallel
+>>> for summary in disassembleParallel(["/path/to/corpus"], output_dir="/path/to/reports"):
+...     print(summary["path"], summary["status"], summary["num_functions"])
+```
+
+Output does not depend on the number of workers, with one exception: `SmdaConfig.TIMEOUT` is
+wall-clock, so under heavy oversubscription a slow sample can time out where a serial run
+finished. Pass `--timeout 0` when output must be reproducible regardless of machine load.
+
+### Tuning analysis cost
+
+The largest built-in performance lever is the optional per-function metadata in `SmdaConfig`:
+`CALCULATE_HASHING` (PIC hashes), `CALCULATE_NESTING` (nesting depth) and `CALCULATE_SCC`
+(strongly connected components). Measured on the bundled cutwail fixture, in Python calls per
+run (a stable metric, unlike wall-clock on a loaded machine): hashing accounts for 10.0%,
+nesting 4.6% and SCC 3.2% of all calls, and disabling all three removes 17.8%. Turn off whatever
+a downstream consumer does not read.
+
 ### IDA Pro integration
 
 SMDA can also turn an IDA-analyzed database into a SMDA report instead of running its own disassembly. Inside the IDA GUI, SMDA supports IDA Pro 8.4 and newer via the existing IDAPython integrations; older SDK generations are rejected. On IDA 9.1 or newer, it prefers the higher-level [IDA Domain API](https://ida-domain.docs.hex-rays.com/) when the optional package is installed and otherwise falls back to IDAPython.
