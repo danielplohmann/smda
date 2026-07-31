@@ -207,6 +207,8 @@ class RecursiveDisassembler:
         if binary_info is None:
             return b""
         relative_start = addr - binary_info.base_addr
+        if relative_start < 0 or relative_start >= len(binary_info.binary):
+            return b""
         relative_end = relative_start + self.backend.max_instruction_size
         return binary_info.binary[relative_start:relative_end]
 
