@@ -40,3 +40,4 @@ profiling/output/
 crash-*
 oom-*
 timeout-*
+.claude
