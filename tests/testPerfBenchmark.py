@@ -19,9 +19,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import computeReportIdentityHash
+
+pytestmark = pytest.mark.slow
 
 _SCRIPTS = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "scripts"
 
@@ -116,6 +120,8 @@ def _result(**overrides):
         "functions": {"0x1000": {"num_blocks": 2, "num_instructions": 10}},
         "report_hash": "a" * 64,
         "python_version": "3.11.0",
+        "peak_memories": [100 * 1024 * 1024],
+        "median_peak_memory": 100 * 1024 * 1024,
     }
     result.update(overrides)
     return result
@@ -152,9 +158,9 @@ class TestComparePerf(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pr_path = os.path.join(tmp, "pr.json")
             base_path = os.path.join(tmp, "base.json")
-            with open(pr_path, "w") as f:
+            with open(pr_path, "w", encoding="utf-8") as f:
                 json.dump(pr, f)
-            with open(base_path, "w") as f:
+            with open(base_path, "w", encoding="utf-8") as f:
                 json.dump(base, f)
             return subprocess.run(
                 [sys.executable, str(_SCRIPTS / "compare_perf.py"), pr_path, base_path, *extra_args],
@@ -188,6 +194,48 @@ class TestComparePerf(unittest.TestCase):
         )
         self.assertEqual(1, completed.returncode)
 
+    def test_short_fixture_percentage_alone_does_not_fail(self):
+        # a 0.21s fixture swinging +31.7% (+0.068s) is runner variance, not work: this
+        # exact shape failed the gate on PR #226 while peak memory moved +0.01%
+        completed = self._run(
+            {"komplex": _result(median_time=0.2829), "cutwail": _result(median_time=0.9265)},
+            {"komplex": _result(median_time=0.2148), "cutwail": _result(median_time=0.9223)},
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("WARN (NOISE?)", completed.stdout)
+
+    def test_large_absolute_regression_still_fails(self):
+        completed = self._run(
+            {"cutwail": _result(median_time=4.2)},
+            {"cutwail": _result(median_time=3.0)},
+        )
+        self.assertEqual(2, completed.returncode)
+        self.assertIn("FAIL (REGRESS)", completed.stdout)
+
+    def test_peak_memory_growth_is_a_failure(self):
+        completed = self._run(
+            {"fixture": _result(median_peak_memory=130 * 1024 * 1024)},
+            {"fixture": _result()},
+        )
+        self.assertEqual(3, completed.returncode)
+        self.assertIn("PEAK MEMORY", completed.stdout)
+        self.assertIn("peak memory grew", completed.stderr)
+
+    def test_peak_memory_within_threshold_passes(self):
+        completed = self._run(
+            {"fixture": _result(median_peak_memory=105 * 1024 * 1024)},
+            {"fixture": _result()},
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("+5.00%", completed.stdout)
+
+    def test_peak_memory_skipped_when_one_side_lacks_the_channel(self):
+        base = _result()
+        del base["median_peak_memory"]
+        completed = self._run({"fixture": _result()}, {"fixture": base})
+        self.assertEqual(0, completed.returncode)
+        self.assertIn("Memory comparison skipped", completed.stdout)
+
     def test_call_counts_skipped_across_python_versions(self):
         completed = self._run(
             {"fixture": _result(total_calls=900, python_version="3.13.0")},
@@ -204,7 +252,7 @@ class TestRunPerfCheck(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = os.path.join(tmp, "results.json")
             module.run_benchmark(2, output)
-            with open(output) as f:
+            with open(output, encoding="utf-8") as f:
                 results = json.load(f)
         self.assertTrue(results)
         for name, entry in results.items():
