@@ -38,6 +38,7 @@ Homepage = "https://github.com/danielplohmann/smda"
 [project.optional-dependencies]
 dev = [
     "build",
+    "diff-cover",
     "hypothesis",
     "pre-commit",
     "pytest",
@@ -63,6 +64,12 @@ profile = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# PEP 561: without this an installed smda hands consumers (MCRIT included) zero types.
+# Most of the surface is inferred rather than annotated; the public entry point in
+# Disassembler.py is annotated explicitly, the model classes are a follow-up.
+[tool.setuptools.package-data]
+smda = ["py.typed"]
+
 [tool.setuptools.dynamic]
 version = {attr = "smda.__version__"}
 
@@ -70,12 +77,24 @@ version = {attr = "smda.__version__"}
 python_files = ["test*.py"]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--strict-markers"
+markers = [
+    "slow: disassembles a real fixture corpus; deselect with -m 'not slow' for a fast subset",
+]
+# A DeprecationWarning from LIEF or capstone on a new interpreter is exactly the signal
+# the 3.14 matrix leg exists to surface, and it passed silently before this.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
 source = ["smda"]
+# BatchProcessor executes in worker processes; without this their lines read as
+# uncovered even though tests exercise them
+concurrency = ["multiprocessing"]
+parallel = true
+sigterm = true
 omit = [
-    "*lib*",
+    "*/lib/*",
     "capstone/*",
     "*distutils/*",
     "ctypes/*",
@@ -92,7 +111,8 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "def main\\(argv\\):",
 ]
-ignore_errors = true
+# ignore_errors is deliberately unset: a file coverage cannot read should fail the run
+fail_under = 75
 
 [tool.coverage.html]
 directory = "coverage-html"
@@ -178,4 +198,22 @@ rules = { "invalid-argument-type" = "ignore" }
 # The pdbparse dependency is optional; suppress unresolved-import for it
 [[tool.ty.overrides]]
 include = ["src/smda/common/labelprovider/PdbSymbolProvider.py"]
+rules = { "unresolved-import" = "ignore" }
+
+# atheris is installed only in the fuzzing CI job, and targets.py is deliberately
+# importable without it so the regression replay path works in the normal test run
+[[tool.ty.overrides]]
+include = ["fuzzing/harness.py"]
+rules = { "unresolved-import" = "ignore" }
+
+# pstats.Stats exposes total_calls/prim_calls at runtime, but typeshed does not
+# declare them; the heterogeneous fixture dicts likewise defeat os.path.join's overloads
+[[tool.ty.overrides]]
+include = [".github/workflows/scripts/run_perf_check.py"]
+rules = { "unresolved-attribute" = "ignore", "no-matching-overload" = "ignore" }
+
+# the profile extra is deliberately kept out of dev to keep the default install lean,
+# so its imports are expected to be missing in a dev-only environment like the lint job
+[[tool.ty.overrides]]
+include = ["profiling/"]
 rules = { "unresolved-import" = "ignore" }
