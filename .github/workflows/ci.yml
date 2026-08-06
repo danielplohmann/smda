@@ -45,8 +45,11 @@ jobs:
       - name: Run ruff formatting check
         run: python -m ruff format --check .
 
+      # tests/ is deliberately absent: it carries ~187 diagnostics and needs its own pass.
+      # The CI scripts are included because evaluate_runtime.py gates the perf benchmark
+      # and was checked by nothing but its own tests.
       - name: Run ty type checking
-        run: python -m ty check src/smda/
+        run: python -m ty check src/smda/ fuzzing/ profiling/ .github/workflows/scripts/
 
       - name: Sibling-pair check (advisory)
         if: github.event_name == 'pull_request'
@@ -55,20 +58,30 @@ jobs:
         run: python .github/workflows/scripts/sibling_check.py
 
   test:
-    name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     # 3.14 is pre-release; report but do not block PRs on it.
     continue-on-error: ${{ matrix.python-version == '3.14' }}
     strategy:
       fail-fast: false
       matrix:
+        # Linux carries the full interpreter range; Windows and macOS run the floor
+        # version only, to catch path/encoding portability without tripling the matrix.
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.11"
 
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # full history so the diff-coverage step below can resolve the base branch
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -85,7 +98,52 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Run tests
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.11'
         run: python -m pytest tests/test*
+
+      - name: Run tests with coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: |
+          set +e
+          python -m pytest --cov=smda --cov-branch --cov-report=xml --cov-report=term-missing tests/ 2>&1 | tee coverage-summary.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Coverage"
+            echo
+            echo '```text'
+            cat coverage-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      # coverage measures `source = ["smda"]`, so this gate only sees changed lines
+      # under src/smda/**; tests/, fuzzing/ and scripts/ pass it by not being measured
+      - name: Check diff coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        env:
+          COMPARE_BRANCH: origin/${{ github.event.repository.default_branch }}
+        run: |
+          set +e
+          diff-cover coverage.xml --compare-branch="$COMPARE_BRANCH" --fail-under=100 2>&1 | tee diff-coverage.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Diff coverage"
+            echo
+            echo '```text'
+            cat diff-coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload coverage report
+        if: always() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: ignore
 
   mcrit-install:
     name: MCRIT install (${{ matrix.os }}, Python ${{ matrix.python-version }})

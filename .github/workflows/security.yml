@@ -1,0 +1,96 @@
+name: Security
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # a dependency CVE can land without anything in this repo changing, so this
+    # has to run on a clock rather than only on pushes
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit
+
+      # audits the runtime dependency set a consumer actually installs, resolved
+      # from pyproject rather than from this runner's environment
+      - name: Audit resolved dependencies
+        run: |
+          set +e
+          pip-audit --strict . 2>&1 | tee audit.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Dependency audit"
+            echo
+            echo '```text'
+            cat audit.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  workflow-audit:
+    name: Workflow audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install zizmor
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install zizmor
+
+      - name: Audit workflows
+        run: |
+          set +e
+          zizmor --persona=regular .github/workflows/ 2>&1 | tee zizmor.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "## Workflow audit"
+            echo
+            echo '```text'
+            cat zizmor.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
