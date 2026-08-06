@@ -15,9 +15,51 @@ from smda.DisassemblyStatistics import DisassemblyStatistics
 
 from .BinaryInfo import BinaryInfo
 from .SmdaBasicBlock import SmdaBasicBlock
-from .SmdaFunction import SmdaFunction
+from .SmdaFunction import MAX_ADDRESS_VALUE, SmdaFunction
 
 LOGGER = logging.getLogger(__name__)
+
+REQUIRED_REPORT_FIELDS = frozenset(
+    {
+        "architecture",
+        "base_addr",
+        "binary_size",
+        "bitness",
+        "code_areas",
+        "confidence_threshold",
+        "disassembly_errors",
+        "execution_time",
+        "identified_alignment",
+        "message",
+        "sha256",
+        "smda_version",
+        "status",
+        "xcfg",
+    }
+)
+INTEGER_REPORT_FIELDS = frozenset(
+    {
+        "base_addr",
+        "binary_size",
+        "bitness",
+        "identified_alignment",
+        "oep",
+    }
+)
+REAL_REPORT_FIELDS = frozenset({"confidence_threshold", "execution_time"})
+REQUIRED_STATISTICS_FIELDS = frozenset(
+    {
+        "num_functions",
+        "num_recursive_functions",
+        "num_leaf_functions",
+        "num_basic_blocks",
+        "num_instructions",
+        "num_api_calls",
+        "num_function_calls",
+        "num_failed_functions",
+        "num_failed_instructions",
+    }
+)
 
 
 class SmdaReport:
@@ -235,6 +277,9 @@ class SmdaReport:
 
         if self.architecture in ("cil", "dalvik"):
             raise NotImplementedError(f"binary synthesis is not supported for '{self.architecture}' reports")
+        missing = [field for field in ("base_addr", "binary_size", "bitness") if getattr(self, field) is None]
+        if missing:
+            raise ValueError(f"cannot synthesize a binary from a report without {', '.join(missing)}")
         synthesizer = createSynthesizer(self, output_format)
         return synthesizer.synthesize(
             function_offsets=function_offsets, with_imports=with_imports, with_strings=with_strings
@@ -286,7 +331,7 @@ class SmdaReport:
     def fromFile(cls, file_path):
         smda_json = {}
         if os.path.isfile(file_path):
-            with open(file_path) as fjson:
+            with open(file_path, encoding="utf-8") as fjson:
                 smda_json = json.load(fjson)
         else:
             raise FileNotFoundError
@@ -319,8 +364,66 @@ class SmdaReport:
             normalized[language_name] = max(normalized.get(language_name, 0.0), score)
         return normalized
 
+    @staticmethod
+    def _validatedFunctionAddress(function_addr):
+        """xcfg keys become function offsets; the synthesizers pack them unsigned."""
+        address = int(function_addr)
+        if not 0 <= address < MAX_ADDRESS_VALUE:
+            raise ValueError("serialized report xcfg addresses must be in the 64-bit space")
+        return address
+
     @classmethod
     def fromDict(cls, report_dict) -> Optional["SmdaReport"]:
+        if not isinstance(report_dict, dict):
+            raise ValueError("serialized report must be a dictionary")
+        if not REQUIRED_REPORT_FIELDS.issubset(report_dict):
+            raise ValueError("serialized report is incomplete")
+        if not isinstance(report_dict["xcfg"], dict):
+            raise ValueError("serialized report xcfg must be a dictionary")
+        if "metadata" in report_dict and not isinstance(report_dict["metadata"], dict):
+            raise ValueError("serialized report metadata must be a dictionary")
+        for field in ("xdata_refs_from", "xdata_refs_to"):
+            references = report_dict.get(field, {})
+            if not isinstance(references, dict) or any(
+                not isinstance(targets, (list, tuple)) or not all(isinstance(target, int) for target in targets)
+                for targets in references.values()
+            ):
+                raise ValueError(f"serialized report {field} must map addresses to lists")
+        code_sections = report_dict.get("code_sections", [])
+        if not isinstance(code_sections, list) or any(
+            not isinstance(section, (list, tuple)) or len(section) < 3 for section in code_sections
+        ):
+            raise ValueError("serialized report code_sections must contain three-item sequences")
+        statistics = report_dict.get("statistics")
+        if statistics:
+            if not isinstance(statistics, dict):
+                raise ValueError("serialized report statistics must be a dictionary")
+            if not REQUIRED_STATISTICS_FIELDS.issubset(statistics):
+                raise ValueError("serialized report statistics are incomplete")
+        if not isinstance(report_dict.get("timestamp", ""), str):
+            raise ValueError("serialized report timestamp must be a string")
+        if "xheader" in report_dict and not isinstance(report_dict["xheader"], str):
+            raise ValueError("serialized report xheader must be a string")
+        if (
+            "xmetadata" in report_dict
+            and report_dict["xmetadata"] is not None
+            and not isinstance(report_dict["xmetadata"], dict)
+        ):
+            raise ValueError("serialized report xmetadata must be a dictionary")
+        if report_dict.get("smda_version") is not None and not isinstance(report_dict["smda_version"], str):
+            raise ValueError("serialized report smda_version must be a string")
+        for field in INTEGER_REPORT_FIELDS:
+            value = report_dict.get(field)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"serialized report {field} must be an integer")
+            if not 0 <= value < MAX_ADDRESS_VALUE:
+                raise ValueError(f"serialized report {field} must fit in a 64-bit address space")
+        for field in REAL_REPORT_FIELDS:
+            value = report_dict.get(field)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                raise ValueError(f"serialized report {field} must be a number")
         smda_report = cls(None)
         smda_report.architecture = report_dict["architecture"]
         smda_report.abi = report_dict.get("abi", "")
@@ -378,7 +481,7 @@ class SmdaReport:
         binary_info.binary_size = smda_report.binary_size
         binary_info.oep = smda_report.oep
         smda_report.xcfg = {
-            int(function_addr): SmdaFunction.fromDict(
+            cls._validatedFunctionAddress(function_addr): SmdaFunction.fromDict(
                 function_dict,
                 binary_info=binary_info,
                 version=smda_report.smda_version,
@@ -459,7 +562,7 @@ class SmdaReport:
         return report_dict
 
     def toFile(self, output_filepath) -> None:
-        with open(output_filepath, "w") as fout:
+        with open(output_filepath, "w", encoding="utf-8") as fout:
             json.dump(self.toDict(), fout, indent=1, sort_keys=True)
             LOGGER.info(f"SmdaReport saved to: {output_filepath}")
 

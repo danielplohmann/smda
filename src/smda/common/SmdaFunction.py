@@ -49,6 +49,12 @@ CIL_PIC_HASH_ESCAPE_VERSION = [4, 3, 8]
 # position-dependent Dalvik pic_hash values and must recalculate on import.
 DALVIK_PIC_HASH_ESCAPE_VERSION = [4, 4, 2]
 
+MAX_ADDRESS_VALUE = 1 << 64
+REQUIRED_FUNCTION_FIELDS = frozenset({"offset", "blocks", "apirefs", "blockrefs", "inrefs", "outrefs", "metadata"})
+REQUIRED_FUNCTION_METADATA = frozenset(
+    {"binweight", "characteristics", "confidence", "function_name", "strongly_connected_components", "tfidf"}
+)
+
 
 class LazyIntKeyDict(dict):
     def __new__(cls, data=None):
@@ -634,11 +640,54 @@ class SmdaFunction:
 
     @classmethod
     def fromDict(cls, function_dict, binary_info=None, version=None, smda_report=None) -> "SmdaFunction":
+        if not isinstance(function_dict, dict):
+            raise ValueError("serialized function must be a dictionary")
+        if not REQUIRED_FUNCTION_FIELDS.issubset(function_dict):
+            raise ValueError("serialized function is incomplete")
+        blocks = function_dict.get("blocks")
+        if not isinstance(blocks, dict):
+            raise ValueError("serialized function blocks must be a dictionary")
+        for block in blocks.values():
+            if not isinstance(block, list):
+                raise ValueError("serialized basic block must be a list")
+            if any(
+                not isinstance(instruction, (list, tuple))
+                or len(instruction) < 4
+                or not isinstance(instruction[0], int)
+                or not 0 <= instruction[0] < MAX_ADDRESS_VALUE
+                or any(not isinstance(field, str) for field in instruction[1:4])
+                for instruction in block
+            ):
+                raise ValueError("serialized instruction must contain four fields")
+        for reference_field in ("apirefs", "blockrefs", "outrefs"):
+            references = function_dict.get(reference_field)
+            if not isinstance(references, dict):
+                raise ValueError(f"serialized function {reference_field} must be a dictionary")
+            if reference_field in ("blockrefs", "outrefs") and any(
+                not isinstance(targets, (list, tuple)) or not all(isinstance(target, int) for target in targets)
+                for targets in references.values()
+            ):
+                raise ValueError(f"serialized function {reference_field} must map addresses to lists")
+        if not isinstance(function_dict.get("inrefs"), list):
+            raise ValueError("serialized function inrefs must be a list")
+        metadata = function_dict.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError("serialized function metadata must be a dictionary")
+        if not REQUIRED_FUNCTION_METADATA.issubset(metadata):
+            raise ValueError("serialized function metadata is incomplete")
+        architecture_metadata = function_dict.get("architecture_metadata", {})
+        if not isinstance(architecture_metadata, dict):
+            raise ValueError("serialized function architecture metadata must be a dictionary")
+        # checked after the container shape so each malformed field still reports itself;
+        # the synthesizers pack these unsigned, and a negative one reaches struct.pack
+        addresses = [function_dict["offset"], *(int(address) for address in blocks)]
+        if any(isinstance(a, bool) or not isinstance(a, int) or not 0 <= a < MAX_ADDRESS_VALUE for a in addresses):
+            raise ValueError("serialized function addresses must be in the 64-bit space")
         smda_function = cls(None)
         smda_function.smda_report = smda_report
         smda_function.offset = function_dict["offset"]
         smda_function.blocks = {}
-        for addr, block in function_dict["blocks"].items():
+        for addr, block in blocks.items():
             smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins, smda_function) for ins in block]
         smda_function._sorted_block_keys = sorted(smda_function.blocks.keys())
         smda_function._basic_blocks = None
@@ -648,15 +697,15 @@ class SmdaFunction:
         smda_function.outrefs = LazyIntKeyDict(function_dict["outrefs"])
         # provide some legacy support by assuming functions are not exported for SMDA reports < 1.7.0
         smda_function.is_exported = function_dict.get("is_exported", False)
-        smda_function.architecture_metadata = function_dict.get("architecture_metadata", {})
+        smda_function.architecture_metadata = architecture_metadata
         smda_function.blockrefs = smda_function.getNormalizedBlockRefs()
-        smda_function.binweight = function_dict["metadata"]["binweight"]
-        smda_function.characteristics = function_dict["metadata"]["characteristics"]
-        smda_function.confidence = function_dict["metadata"]["confidence"]
-        smda_function.function_name = function_dict["metadata"]["function_name"]
-        smda_function.pic_hash = function_dict["metadata"].get("pic_hash", None)
-        smda_function.strongly_connected_components = function_dict["metadata"]["strongly_connected_components"]
-        smda_function.tfidf = function_dict["metadata"]["tfidf"]
+        smda_function.binweight = metadata["binweight"]
+        smda_function.characteristics = metadata["characteristics"]
+        smda_function.confidence = metadata["confidence"]
+        smda_function.function_name = metadata["function_name"]
+        smda_function.pic_hash = metadata.get("pic_hash", None)
+        smda_function.strongly_connected_components = metadata["strongly_connected_components"]
+        smda_function.tfidf = metadata["tfidf"]
         stringrefs = function_dict.get("stringrefs", {})
         function_architecture = None
         if smda_report is not None:
@@ -708,8 +757,10 @@ class SmdaFunction:
                 smda_function.nesting_depth = smda_function._calculateNestingDepth()
                 if smda_function._escaper and hash_context:
                     smda_function.pic_hash = smda_function.getPicHash(hash_context)
+            elif "nesting_depth" in metadata:
+                smda_function.nesting_depth = metadata["nesting_depth"]
             else:
-                smda_function.nesting_depth = function_dict["metadata"]["nesting_depth"]
+                smda_function.nesting_depth = smda_function._calculateNestingDepth()
         # if we don't have valid version information, always recalculate
         else:
             smda_function.nesting_depth = smda_function._calculateNestingDepth()
