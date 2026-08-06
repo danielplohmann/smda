@@ -57,7 +57,7 @@ class WinApiResolver(AbstractLabelProvider):
             return
         api_db = {}
         if os.path.isfile(db_filepath):
-            with open(db_filepath) as f_json:
+            with open(db_filepath, encoding="utf-8") as f_json:
                 api_db = json.loads(f_json.read())
         else:
             LOGGER.error(

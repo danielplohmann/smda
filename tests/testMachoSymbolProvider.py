@@ -44,7 +44,7 @@ def _xor_fixture(data):
 
 
 def _load_fixture(fixture_id):
-    manifest = json.loads(MANIFEST_PATH.read_text())
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     fixture = next(item for item in manifest["fixtures"] if item["id"] == fixture_id)
     raw = _xor_fixture((CORPUS_DIR / fixture["path"]).read_bytes())
     loader = MemoryFileLoader(raw, map_file=True)
