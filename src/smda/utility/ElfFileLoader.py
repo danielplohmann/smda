@@ -312,8 +312,11 @@ class ElfFileLoader:
         try:
             elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
             if elffile:
-                abi = elffile.header.identity_os_abi.name
-        except lief.bad_file as exc:
+                identity_os_abi = elffile.header.identity_os_abi
+                abi = getattr(identity_os_abi, "name", "")
+                if not abi:
+                    LOGGER.debug("ELF: unnamed OS ABI %r, reporting it as unknown", identity_os_abi)
+        except ValueError as exc:
             LOGGER.warning("Failed to determine ELF ABI: %s", exc)
         return abi
 

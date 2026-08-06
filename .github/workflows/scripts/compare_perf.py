@@ -12,7 +12,23 @@ def main():
         "--threshold-warn", type=float, default=0.20, help="Slowdown warning threshold (e.g. 0.20 for 20%%)"
     )
     parser.add_argument(
-        "--threshold-fail", type=float, default=0.50, help="Slowdown failure threshold (e.g. 0.50 for 50%%)"
+        "--threshold-fail", type=float, default=0.30, help="Slowdown failure threshold (e.g. 0.30 for 30%%)"
+    )
+    parser.add_argument(
+        "--min-absolute-regression",
+        type=float,
+        default=0.15,
+        help="Seconds a single fixture must also lose before its percentage counts as a "
+        "failure. The counterbalanced passes cancel drift but not per-sample variance, so "
+        "a sub-second fixture can swing tens of percent on a shared runner without doing "
+        "any more work. The OVERALL row carries no such floor.",
+    )
+    parser.add_argument(
+        "--memory-threshold-fail",
+        type=float,
+        default=0.10,
+        help="Peak-memory growth failure threshold (e.g. 0.10 for 10%%). Tighter than the time "
+        "threshold because allocation totals barely vary between runs on a shared runner.",
     )
     parser.add_argument(
         "--fail-on-call-count-change",
@@ -23,14 +39,14 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.pr_results) as f:
+        with open(args.pr_results, encoding="utf-8") as f:
             pr_data = json.load(f)
     except Exception as e:
         print(f"Error reading PR results JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        with open(args.base_results) as f:
+        with open(args.base_results, encoding="utf-8") as f:
             base_data = json.load(f)
     except Exception as e:
         print(f"Error reading Base results JSON: {e}", file=sys.stderr)
@@ -38,6 +54,9 @@ def main():
 
     correctness_failed = False
     perf_failed = False
+    memory_failed = False
+    memory_rows = []
+    skipped_memory = []
 
     print("\n=== SMDA BENCHMARK COMPARISON ===")
     print(f"Comparing PR results ({args.pr_results}) with Base results ({args.base_results})\n")
@@ -47,8 +66,8 @@ def main():
     print(row_fmt.format(*headers))
     print("-" * 90)
 
-    overall_base_time = 0
-    overall_pr_time = 0
+    overall_base_time = 0.0
+    overall_pr_time = 0.0
     call_count_rows = []
     call_count_changed = False
     skipped_call_counts = []
@@ -76,15 +95,29 @@ def main():
         pct_change = (diff / base_med) * 100 if base_med > 0 else 0
 
         # Check performance status
-        if pct_change > (args.threshold_fail * 100):
+        if pct_change > (args.threshold_fail * 100) and diff >= args.min_absolute_regression:
             perf_status = "FAIL (REGRESS)"
             perf_failed = True
+        elif pct_change > (args.threshold_fail * 100):
+            perf_status = "WARN (NOISE?)"
         elif pct_change > (args.threshold_warn * 100):
             perf_status = "WARN"
         elif pct_change < -5:
             perf_status = "OK (IMPROVED)"
         else:
             perf_status = "OK"
+
+        # Peak memory is the resource most likely to break a downstream batch consumer,
+        # which sizes its worker count by per-file peak, so it gets its own gate.
+        base_mem = base.get("median_peak_memory")
+        pr_mem = pr.get("median_peak_memory")
+        if base_mem and pr_mem:
+            mem_change = ((pr_mem - base_mem) / base_mem) * 100
+            memory_rows.append((name, base_mem, pr_mem, pr_mem - base_mem, mem_change))
+            if mem_change > (args.memory_threshold_fail * 100):
+                memory_failed = True
+        elif base_mem or pr_mem:
+            skipped_memory.append(name)
 
         # Check correctness
         corr_status = "MATCH"
@@ -185,6 +218,26 @@ def main():
     )
     print()
 
+    if memory_rows:
+        status = "FAIL" if memory_failed else "OK"
+        print(f"=== PEAK MEMORY (gated at {args.memory_threshold_fail * 100:.0f}%: {status}) ===")
+        mem_fmt = "{:<12} | {:>14} | {:>14} | {:>14} | {:>9}"
+        print(mem_fmt.format("Fixture", "Base Peak", "PR Peak", "Delta", "Change"))
+        print("-" * 74)
+        for mem_name, base_mem, pr_mem, delta, pct in memory_rows:
+            print(
+                mem_fmt.format(
+                    mem_name,
+                    f"{base_mem / 1048576:.1f} MiB",
+                    f"{pr_mem / 1048576:.1f} MiB",
+                    f"{delta / 1048576:+.1f} MiB",
+                    f"{pct:+.2f}%",
+                )
+            )
+        print()
+    if skipped_memory:
+        print(f"Memory comparison skipped (one side lacks the channel): {', '.join(skipped_memory)}\n")
+
     if call_count_rows:
         print("=== PYTHON CALL COUNTS (informational) ===")
         cc_fmt = "{:<12} | {:>14} | {:>14} | {:>14} | {:>9}"
@@ -198,16 +251,19 @@ def main():
 
     # Exit codes
     if correctness_failed:
-        print("❌ Correctness checks failed! Output results do not match.", file=sys.stderr)
+        print("FAIL: correctness checks failed; output results do not match.", file=sys.stderr)
         sys.exit(1)
     if call_count_changed and args.fail_on_call_count_change:
-        print("❌ Call counts changed and --fail-on-call-count-change was requested.", file=sys.stderr)
+        print("FAIL: call counts changed and --fail-on-call-count-change was requested.", file=sys.stderr)
         sys.exit(1)
     if perf_failed:
-        print("❌ Performance checks failed! Severe performance regression detected.", file=sys.stderr)
+        print("FAIL: performance checks failed; severe performance regression detected.", file=sys.stderr)
         sys.exit(2)
+    if memory_failed:
+        print("FAIL: peak memory grew beyond the configured threshold.", file=sys.stderr)
+        sys.exit(3)
 
-    print("✅ All checks passed successfully.")
+    print("PASS: all checks passed successfully.")
     sys.exit(0)
 
 
