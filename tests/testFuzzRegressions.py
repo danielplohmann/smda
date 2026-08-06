@@ -15,10 +15,14 @@ one is replayed here and must pass.
 import logging
 import os
 import re
+import struct
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 logging.disable(logging.CRITICAL)
 
@@ -27,7 +31,17 @@ sys.path.insert(0, str(REPO_ROOT / "fuzzing"))
 
 from minimize import failure_type, shrink  # noqa: E402
 from prune_corpus import prune  # noqa: E402
-from targets import TARGETS  # noqa: E402
+from targets import (  # noqa: E402
+    FUZZING_ALLOWED_OPERATIONAL_EXCEPTION_TYPES,
+    FUZZING_DEFECT_EXCEPTION_TYPES,
+    FUZZING_LOADER_EXCEPTION_TYPES,
+    TARGETS,
+    MachoFileLoader,
+    PeFileLoader,
+    _reraise_real_defect,
+)
+
+pytestmark = pytest.mark.slow
 
 REGRESSION_DIR = Path(__file__).resolve().parent / "fuzz_regressions"
 
@@ -53,11 +67,65 @@ def decode_fixture(data, name):
 
 
 class SmdaFuzzTargetSmokeTest(unittest.TestCase):
+    @staticmethod
+    def _apply_oracle(exception, allow_struct_error=False):
+        try:
+            raise exception
+        except Exception as caught:
+            _reraise_real_defect(caught, allow_struct_error=allow_struct_error)
+
+    def test_fuzzing_oracle_separates_defects_from_parse_errors(self):
+        for exception_type in FUZZING_DEFECT_EXCEPTION_TYPES:
+            with (
+                self.subTest(exception_type=exception_type.__name__),
+                self.assertRaises(exception_type),
+            ):
+                self._apply_oracle(exception_type("defect"))
+
+        allowed_exceptions = (
+            ValueError("malformed input"),
+            UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte"),
+        )
+        for exception in allowed_exceptions:
+            with self.subTest(exception_type=type(exception).__name__):
+                self._apply_oracle(exception)
+
+        self._apply_oracle(struct.error("truncated structure"), allow_struct_error=True)
+        with self.assertRaises(struct.error):
+            self._apply_oracle(struct.error("truncated structure"))
+        self.assertEqual(FUZZING_ALLOWED_OPERATIONAL_EXCEPTION_TYPES, (ValueError, UnicodeDecodeError))
+        self.assertEqual(FUZZING_LOADER_EXCEPTION_TYPES, (struct.error,))
+
     def test_targets_tolerate_smoke_inputs(self):
         for target_name, target in sorted(TARGETS.items()):
             for payload in SMOKE_INPUTS:
                 with self.subTest(target=target_name, size=len(payload)):
                     target(payload)
+
+    def test_formats_target_rejects_cross_format_lief_results(self):
+        cases = ((0, "mirai_x64_xored"), (1, "cutwail_xored"), (2, "mirai_x64_xored"))
+        for selector, fixture_name in cases:
+            with self.subTest(selector=selector, fixture=fixture_name):
+                fixture_path = REPO_ROOT / "tests" / fixture_name
+                payload = decode_fixture(fixture_path.read_bytes(), fixture_name)[:8192]
+                TARGETS["formats"](bytes([selector]) + payload)
+
+    def test_formats_target_narrows_struct_error_allowlist(self):
+        with (
+            patch.object(PeFileLoader, "mapBinary", side_effect=struct.error("PE defect")),
+            self.assertRaises(struct.error),
+        ):
+            TARGETS["formats"](b"\x00")
+
+        with patch.object(MachoFileLoader, "mapBinary", side_effect=struct.error("truncated Mach-O")):
+            TARGETS["formats"](b"\x02")
+
+    def test_report_target_reraises_defects_from_json_decode(self):
+        with (
+            patch("targets.json.loads", side_effect=RecursionError("decoder defect")),
+            self.assertRaises(RecursionError),
+        ):
+            TARGETS["report"](b"{}")
 
     def test_every_target_has_an_entry_point(self):
         fuzzing_dir = REPO_ROOT / "fuzzing"
@@ -69,7 +137,7 @@ class SmdaFuzzTargetSmokeTest(unittest.TestCase):
 
     def test_dictionary_uses_only_libfuzzer_escapes(self):
         """libFuzzer accepts \\xAB, \\\\ and \\" only; anything else aborts the run at startup."""
-        dictionary = (REPO_ROOT / "fuzzing" / "smda.dict").read_text()
+        dictionary = (REPO_ROOT / "fuzzing" / "smda.dict").read_text(encoding="utf-8")
         for number, line in enumerate(dictionary.splitlines(), 1):
             entry = line.strip()
             if not entry or entry.startswith("#"):
@@ -95,7 +163,7 @@ class SmdaFuzzTargetSmokeTest(unittest.TestCase):
                 index += 2
 
     def test_workflow_covers_every_target(self):
-        workflow = (REPO_ROOT / ".github" / "workflows" / "fuzzing.yml").read_text()
+        workflow = (REPO_ROOT / ".github" / "workflows" / "fuzzing.yml").read_text(encoding="utf-8")
         for target_name in TARGETS:
             self.assertIn(f"fuzz_{target_name}", workflow, f"target {target_name} is not fuzzed in CI")
 
