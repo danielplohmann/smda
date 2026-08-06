@@ -84,12 +84,8 @@ def _prefixed_seeds(seeds, selector_count):
     return prefixed
 
 
-def _report_seeds():
-    """Disassemble one fixture and dump the report as JSON.
-
-    A hand-written skeleton would only reach the first few field lookups in
-    fromDict(); a real report reaches the function/block/instruction rebuild.
-    """
+def _full_report_payload():
+    """Disassemble one fixture and dump the report as JSON."""
     from smda.Disassembler import Disassembler
     from smda.SmdaConfig import SmdaConfig
 
@@ -101,20 +97,37 @@ def _report_seeds():
     report = Disassembler(config).disassembleUnmappedBuffer(decode_fixture(fixture_path))
     if report is None or report.status == "error":
         raise SystemExit("could not produce a report seed from the fixture")
-    payload = json.dumps(report.toDict()).encode()
-    return [("report_full", payload), ("report_minimal", json.dumps({"architecture": "intel"}).encode())]
+    return json.dumps(report.toDict()).encode()
+
+
+def _report_seeds():
+    """The full report reaches the function/block/instruction rebuild; the small
+    skeleton separately exercises SmdaReport.fromDict's required-field validation.
+    """
+    return [
+        ("report_full", _full_report_payload()),
+        ("report_minimal", json.dumps({"architecture": "intel"}).encode()),
+    ]
+
+
+def _synthesis_seeds():
+    """One report per output format, behind the target's leading selector byte."""
+    payload = _full_report_payload()
+    return [(f"synthesis_sel{selector}", bytes([selector]) + payload) for selector in range(3)]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus_dir", nargs="?", default="corpus", type=Path)
-    parser.add_argument("--profile", choices=(*SELECTOR_BYTES, "report"), default="binary")
+    parser.add_argument("--profile", choices=(*SELECTOR_BYTES, "report", "synthesis"), default="binary")
     parser.add_argument("--head-size", type=int, default=8192)
     args = parser.parse_args()
 
     args.corpus_dir.mkdir(parents=True, exist_ok=True)
     if args.profile == "report":
         seeds = _report_seeds()
+    elif args.profile == "synthesis":
+        seeds = _synthesis_seeds()
     else:
         seeds = _prefixed_seeds(_binary_seeds(args.head_size), SELECTOR_BYTES[args.profile])
     for name, payload in seeds:

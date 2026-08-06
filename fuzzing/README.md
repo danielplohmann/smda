@@ -28,6 +28,7 @@ works anywhere without atheris.
 | `disassembler` | `disassembleUnmappedBuffer()`, the full pipeline |
 | `buffer` | `disassembleBuffer()` with fuzzer-chosen architecture/bitness/base |
 | `report` | `SmdaReport.fromDict()` over fuzzer-generated JSON, plus round-trip |
+| `synthesis` | `synthesizeBinary()` per format, asserting the output re-parses |
 
 ## What counts as a finding
 
@@ -39,10 +40,12 @@ ordinary parse failures are not findings. What fails a run:
 - a segfault, abort, or uncaught native error in capstone/lief
 - a hang (libFuzzer `-timeout`) or memory blow-up (`-rss_limit_mb`,
   `-malloc_limit_mb`)
-- an exception the contract classes as non-operational (`AssertionError`,
-  `MemoryError`, `ImportError`, `NameError`, `ReferenceError`, `SyntaxError`)
-- `RecursionError` — operational by type, but a latent stack overflow in
-  practice, so the harnesses promote it (`FATAL_EXCEPTION_TYPES`)
+- a programming-error exception from the stricter fuzzing oracle (`AssertionError`,
+  `AttributeError`, `ImportError`, `IndexError`, `KeyError`, `MemoryError`,
+  `NameError`, `RecursionError`, `ReferenceError`, `SyntaxError`, `TypeError`,
+  `UnboundLocalError`, or `ZeroDivisionError`)
+- an exception outside the narrow malformed-input allowlist (`ValueError`,
+  `UnicodeDecodeError`, and the documented truncated-Mach-O `struct.error`)
 - a report that is `None` or carries a status outside `{ok, timeout, error}`
 
 ## Reproducing a CI finding
@@ -75,9 +78,9 @@ python fuzzing/generate_seeds.py corpus_loaders --profile binary
 python fuzzing/fuzz_loaders.py corpus_loaders -max_total_time=120 -dict=fuzzing/smda.dict
 ```
 
-Use `--profile formats` / `--profile buffer` / `--profile report` for the
-corresponding targets: those targets consume selector bytes from the front of
-the input, and the profile prepends them.
+Use `--profile formats` / `--profile buffer` / `--profile report` /
+`--profile synthesis` for the corresponding targets: those targets consume
+selector bytes from the front of the input, and the profile prepends them.
 
 The corpus is cached per target in CI, so coverage accumulates across runs
 instead of restarting from the seeds every time.
