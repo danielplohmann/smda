@@ -2,6 +2,8 @@
 
 """Shared Mach-O slice selection helpers for loaders and label providers."""
 
+import warnings
+
 import lief
 
 
@@ -19,7 +21,9 @@ def get_active_macho_binary(lief_binary, *, bitness=None, architecture=""):
             if bitness and binary_bitness != bitness:
                 continue
             if architecture:
-                cpu_type = getattr(binary.header, "cpu_type", None)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    cpu_type = getattr(binary.header, "cpu_type", None)
                 is_intel = cpu_type in (lief.MachO.Header.CPU_TYPE.X86, lief.MachO.Header.CPU_TYPE.X86_64)
                 is_arm = cpu_type in (lief.MachO.Header.CPU_TYPE.ARM, lief.MachO.Header.CPU_TYPE.ARM64)
                 if architecture == "intel" and not is_intel:

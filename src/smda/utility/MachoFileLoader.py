@@ -1,5 +1,6 @@
 import logging
 import struct
+import warnings
 from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
@@ -75,7 +76,10 @@ def _resolve_macho_cpu(macho_file):
     # metadata instead of raising.
     if not macho_file or not hasattr(macho_file, "header"):
         return "", 0, False
-    return _MACHO_CPU_TYPES.get(macho_file.header.cpu_type, ("", 0, False))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cpu_type = macho_file.header.cpu_type
+    return _MACHO_CPU_TYPES.get(cpu_type, ("", 0, False))
 
 
 def align(v, alignment):

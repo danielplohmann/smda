@@ -34,6 +34,19 @@ class TestElfFileLoader(unittest.TestCase):
         self.assertTrue(loader.getCodeAreas())
         self.assertTrue(loader.getData())
 
+    def test_invalid_abi_does_not_depend_on_removed_lief_exception(self):
+        class InvalidAbi:
+            @property
+            def name(self):
+                raise ValueError("invalid ABI")
+
+        parsed = SimpleNamespace(header=SimpleNamespace(identity_os_abi=InvalidAbi()))
+
+        self.assertEqual(ElfFileLoader.getAbi(b"", parsed=parsed), "")
+        self.assertEqual(
+            ElfFileLoader.getAbi(b"", parsed=SimpleNamespace(header=SimpleNamespace(identity_os_abi=110))), ""
+        )
+
     def test_plt_ranges_include_all_supported_section_names(self):
         sections = [
             SimpleNamespace(name=".plt", virtual_address=0x1000, size=0x20),
