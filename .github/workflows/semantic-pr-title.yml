@@ -1,6 +1,9 @@
 name: Semantic PR Title
 
-on:
+# pull_request_target is required to read the title of a PR from a fork, and is safe
+# here specifically because this workflow never checks out or executes PR content -
+# it runs one pinned action against the PR metadata with a read-only token.
+on: # zizmor: ignore[dangerous-triggers]
   pull_request_target:
     types:
       - opened
@@ -20,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check Conventional Commit format
-        uses: amannn/action-semantic-pull-request@v6.1.1
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
