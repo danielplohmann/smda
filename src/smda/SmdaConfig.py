@@ -13,7 +13,6 @@ class SmdaConfig:
     API_COLLECTION_FILES = {}
     ### global logging-config setup
     # Only do basicConfig if no handlers have been configured
-    LOG_PATH = "./"
     LOG_LEVEL = logging.INFO
     LOG_FORMAT = "%(asctime)-15s: %(name)-32s - %(message)s"
 
@@ -70,6 +69,7 @@ class SmdaConfig:
     CONFIDENCE_THRESHOLD = 0.0
 
     def __init__(self):
+        self.API_COLLECTION_FILES = dict(SmdaConfig.API_COLLECTION_FILES)
         self._disableLiefLogging()
 
     def _disableLiefLogging(self):
