@@ -6,7 +6,7 @@ PYTHON ?= python3
 TARGET ?= asprox
 
 init:
-	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<82.1.0" "wheel>=0.47.0"
+	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<83.1.0" "wheel>=0.47.0"
 	$(PYTHON) -m pip install -e ".[dev]"
 	$(PYTHON) -m pre_commit install
 package:
@@ -39,7 +39,7 @@ profile-flame:
 	py-spy record --native -o profiling/output/$(TARGET).cpu.svg -- \
 		$(PYTHON) -m profiling.profile_smda run --target $(TARGET)
 clean:
-	find . | grep -E "(__pycache__|\.pyc|\.pyo$\)" | xargs rm -rf
+	find . \( -name '__pycache__' -o -name '*.pyc' -o -name '*.pyo' \) -prune -exec rm -rf {} +
 	rm -rf .coverage
 	rm -rf coverage-html
 	rm -rf dist/*
