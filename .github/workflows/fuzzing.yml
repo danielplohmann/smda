@@ -62,6 +62,9 @@ jobs:
           - target: fuzz_report
             seed_profile: report
             max_len: 1048576
+          - target: fuzz_synthesis
+            seed_profile: synthesis
+            max_len: 1048576
 
     steps:
       - name: Checkout code
@@ -96,6 +99,13 @@ jobs:
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
             fuzz-corpus-${{ matrix.target }}-
+
+      # the cache evicts after 7 days without a hit, so a quiet fortnight would drop the
+      # run back to bare seeds; the in-repo floor makes the starting state deterministic
+      - name: Restore in-repo corpus floor
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python fuzzing/restore_corpus.py "${TARGET#fuzz_}" corpus
 
       - name: Generate seed corpus
         run: python fuzzing/generate_seeds.py corpus --profile ${{ matrix.seed_profile }}

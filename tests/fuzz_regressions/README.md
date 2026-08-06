@@ -9,7 +9,7 @@ Rules:
   (`byte ^ (index % 256)`), never as a raw sample.
 - Name it `<target>_<short-slug>_xored`, where `<target>` is one of the keys in
   `fuzzing/targets.py` (`loaders`, `formats`, `disassembler`, `buffer`,
-  `report`) — `tests/testFuzzRegressions.py` dispatches on that prefix.
+  `report`, `synthesis`) — `tests/testFuzzRegressions.py` dispatches on that prefix.
 - Keep it minimized (`python fuzzing/minimize.py <target> <artifact>`) and small;
   these run on every test invocation.
 

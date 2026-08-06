@@ -12,25 +12,55 @@ stays byte-exact.
 """
 
 import json
+import struct
+
+import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
+from smda.synthesis import FORMAT_ELF, FORMAT_MACHO, FORMAT_PE
 from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
 from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.ElfFileLoader import ElfFileLoader
+from smda.utility.lief_helper import safe_lief_parse
 from smda.utility.MachoFileLoader import MachoFileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
 from smda.utility.PeFileLoader import PeFileLoader
 
-# Exceptions that the public contract treats as operational (i.e. any malformed
-# input may legitimately produce them) but which still indicate a real defect
-# when a fuzzer triggers them: unbounded recursion is a crash on CPython builds
-# with a raised recursion limit and a latent stack overflow either way.
-FATAL_EXCEPTION_TYPES = (RecursionError,)
+# The library deliberately turns malformed-input failures into error reports for
+# callers. The fuzzing oracle is stricter: these exception classes indicate a
+# programming defect when crafted input reaches them, except for the
+# loader-specific struct.error carve-out below.
+FUZZING_DEFECT_EXCEPTION_TYPES = (
+    AssertionError,
+    AttributeError,
+    ImportError,
+    IndexError,
+    KeyError,
+    MemoryError,
+    NameError,
+    RecursionError,
+    ReferenceError,
+    SyntaxError,
+    TypeError,
+    UnboundLocalError,
+    ZeroDivisionError,
+    struct.error,
+)
+
+# These are documented malformed-input outcomes across the parser targets.
+FUZZING_ALLOWED_OPERATIONAL_EXCEPTION_TYPES = (ValueError, UnicodeDecodeError)
+
+# struct.error is documented for truncated Mach-O structures and is also
+# reachable through the generic MemoryFileLoader dispatch path. Format-target
+# carve-outs are narrowed to MachoFileLoader below.
+FUZZING_LOADER_EXCEPTION_TYPES = (struct.error,)
 
 VALID_STATUS = frozenset({"ok", "timeout", "error"})
+
+SYNTHESIS_FORMATS = (FORMAT_PE, FORMAT_ELF, FORMAT_MACHO)
 
 ARCHITECTURES = ("intel", "aarch64", "cil", "dalvik", "unsupported")
 BITNESSES = (None, 16, 32, 64)
@@ -43,6 +73,12 @@ FORMAT_LOADERS = (
     DexFileLoader,
 )
 
+FORMAT_PARSED_TYPES = {
+    PeFileLoader: lief.PE.Binary,
+    ElfFileLoader: lief.ELF.Binary,
+    MachoFileLoader: (lief.MachO.Binary, lief.MachO.FatBinary),
+}
+
 # Analysis budget per input. The engine's own -timeout is the backstop for hangs
 # inside native code; this keeps the cooperative timeout well below it.
 ANALYSIS_TIMEOUT = 5
@@ -54,10 +90,14 @@ def _config():
     return config
 
 
-def _reraise_real_defect(exception):
-    """Swallow operational exceptions, propagate everything that is a defect."""
-    if isinstance(exception, FATAL_EXCEPTION_TYPES):
+def _reraise_real_defect(exception, *, allow_struct_error=False):
+    """Apply the stricter fuzzing oracle without changing the library contract."""
+    if allow_struct_error and isinstance(exception, FUZZING_LOADER_EXCEPTION_TYPES):
+        return
+    if isinstance(exception, FUZZING_DEFECT_EXCEPTION_TYPES):
         raise
+    if isinstance(exception, FUZZING_ALLOWED_OPERATIONAL_EXCEPTION_TYPES):
+        return
     reraise_non_operational_exception(exception)
 
 
@@ -81,7 +121,9 @@ def loaders(data):
         loader.getCodeAreas()
         loader.getHasBackend()
     except Exception as exc:
-        _reraise_real_defect(exc)
+        # the dispatch can land on MachoFileLoader but does not report which, so the
+        # documented truncated-Mach-O struct.error has to be allowed for every loader
+        _reraise_real_defect(exc, allow_struct_error=True)
 
 
 def formats(data):
@@ -96,7 +138,14 @@ def formats(data):
     loader = FORMAT_LOADERS[data[0] % len(FORMAT_LOADERS)]
     payload = data[1:]
     try:
-        kw = {"parsed": loader.parseBinary(payload)} if hasattr(loader, "parseBinary") else {}
+        if hasattr(loader, "parseBinary"):
+            parsed = loader.parseBinary(payload)
+            expected_type = FORMAT_PARSED_TYPES.get(loader)
+            if expected_type and not isinstance(parsed, expected_type):
+                parsed = None
+            kw = {"parsed": parsed}
+        else:
+            kw = {}
         loader.mapBinary(payload, **kw)
         loader.getBaseAddress(payload, **kw)
         loader.getBitness(payload, **kw)
@@ -106,7 +155,7 @@ def formats(data):
         if hasattr(loader, "getHasBackend"):
             loader.getHasBackend(payload, **kw)
     except Exception as exc:
-        _reraise_real_defect(exc)
+        _reraise_real_defect(exc, allow_struct_error=loader is MachoFileLoader)
 
 
 def disassembler(data):
@@ -151,7 +200,8 @@ def report(data):
     """SmdaReport JSON deserialization, the surface consumers ingest reports on."""
     try:
         parsed = json.loads(data)
-    except Exception:
+    except Exception as exc:
+        _reraise_real_defect(exc)
         return
     if not isinstance(parsed, dict):
         return
@@ -163,10 +213,42 @@ def report(data):
         _reraise_real_defect(exc)
 
 
+def synthesis(data):
+    """Binary synthesis: rebuild a fictive file from a report and re-parse it.
+
+    src/smda/synthesis/ writes binary headers from report-derived integers and is
+    documented as not hardened against adversarial input, which makes it the one
+    place where a crafted report reaches struct packing and offset arithmetic.
+    """
+    if not data:
+        return
+    output_format = SYNTHESIS_FORMATS[data[0] % len(SYNTHESIS_FORMATS)]
+    try:
+        parsed = json.loads(data[1:])
+    except Exception as exc:
+        _reraise_real_defect(exc)
+        return
+    if not isinstance(parsed, dict):
+        return
+    try:
+        smda_report = SmdaReport.fromDict(parsed)
+        if smda_report is None:
+            return
+        synthesized = smda_report.synthesizeBinary(output_format=output_format)
+    except Exception as exc:
+        _reraise_real_defect(exc)
+        return
+    # the point of synthesis is a loadable file, so bytes that no longer parse are
+    # a defect in the synthesizer rather than a legitimate response to odd input
+    if synthesized and safe_lief_parse(bytes(synthesized)) is None:
+        raise AssertionError(f"synthesized {output_format} image does not parse")
+
+
 TARGETS = {
     "loaders": loaders,
     "formats": formats,
     "disassembler": disassembler,
+    "synthesis": synthesis,
     "buffer": buffer,
     "report": report,
 }
