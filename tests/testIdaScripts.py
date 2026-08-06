@@ -63,7 +63,7 @@ class TestIdaDomainExport(unittest.TestCase):
             ):
                 result = ida_domain_export.export_database("sample.i64", output_path)
 
-            self.assertEqual(json.loads(output_path.read_text()), {"status": "ok"})
+            self.assertEqual(json.loads(output_path.read_text(encoding="utf-8")), {"status": "ok"})
 
         self.assertIs(result, report)
         self.assertIs(disassembler.disassembler, ida_exporter)

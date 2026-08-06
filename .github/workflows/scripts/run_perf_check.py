@@ -9,6 +9,7 @@ import pstats
 import statistics
 import sys
 import time
+import tracemalloc
 
 # Setup python path so we can run the script directly from the repo root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../src")))
@@ -34,11 +35,18 @@ def decrypt_binary(filepath):
     return bytes(decrypted)
 
 
+# sample list -> the median key derived from it; both accumulate across counterbalanced passes
+SAMPLE_CHANNELS = {
+    "execution_times": "median_time",
+    "peak_memories": "median_peak_memory",
+}
+
+
 def merge_results(existing_results, new_results):
     """Merge a fresh pass into accumulated results without dropping pass-specific metrics.
 
-    Timing samples accumulate across passes; every other key is carried forward from the
-    existing entry unless the new pass actually produced it.
+    Timing and memory samples accumulate across passes; every other key is carried forward
+    from the existing entry unless the new pass actually produced it.
     """
     merged_results = dict(existing_results)
     for name, new_result in new_results.items():
@@ -47,9 +55,14 @@ def merge_results(existing_results, new_results):
             continue
         merged = dict(merged_results[name])
         merged.update(new_result)
-        execution_times = merged_results[name]["execution_times"] + new_result["execution_times"]
-        merged["execution_times"] = execution_times
-        merged["median_time"] = statistics.median(execution_times)
+        for samples_key, median_key in SAMPLE_CHANNELS.items():
+            existing_samples = merged_results[name].get(samples_key)
+            new_samples = new_result.get(samples_key)
+            if not existing_samples or not new_samples:
+                continue
+            samples = existing_samples + new_samples
+            merged[samples_key] = samples
+            merged[median_key] = statistics.median(samples)
         merged_results[name] = merged
     return merged_results
 
@@ -131,6 +144,15 @@ def run_benchmark(iterations, output_file, append=False, with_call_counts=False)
             )
             sys.exit(1)
 
+        # measured in its own pass: tracemalloc materially slows allocation, so tracing
+        # inside the timed loop would corrupt the channel it sits beside
+        tracemalloc.start()
+        try:
+            disassemble_fixture(config, fixture, binary_bytes)
+            peak_memory = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
         num_functions = report.num_functions if report else 0
         num_instructions = report.num_instructions if report else 0
         num_blocks = report.num_blocks if report else 0
@@ -148,6 +170,8 @@ def run_benchmark(iterations, output_file, append=False, with_call_counts=False)
             "backend": fixture["backend"],
             "execution_times": times,
             "median_time": statistics.median(times),
+            "peak_memories": [peak_memory],
+            "median_peak_memory": peak_memory,
             "num_functions": num_functions,
             "num_instructions": num_instructions,
             "num_blocks": num_blocks,
@@ -163,13 +187,13 @@ def run_benchmark(iterations, output_file, append=False, with_call_counts=False)
 
     if output_file:
         if append and os.path.exists(output_file):
-            with open(output_file) as f:
+            with open(output_file, encoding="utf-8") as f:
                 results = merge_results(json.load(f), results)
         # Create output directory if it doesn't exist
         out_dir = os.path.dirname(os.path.abspath(output_file))
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, sort_keys=True)
         print(f"Benchmark results successfully written to {output_file}")
     else:

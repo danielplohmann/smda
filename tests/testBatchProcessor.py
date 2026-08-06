@@ -4,6 +4,8 @@ import shutil
 import tempfile
 import unittest
 
+import pytest
+
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.BatchProcessor import (
     collectInputFiles,
@@ -11,6 +13,8 @@ from smda.utility.BatchProcessor import (
     disassembleParallel,
     getDefaultWorkerCount,
 )
+
+pytestmark = pytest.mark.slow
 
 FIXTURES = [
     "cutwail_xored",
@@ -74,7 +78,7 @@ class TestBatchProcessor(unittest.TestCase):
         for stem, summary in results.items():
             expected = os.path.join(output_dir, stem + ".smda")
             self.assertEqual(expected, summary["output_path"])
-            with open(expected) as f_in:
+            with open(expected, encoding="utf-8") as f_in:
                 as_dict = json.load(f_in)
             self.assertEqual(summary["num_functions"], as_dict["statistics"]["num_functions"])
 

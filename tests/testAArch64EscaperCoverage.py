@@ -8,9 +8,13 @@ from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper as Escaper
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
+
+pytestmark = pytest.mark.slow
 
 logging.disable(logging.CRITICAL)
 
@@ -40,7 +44,7 @@ def _collect_escaping_gaps(report):
 class TestAArch64EscaperCoverage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.manifest = json.loads(MANIFEST_PATH.read_text())
+        cls.manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         cls.fixtures = cls.manifest["fixtures"]
 
     def _disassemble_fixture(self, fixture):
