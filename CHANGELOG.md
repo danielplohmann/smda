@@ -1,0 +1,192 @@
+# Changelog
+
+Newest first. Entries carry the release date, the version, and what changed.
+
+ * 2026-08-04: v4.4.4 - Continuous fuzzing and determinism hardening: an atheris/libFuzzer harness (`fuzzing/`) covers loaders, format parsers, the full disassembly pipeline, and report JSON round-trip, running on a schedule and on relevant PRs. Fixes it surfaced: CIL `TypeDef`/`TypeSpec` operands fell through to `str(operand)` and serialized a raw memory address, making every report of the same input non-deterministic; a negative disassembly-window offset could read from the tail of the mapped image and book unrelated bytes into `code_map`; and `MachoFileLoader.parseBinary` was missing the `safe_lief_parse` guard against a crafted-header `std::bad_alloc`. Also adds `SmdaReport`/`SmdaInstruction` picklability (excludes the ctypes-backed capstone objects from `__getstate__`), parallel batch disassembly (`smda.utility.BatchProcessor`, `batch_analyze.py`, ~4.5x on a 10-core box), and a report-identity-hash correctness channel in the perf-benchmark gate. (THX: @r0ny123)
+ * 2026-08-04: v4.4.3 - Audit hardening: `ty` static type checking wired into CI, ~36 Hypothesis fuzz tests over the file loaders/Rust demangler/Go+Delphi label providers, 15 property tests (report round-trip, block coverage, pic-hash relocation stability, escaper determinism, a dominator-tree brute-force oracle), and an advisory sibling-pair CI check that flags when a PR touches one file in a related group (loaders, escapers, backends, ...) but not its siblings. Adds `safe_lief_parse()` so a crafted header that would make lief attempt an unbounded allocation degrades to `None` instead of aborting the process, and fixes mutable class-level defaults shared across `SmdaFunction`/`SmdaReport` instances plus a register-operand `getDataRefs()` false positive on base-0 images. (THX: @r0ny123)
+ * 2026-07-29: v4.4.2 - Dalvik PIC hashing is now position-independent: `escape_intraprocedural_jumps` was inverted relative to the Intel and CIL escapers, retaining the raw signed branch offset on the `pic_hash` path so two structurally identical methods whose branch deltas differed only by an earlier instruction's width produced different hashes. Branch-only formats (10t/20t/21t/22t/30t) are now masked on both paths. **This invalidates previously computed Dalvik `pic_hash` values**; reports below 4.4.2 recalculate on import.
+ * 2026-07-29: v4.4.1 - Experimental binary synthesis: `SmdaReport.synthesizeBinary()` rebuilds fictive PE/ELF/Mach-O files from a recovered CFG, planting bytes per basic block at their original VAs and fusing import metadata (new `smda/synthesis/` package with `BinarySynthesizer`, `PeSynthesizer`, `ElfSynthesizer`, `MachoSynthesizer`). Includes review-hardening fixes: graceful fallbacks for malformed/headerless inputs, non-contiguous IAT gap handling, and removal of dead base-class helpers. (No new runtime deps.)
+ * 2026-07-26: v4.4.0 - Labels/reporting: recover and demangle ELF function/data exports and relocation imports, add `xmetadata.exported_symbols`, normalize `metadata.language` to score-only maps (including legacy report loading), replace host C++ demangler tools with the bundled `pycxxfilt` LLVM demangler, and require Python 3.11+. (THX: @r0ny123)
+ * 2026-07-28: v4.3.11 - Labels: tier-1 symbol recovery — apply `DelphiPythiaProvider` names via the engine (register it as a symbol provider so recovered VMT/method-table names land on functions), format Go pclntab marker error messages as hex, and expand `OrdinalHelper` with stable Winsock (`ws2_32`/`wsock32`) and `oleaut32` ordinals for more accurate API name resolution. (THX: @r0ny123)
+ * 2026-07-24: v4.3.10 - Dalvik: format-aware DalvikInstructionEscaper for PIC/OPC hashing (pool-index/immediate/branch masking), typed exception edges surfaced via SmdaFunction.getExceptionBlockRefs(), method_handle/call_site resolution (DEX 038+), orphan code_item discovery, unreachable-code flagging, backward-payload fixed-point sweep, ART-reconciled can_throw flags (incl. fill-array-data), goto/32 self-branch accepted, and explicit ODEX/CDEX rejection. (THX: @r0ny123)
+ * 2026-07-24: v4.3.9 - Common: surface Rust detection in the language-guess heuristic (wire RustSymbolProvider.is_rust_binary() into LanguageAnalyzer so Rust binaries guess "rust" instead of "c++", and harden _get_binary_data() against missing raw_data/file_path). (THX: @r0ny123)
+ * 2026-07-24: v4.3.8 - CIL: complete opcode coverage in the CIL instruction escaper by deriving mnemonic grouping and binary token/branch escaping directly from dncil's opcode table (instead of a hand-maintained list), and add a CIL pic_hash recalculation gate for older reports. (THX: @r0ny123)
+ * 2026-07-24: v4.3.7 - Performance: cross-backend hot-path pass hoisting repeated lookups and avoiding redundant allocations (setdefault->get+conditional-set, zero-copy memoryview word scans in Aarch64 candidate discovery, skipped capstone re-decode in _recordDataRefs, debug-f-string gating, frozenset mnemonic membership in the intel backend). (THX: @r0ny123)
+ * 2026-07-24: v4.3.6 - Cross-backend correctness sweep: intel prefix normalization and xadd clobber fixes, Aarch64 LSL shift propagation, CIL/Dalvik exception-flow and throwable-opcode handling plus DEX payload hardening, and label-provider/type-surface fixes. (THX: @r0ny123)
+ * 2026-07-22: v4.3.5 - Widened Intel PIC-hash escaping to cover 64-bit immediates (`mov r64, imm64` constants were previously truncated to their first 8 hex digits and never escaped, so PicHash was not relocation-invariant on 64-bit binaries). (THX: @r0ny123)
+ * 2026-07-22: v4.3.4 - Added a default-off x64 PE pass (`USE_PE_X64_PDATA_ENDS`) that splits already-recovered functions at exact `.pdata` RUNTIME_FUNCTION boundaries when an interior boundary has an external non-fall-through inbound reference. (THX: @r0ny123)
+ * 2026-07-22: v4.3.3 - Detect x86/x64 import-jmp thunks (a single `jmp` through a resolved IAT/GOT slot) and populate `num_thunk_functions` in reports. (THX: @r0ny123)
+ * 2026-07-22: v4.3.2 - Fixed language identification to prefer exact Go build-ID evidence over the structurally noisy C++ score and now export the computed `language` guess in `SmdaReport`. (THX: @r0ny123)
+ * 2026-07-22: v4.3.1 - Restored the dropped reachable-collision cleanup in `FunctionAnalysisState.getBlocks()` so a fall-through colliding with another function removes the stale cross-function code reference and ends the block. (THX: @r0ny123)
+ * 2026-07-17: v4.3.0 - Format-aware `xheader` capture: `getHeaderBytes()` now stores computed, trailing-zero-trimmed, capped header regions for PE (section table), ELF (program headers), and Mach-O (active-slice load commands) instead of fixed truncations, enabling metadata recovery and binary re-synthesis. Added a normalized PE header hash (`SmdaReport.pe_header_hash`, volatile TimeDateStamp/CheckSum/SizeOfImage zeroed) for hash-busting-resistant clustering.
+ * 2026-07-17: v4.2.17 - Improved function-boundary accuracy on ARM64 PE binaries (trap-data gap rejection, prologue-gated call-fallthrough alignment cuts, .pdata-authoritative conditional-tailcall boundaries) with the matching x86 gap-scan/alignment-cut fixes. (THX: @r0ny123)
+ * 2026-07-15: v4.2.16 - Aarch64: add platform-specific function-candidate sources (PE ARM64 exception directory, ELF .eh_frame FDEs, Mach-O function-pointer metadata), wire the analysis-timeout callback into candidate identification, and extend README platform support wording. (THX: @r0ny123)
+ * 2026-07-15: v4.2.15 - Improved interoperability with IDA Pro: Now using `ida_domain` if available, supporting headless IDB->SMDA report conversion. (THX: @r0ny123)
+ * 2026-07-15: v4.2.14 - Improved consistency for capstone instance retrieval from SmdaReport. (THX: @r0ny123)
+ * 2026-07-14: v4.2.13 - Adressed an issue where a lazy data structure caused issues after (un)marshalling.
+ * 2026-07-14: v4.2.12 - Better exposure of getInstructionEscaper(), which no returns the correct instance based on the respective architecture.
+ * 2026-07-14: v4.2.11 - Performance: skip redundant Aarch64 report-time data-ref re-derivation and complete the set.update([x]) -> set.add(x) sweep (both behavior-preserving). (THX: @r0ny123)
+ * 2026-07-14: v4.2.10 - Aarch64: deduplicate shared raw-word GOT/reference decode constants and register-field helpers into definitions.py. (THX: @r0ny123)
+ * 2026-07-14: v4.2.9 - Aarch64: shared constant-propagation dataflow module enabling cross-block indirect-call resolution and deeper jump-table recovery (predecessor-resolved bases/sizes, ldr+extend chains). (THX: @r0ny123)
+ * 2026-07-14: v4.2.8 - Aarch64: architecture-aware report metrics (num_calls/num_returns/isApiThunk), indirect-jump PLT/GOT API attribution, and candidate-scan timeout guards. (THX: @r0ny123)
+ * 2026-07-14: v4.2.7 - Intel x64: extended AMD64 prologue family (endbr64, callee-saved pushes, masked mov/sub openers) and exit_group / int 0x80 syscall-exit detection. (THX: @r0ny123)
+ * 2026-07-13: v4.2.6 - Aarch64: FEAT_HBC bc.<cond>/drps classification, adrp+ldr+br API/GOT thunk detection, and stack-built string recovery. (THX: @r0ny123)
+ * 2026-07-13: v4.2.5 - Core: hoist shared import-stub range helpers into ArchBackend and report the unsupported architecture in no-backend error reports. (THX: @r0ny123)
+ * 2026-07-11: v4.2.4 - Cross-format loader parity: Mach-O fat-binary slice handling, Intel/AArch64 import stub resolution, and Mach-O Rust symbol demangling. (THX: @r0ny123)
+ * 2026-07-10: v4.2.3 - Fix: function promotion bug caused by missing symbol type evaluation (THX: @r0ny123).
+ * 2026-07-09: v4.2.2 - Now also parsing delay import tables from Windows PEs.
+ * 2026-07-09: v4.2.1 - Better detection of CFG instructions with prefixes, improved accuracy of gap search. (THX: @r0ny123) IDA ARM64 export.
+ * 2026-06-24: v4.2.0 - Further improvements for inter-procedural operand escaping (closer to x86_x64 and traditional PIC hashing).
+ * 2026-06-23: v4.1.0 - Significantly extended Aarch64 mnemonic escapes and improved PIC/OPC hashing. (THX: @r0ny123)
+ * 2026-06-23: v4.0.2 - Improvements to Aarch64 function recovery, adressing tailcalls and gap function cornercases.
+ * 2026-06-23: v4.0.1 - Refactoring: improved and streamlined symbol parsing and metadata handling. (THX: @r0ny123)
+ * 2026-06-12: v4.0.0 - Support for Aarch64! (THX: @r0ny123)
+ * 2026-06-12: v3.4.2 - Minor bugfixes regarding corner case offset extraction and calculations. (THX: @r0ny123)
+ * 2026-06-12: v3.4.1 - Added test payloads for various additional architectures. (THX: @r0ny123)
+ * 2026-06-12: v3.4.0 - Now properly inferring architecture and bitness based on ELF headers. Information sources like symbols etc. are properly handled. (THX: @r0ny123)
+ * 2026-06-12: v3.3.2 - Added ability to store binary input file/buffer using MCRIT's deflate+base85 method. (THX: @r0ny123)
+ * 2026-06-12: v3.3.1 - Added safeguards intended to limit processing time and heap consumption explosions. (THX: @r0ny123)
+ * 2026-06-12: v3.3.0 - Introdcued a performance benchmarking suite with profilers for execution and memory to verify and guide improvements. (THX: @r0ny123)
+ * 2026-06-10: v3.2.1 - minor fixes, dependency bumps.
+ * 2026-05-26: v3.2.0 - Several performance optimizations to reduce processing time. (THX: @r0ny123)
+ * 2026-05-26: v3.1.0 - Repository structure changed to src-style, modernized overall package and CI procedures. (THX: @r0ny123)
+ * 2026-06-01: v3.0.2 - Added safeguards against memory usage explosion during candidate identification on pathological/junk samples (issue #85): new SmdaConfig backstops `MAX_FUNCTION_CANDIDATES` (default 200000) and `MAX_CALL_REFS_PER_CANDIDATE` (default 2000), the high-volume reference/prologue locators now honor the existing wall-clock TIMEOUT, and high-value candidate locators run before the cap can be exhausted.
+ * 2026-05-20: v3.0.1 - Improved performance for string extraction by reducing type casts. (THX: @r0ny123)
+ * 2026-05-20: v3.0.0 - Support for Android Dalvik disassembly. (THX: @r0ny123)
+ * 2026-05-20: v2.6.0 - Use Pythia as drop-in replacement for current Delphi VMT parser. (THX: @r0ny123)
+ * 2026-05-20: v2.5.4 - Improve performance by precompiling regexes, doing additional prefix extraction and covering more GAP sequence NOPs. (THX: @r0ny123)
+ * 2026-03-23: v2.5.3 - Added ELF ABI to SmdaReport info, upgraded DelphiReSym to handle Delphi 13, slight performance improvements by removing redundant label extraction. (THX: @r0ny123)
+ * 2026-01-16: v2.5.2 - Fixed bug in IdaInterface where binary data was unproperly extracted.
+ * 2026-01-16: v2.5.1 - Reducing calls to lief by caching the object. (THX: @r0ny123)
+ * 2026-01-16: v2.5.0 - Introduced Rust symbol extraction and demangling. (THX: @r0ny123)
+ * 2026-01-16: v2.4.7 - Improved reliability of exception handler candidate extraction. (THX: @r0ny123)
+ * 2026-01-07: v2.4.6 - Fixed version check for IDA compatibility decision
+ * 2025-12-17: v2.4.5 - Improved security and reliability in various spots. (THX: @r0ny123)
+ * 2025-12-15: v2.4.4 - Extended set of default prologues for additional 64bit GCC-style byte combinations. Added exit syscall check to improve function end recognition. (THX: @N0fix)
+ * 2025-12-10: v2.4.3 - Compatibility issue for IDA export, API changes happened already in 8.5, so adjusted the version check.
+ * 2025-11-28: v2.4.2 - Fix for a bug when extracting and merging code areas from section tables. (THX: @r0ny123)
+ * 2025-11-28: v2.4.1 - Modernized packaging by also building a wheel. (THX: @dimbleby)
+ * 2025-11-21: v2.4.0 - Integration of DelphiReSym by @WenzWenzWenz for Delphi VMT parsing, thanks to @r0ny123 for adapting it!!
+ * 2025-10-21: v2.3.1 - Fixed lief error for section/segment flags in ELF files crashing file loading. Now properly parsing and providing symbol info for PEs in their own xmetadata section.
+ * 2025-10-21: v2.3.0 - Major code refactor and cleanup, with many thanks to the contribution @r0ny123!!
+ * 2025-07-25: v2.2.3 - Minor bugfixes.
+ * 2025-07-23: v2.2.1 - Added xmetadata field to SmdaReport, with information about imports and exports. Improved string extraction from Go binaries.
+ * 2025-06-13: v2.1.0 - Support for export from IDA 9.0+ (THX to @jershmagersh for the update!).
+ * 2025-02-26: v2.0.2 - Adjusting relative import, adding init file.
+ * 2025-02-25: v2.0.0 - Initial experimental support for CIL (.NET) disassembly.
+ * 2025-02-24: v1.14.3 - PicHashing can now be disabled via SmdaConfig to save some processing time. (THX to @Nalexander-hanel!)
+ * 2025-02-24: v1.14.2 - We are Python 3.8+ compatible again (changed UTC usage) and (DWARF) PE symbols for PE files should be extracted again (THX to @N0fix for the update!)
+ * 2025-02-21: v1.14.1 - Fixed changed field names in LIEF usage that broke ELF parsing, added tests for ELF+macOS parsing (THX to @N0fix for the update!)
+ * 2025-01-29: v1.14.0 - Bump to LIEF 0.16.0+ (THX to @huettenhain for the ping!). Migrated tests to `pytest`, UTC datetime handling fixes.
+ * 2025-01-26: v1.13.24 - Added functionality to import and export SMDA reports as JSON. Fixed byte patterns matching special regex chars (THX to @alexander-hanel!).
+ * 2024-07-26: v1.13.23 - Now using OEP as symbol function candidate when available (THX to @alexander-hanel for reporting!).
+ * 2024-05-10: v1.13.22 - Handled odd case where disassembly with capstone and IDA would return different results (THX to @r0ny123 for reporting!).
+ * 2024-04-17: v1.13.21 - Fixed handling of Go binaries for version 1.20+ (THX to @Manny684!).
+ * 2024-04-08: v1.13.20 - Fixed handling of bnd prefix in CFG instructions to help with parsing PLT (THX to @Manny684!).
+ * 2024-04-02: v1.13.19 - Fixed bug in string parsing, added tests, strings now no longer are hex-encoded as they are always printable anyway.
+ * 2024-03-12: v1.13.18 - Added functionality to extract and store all referenced strings along SmdaFunctions (has to be enabled via SmdaConfig).
+ * 2024-03-12: v1.13.17 - Extended disassembleBuffer() to now take additional arguments `code_areas` and `oep`.
+ * 2024-02-21: v1.13.16 - BREAKING IntelInstructionEscaper.escapeMnemonic: Escaper now handles another 200 instruction names found in other capstone source files (THX for reporting @malwarefrank!).
+ * 2024-02-15: v1.13.15 - Fixed issues with version recognition in SmdaFunction which cause issues in MCRIT (THX to @
+ * 2024-02-02: v1.13.12 - Versions might be non-numerical, addressed that in SmdaFunction.
+ * 2024-01-23: v1.13.11 - Introduced indicator in SmdaConfig for compatibility of instruction escaping.
+ * 2024-01-23: v1.13.10 - Parsing of PE files should work again with lief >=0.14.0.
+ * 2024-01-23: v1.13.9  - Improved parsing robustness for section/segment tables in ELF files, also now padding with zeroes when finding less content than expected physical size in a segment (THX for reporting @schrodyn!).
+ * 2024-01-23: v1.13.8  - BREAKING adjustments to IntelInstructionEscaper.escapeMnemonic: Escaper now is capable of handling all known x86/x64 instructions in capstone (THX for reporting @schrodyn!).
+ * 2023-12-01: v1.13.7  - Skip processing of Delphi structs for large files, workaround until this is properly reimplemented.
+ * 2023-11-29: v1.13.6  - Made OpcodeHash an attribute with on-demand calculation to save processing time.
+ * 2023-11-29: v1.13.3  - Implemented an alternative queue working with reference count based brackets in pursuit of accelerated processing.
+ * 2023-11-28: v1.13.2  - IndirectCallAnalyzer will now analyze at most a configurable amount of calls per basic block, default 50.
+ * 2023-11-21: v1.13.1  - SmdaBasicBlock now has `getPredecessors()` and `getSuccessors()`.
+ * 2023-11-21: v1.13.0  - BREAKING adjustments to PicHashing (now wildcarding intraprocedural jumps in functions, additionally more immediates if within address space). Introduction of OpcodeHash (OpcHash), which wildcards all but prefixes and opcode bytes.
+ * 2023-10-12: v1.12.7  - Bugfix for parsing Delphi structs.
+ * 2023-09-15: v1.12.6  - Bugfix in BlockLocator (THX to @cccs-ay!).
+ * 2023-08-28: v1.12.5  - Bugfix for address dereferencing where buffer sizes were not properly checked (THX to @yankovs!).
+ * 2023-08-08: v1.12.4  - SmdaBasicBlock can now do getPicBlockHash().
+ * 2023-05-23: v1.12.3  - Fixed bugs in PE parser and Go parser.
+ * 2023-05-08: v1.12.1  - Get rid of deprecation warning in IDA 8.0+.
+ * 2023-03-24: v1.12.0  - SMDA now parses PE export directories for symbols, as well as MinGW DWARF information if available.
+ * 2023-03-14: v1.11.2  - SMDA report now also contains SHA1 and MD5.
+ * 2023-03-14: v1.11.1  - rendering dotGraph can now include API references instead of plain calls.
+ * 2023-02-06: v1.11.0  - SmdaReport now has functionality to find a function/block by a given offset contained within in (THX to @cccs-ay!).
+ * 2023-02-06: v1.10.0  - Adjusted to LIEF 0.12.3 API for binary parsing (THX to @lainswork!).
+ * 2022-08-31: v1.9.9 - Better handling of colliding code due to tailjumps.
+ * 2022-08-30: v1.9.8 - Improved accuracy for references around tailcalls.
+ * 2022-08-25: v1.9.6 - Fixed bug in delphi knowledge base handling and improved performance.
+ * 2022-08-23: v1.9.4 - Fixed bug in section padding for ELF files.
+ * 2022-08-22: v1.9.3 - Added parsing for Delphi knowledge base files (THX to @danielenders1!).
+ * 2022-08-22: v1.9.2 - Improved structural parsing of Delphi binaries (THX to @danielenders1!).
+ * 2022-08-12: v1.9.1   - Added support for parsing intel MachO files, including Go parsing.
+ * 2022-08-10: v1.8.5 - Fixed Go 64bit lavel parsing for v1.12 binaries.
+ * 2022-08-04: v1.8.4 - Dot export now uses hex formatted addresses in node names.
+ * 2022-08-03: v1.8.3 - Added support for producing a Dot export for SmdaFunction.
+ * 2022-08-01: v1.8.1 - Added support for parsing 32bit Go binaries as well.
+ * 2022-08-01: v1.8.0   - Added support for parsing Go function information (THX to @danielenders1!).
+ * 2022-07-22: v1.7.4 - Bugfix for marshalling of reports.
+ * 2022-07-08: v1.7.2 - Excluded overly aggressive tailcall recognition heuristics when processing Golang binaries.
+ * 2022-01-27: v1.7.0   - SmdaReports now contains a field `oep`; SmdaFunctions now indicate `is_exported` and can provide CodeXrefs via `getCodeInrefs()` and `getCodeOutrefs()`. (THX for the ideas: @mr-tz)
+ * 2021-08-20: v1.6.1 - Bugfix for alignment calculation of binary mappings. (THX: @williballenthin)
+ * 2021-08-20: v1.6.0   - Bugfix for alignment calculation of binary mappings. (THX: @williballenthin)
+ * 2021-07-22: v1.5.19 - Now also parsing plt.sec structures to identify functions.
+ * 2021-06-07: v1.5.18 - Bugfix for struct.pack 8byte conversion using L instead Q (works on Linux, not on Windows).
+ * 2021-05-21: v1.5.17 - Bugfix for MemoryError when having LIEF try to process section data.
+ * 2021-05-20: v1.5.16 - Bugfix for formatting exceptions in report output (THX: @BonusPlay)
+ * 2021-05-18: v1.5.15 - Changed SHA256 in SmdaReports for unmapped files (was hash of memory-mapped image, not it's the input file's hash).
+ * 2021-04-07: v1.5.14 - Bugfix when processing Exception handler addresses as function entry point candidates (THX: capa team).
+ * 2021-01-20: v1.5.13 - Now using LIEF 0.11 and moved some print output to logging.
+ * 2021-01-15: v1.5.11 - Disassembler now offers `disassembleUnmappedBuffer(buffer)` to load and process unmapped files directly from memory.
+ * 2020-12-11: v1.5.10 - Pinned LIEF to 0.10.1.
+ * 2020-12-01: v1.5.9 - Bugfix for section names. again. :)
+ * 2020-11-25: v1.5.6 - Now considering segments for content when ELF file has no sections (THX: @jcrussell).
+ * 2020-11-10: v1.5.5 - Unmarshalling setting default value for older reports.
+ * 2020-11-06: v1.5.4 - Minor fix on PE header parsing.
+ * 2020-11-05: v1.5.3 - Adjusted API thunk identification.
+ * 2020-10-30: v1.5.2 - One bugfix, also removed one print and reduced logging priority for the message in case the PDB parser module is missing.
+ * 2020-10-30: v1.5.1 - PE section table now contained in SmdaReport and added `SmdaReport.getSection(offset)`.
+ * 2020-10-30: v1.5.0   - PE section table now contained in SmdaReport and added `SmdaReport.getSection(offset)`.
+ * 2020-10-30: v1.4.12 - Bugfix in IndirectCallHandler (THX: @jcrussell).
+ * 2020-10-29: v1.4.11 - Populate exception handlers specified in PE64 `.pdata` section as FEPs.
+ * 2020-10-29: v1.4.10 - Resolves 64bit API calls of style `call qword ptr [rip + offset]` and more register-based API calls in general (THX: @jcrussell).
+ * 2020-10-29: v1.4.8 - Bugfixes. Verbose mode added (THX: @jcrussell).
+ * 2020-10-28: v1.4.6 - WinApiResolver now tries to resolve import by ordinal to their name if it is known - can be extended in the database of OrdinalHelper.
+ * 2020-10-28: v1.4.5 - Store the (mapped) buffer that was used to do disassembly along inside a SmdaReport - goal: enable to read strings/bytes at offsets at a later time.
+ * 2020-10-27: v1.4.4 - SmdaInstructions can now provide potential data references via `SmdaInstruction.getDataRefs()`.
+ * 2020-10-27: v1.4.3 - SmdaInstructions can now on demand provide the detailed capstone instruction representation via `SmdaInstruction.getDetailed()`.
+ * 2020-10-27: v1.4.1 - 10-20% gain in processing speed by switching to `capstone.disasm_lite()`.
+ * 2020-10-26: v1.4.0   - Adding SmdaBasicBlock. Some convenience code to ease intgration with capa. (GeekWeek edition!)
+ * 2020-09-07: v1.3.11 - Summarizable DisassemblyStatistics.
+ * 2020-09-02: v1.3.10 - Fixed a bug where IDA Pro would crash when failing to demangle a function name while exporting a SMDA report.
+ * 2020-08-31: v1.3.9 - Adjusted Logging to avoid interference with other loggers configured outside of SMDA (THX: @BonusPlay).
+ * 2020-08-25: v1.3.6 - PicHash no longer stored as list.
+ * 2020-08-17: v1.3.5 - Bugfix for import parsing (ELF files).
+ * 2020-08-17: v1.3.4 - Recalculate PIC hash and nesting depth for  older (v1.2.x) reports on import for compatibility.
+ * 2020-08-17: v1.3.3 - Added binary variation of `push ebp;mov ebp, esp` to list of default prologues and added exception handling for DominatorTrees (THX: @fxb).
+ * 2020-07-13: v1.3.2 - Use LIEF to parse Import Table for WinAPI usage data when processing unmapped files.
+ * 2020-07-13: v1.3.1 - Fixed `setup.py` to properly specify dependencies (THX: @BonusPlay).
+ * 2020-06-22: v1.3.0   - Added DominatorTree (Implementation by Armin Rigo) to calculate function nesting depth, shortened PIC hash to 8 byte, added some missing instructions for the InstructionEscaper, IdaInterface now demangles names.
+ * 2020-05-28: v1.2.15 - Bugfixes in IntelInstructionEscaper (handling of negative RIP-relative offsets), SmdaReport (datetime handling), PeFileParser (handling of empty pefile.sections); SCC calculation changed to iterative algorithm (using @bwesterb's implementation) and activated by default again.
+ * 2020-05-14: v1.2.10 - Bug in IdaInterface fixed.
+ * 2020-05-13: v1.2.9 - Bugfix in code gap identification in FunctionCandidateManager, SCC calculation is now optional.
+ * 2020-05-12: v1.2.7 - Added additional default metadata field "component" to SmdaReport.
+ * 2020-05-11: v1.2.6 - Export from IDA to SMDA data format is now supported (IDA 7.4).
+ * 2020-05-09: v1.2.5 - Fixed off-by-one that affected wildcarding of instructions (THX to Viviane Zwanger).
+ * 2020-05-04: v1.2.4 - Various minor fixes.
+ * 2020-04-29: v1.2.0   - Restructured config.py into smda/SmdaConfig.py to similfy usage and now available via PyPI! The smda/Disassembler.py now emits a report object (smda.common.SmdaReport) that allows direct (pythonic) interaction with the results - a JSON can still be easily generated by using toDict() on the report.
+ * 2020-04-28: v1.1.0   - Several improvements, including: x64 jump table handling, better data flow handling for calls using registers and tailcalls, extended list of common prologues based on much more groundtruth data, extended padding instruction list for gap function discovery, adjusted weights in candidate priority score, filtering code areas based on section tables, using exported symbols as candidates, new function output metadata: confidence score based on instruction mnemonic histogram, PIC hash based on escaped binary instruction sequence
+ * 2019-08-05: v1.0.3 - SMDA can now export reports from IDA Pro (requires capstone to be available for idapython).
+ * 2019-02-14: v1.0.2 - ELF symbols for functions are now resolved, if present in the file. Also "-m" parameter changed to "-p" to imply parsing instead of just mapping (THX: @VPaulV).
+ * 2018-07-09: v1.0.1 - Performance improvements.
+ * 2018-07-01: v1.0.0   - Initial Release.
+ * 2022-11-18: v1.9.16- Fixed a bug where handling of inrefs in SmdaReport could lead to crashes (THX to @1337-42!).
+ * 2022-09-27: v1.9.15- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).
+ * 2022-09-20: v1.9.13- Fixed a bug for listing unreachable basic block refs pointing outside of function boundaries (exception handling).
+ * 2022-09-19: v1.9.12- Fixed a logic binding bug in IntelInstructionEscaper (THX to @1337-42!).
+ * 2022-09-08: v1.9.11- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.
+ * 2020-03-10: Various minor fixes and QoL improvements.
+ * 2019-08-20: IdaExporter is now handling failed instruction conversion via capstone properly.
+ * 2019-08-19: Minor fix for crashes caused by PDB parser.
+ * 2019-06-13: PDB symbols for functions are now resolved if given a PDB file using parameter "-d" (THX to @VPaulV).
+ * 2019-05-15: Fixed a bug in PE mapper where buffer would be shortened because of misinterpretation of section sizes.
+ * 2018-12-12: all gcc jump table styles are now parsed correctly.
+ * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
+ * 2018-09-28: We now have functional PE/ELF loaders.
