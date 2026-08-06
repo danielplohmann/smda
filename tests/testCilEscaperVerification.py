@@ -2,6 +2,7 @@ import logging
 import os
 import unittest
 
+import pytest
 from dncil.cil.opcode import OpCode, OpCodes
 
 from smda.cil.CilInstructionEscaper import CilInstructionEscaper
@@ -10,6 +11,8 @@ from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
+
+pytestmark = pytest.mark.slow
 
 LOGGER = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)-15s %(message)s")
