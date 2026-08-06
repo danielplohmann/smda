@@ -1,12 +1,15 @@
 import copy
 import hashlib
+import json
 import struct
+import tempfile
 import unittest
+from pathlib import Path
 
 from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.SmdaFunction import INTEL_PIC_HASH_ESCAPE_VERSION, LazyIntKeyDict, SmdaFunction
 from smda.common.SmdaInstruction import SmdaInstruction
-from smda.common.SmdaReport import SmdaReport
+from smda.common.SmdaReport import REQUIRED_REPORT_FIELDS, SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 
@@ -73,6 +76,170 @@ class TestCommonModels(unittest.TestCase):
         restored = SmdaReport.fromDict(report_dict)
         self.assertIsNone(restored.timestamp)
         self.assertEqual(restored.num_functions, 0)
+
+    def test_report_round_trips_through_a_utf8_file(self):
+        report = SmdaReport()
+        report.filename = "café_módulo.exe"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            report_path = Path(tmp_dir) / "report.smda"
+            report.toFile(str(report_path))
+            self.assertEqual(SmdaReport.fromFile(str(report_path)).filename, "café_módulo.exe")
+
+            raw_path = Path(tmp_dir) / "raw.smda"
+            raw_path.write_text(json.dumps(report.toDict(), ensure_ascii=False), encoding="utf-8")
+            self.assertIn("café_módulo.exe", raw_path.read_bytes().decode("utf-8"))
+            self.assertEqual(SmdaReport.fromFile(str(raw_path)).filename, "café_módulo.exe")
+
+            with self.assertRaises(FileNotFoundError):
+                SmdaReport.fromFile(str(Path(tmp_dir) / "absent.smda"))
+
+    def test_report_rejects_non_mapping_function_payloads(self):
+        report_dict = SmdaReport().toDict()
+
+        for payload in (None, {"xcfg": []}, {"xcfg": {"0": []}}):
+            with self.subTest(payload=payload):
+                candidate = copy.deepcopy(report_dict)
+                if payload is None:
+                    candidate = payload
+                else:
+                    candidate.update(payload)
+                with self.assertRaises(ValueError):
+                    SmdaReport.fromDict(candidate)
+
+    def test_report_rejects_missing_required_fields(self):
+        report_dict = SmdaReport().toDict()
+
+        for field in sorted(REQUIRED_REPORT_FIELDS):
+            with self.subTest(field=field):
+                candidate = copy.deepcopy(report_dict)
+                candidate.pop(field)
+                with self.assertRaises(ValueError):
+                    SmdaReport.fromDict(candidate)
+
+    def test_report_rejects_malformed_container_fields(self):
+        report_dict = SmdaReport().toDict()
+        malformed_fields = [
+            ("metadata", []),
+            ("code_sections", [1]),
+            ("xdata_refs_from", []),
+            ("xdata_refs_to", []),
+            ("statistics", {"num_functions": 1}),
+            ("xdata_refs_from", {"0": [0, "1"]}),
+        ]
+
+        for field, value in malformed_fields:
+            with self.subTest(field=field, value=value):
+                candidate = copy.deepcopy(report_dict)
+                candidate[field] = value
+                with self.assertRaises(ValueError):
+                    SmdaReport.fromDict(candidate)
+
+    @staticmethod
+    def _report_with_one_function(smda_version, metadata_extra=None):
+        report_dict = SmdaReport().toDict()
+        report_dict["architecture"] = "intel"
+        report_dict["smda_version"] = smda_version
+        report_dict["xcfg"] = {
+            "0": {
+                "offset": 0,
+                "blocks": {},
+                "apirefs": {},
+                "blockrefs": {},
+                "inrefs": [],
+                "outrefs": {},
+                "metadata": {
+                    "binweight": 0,
+                    "characteristics": [],
+                    "confidence": 0,
+                    "function_name": "",
+                    "strongly_connected_components": [],
+                    "tfidf": {},
+                    **(metadata_extra or {}),
+                },
+            }
+        }
+        return report_dict
+
+    def test_legacy_report_recalculates_missing_nesting_depth(self):
+        restored = SmdaReport.fromDict(self._report_with_one_function("1.0.0"))
+
+        self.assertEqual(restored.getFunction(0).nesting_depth, 0)
+
+    def test_current_report_uses_the_cached_nesting_depth(self):
+        restored = SmdaReport.fromDict(self._report_with_one_function("4.4.0", {"nesting_depth": 3}))
+        self.assertEqual(restored.getFunction(0).nesting_depth, 3)
+
+        restored = SmdaReport.fromDict(self._report_with_one_function("4.4.0"))
+        self.assertEqual(restored.getFunction(0).nesting_depth, 0)
+
+    def test_report_rejects_non_string_instruction_fields(self):
+        report_dict = SmdaReport().toDict()
+        report_dict["architecture"] = "intel"
+        report_dict["xcfg"] = {
+            "0": {
+                "offset": 0,
+                "blocks": {"0": [[0, [], "nop", ""]]},
+                "apirefs": {},
+                "blockrefs": {},
+                "inrefs": [],
+                "outrefs": {},
+                "metadata": {
+                    "binweight": 0,
+                    "characteristics": [],
+                    "confidence": 0,
+                    "function_name": "",
+                    "nesting_depth": 0,
+                    "strongly_connected_components": [],
+                    "tfidf": {},
+                },
+            }
+        }
+
+        with self.assertRaises(ValueError):
+            SmdaReport.fromDict(report_dict)
+
+    def test_report_rejects_invalid_scalar_fields(self):
+        report_dict = SmdaReport().toDict()
+        malformed_fields = {
+            "statistics": ["invalid"],
+            "timestamp": 1,
+            "xheader": 1,
+            "xmetadata": 1,
+            "smda_version": 1,
+        }
+
+        for field, value in malformed_fields.items():
+            with self.subTest(field=field):
+                candidate = copy.deepcopy(report_dict)
+                candidate[field] = value
+                with self.assertRaises(ValueError):
+                    SmdaReport.fromDict(candidate)
+
+    def test_function_rejects_malformed_container_fields(self):
+        function_dict = SmdaFunction().toDict()
+        malformed_fields = {
+            "incomplete": {},
+            "blocks_type": {"blocks": []},
+            "block_type": {"blocks": {"0": {}}},
+            "apirefs_type": {"apirefs": []},
+            "blockrefs_type": {"blockrefs": []},
+            "outrefs_type": {"outrefs": []},
+            "blockrefs_targets": {"blockrefs": {"0": [0, "1"]}},
+            "inrefs_type": {"inrefs": {}},
+            "metadata_type": {"metadata": []},
+            "metadata_fields": {"metadata": {}},
+            "architecture_metadata_type": {"architecture_metadata": []},
+        }
+
+        for name, updates in malformed_fields.items():
+            with self.subTest(name=name):
+                candidate = copy.deepcopy(function_dict)
+                if name == "incomplete":
+                    candidate.pop("metadata")
+                candidate.update(updates)
+                with self.assertRaises(ValueError):
+                    SmdaFunction.fromDict(candidate)
 
     def test_function_hash_helpers_use_little_endian(self):
         function = SmdaFunction()
