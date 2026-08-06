@@ -16,6 +16,8 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from smda.aarch64.AArch64CapstoneVerification import (
     expected_escaped_operands,
     expected_mnemonic_group,
@@ -26,6 +28,8 @@ from smda.aarch64.AArch64CapstoneVerification import (
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper as Escaper
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
+
+pytestmark = pytest.mark.slow
 
 logging.disable(logging.CRITICAL)
 
@@ -148,7 +152,7 @@ class _CapstoneVerificationGatesMixin:
 class TestAArch64EscaperCapstoneVerification(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.manifest = json.loads(MANIFEST_PATH.read_text())
+        cls.manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         cls.fixtures = cls.manifest["fixtures"]
 
     def _disassemble(self):

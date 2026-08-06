@@ -27,7 +27,7 @@ def _write_report(folder: Path, name: str, addrs, exec_time):
         "execution_time": exec_time,
         "xcfg": {a: {"blocks": {"0": []}} for a in addrs},
     }
-    with open(folder / f"{name}.smda", "w") as f:
+    with open(folder / f"{name}.smda", "w", encoding="utf-8") as f:
         json.dump(data, f)
 
 
@@ -180,11 +180,11 @@ class TestEndToEnd(unittest.TestCase):
             self._make(root, base, pr)
             code = self._run(root)
             self.assertEqual(code, 0)
-            model = json.loads((root / "cache" / "evaluation.json").read_text())
+            model = json.loads((root / "cache" / "evaluation.json").read_text(encoding="utf-8"))
             self.assertTrue(model["correctness"]["pass"])
             self.assertGreater(model["performance"]["paired"]["median_speedup"], 0)
             # Markdown table stays contiguous (header + 2 side rows, no interleaving)
-            md = (root / "cache" / "evaluation.md").read_text()
+            md = (root / "cache" / "evaluation.md").read_text(encoding="utf-8")
             self.assertIn("#### Summary", md)
             self.assertIn("Median paired speedup", md)
             self.assertIn("Throughput estimate (func/s)", md)
@@ -235,7 +235,7 @@ class TestEndToEnd(unittest.TestCase):
                 _write_report(root / "smda-base" / f"base_{i}", "f0", ["0x1", "0x2"], 2.0)
                 _write_report(root / "smda-pr" / f"pr_{i}", "f0", ["0x1", "0x2"], 1.0)
             self.assertEqual(self._run(root), 0)
-            model = json.loads((root / "cache" / "evaluation.json").read_text())
+            model = json.loads((root / "cache" / "evaluation.json").read_text(encoding="utf-8"))
             self.assertEqual(model["correctness"]["n_common"], 1)
 
     @staticmethod

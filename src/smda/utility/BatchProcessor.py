@@ -66,7 +66,7 @@ def _analyzeOneFile(task):
         summary["report_hash"] = computeReportIdentityHash(report)
         if task["output_dir"]:
             output_path = os.path.join(task["output_dir"], task["report_stem"] + ".smda")
-            with open(output_path, "w") as f_out:
+            with open(output_path, "w", encoding="utf-8") as f_out:
                 json.dump(report.toDict(), f_out, indent=1, sort_keys=True)
             summary["output_path"] = output_path
         if task["return_reports"]:
