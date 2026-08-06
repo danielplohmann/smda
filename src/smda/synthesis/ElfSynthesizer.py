@@ -1,7 +1,8 @@
 import struct
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
-from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
+from smda.common.SmdaReport import MAX_ADDRESS_VALUE
+from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_up
 
 PT_LOAD = 1
 PT_DYNAMIC = 2
@@ -141,8 +142,7 @@ class ElfSynthesizer(BinarySynthesizer):
         ]
         if uncovered:
             self._warn("%d functions are outside all known sections, adding synthetic .smda section", len(uncovered))
-            va_start = align_down(min(uncovered), PAGE_SIZE)
-            va_end = align_up(max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in uncovered), 16)
+            va_start, va_end = self._syntheticSpan(uncovered, PAGE_SIZE)
             sections.append(
                 {
                     "name": ".smda",
@@ -356,6 +356,8 @@ class ElfSynthesizer(BinarySynthesizer):
             )
         else:
             entry = min((s["va_start"] for s in sections if s["executable"]), default=0)
+        if not 0 <= entry < MAX_ADDRESS_VALUE:
+            raise ValueError(f"synthesized entry point 0x{entry:x} does not fit a 64-bit address space")
         if is_64:
             struct.pack_into(
                 "<HHIQQQIHHHHHH",
@@ -522,8 +524,7 @@ class ElfSynthesizer(BinarySynthesizer):
 
     def _synthesizeMinimal(self, offsets):
         bitness = self._getBitness()
-        va_start = align_down(min(offsets), PAGE_SIZE)
-        va_end = align_up(max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in offsets), 16)
+        va_start, va_end = self._syntheticSpan(offsets, PAGE_SIZE)
         section = {
             "name": ".text",
             "va_start": va_start,

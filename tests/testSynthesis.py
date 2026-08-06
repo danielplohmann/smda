@@ -17,7 +17,7 @@ from pathlib import Path
 
 import lief
 
-from smda.common.SmdaReport import SmdaReport
+from smda.common.SmdaReport import MAX_ADDRESS_VALUE, SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.synthesis import FORMAT_ELF, FORMAT_MACHO, FORMAT_PE, sniffBinaryFormat
@@ -36,7 +36,7 @@ def _load_xored_fixture(fixture_name):
 
 
 def _load_macho_fixture(fixture_id):
-    manifest = json.loads((CORPUS_DIR / "manifest.json").read_text())
+    manifest = json.loads((CORPUS_DIR / "manifest.json").read_text(encoding="utf-8"))
     fixture = next(entry for entry in manifest["fixtures"] if entry["id"] == fixture_id)
     raw = (CORPUS_DIR / fixture["path"]).read_bytes()
     return bytes(byte ^ (index % 256) for index, byte in enumerate(raw))
@@ -107,6 +107,96 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         report.architecture = "cil"
         with self.assertRaises(NotImplementedError):
             report.synthesizeBinary(output_format=FORMAT_PE)
+
+    def testReportWithoutLayoutRaisesInsteadOfFailingInArithmetic(self):
+        report = SmdaReport.fromDict(self.pe_report.toDict())
+        report.base_addr = None
+        with self.assertRaises(ValueError) as ctx:
+            report.synthesizeBinary(output_format=FORMAT_PE)
+        assert "base_addr" in str(ctx.exception)
+
+    def testNegativeFunctionAddressIsRejectedOnImport(self):
+        # the xcfg key becomes the function offset and the synthesizers pack it unsigned;
+        # a negative one survived the image-span bound because max - min still measured sane
+        report_dict = json.loads(json.dumps(self.pe_report.toDict()))
+        offsets = sorted(int(offset) for offset in report_dict["xcfg"])
+        report_dict["xcfg"][str(-0xD8A680)] = report_dict["xcfg"].pop(str(offsets[0]))
+
+        with self.assertRaises(ValueError) as ctx:
+            SmdaReport.fromDict(report_dict)
+        assert "64-bit space" in str(ctx.exception)
+
+    def testNegativeBlockAddressIsRejectedOnImport(self):
+        report_dict = json.loads(json.dumps(self.pe_report.toDict()))
+        offsets = sorted(int(offset) for offset in report_dict["xcfg"])
+        function = report_dict["xcfg"][str(offsets[0])]
+        block_address = next(iter(function["blocks"]))
+        function["blocks"][str(-0x1000)] = function["blocks"].pop(block_address)
+
+        with self.assertRaises(ValueError) as ctx:
+            SmdaReport.fromDict(report_dict)
+        assert "64-bit space" in str(ctx.exception)
+
+    def testDerivedEntryPointOverflowIsRejected(self):
+        # base_addr and oep are each inside the address space, but their sum is not, so the
+        # deserialization bound cannot catch this - only the synthesizer that derives it can
+        report_dict = json.loads(json.dumps(self.elf_report.toDict()))
+        report_dict["base_addr"] = MAX_ADDRESS_VALUE - 1
+        report_dict["oep"] = 1
+
+        with self.assertRaises(ValueError) as ctx:
+            SmdaReport.fromDict(report_dict).synthesizeBinary(output_format=FORMAT_ELF)
+        assert "entry point" in str(ctx.exception)
+
+    def testOversizedImageSpanIsRejected(self):
+        report_dict = json.loads(json.dumps(self.pe_report.toDict()))
+        offsets = sorted(int(offset) for offset in report_dict["xcfg"])
+        template = report_dict["xcfg"][str(offsets[0])]
+        far_offset = offsets[0] + SmdaConfig.MAX_IMAGE_SIZE * 4
+
+        moved = copy.deepcopy(template)
+        moved["offset"] = far_offset
+        moved["blocks"] = {str(far_offset): next(iter(template["blocks"].values()))}
+        report_dict["xcfg"][str(far_offset)] = moved
+
+        for output_format in (FORMAT_PE, FORMAT_ELF, FORMAT_MACHO):
+            with self.subTest(output_format=output_format):
+                report = SmdaReport.fromDict(copy.deepcopy(report_dict))
+                with self.assertRaises(ValueError) as ctx:
+                    report.synthesizeBinary(output_format=output_format)
+                assert "MAX_IMAGE_SIZE" in str(ctx.exception)
+
+    def testAddressFieldsBeyond64BitsAreRejectedOnImport(self):
+        for field in ("base_addr", "binary_size", "bitness", "identified_alignment", "oep"):
+            for value in (-1, 2**64, 2**96):
+                with self.subTest(field=field, value=value):
+                    report_dict = copy.deepcopy(self.pe_report.toDict())
+                    report_dict[field] = value
+                    with self.assertRaises(ValueError):
+                        SmdaReport.fromDict(report_dict)
+
+    def testNonNumericScalarsAreRejectedOnImport(self):
+        for field in ("base_addr", "binary_size", "bitness", "oep", "execution_time"):
+            for value in ("x", [], {}, True):
+                with self.subTest(field=field, value=value):
+                    report_dict = copy.deepcopy(self.pe_report.toDict())
+                    report_dict[field] = value
+                    with self.assertRaises(ValueError):
+                        SmdaReport.fromDict(report_dict)
+
+    def testFractionalAddressFieldsAreRejectedOnImport(self):
+        for field in ("base_addr", "binary_size", "bitness", "identified_alignment", "oep"):
+            with self.subTest(field=field):
+                report_dict = copy.deepcopy(self.pe_report.toDict())
+                report_dict[field] = 1.5
+                with self.assertRaises(ValueError):
+                    SmdaReport.fromDict(report_dict)
+
+        for field in ("execution_time", "confidence_threshold"):
+            with self.subTest(field=field):
+                report_dict = copy.deepcopy(self.pe_report.toDict())
+                report_dict[field] = 1.5
+                assert SmdaReport.fromDict(report_dict) is not None
 
     def testHeaderlessReportRequiresExplicitFormat(self):
         report = SmdaReport.fromDict(self.pe_report.toDict())
@@ -196,6 +286,21 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         assert slot_b in relocations
         assert relocations[slot_a].symbol.name == "system"
         assert relocations[slot_b].symbol.name == "strdup"
+
+    def testFunctionsOutsideEverySectionGetASyntheticSection(self):
+        # keeps the header (so the full path runs, not the minimal one) but moves every
+        # section clear of the functions, which is the branch that builds the synthetic
+        # span - the one that used to invert and reach struct.pack with a negative size
+        for output_format, report in ((FORMAT_ELF, self.elf_report), (FORMAT_MACHO, self.macho_report)):
+            with self.subTest(output_format=output_format):
+                rebuilt = SmdaReport.fromDict(report.toDict())
+                rebuilt.code_sections = [(name, 0x10, 0x20) for name, _, _ in rebuilt.code_sections]
+
+                synthesized = rebuilt.synthesizeBinary(output_format=output_format)
+
+                parsed = lief.parse(synthesized)
+                assert parsed is not None
+                assert parsed.sections
 
     def testElfSynthesisMinimal(self):
         report = SmdaReport.fromDict(self.elf_report.toDict())

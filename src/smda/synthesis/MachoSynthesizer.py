@@ -2,7 +2,7 @@ import struct
 from typing import Any, Dict, List
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
-from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
+from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_up
 
 MH_MAGIC = 0xFEEDFACE
 MH_MAGIC_64 = 0xFEEDFACF
@@ -332,8 +332,7 @@ class MachoSynthesizer(BinarySynthesizer):
         ]
         if uncovered:
             self._warn("%d functions are outside all known sections, adding synthetic __smda section", len(uncovered))
-            va_start = align_down(min(uncovered), PAGE_SIZE)
-            va_end = align_up(max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in uncovered), 16)
+            va_start, va_end = self._syntheticSpan(uncovered, PAGE_SIZE)
             sections.append(
                 {
                     "name": "__smda",
@@ -714,7 +713,6 @@ class MachoSynthesizer(BinarySynthesizer):
         )
 
     def _synthesizeMinimal(self, offsets):
-        va_start = align_down(min(offsets), PAGE_SIZE)
-        va_end = align_up(max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in offsets), 16)
+        va_start, va_end = self._syntheticSpan(offsets, PAGE_SIZE)
         section = {"name": "__text", "va_start": va_start, "va_end": va_end}
         return self._synthesizeFromSections([section], offsets, False, False)
