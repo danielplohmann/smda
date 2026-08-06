@@ -324,5 +324,29 @@ class DisassemblyTestSuite(unittest.TestCase):
             )
 
 
+class SmdaEscaperRangeTestSuite(unittest.TestCase):
+    """Escaping must survive operand values no real instruction can encode.
+
+    Both escape helpers pack the parsed value as "<I" and fall back to "<Q"; the
+    operand regexes accept a hex literal of any length, so a crafted report can carry
+    one that fits neither. These reach getPicHash from SmdaReport.fromDict.
+    """
+
+    def test_escape_binary_value_tolerates_a_value_wider_than_64_bits(self):
+        smda_ins = SmdaInstruction([0x1000, "b800000000", "mov", "eax, 0x0"])
+        sequence = smda_ins.bytes
+        self.assertEqual(sequence, IntelInstructionEscaper.escapeBinaryValue(smda_ins, sequence, 2**64))
+        self.assertEqual(sequence, IntelInstructionEscaper.escapeBinaryValue(smda_ins, sequence, 2**96))
+
+    def test_escape_binary_value_still_wildcards_values_that_fit(self):
+        smda_ins = SmdaInstruction([0x1000, "b8efbeadde", "mov", "eax, 0xdeadbeef"])
+        escaped = IntelInstructionEscaper.escapeBinaryValue(smda_ins, smda_ins.bytes, 0xDEADBEEF)
+        self.assertEqual("b8????????", escaped)
+
+    def test_escape_binary_ptr_ref_tolerates_a_displacement_wider_than_64_bits(self):
+        smda_ins = SmdaInstruction([0x1000, "8b0500104000", "mov", "eax, dword ptr [0xffffffffffffffffff]"])
+        self.assertEqual(smda_ins.bytes, IntelInstructionEscaper.escapeBinaryPtrRef(smda_ins))
+
+
 if __name__ == "__main__":
     unittest.main()
