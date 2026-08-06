@@ -2270,7 +2270,13 @@ class IntelInstructionEscaper:
             try:
                 packed_hex = str(codecs.encode(struct.pack(pack_format, offset), "hex").decode("ascii"))
             except struct.error:
-                packed_hex = str(codecs.encode(struct.pack("<Q", offset), "hex").decode("ascii"))
+                try:
+                    packed_hex = str(codecs.encode(struct.pack("<Q", offset), "hex").decode("ascii"))
+                except struct.error:
+                    # the operand regex accepts a hex literal of any length, so a crafted
+                    # report can carry a displacement wider than 64 bits. It cannot occur
+                    # in the instruction bytes, so there is nothing to escape.
+                    return ins.bytes
             wildcard = "?" * len(packed_hex)
             num_occurrences = occurrences(ins.bytes, packed_hex)
             if num_occurrences == 1:
@@ -2297,7 +2303,12 @@ class IntelInstructionEscaper:
             packed_hex = str(codecs.encode(struct.pack("<I", value), "hex").decode("ascii"))
         except struct.error:
             # value doesn't fit in 32 bits -- a 64-bit immediate (e.g. "mov r64, imm64")
-            packed_hex = str(codecs.encode(struct.pack("<Q", value), "hex").decode("ascii"))
+            try:
+                packed_hex = str(codecs.encode(struct.pack("<Q", value), "hex").decode("ascii"))
+            except struct.error:
+                # the immediate regex accepts a hex literal of any length, so a crafted
+                # report can carry one wider than 64 bits; it cannot occur in the bytes
+                return escaped_sequence
         wildcard = "?" * len(packed_hex)
         num_occurrences = occurrences(escaped_sequence, packed_hex)
         if num_occurrences == 1:
