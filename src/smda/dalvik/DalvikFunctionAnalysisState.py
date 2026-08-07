@@ -38,6 +38,7 @@ class DalvikFunctionAnalysisState:
         self.processed_blocks = set()
         self.processed_bytes = set()
         self.jump_targets = set()
+        self.jump_refs = set()
         self.block_starts = {start_addr}
         self.call_register_ins = []
         self.block_start = 0xFFFFFFFF
@@ -109,6 +110,7 @@ class DalvikFunctionAnalysisState:
         else:
             refs_to.add(addr_from)
         if by_jump:
+            self.jump_refs.add((addr_from, addr_to))
             self.jump_targets.add(addr_to)
 
     def removeCodeRef(self, addr_from, addr_to):
@@ -118,8 +120,10 @@ class DalvikFunctionAnalysisState:
             self.code_refs_from[addr_from].remove(addr_to)
         if addr_to in self.code_refs_to and addr_from in self.code_refs_to[addr_to]:
             self.code_refs_to[addr_to].remove(addr_from)
-        if addr_to in self.jump_targets:
-            self.jump_targets.remove(addr_to)
+        if (addr_from, addr_to) in self.jump_refs:
+            self.jump_refs.remove((addr_from, addr_to))
+            if not any(to == addr_to for _, to in self.jump_refs):
+                self.jump_targets.discard(addr_to)
 
     def addDataRef(self, addr_from, addr_to, size=1):
         self.data_refs.add((addr_from, addr_to))
