@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: init package publish ruff-check ruff-format ruff-fix lint format test test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
+.PHONY: init package publish ruff-check ruff-format ruff-fix lint format typecheck test test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
 
 # Default profiling target fixture; override e.g. `make profile-cpu TARGET=komplex`
 TARGET ?= asprox
@@ -22,6 +22,9 @@ ruff-fix:
 	$(PYTHON) -m ruff check . --fix
 lint: ruff-check
 format: ruff-format
+# Paths must match the Code Quality job in .github/workflows/ci.yml
+typecheck:
+	$(PYTHON) -m ty check src/smda/ fuzzing/ profiling/ .github/workflows/scripts/
 test:
 	$(PYTHON) -m pytest tests/test*
 test-coverage:
