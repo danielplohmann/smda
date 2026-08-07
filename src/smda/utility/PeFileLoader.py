@@ -70,7 +70,7 @@ class PeFileLoader:
                         max_virt_section_offset,
                         section_info["raw_size"] + section_info["virt_offset"],
                     )
-                    if section_info["raw_offset"] > 0x200:
+                    if section_info["raw_offset"] >= 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
             # isCompatible() only checks for the "MZ" magic, so a DOS-stub-only binary, a
             # corrupted PE, or one with a garbage e_lfanew reaches this point with no usable
