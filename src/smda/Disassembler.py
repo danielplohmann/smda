@@ -208,9 +208,9 @@ class Disassembler:
             if self.config.WITH_STRINGS:
                 go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
-                self._addStringsToReport(smda_report, file_content, mode=string_mode)
+                self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
-                smda_report.buffer = file_content
+                smda_report.buffer = binary_info.binary
         except Exception as exc:
             smda_report = self._handleDisassemblyException(
                 start,
@@ -253,9 +253,9 @@ class Disassembler:
             if self.config.WITH_STRINGS:
                 go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
-                self._addStringsToReport(smda_report, file_content, mode=string_mode)
+                self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
-                smda_report.buffer = file_content
+                smda_report.buffer = binary_info.binary
         except Exception as exc:
             smda_report = self._handleDisassemblyException(
                 start,
