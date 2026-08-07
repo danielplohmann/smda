@@ -678,8 +678,7 @@ class SmdaFunction:
         architecture_metadata = function_dict.get("architecture_metadata", {})
         if not isinstance(architecture_metadata, dict):
             raise ValueError("serialized function architecture metadata must be a dictionary")
-        # checked after the container shape so each malformed field still reports itself;
-        # the synthesizers pack these unsigned, and a negative one reaches struct.pack
+        # checked after the container shape so each malformed field reports itself
         addresses = [function_dict["offset"], *(int(address) for address in blocks)]
         if any(isinstance(a, bool) or not isinstance(a, int) or not 0 <= a < MAX_ADDRESS_VALUE for a in addresses):
             raise ValueError("serialized function addresses must be in the 64-bit space")
