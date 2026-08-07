@@ -1,5 +1,6 @@
 import struct
 import unittest
+from types import SimpleNamespace
 
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
@@ -206,6 +207,21 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         ranges = AArch64FunctionCandidateManager._peExecutableSectionRanges(parsed, base)
 
         self.assertEqual(ranges, [(base + 0x1000, base + 0x1000 + 0x2A0)])
+
+    def test_aarch64_pe_exec_section_ranges_skip_a_wholly_empty_section(self):
+        # neither VirtualSize nor SizeOfRawData gives an extent, so there is nothing
+        # to constrain pointer targets with and no range may be emitted
+        section = SimpleNamespace(
+            characteristics=0x20000020,
+            virtual_address=0x1000,
+            virtual_size=0,
+            sizeof_raw_data=0,
+        )
+        parsed = SimpleNamespace(sections=[section])
+
+        ranges = AArch64FunctionCandidateManager._peExecutableSectionRanges(parsed, 0x400000)
+
+        self.assertEqual(ranges, [])
 
     def test_mergeCodeAreas(self):
         test_cases = [
