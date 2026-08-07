@@ -3,7 +3,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 CALL_INS = ["call", "calli", "callvirt"]
-END_INS = ["ret"]
+END_INS = ["ret", "throw", "rethrow", "endfinally", "endfilter"]
 
 
 class FunctionAnalysisState:
