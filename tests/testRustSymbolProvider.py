@@ -11,6 +11,7 @@ from smda.common.labelprovider.rust_demangler import demangle
 from smda.common.labelprovider.rust_demangler.rust import TypeNotFoundError
 from smda.common.labelprovider.rust_demangler.rust_legacy import LegacyDemangler, UnableToLegacyDemangle
 from smda.common.labelprovider.rust_demangler.rust_v0 import (
+    Parser,
     Printer,
     UnableTov0Demangle,
     V0Demangler,
@@ -227,6 +228,23 @@ class TestRustDemangler(unittest.TestCase):
             LegacyDemangler().demangle(name)
         self.assertFalse(is_rust_language_evidence(name))
         self.assertEqual(demangle_itanium_symbol(name), name)
+
+    def test_non_ascii_unicode_digit_does_not_escape_value_error(self):
+        # str.isdigit() is True for Unicode category No (RUMI DIGIT ONE, superscripts,
+        # circled digits) but int() rejects those, so every isdigit()-gated length or
+        # digit parse in the demangler could raise an uncatchable ValueError. Mangled
+        # Rust symbols are ASCII by construction, so the gate is an ASCII-digit test.
+        for name in ("_ZN\U00010e60", "_ZN²x", "_ZN①"):
+            with self.assertRaises(UnableToLegacyDemangle):
+                LegacyDemangler().demangle(name)
+            self.assertFalse(is_rust_language_evidence(name))
+        # the v0 demangler shares the class through digit_10/digit_62/hex_nibbles
+        for name in ("_RNvC\U00010e60", "_RNvC1a²"):
+            self.assertIsInstance(demangle_itanium_symbol(name), str)
+        # digit_62 decodes base-62 backref indices; a category-No "digit" must be
+        # rejected as a non-digit instead of reaching int()
+        with self.assertRaises(UnableTov0Demangle):
+            Parser("\U00010e60", 0).digit_62()
 
     def test_v0_backref_path_updates_parent_printer_output(self):
         """Backref path printers should copy string output back to the caller."""
