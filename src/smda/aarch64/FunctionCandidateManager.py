@@ -135,8 +135,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         ranges = []
         for section in lief_binary.sections:
             if section.characteristics & 0x20000000:
-                # a zero VirtualSize is mapped by its raw size, so the extent has to be
-                # recovered the same way PeFileLoader.getCodeAreas recovers it
                 section_size = section.virtual_size or section.sizeof_raw_data
                 if not section_size:
                     continue
