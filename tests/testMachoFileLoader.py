@@ -260,6 +260,24 @@ class TestMachoFileLoader(unittest.TestCase):
 
         self.assertEqual(areas, [[0x100004000, 0x100009000]])
 
+    def test_code_areas_skip_zero_width_section_and_segment(self):
+        # A zero-size instruction section or executable segment produced a degenerate
+        # [start, start] area, which mergeCodeAreas keeps - leaving code_areas non-empty
+        # so isInCodeAreas filters against a range that matches no address at all.
+        exec_prot = int(lief.MachO.SegmentCommand.VM_PROTECTIONS.X)
+        ins_flags = lief.MachO.Section.FLAGS.PURE_INSTRUCTIONS.value
+        selected = _MachoSlice()
+        selected.sections = [_Section(0x100004000, 0, ins_flags)]
+        selected.segments = [_Segment(virtual_address=0x100000000, virtual_size=0, init_protection=exec_prot | 1)]
+
+        with mock.patch(
+            "smda.utility.MachoFileLoader.get_active_macho_binary",
+            return_value=selected,
+        ):
+            areas = MachoFileLoader.getCodeAreas(b"", parsed=object())
+
+        self.assertEqual(areas, [])
+
     def test_get_has_backend_for_supported_cpu(self):
         selected = _MachoSlice()
         with mock.patch(

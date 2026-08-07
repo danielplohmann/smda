@@ -349,7 +349,10 @@ class MachoFileLoader:
                 if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])
+                # a zero-width area is never a useful bound, and if it is the only one
+                # recovered it turns isInCodeAreas into a filter that rejects everything
+                if section_end > section_start:
+                    code_areas.append([section_start, section_end])
         # Mach-O commonly marks the whole __TEXT segment executable even though
         # it also contains constants and strings. Prefer precise instruction
         # sections when present; use executable segments only as a fallback for
@@ -363,7 +366,8 @@ class MachoFileLoader:
                 continue
             segment_start = segment.virtual_address
             segment_size = segment.virtual_size
-            code_areas.append([segment_start, segment_start + segment_size])
+            if segment_size:
+                code_areas.append([segment_start, segment_start + segment_size])
         return MachoFileLoader.mergeCodeAreas(code_areas)
 
     @staticmethod
