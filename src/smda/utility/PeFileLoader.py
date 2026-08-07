@@ -70,7 +70,7 @@ class PeFileLoader:
                         max_virt_section_offset,
                         section_info["raw_size"] + section_info["virt_offset"],
                     )
-                    if section_info["raw_offset"] > 0x200:
+                    if section_info["raw_offset"] >= 0x200:
                         min_raw_section_offset = min(min_raw_section_offset, section_info["raw_offset"])
             # isCompatible() only checks for the "MZ" magic, so a DOS-stub-only binary, a
             # corrupted PE, or one with a garbage e_lfanew reaches this point with no usable
@@ -192,11 +192,13 @@ class PeFileLoader:
                 # MEM_EXECUTE
                 if section.characteristics & 0x20000000:
                     section_start = base_address + section.virtual_address
-                    section_size = section.virtual_size
+                    # the PE loader maps a zero-VirtualSize section to its raw size
+                    section_size = section.virtual_size or section.sizeof_raw_data
                     if section_size % 0x1000 != 0:
                         section_size += 0x1000 - (section_size % 0x1000)
                     section_end = section_start + section_size
-                    code_areas.append([section_start, section_end])
+                    if section_end > section_start:
+                        code_areas.append([section_start, section_end])
         return PeFileLoader.mergeCodeAreas(code_areas)
 
     @staticmethod

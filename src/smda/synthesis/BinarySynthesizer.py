@@ -1,5 +1,7 @@
 import logging
 
+from smda.SmdaConfig import SmdaConfig
+
 LOGGER = logging.getLogger(__name__)
 
 AARCH64_NOP = bytes.fromhex("1f2003d5")
@@ -41,6 +43,13 @@ class BinarySynthesizer:
         skipped = len(offsets) - len(resolved)
         if skipped:
             self._warn("synthesis: %d requested function offsets are not in the report", skipped)
+        if resolved:
+            span = max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in resolved) - resolved[0]
+            if span > SmdaConfig.MAX_IMAGE_SIZE:
+                raise ValueError(
+                    f"synthesized image span of 0x{span:x} bytes exceeds MAX_IMAGE_SIZE; "
+                    "the report's function offsets are too far apart to rebuild"
+                )
         return resolved
 
     @staticmethod
@@ -55,6 +64,18 @@ class BinarySynthesizer:
 
     def _functionExtentEnd(self, smda_function):
         return max(offset + len(chunk) for offset, chunk in self._iterFunctionChunks(smda_function))
+
+    def _syntheticSpan(self, offsets, start_alignment, end_alignment=16):
+        """Page-aligned [start, end) guaranteed to cover every offset in ``offsets``.
+
+        The floor rounds an offset down and the ceiling rounds an extent end up, and the
+        two are independent: a report whose blocks sit below their own function offset
+        yields an extent end under the floor and an inverted span, which reaches
+        struct.pack as a negative size.
+        """
+        va_start = align_down(min(offsets), start_alignment)
+        extent_end = max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in offsets)
+        return va_start, align_up(max(extent_end, max(offsets) + 1), end_alignment)
 
     def _nopPadding(self):
         return AARCH64_NOP if self.report.architecture == "aarch64" else INTEL_NOP

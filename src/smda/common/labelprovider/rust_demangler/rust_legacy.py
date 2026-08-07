@@ -36,11 +36,15 @@ class LegacyDemangler:
         for ele in range(self.elements):
             rest = inn
             for i in rest:
-                if i.isdigit():
+                if i in string.digits:
                     rest = rest[1:]
                     continue
                 else:
                     break
+
+            if len(inn) == len(rest):
+                # no length prefix remains: the element count came from the pre-strip string
+                raise UnableToLegacyDemangle(original_inpstr)
 
             num = int(inn[0 : len(inn) - len(rest)])
 
@@ -163,10 +167,10 @@ class LegacyDemangler:
         c = 0
         while c < len(inpstr) and inpstr[c] != "E":
             length = 0
-            if not inpstr[c].isdigit():
+            if inpstr[c] not in string.digits:
                 raise UnableToLegacyDemangle(inpstr)
 
-            while c < len(inpstr) and inpstr[c].isdigit():
+            while c < len(inpstr) and inpstr[c] in string.digits:
                 length = length * 10 + int(inpstr[c])
                 c += 1
 

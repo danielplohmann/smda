@@ -312,8 +312,11 @@ class ElfFileLoader:
         try:
             elffile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
             if elffile:
-                abi = elffile.header.identity_os_abi.name
-        except lief.bad_file as exc:
+                identity_os_abi = elffile.header.identity_os_abi
+                abi = getattr(identity_os_abi, "name", "")
+                if not abi:
+                    LOGGER.debug("ELF: unnamed OS ABI %r, reporting it as unknown", identity_os_abi)
+        except ValueError as exc:
             LOGGER.warning("Failed to determine ELF ABI: %s", exc)
         return abi
 
@@ -354,7 +357,8 @@ class ElfFileLoader:
                 if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])
+                if section_end > section_start:
+                    code_areas.append([section_start, section_end])
         for segment in sorted(elffile.segments, key=lambda segment: segment.physical_size, reverse=True):
             segment_flags = 0
             # ignore invalid segment flags and assume it's not a code section
@@ -367,7 +371,8 @@ class ElfFileLoader:
                 if segment.alignment and segment_size % segment.alignment != 0:
                     segment_size += segment.alignment - (segment_size % segment.alignment)
                 segment_end = segment_start + segment_size
-                code_areas.append([segment_start, segment_end])
+                if segment_end > segment_start:
+                    code_areas.append([segment_start, segment_end])
         return ElfFileLoader.mergeCodeAreas(code_areas)
 
     @staticmethod

@@ -73,7 +73,7 @@ def parse_report(filepath):
     basic blocks. We keep that count for throughput context, but correctness is
     compared via the set of function addresses (the keys of ``block_counts``).
     """
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
 
     xcfg = data.get("xcfg", {})
@@ -106,7 +106,7 @@ def load_from_cache(folder_name):
     cache_file = get_cache_key(folder_name)
     if cache_file.exists():
         try:
-            with open(cache_file) as f:
+            with open(cache_file, encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError):
             pass
@@ -160,7 +160,7 @@ def cache_reports(folder_path):
         cache_data[json_file.name] = parse_report(json_file)
 
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(cache_file, "w") as f:
+    with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(cache_data, f, indent=2)
 
     return cache_data
@@ -679,7 +679,7 @@ def generate_markdown_report(model, output_path):
             lines.append("</details>")
             lines.append("")
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return output_path
 
@@ -777,14 +777,14 @@ def generate_html_report(model, output_path):
         + "</p>\n</body>\n</html>\n"
     )
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
     return output_path
 
 
 def write_json_report(model, output_path):
     """Machine-readable report (schema-versioned)."""
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(model, f, indent=2, default=lambda o: sorted(o) if isinstance(o, (set, frozenset)) else str(o))
     return output_path
 
@@ -900,14 +900,14 @@ def main(argv=None):
         print(f"No comparable data: {model.get('reason')}")
         model.setdefault("gate", {"enabled": gate, "failed": False, "exit_code": 0, "reasons": ["no comparable data"]})
         # Still emit minimal reports so artifacts exist.
-        with open(cache_path / "evaluation.json", "w") as f:
+        with open(cache_path / "evaluation.json", "w", encoding="utf-8") as f:
             json.dump(model, f, indent=2)
-        with open(cache_path / "evaluation.md", "w") as f:
+        with open(cache_path / "evaluation.md", "w", encoding="utf-8") as f:
             f.write(
                 "### 📊 SMDA Performance Evaluation Benchmark Results\n\n"
                 f"_No comparable data: {model.get('reason')}._\n"
             )
-        with open(cache_path / "evaluation.html", "w") as f:
+        with open(cache_path / "evaluation.html", "w", encoding="utf-8") as f:
             f.write(
                 f"<html><body><h1>SMDA Evaluation</h1><p>No comparable data: {model.get('reason')}</p></body></html>"
             )

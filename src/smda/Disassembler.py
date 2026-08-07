@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import logging
 import traceback
+from typing import Any, List, Optional
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.cil.CilDisassembler import CilDisassembler
@@ -22,7 +23,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class Disassembler:
-    def __init__(self, config=None, backend=None):
+    def __init__(self, config: Optional[SmdaConfig] = None, backend: Optional[str] = None) -> None:
         if config is None:
             config = SmdaConfig()
         self.config = config
@@ -45,7 +46,7 @@ class Disassembler:
         # cache the last DisassemblyResult
         self.disassembly = None
 
-    def initDisassembler(self, architecture="intel"):
+    def initDisassembler(self, architecture: str = "intel") -> None:
         """Initialize disassembler backend to given architecture, default: intel.
         Re-creates the backend if a differing architecture is requested later, unless a
         backend was explicitly pinned at construction time (self._explicit_backend)."""
@@ -174,7 +175,7 @@ class Disassembler:
         if not binary_info.md5:
             binary_info.md5 = hashlib.md5(data).hexdigest()
 
-    def disassembleFile(self, file_path, pdb_path=""):
+    def disassembleFile(self, file_path: str, pdb_path: str = "") -> SmdaReport:
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
             loader = FileLoader(file_path, map_file=True)
@@ -197,7 +198,7 @@ class Disassembler:
             )
         return smda_report
 
-    def disassembleUnmappedBuffer(self, file_content):
+    def disassembleUnmappedBuffer(self, file_content: bytes) -> SmdaReport:
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
             loader = MemoryFileLoader(file_content, map_file=True)
@@ -207,9 +208,9 @@ class Disassembler:
             if self.config.WITH_STRINGS:
                 go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
-                self._addStringsToReport(smda_report, file_content, mode=string_mode)
+                self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
-                smda_report.buffer = file_content
+                smda_report.buffer = binary_info.binary
         except Exception as exc:
             smda_report = self._handleDisassemblyException(
                 start,
@@ -220,13 +221,13 @@ class Disassembler:
 
     def disassembleBuffer(
         self,
-        file_content,
-        base_addr,
-        bitness=None,
-        code_areas=None,
-        oep=None,
-        architecture="intel",
-    ):
+        file_content: bytes,
+        base_addr: int,
+        bitness: Optional[int] = None,
+        code_areas: Optional[List[Any]] = None,
+        oep: Optional[int] = None,
+        architecture: str = "intel",
+    ) -> SmdaReport:
         """
         Disassemble a given buffer (file_content), with given base_addr.
         Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
@@ -252,9 +253,9 @@ class Disassembler:
             if self.config.WITH_STRINGS:
                 go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
                 string_mode = "go" if go_pclntab_offset is not None else None
-                self._addStringsToReport(smda_report, file_content, mode=string_mode)
+                self._addStringsToReport(smda_report, binary_info.binary, mode=string_mode)
             if self.config.STORE_BUFFER:
-                smda_report.buffer = file_content
+                smda_report.buffer = binary_info.binary
         except Exception as exc:
             smda_report = self._handleDisassemblyException(
                 start,

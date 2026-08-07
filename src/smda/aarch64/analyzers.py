@@ -539,6 +539,7 @@ class AArch64JumpTableAnalyzer:
 
         tracked_regs = {target_reg}
         table_base = None
+        relative_anchor = None
         index_reg = None
         entry_size = 8
         is_signed = False
@@ -570,10 +571,12 @@ class AArch64JumpTableAnalyzer:
                     # Detect relative base and capture the index register's shift
                     index_op = None
                     if reg1 in constants:
+                        relative_anchor = constants[reg1]
                         table_base = constants[reg1]
                         is_relative = True
                         index_op = op2
                     elif reg2 in constants:
+                        relative_anchor = constants[reg2]
                         table_base = constants[reg2]
                         is_relative = True
                         index_op = op1
@@ -691,7 +694,11 @@ class AArch64JumpTableAnalyzer:
             else:
                 break
 
-            target = (table_base + (val << entry_shift)) & d.getBitMask() if is_relative else val & d.getBitMask()
+            if is_relative:
+                rebase_base = relative_anchor if relative_anchor is not None else table_base
+                target = (rebase_base + (val << entry_shift)) & d.getBitMask()
+            else:
+                target = val & d.getBitMask()
 
             if not d.disassembly.isAddrWithinMemoryImage(target):
                 break

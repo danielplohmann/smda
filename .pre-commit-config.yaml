@@ -12,10 +12,18 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # binary payloads: appending a newline or stripping a trailing 0x20 corrupts
+      # an obfuscated corpus entry or a malware fixture rather than tidying it
       - id: trailing-whitespace
-        exclude: ^data/apiscout_.*\.json$
+        exclude: &binary_payloads |
+          (?x)^(
+            data/apiscout_.*\.json
+            |tests/[^/]*_xored
+            |tests/fuzz_corpus/(?!README\.md).*
+            |tests/fuzz_regressions/(?!README\.md).*
+          )$
       - id: end-of-file-fixer
-        exclude: ^data/apiscout_.*\.json$
+        exclude: *binary_payloads
       - id: check-case-conflict
       - id: check-illegal-windows-names
       - id: check-json

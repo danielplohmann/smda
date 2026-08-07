@@ -10,7 +10,6 @@ import dnfile
 import dnfile.mdtable
 from dncil.cil.body import CilMethodBody
 from dncil.cil.body.reader import CilMethodBodyReaderBase
-from dncil.cil.error import MethodBodyFormatError
 from dncil.clr.token import InvalidToken, StringToken, Token
 from dnfile.enums import MetadataTables
 
@@ -26,8 +25,11 @@ DOTNET_META_TABLES_BY_INDEX = {table.value: table.name for table in MetadataTabl
 
 def read_dotnet_user_string(pe, token: StringToken) -> Union[str, InvalidToken]:
     """read user string from #US stream"""
+    user_string_heap = getattr(pe.net, "user_strings", None)
+    if user_string_heap is None:
+        return InvalidToken(token.value)
     try:
-        user_string: Optional[dnfile.stream.UserString] = pe.net.user_strings.get(token.rid)
+        user_string: Optional[dnfile.stream.UserString] = user_string_heap.get(token.rid)
     except UnicodeDecodeError:
         return InvalidToken(token.value)
 
@@ -298,13 +300,13 @@ class CilDisassembler:
         LOGGER.debug("Starting parser-based analysis.")
         pe = dnfile.dnPE(data=binary_info.raw_data)
         for row in pe.net.mdtables.MethodDef:
-            if not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
-                # skip methods that do not have a method body
+            if not row.Rva or not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
                 continue
             try:
                 method_body = CilMethodBody(DnfileMethodBodyReader(pe, row))
-            except MethodBodyFormatError as e:
-                LOGGER.error(e)
+            except Exception as exc:
+                reraise_non_operational_exception(exc)
+                LOGGER.error("Skipping malformed CIL method body: %s", exc)
                 continue
             if not method_body.instructions:
                 continue

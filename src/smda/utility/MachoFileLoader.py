@@ -1,5 +1,6 @@
 import logging
 import struct
+import warnings
 from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
@@ -75,7 +76,10 @@ def _resolve_macho_cpu(macho_file):
     # metadata instead of raising.
     if not macho_file or not hasattr(macho_file, "header"):
         return "", 0, False
-    return _MACHO_CPU_TYPES.get(macho_file.header.cpu_type, ("", 0, False))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cpu_type = macho_file.header.cpu_type
+    return _MACHO_CPU_TYPES.get(cpu_type, ("", 0, False))
 
 
 def align(v, alignment):
@@ -349,7 +353,8 @@ class MachoFileLoader:
                 if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])
+                if section_end > section_start:
+                    code_areas.append([section_start, section_end])
         # Mach-O commonly marks the whole __TEXT segment executable even though
         # it also contains constants and strings. Prefer precise instruction
         # sections when present; use executable segments only as a fallback for
@@ -363,7 +368,8 @@ class MachoFileLoader:
                 continue
             segment_start = segment.virtual_address
             segment_size = segment.virtual_size
-            code_areas.append([segment_start, segment_start + segment_size])
+            if segment_size:
+                code_areas.append([segment_start, segment_start + segment_size])
         return MachoFileLoader.mergeCodeAreas(code_areas)
 
     @staticmethod

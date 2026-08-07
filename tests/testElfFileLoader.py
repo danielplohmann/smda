@@ -34,6 +34,19 @@ class TestElfFileLoader(unittest.TestCase):
         self.assertTrue(loader.getCodeAreas())
         self.assertTrue(loader.getData())
 
+    def test_invalid_abi_does_not_depend_on_removed_lief_exception(self):
+        class InvalidAbi:
+            @property
+            def name(self):
+                raise ValueError("invalid ABI")
+
+        parsed = SimpleNamespace(header=SimpleNamespace(identity_os_abi=InvalidAbi()))
+
+        self.assertEqual(ElfFileLoader.getAbi(b"", parsed=parsed), "")
+        self.assertEqual(
+            ElfFileLoader.getAbi(b"", parsed=SimpleNamespace(header=SimpleNamespace(identity_os_abi=110))), ""
+        )
+
     def test_plt_ranges_include_all_supported_section_names(self):
         sections = [
             SimpleNamespace(name=".plt", virtual_address=0x1000, size=0x20),
@@ -97,6 +110,31 @@ class TestElfFileLoader(unittest.TestCase):
         code_areas = ElfFileLoader.getCodeAreas(b"", parsed=parsed)
 
         self.assertEqual(code_areas, [[0x1000, 0x100A]])
+
+    def test_code_areas_skip_zero_width_section_and_segment(self):
+        # A zero-size executable section/segment produced a degenerate [start, start]
+        # area. mergeCodeAreas keeps it, so code_areas is non-empty and both
+        # isInCodeAreas and _passesCodeFilter switch from their "no code areas, assume
+        # the whole image" fallback to a filter that rejects every address.
+        empty_section = SimpleNamespace(
+            virtual_address=0x1000,
+            size=0,
+            alignment=0,
+            flags=lief.ELF.Section.FLAGS.EXECINSTR.value,
+            file_offset=0,
+            offset=0,
+            content=b"",
+        )
+        empty_segment = SimpleNamespace(
+            virtual_address=0x8000,
+            virtual_size=0,
+            physical_size=0,
+            alignment=0,
+            flags=SimpleNamespace(value=5),
+        )
+        parsed = SimpleNamespace(sections=[empty_section], segments=[empty_segment])
+
+        self.assertEqual(ElfFileLoader.getCodeAreas(b"", parsed=parsed), [])
 
     def test_map_binary_clamps_header_copy_to_actual_file_length(self):
         section = SimpleNamespace(

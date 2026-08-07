@@ -196,7 +196,7 @@ def work(input_element):
             REPORT.version = getSampleVersion(INPUT_FILEPATH, REPORT.family)
             REPORT.filename = os.path.basename(malpedia_relative_path)
             output_dir = input_element.get("output_dir", "finished-reports")
-            with open(output_dir + os.sep + REPORT_STEM + ".smda", "w") as fout:
+            with open(output_dir + os.sep + REPORT_STEM + ".smda", "w", encoding="utf-8") as fout:
                 json.dump(REPORT.toDict(), fout, indent=1, sort_keys=True)
                 logger.info("Wrote " + output_dir + "/" + REPORT_STEM + ".smda")
     except Exception:

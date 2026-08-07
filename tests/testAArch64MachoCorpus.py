@@ -13,12 +13,16 @@ import os
 import unittest
 from pathlib import Path
 
+import pytest
+
 from smda.aarch64.definitions import BTI_PROLOGUES, INSTRUCTION_SIZE, PAC_PROLOGUES
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.MachoFileLoader import MachoFileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
+
+pytestmark = pytest.mark.slow
 
 logging.disable(logging.CRITICAL)
 
@@ -80,7 +84,7 @@ def _fixtures_for_source(fixtures, source_id):
 class TestAArch64MachoCorpus(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.manifest = json.loads(MANIFEST_PATH.read_text())
+        cls.manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         cls.fixtures = cls.manifest["fixtures"]
         cls.sources = cls.manifest["sources"]
         cls._cases = {}
