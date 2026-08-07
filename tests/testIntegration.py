@@ -125,6 +125,41 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert self.cutwail_disassembly.num_instructions == self.cutwail_unmapped_disassembly.num_instructions
         SmdaReport.fromDict(report_as_dict)
 
+    def testUnmappedBufferStringRefsMatchMappedImage(self):
+        # disassembleUnmappedBuffer used to feed the raw file bytes (not the
+        # mapped image) into string extraction and STORE_BUFFER. StringExtractor
+        # resolves referencing addresses against base_addr + len(buffer), so the
+        # raw file produced different (wrong) data offsets than the mapped path.
+        import tempfile
+
+        def string_refs(report):
+            refs = set()
+            for smda_function in report.getFunctions():
+                for entry in smda_function.stringrefs:
+                    refs.add((entry["string"], entry["ins_addr"], entry["data_addr"]))
+            return refs
+
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(self.cutwail_binary)
+            file_report = Disassembler(config).disassembleFile(path)
+        finally:
+            os.unlink(path)
+        mapped_refs = string_refs(file_report)
+        unmapped_refs = string_refs(self.cutwail_unmapped_disassembly)
+        assert mapped_refs
+        assert mapped_refs == unmapped_refs
+
+    def testStoreBufferPersistsMappedImage(self):
+        config.STORE_BUFFER = True
+        try:
+            report = Disassembler(config).disassembleUnmappedBuffer(self.cutwail_binary)
+        finally:
+            config.STORE_BUFFER = False
+        assert len(report.buffer) > len(self.cutwail_binary)
+        assert report.buffer[:0x40] == self.cutwail_binary[:0x40]
+
     def testBlockLocator(self):
         # test with a function start
         found_function = self.asprox_disassembly.findFunctionByContainedAddress(0x008D8292)
