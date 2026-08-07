@@ -218,7 +218,7 @@ class BinaryInfo:
         if lief_type == "PE":
             for section in parsed_binary.sections:
                 section_start = self.base_addr + section.virtual_address
-                section_size = section.virtual_size
+                section_size = section.virtual_size or section.sizeof_raw_data
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
                 yield section.name, section_start, section_start + section_size

@@ -1,6 +1,8 @@
 import struct
 import unittest
 
+from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
+from smda.common.BinaryInfo import BinaryInfo
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.PeFileLoader import PeFileLoader
 
@@ -149,6 +151,61 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         # not echo raw section content
         self.assertEqual(mapped[0x200:0x1000], b"\x00" * (0x1000 - 0x200))
         self.assertEqual(mapped[0x1000:0x1100], bytes(binary)[0x200:0x300])
+
+    @staticmethod
+    def _build_pe_with_zero_virtual_size_exec_section():
+        pe = 0x80
+        binary = bytearray(0x240)
+        binary[:2] = b"MZ"
+        binary[0x3C:0x40] = pe.to_bytes(4, "little")
+        binary[pe : pe + 4] = b"PE\x00\x00"
+        binary[pe + 4 : pe + 6] = (0x14C).to_bytes(2, "little")
+        binary[pe + 6 : pe + 8] = (1).to_bytes(2, "little")
+        binary[pe + 20 : pe + 22] = (0xE0).to_bytes(2, "little")  # SizeOfOptionalHeader
+        binary[pe + 22 : pe + 24] = (0x0102).to_bytes(2, "little")
+        binary[pe + 24 : pe + 26] = (0x10B).to_bytes(2, "little")  # PE32 magic
+        section = pe + 4 + 20 + 0xE0
+        binary[section : section + 8] = b".text\x00\x00"
+        binary[section + 8 : section + 12] = (0).to_bytes(4, "little")  # VirtualSize
+        binary[section + 12 : section + 16] = (0x1000).to_bytes(4, "little")
+        binary[section + 16 : section + 20] = (0x2A0).to_bytes(4, "little")  # SizeOfRawData
+        binary[section + 20 : section + 24] = (0x200).to_bytes(4, "little")
+        binary[section + 36 : section + 40] = (0x60000020 | 0x20000000).to_bytes(4, "little")
+        return bytes(binary)
+
+    def test_getCodeAreas_recovers_executable_extent_from_raw_size_when_virtual_size_is_zero(self):
+        # MEM_EXECUTE section with VirtualSize == 0 produced a zero-width code area that
+        # rejected every address, silently losing all functions. mapBinary folds raw_size
+        # into the virtual extent, so the code gate must do the same and round up.
+        binary = self._build_pe_with_zero_virtual_size_exec_section()
+
+        code_areas = PeFileLoader.getCodeAreas(binary)
+
+        base = PeFileLoader.getBaseAddress(binary)
+        self.assertEqual(code_areas, [[base + 0x1000, base + 0x1000 + 0x1000]])
+
+    def test_getSections_recovers_extent_from_raw_size_when_virtual_size_is_zero(self):
+        # same class as getCodeAreas: a zero VirtualSize yielded a zero-width section
+        # range, so no address ever resolved to the section's name
+        binary = self._build_pe_with_zero_virtual_size_exec_section()
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = PeFileLoader.getBaseAddress(binary)
+
+        sections = {name: (start, end) for name, start, end in binary_info.getSections()}
+
+        base = binary_info.base_addr
+        self.assertEqual(sections[".text"], (base + 0x1000, base + 0x1000 + 0x1000))
+
+    def test_aarch64_pe_exec_section_ranges_survive_zero_virtual_size(self):
+        # the AArch64 candidate manager dropped such a section from its executable
+        # ranges entirely, rejecting every pointer target inside it
+        binary = self._build_pe_with_zero_virtual_size_exec_section()
+        base = PeFileLoader.getBaseAddress(binary)
+        parsed = PeFileLoader.parseBinary(binary)
+
+        ranges = AArch64FunctionCandidateManager._peExecutableSectionRanges(parsed, base)
+
+        self.assertEqual(ranges, [(base + 0x1000, base + 0x1000 + 0x2A0)])
 
     def test_mergeCodeAreas(self):
         test_cases = [

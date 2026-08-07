@@ -357,7 +357,10 @@ class ElfFileLoader:
                 if section.alignment and section_size % section.alignment != 0:
                     section_size += section.alignment - (section_size % section.alignment)
                 section_end = section_start + section_size
-                code_areas.append([section_start, section_end])
+                # a zero-width area is never a useful bound, and if it is the only one
+                # recovered it turns isInCodeAreas into a filter that rejects everything
+                if section_end > section_start:
+                    code_areas.append([section_start, section_end])
         for segment in sorted(elffile.segments, key=lambda segment: segment.physical_size, reverse=True):
             segment_flags = 0
             # ignore invalid segment flags and assume it's not a code section
@@ -370,7 +373,8 @@ class ElfFileLoader:
                 if segment.alignment and segment_size % segment.alignment != 0:
                     segment_size += segment.alignment - (segment_size % segment.alignment)
                 segment_end = segment_start + segment_size
-                code_areas.append([segment_start, segment_end])
+                if segment_end > segment_start:
+                    code_areas.append([segment_start, segment_end])
         return ElfFileLoader.mergeCodeAreas(code_areas)
 
     @staticmethod
