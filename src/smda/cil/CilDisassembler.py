@@ -27,7 +27,6 @@ def read_dotnet_user_string(pe, token: StringToken) -> Union[str, InvalidToken]:
     """read user string from #US stream"""
     user_string_heap = getattr(pe.net, "user_strings", None)
     if user_string_heap is None:
-        # no stream named "#US" was found by dnfile, so no user string can resolve
         return InvalidToken(token.value)
     try:
         user_string: Optional[dnfile.stream.UserString] = user_string_heap.get(token.rid)
@@ -302,8 +301,6 @@ class CilDisassembler:
         pe = dnfile.dnPE(data=binary_info.raw_data)
         for row in pe.net.mdtables.MethodDef:
             if not row.Rva or not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
-                # skip methods that do not have a method body (a zero Rva from a
-                # malformed/truncated metadata stream maps to an out-of-image offset)
                 continue
             try:
                 method_body = CilMethodBody(DnfileMethodBodyReader(pe, row))

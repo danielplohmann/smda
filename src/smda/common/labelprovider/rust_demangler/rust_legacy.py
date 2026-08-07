@@ -43,8 +43,7 @@ class LegacyDemangler:
                     break
 
             if len(inn) == len(rest):
-                # no length prefix remains: the element count came from the
-                # untrimmed (pre-".llvm." strip) string, whose tail is gone now
+                # no length prefix remains: the element count came from the pre-strip string
                 raise UnableToLegacyDemangle(original_inpstr)
 
             num = int(inn[0 : len(inn) - len(rest)])

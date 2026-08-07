@@ -192,9 +192,7 @@ class PeFileLoader:
                 # MEM_EXECUTE
                 if section.characteristics & 0x20000000:
                     section_start = base_address + section.virtual_address
-                    # a zero virtual_size must not produce a zero-width (dead) code
-                    # area that rejects every address: the loader maps the section to
-                    # its raw size, so recover the executable extent from SizeOfRawData
+                    # the PE loader maps a zero-VirtualSize section to its raw size
                     section_size = section.virtual_size or section.sizeof_raw_data
                     if section_size % 0x1000 != 0:
                         section_size += 0x1000 - (section_size % 0x1000)
