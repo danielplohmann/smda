@@ -160,6 +160,16 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
         assert len(report.buffer) > len(self.cutwail_binary)
         assert report.buffer[:0x40] == self.cutwail_binary[:0x40]
 
+    def testStoreBufferOnRawBufferPathKeepsTheSuppliedBytes(self):
+        # disassembleBuffer is handed an already-mapped buffer, so binary_info.binary
+        # is the caller's own bytes - storing it must be an identity, not a re-read.
+        config.STORE_BUFFER = True
+        try:
+            report = Disassembler(config).disassembleBuffer(self.cutwail_binary, 0x400000)
+        finally:
+            config.STORE_BUFFER = False
+        assert report.buffer == self.cutwail_binary
+
     def testBlockLocator(self):
         # test with a function start
         found_function = self.asprox_disassembly.findFunctionByContainedAddress(0x008D8292)

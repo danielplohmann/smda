@@ -1,6 +1,8 @@
 import unittest
 
+from smda.cil.FunctionAnalysisState import FunctionAnalysisState as CilFunctionAnalysisState
 from smda.common.FunctionAnalysisState import FunctionAnalysisState
+from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 
 
 class _BareState(FunctionAnalysisState):
@@ -45,6 +47,52 @@ class FunctionAnalysisStateTestSuite(unittest.TestCase):
         self.assertNotIn(0x106, state.jump_targets)
         starts = {block[0][0] for block in state.getBlocks()}
         self.assertNotIn(0x106, starts)
+
+
+class CilFunctionAnalysisStateTestSuite(unittest.TestCase):
+    """The CIL state carries its own copy of the edge book-keeping."""
+
+    def test_removeCodeRef_purges_only_real_jump_edges(self):
+        state = CilFunctionAnalysisState(0x100, 0x100, None)
+        state.addCodeRef(0x102, 0x106, by_jump=True)
+        state.addCodeRef(0x104, 0x106)
+        self.assertIn(0x106, state.jump_targets)
+
+        state.removeCodeRef(0x104, 0x106)
+
+        self.assertNotIn((0x104, 0x106), state.code_refs)
+        self.assertIn(0x106, state.jump_targets)
+
+    def test_remove_real_jump_edge_releases_target_when_alone(self):
+        state = CilFunctionAnalysisState(0x100, 0x100, None)
+        state.addCodeRef(0x100, 0x106, by_jump=True)
+
+        state.removeCodeRef(0x100, 0x106)
+
+        self.assertNotIn(0x106, state.jump_targets)
+
+
+class DalvikFunctionAnalysisStateTestSuite(unittest.TestCase):
+    """The Dalvik state carries its own copy of the edge book-keeping."""
+
+    def test_removeCodeRef_purges_only_real_jump_edges(self):
+        state = DalvikFunctionAnalysisState(0x100, None)
+        state.addCodeRef(0x102, 0x106, by_jump=True)
+        state.addCodeRef(0x104, 0x106)
+        self.assertIn(0x106, state.jump_targets)
+
+        state.removeCodeRef(0x104, 0x106)
+
+        self.assertNotIn((0x104, 0x106), state.code_refs)
+        self.assertIn(0x106, state.jump_targets)
+
+    def test_remove_real_jump_edge_releases_target_when_alone(self):
+        state = DalvikFunctionAnalysisState(0x100, None)
+        state.addCodeRef(0x100, 0x106, by_jump=True)
+
+        state.removeCodeRef(0x100, 0x106)
+
+        self.assertNotIn(0x106, state.jump_targets)
 
 
 if __name__ == "__main__":
