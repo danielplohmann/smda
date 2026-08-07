@@ -127,6 +127,29 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         with self.assertRaises(ValueError):
             PeFileLoader.mapBinary(bytes(binary))
 
+    def test_mapBinary_header_copy_respects_section_at_offset_0x200(self):
+        # A section with PointerToRawData == 0x200 is the most common PE layout. The
+        # raw_offset `> 0x200` floor skipped exactly this value, so the 0xFFFFFFFF
+        # sentinel survived and the whole raw file (including section payload bytes)
+        # was copied into the RVA-0 header region up to the first section's VA.
+        virt_offset = 0x1000
+        virt_size = 0x100
+        raw_size = 0x100
+        raw_offset = 0x200
+        total_len = 0x400
+        binary = self._build_pe_with_section(total_len, virt_size, virt_offset, raw_size, raw_offset)
+        binary = bytearray(binary)
+        for i in range(raw_size):
+            binary[raw_offset + i] = 0x90
+
+        mapped = PeFileLoader.mapBinary(bytes(binary))
+
+        self.assertEqual(mapped[0:0x200], bytes(binary)[0:0x200])
+        # the header gap between SizeOfHeaders and the section VA must stay zero-filled,
+        # not echo raw section content
+        self.assertEqual(mapped[0x200:0x1000], b"\x00" * (0x1000 - 0x200))
+        self.assertEqual(mapped[0x1000:0x1100], bytes(binary)[0x200:0x300])
+
     def test_mergeCodeAreas(self):
         test_cases = [
             ("Overlapping intervals", [[1, 5], [3, 7], [8, 12]], [[1, 7], [8, 12]]),
