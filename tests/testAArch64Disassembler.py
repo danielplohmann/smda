@@ -2226,6 +2226,13 @@ class TestAArch64Analyzers(unittest.TestCase):
             for block_start, succs in (function.blockrefs or {}).items():
                 if len(succs) >= 16:
                     multi.append((function.offset, block_start, len(succs)))
+                    if function.offset == 0x100000460 and block_start == 0x100000480:
+                        # Regression: relative table entries were rebased on the table's
+                        # own address instead of the adr anchor, pushing every target
+                        # +0xE8 into udf padding / table data. The 16 real case bodies
+                        # are spaced 0xC apart starting at the adr anchor target.
+                        expected = [0x10000049C + i * 0xC for i in range(16)]
+                        self.assertEqual(sorted(succs), expected)
         self.assertGreaterEqual(len(multi), 1, f"expected >=1 16-way JT block, got {multi}")
         self.assertTrue(any(degree == 16 for _, _, degree in multi), multi)
 
