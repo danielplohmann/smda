@@ -382,7 +382,7 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
         synthesizer.warnings = []
         written = []
 
-        def _record(regions, rva, thunk_value, ptr_size):
+        def _record(regions, rva, thunk_value, ptr_size, data_only=False):
             written.append(rva)
             return True
 
@@ -410,7 +410,7 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
         synthesizer.warnings = []
         written = []
 
-        def _record(regions, rva, thunk_value, ptr_size):
+        def _record(regions, rva, thunk_value, ptr_size, data_only=False):
             written.append(rva)
             return True
 
@@ -458,6 +458,152 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
         self.assertFalse(by_name["__text"]["perms"] & VM_PROT_WRITE)
         self.assertTrue(by_name["__data"]["perms"] & VM_PROT_WRITE)
         self.assertFalse(by_name["__data"]["perms"] & VM_PROT_EXECUTE)
+
+
+class SynthesisLayoutTestSuite(unittest.TestCase):
+    """Layout properties a re-loading disassembler depends on."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        string_config = SmdaConfig()
+        string_config.WITH_STRINGS = True
+        disasm = Disassembler(string_config, backend="intel")
+        cls.pe_report = disasm.disassembleUnmappedBuffer(_load_xored_fixture("cutwail_xored"))
+        cls.elf_report = disasm.disassembleUnmappedBuffer(_load_xored_fixture("mirai_x64_xored"))
+        aarch64_disasm = Disassembler(string_config, backend="aarch64")
+        cls.macho_report = aarch64_disasm.disassembleUnmappedBuffer(_load_macho_fixture("malpedia/osx.hloader"))
+
+    def test_import_slots_inside_code_are_relocated_instead_of_overwriting_it(self):
+        report = copy.deepcopy(self.pe_report)
+        base = report.base_addr
+        report.xmetadata["imported_functions"] = {
+            base + 0x1000: ("kernel32.dll", "CreateFileA"),
+            base + 0x2000: ("kernel32.dll", "ExitProcess"),
+        }
+        synthesized = report.synthesizeBinary(output_format=FORMAT_PE, with_strings=False)
+        parsed = lief.parse(synthesized)
+        sections = [(base + s.virtual_address, bytes(s.content)) for s in parsed.sections]
+        assert _verify_planted_blocks(report, sections) == []
+        names = {entry.name for imported in parsed.imports for entry in imported.entries if entry.name}
+        assert {"CreateFileA", "ExitProcess"} <= names
+        bspack = next(s for s in parsed.sections if s.name.startswith(".bspack"))
+        assert parsed.data_directory(lief.PE.DataDirectory.TYPES.IMPORT_TABLE).rva > bspack.virtual_address
+
+    def test_recorded_import_slots_in_data_keep_their_address(self):
+        report = self.pe_report
+        slots = sorted(int(key) for key in report.xmetadata["imported_functions"])
+        synthesized = report.synthesizeBinary()
+        parsed = lief.parse(synthesized)
+        thunk_rvas = {entry.iat_address for imported in parsed.imports for entry in imported.entries}
+        assert {slot - report.base_addr for slot in slots} <= thunk_rvas
+
+    def test_an_import_slot_below_the_image_base_places_no_negative_section(self):
+        report = copy.deepcopy(self.pe_report)
+        report.xheader = None
+        report.xmetadata["imported_functions"] = {report.base_addr - 0x1000: ("kernel32.dll", "ExitProcess")}
+        synthesized = report.synthesizeBinary(output_format=FORMAT_PE, with_strings=False)
+        parsed = lief.parse(synthesized)
+        assert parsed is not None
+        assert all(section.virtual_address > 0 for section in parsed.sections)
+        assert ".smdaIAT" not in [section.name for section in parsed.sections]
+
+    def test_a_low_string_ref_does_not_produce_a_section_at_rva_zero(self):
+        report = copy.deepcopy(self.pe_report)
+        report.xheader = None
+        base = report.base_addr
+        function = next(iter(report.xcfg.values()))
+        function.stringrefs = [
+            {"data_addr": base + 0x200, "string": "low"},
+            {"data_addr": base + 0x50000, "string": "high"},
+        ]
+        synthesized = report.synthesizeBinary(output_format=FORMAT_PE)
+        parsed = lief.parse(synthesized)
+        assert all(section.virtual_address >= parsed.optional_header.sizeof_headers for section in parsed.sections)
+        for index, first in enumerate(parsed.sections):
+            for second in list(parsed.sections)[index + 1 :]:
+                assert not (
+                    first.virtual_address < second.virtual_address + second.virtual_size
+                    and second.virtual_address < first.virtual_address + first.virtual_size
+                )
+
+    def test_a_string_section_is_still_added_when_it_fits(self):
+        report = copy.deepcopy(self.pe_report)
+        report.xheader = None
+        base = report.base_addr
+        function = next(iter(report.xcfg.values()))
+        function.stringrefs = [{"data_addr": base + 0x80000, "string": "far away"}]
+        synthesized = report.synthesizeBinary(output_format=FORMAT_PE)
+        parsed = lief.parse(synthesized)
+        covering = [s for s in parsed.sections if s.virtual_address <= 0x80000 < s.virtual_address + s.virtual_size]
+        assert covering
+        assert bytes(covering[0].content).find(b"far away\x00") >= 0
+
+    def test_unnamed_sections_still_reach_the_elf_section_header_table(self):
+        report = copy.deepcopy(self.elf_report)
+        report.code_sections = [("", start, end) for _, start, end in report.code_sections]
+        synthesized = report.synthesizeBinary(output_format=FORMAT_ELF, with_strings=False)
+        parsed = lief.parse(synthesized)
+        named = [section for section in parsed.sections if section.virtual_address]
+        assert len(named) == len([entry for entry in report.code_sections if entry[1] and entry[1] < entry[2]])
+        assert all(section.name.startswith(".smda") for section in named)
+        assert min(section.virtual_address - section.file_offset for section in named) == report.base_addr
+
+    def test_a_fabricated_section_name_does_not_collide_with_a_real_one(self):
+        report = copy.deepcopy(self.elf_report)
+        report.code_sections = [
+            (".smda0" if index == 0 else "", start, end) for index, (_, start, end) in enumerate(report.code_sections)
+        ]
+        synthesized = report.synthesizeBinary(output_format=FORMAT_ELF, with_strings=False)
+        parsed = lief.parse(synthesized)
+        names = [section.name for section in parsed.sections if section.virtual_address]
+        assert len(names) == len(set(names))
+        assert ".smda1" in names
+
+    def test_elf_sections_stay_congruent_with_the_image_base(self):
+        report = self.elf_report
+        synthesized = report.synthesizeBinary(with_strings=False)
+        parsed = lief.parse(synthesized)
+        mapped = [section for section in parsed.sections if section.virtual_address and section.file_offset]
+        assert min(section.virtual_address - section.file_offset for section in mapped) == report.base_addr
+        loads = [segment for segment in parsed.segments if segment.type == lief.ELF.Segment.TYPE.LOAD]
+        assert min(segment.virtual_address - segment.file_offset for segment in loads) == report.base_addr
+        sections = [(s.virtual_address, bytes(s.content)) for s in parsed.sections]
+        assert _verify_planted_blocks(report, sections) == []
+
+    def test_a_32bit_elf_with_imports_stays_congruent(self):
+        data_va = next(start for name, start, _ in self.elf_report.code_sections if name == ".data")
+        report = copy.deepcopy(self.elf_report)
+        report.bitness = 32
+        report.xheader = None
+        report.xmetadata["imported_functions"] = {data_va + 0x8: ("libc.so.6", "system")}
+        synthesized = report.synthesizeBinary(output_format=FORMAT_ELF, with_strings=False)
+        parsed = lief.parse(synthesized)
+        assert parsed.header.identity_class == lief.ELF.Header.CLASS.ELF32
+        assert any(segment.type == lief.ELF.Segment.TYPE.DYNAMIC for segment in parsed.segments)
+        mapped = [section for section in parsed.sections if section.virtual_address and section.file_offset]
+        assert min(section.virtual_address - section.file_offset for section in mapped) == report.base_addr
+
+    def test_macho_text_maps_from_file_offset_zero(self):
+        report = self.macho_report
+        synthesized = report.synthesizeBinary(with_strings=False)
+        parsed = lief.parse(synthesized)
+        text = next(segment for segment in parsed.segments if segment.name == "__TEXT")
+        assert text.file_offset == 0
+        assert min(segment.virtual_address - segment.file_offset for segment in parsed.segments) == report.base_addr
+        sections = [(s.virtual_address, bytes(s.content)) for s in parsed.sections]
+        assert _verify_planted_blocks(report, sections) == []
+
+    def test_macho_minimal_keeps_the_header_off_the_planted_bytes(self):
+        report = SmdaReport.fromDict(self.macho_report.toDict())
+        report.code_sections = []
+        report.xheader = None
+        synthesized = report.synthesizeBinary(output_format=FORMAT_MACHO)
+        parsed = lief.parse(synthesized)
+        text = next(segment for segment in parsed.segments if segment.sections)
+        assert text.file_offset > 0
+        sections = [(s.virtual_address, bytes(s.content)) for s in parsed.sections]
+        assert _verify_planted_blocks(report, sections) == []
 
 
 if __name__ == "__main__":
