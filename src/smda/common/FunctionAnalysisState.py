@@ -58,10 +58,8 @@ class FunctionAnalysisState:
 
     def chooseNextBlock(self):
         self.is_block_ending_instruction = False
-        # is_jmp is a one-instruction latch: the instruction that books a jump ref consumes
-        # it in its own addInstruction call. Any path that leaves a block without booking
-        # that instruction must clear it, or the next block's first fall-through edge is
-        # recorded as a jump target and splits a basic block that has no branch into it.
+        # is_jmp is a one-instruction latch, consumed by the addInstruction of the branch
+        # that set it; a block left without booking that instruction must not carry it out
         self.is_jmp = False
         self.block_start = self.block_queue.pop()
         self._queued_blocks.discard(self.block_start)

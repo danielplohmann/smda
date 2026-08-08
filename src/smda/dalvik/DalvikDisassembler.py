@@ -235,10 +235,8 @@ class DexReferenceResolver:
         if name:
             return self._normalizeTypeString(name)
         with contextlib.suppress(Exception):
-            # the object-repr guard has to run before normalization: normalization rewrites
-            # dots to slashes and wraps the result as "L...;", so "<lief.DEX.Type object at
-            # 0x...>" comes back as a plausible-looking descriptor with a memory address in
-            # it and no longer starts with "<lief."
+            # guard before normalizing: normalization rewrites dots to slashes and wraps the
+            # result as "L...;", which turns an object repr into a plausible descriptor
             raw_type_string = str(type_obj)
             if not raw_type_string.startswith("<") and " - " not in raw_type_string:
                 type_as_string = self._normalizeTypeString(raw_type_string)
