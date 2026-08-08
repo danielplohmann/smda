@@ -1,8 +1,10 @@
 import struct
 import unittest
+from types import SimpleNamespace
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.DelphiPythiaProvider import DelphiPythiaProvider
+from smda.common.labelprovider.DelphiReSymProvider import DelphiReSymProvider
 from smda.common.LanguageAnalyzer import LanguageAnalyzer
 
 
@@ -137,6 +139,16 @@ class TestDelphiPythiaProvider(unittest.TestCase):
 
         self.assertIn(DelphiPythiaProvider, provider_types)
         self.assertNotIn(DelphiPythiaProvider, {type(provider) for provider in engine.api_providers})
+
+
+class TestDelphiReSymNegativeOffsets(unittest.TestCase):
+    def test_method_entry_below_the_image_is_rejected(self):
+        parser = DelphiReSymProvider.__new__(DelphiReSymProvider)
+        parser._binary = b"\x41" * 0x100
+        parser._base_addr = 0x400000
+        parser._settings = SimpleNamespace(ptr_size=4, jump_dist=0)
+
+        self.assertIsNone(parser._extract_method_info(-1))
 
 
 if __name__ == "__main__":

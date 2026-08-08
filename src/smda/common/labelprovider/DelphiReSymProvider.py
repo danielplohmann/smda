@@ -529,6 +529,8 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def _extract_method_info(self, method_entry_offset: int) -> Optional[MethodInfo]:
         """Extract detailed information about a method from its MethodEntry structure."""
+        if method_entry_offset < 0:
+            return None
         try:
             # Function entry point (offset +2)
             func_addr = self._read_ptr(method_entry_offset + 2)
