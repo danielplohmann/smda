@@ -121,7 +121,7 @@ def read_go_string(smda_report, offset):
     # deref again for the actual string
     if smda_report.isAddrWithinMemoryImage(offset):
         word_size = 8 if smda_report.bitness == 64 else 4
-        word_format = "Q" if word_size == 8 else "I"
+        word_format = "<Q" if word_size == 8 else "<I"
         string_pointer_bytes = read_bytes(smda_report, offset, num_bytes=word_size)
         length_bytes = read_bytes(smda_report, offset + word_size, num_bytes=word_size)
         if len(string_pointer_bytes) < word_size or len(length_bytes) < word_size:

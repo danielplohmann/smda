@@ -25,7 +25,7 @@ class BitnessAnalyzer:
         for call_match in re.finditer(b"\xe8", binary):
             if len(binary) - call_match.start() >= 5:
                 packed_call = binary[call_match.start() + 1 : call_match.start() + 5]
-                rel_call_offset = struct.unpack("i", packed_call)[0]
+                rel_call_offset = struct.unpack("<i", packed_call)[0]
                 call_destination = rel_call_offset + call_match.start() + 5  # & bitmask
                 if call_destination > 0 and call_destination < len(binary):
                     first_byte = binary[call_destination]

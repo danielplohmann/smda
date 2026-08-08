@@ -32,7 +32,7 @@ class LanguageAnalyzer:
     def validPEHeader(self):
         is_pe = self.disassembly.binary_info.binary[0:2] == b"\x4d\x5a"
         if len(self.disassembly.binary_info.binary) > 0x40:
-            pe_offset = struct.unpack("I", self.disassembly.binary_info.binary[0x3C:0x40])[0]
+            pe_offset = struct.unpack("<I", self.disassembly.binary_info.binary[0x3C:0x40])[0]
             is_pe = is_pe and (
                 len(self.disassembly.binary_info.binary) > pe_offset
                 and self.disassembly.binary_info.binary[pe_offset : pe_offset + 2] == b"\x50\x45"
@@ -44,10 +44,10 @@ class LanguageAnalyzer:
     # SOURCE: https://gist.github.com/geudrik/03152ba1a148d9475e81
     def _getPETimestamp(self):
         try:
-            pe_offset = struct.unpack("I", self.disassembly.binary_info.binary[0x3C:0x40])[0]
+            pe_offset = struct.unpack("<I", self.disassembly.binary_info.binary[0x3C:0x40])[0]
             # Seek to PE header and read second DWORD
             ts_offset = pe_offset + 8
-            return struct.unpack("I", self.disassembly.binary_info.binary[ts_offset : ts_offset + 4])[0]
+            return struct.unpack("<I", self.disassembly.binary_info.binary[ts_offset : ts_offset + 4])[0]
         except (struct.error, IndexError):
             return 0
 

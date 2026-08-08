@@ -267,6 +267,18 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         self.assertEqual(len(mapped), virt_offset + virt_size)
         self.assertEqual(mapped[virt_offset : virt_offset + raw_size], binary[raw_offset : raw_offset + raw_size])
 
+    def test_header_fields_decode_as_little_endian(self):
+        pe_offset = 0x80
+        binary = bytearray(self._minimal_pe_header(0x14C))
+        binary.extend(b"\x00" * 0x40)
+        binary[pe_offset + 0x28 : pe_offset + 0x2C] = (0x1234).to_bytes(4, "little")
+        binary[pe_offset + 0x34 : pe_offset + 0x38] = (0x400000).to_bytes(4, "little")
+
+        self.assertEqual(PeFileLoader.getOEP(bytes(binary)), 0x1234)
+        self.assertEqual(PeFileLoader.getBaseAddress(bytes(binary)), 0x400000)
+        self.assertEqual(PeFileLoader.getMachineType(bytes(binary)), 0x14C)
+        self.assertEqual(PeFileLoader.getPeOffset(bytes(binary)), pe_offset)
+
 
 if __name__ == "__main__":
     unittest.main()
