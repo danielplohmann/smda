@@ -259,5 +259,50 @@ class EhFrameFixtureTestSuite(unittest.TestCase):
         self.assertIn(0x411F50, {function.offset for function in report.getFunctions()})
 
 
+def _record64(cie_id, body):
+    payload = struct.pack("<Q", cie_id) + body
+    if len(payload) % 4:
+        payload += b"\x00" * (4 - len(payload) % 4)
+    return struct.pack("<I", 0xFFFFFFFF) + struct.pack("<Q", len(payload)) + payload
+
+
+def _cie64(fde_encoding=0x00):
+    body = bytes([1]) + b"zR" + b"\x00"
+    body += _uleb(1) + b"\x7c" + bytes([30])
+    aug_data = bytes([fde_encoding])
+    body += _uleb(len(aug_data)) + aug_data
+    return _record64(0, body)
+
+
+def _fde64(cie_offset_from_stream_start, stream_pos, initial_location, address_range, fmt):
+    # the CIE pointer counts back from the FDE's own id field (4-byte marker + 8-byte length)
+    body = struct.pack(fmt, initial_location) + struct.pack(fmt, address_range)
+    return _record64(stream_pos + 12 - cie_offset_from_stream_start, body)
+
+
+class EhFrameAugmentationTestSuite(unittest.TestCase):
+    def test_data_free_augmentation_chars_do_not_exhaust_the_cursor(self):
+        for augmentation in (b"zR", b"zRS", b"zRB", b"zRSB"):
+            with self.subTest(augmentation=augmentation):
+                stream = _cie(augmentation=augmentation, fde_encoding=0x00)
+                stream += _fde(0, len(stream), 0x401000, 0x40, "<Q")
+
+                self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [(0x401000, 0x40)])
+
+    def test_signal_frame_only_augmentation_keeps_the_default_encoding(self):
+        stream = _cie(augmentation=b"zS")
+        stream += _fde(0, len(stream), 0x401000, 0x40, "<Q")
+
+        self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [(0x401000, 0x40)])
+
+
+class EhFrameDwarf64TestSuite(unittest.TestCase):
+    def test_64bit_format_records_use_an_eight_byte_cie_pointer(self):
+        stream = _cie64(fde_encoding=0x00)
+        stream += _fde64(0, len(stream), 0x401000, 0x40, "<Q")
+
+        self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [(0x401000, 0x40)])
+
+
 if __name__ == "__main__":
     unittest.main()
