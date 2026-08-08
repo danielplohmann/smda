@@ -40,10 +40,16 @@ class PeFileLoader:
             section_infos = []
             optional_header_size = 0xF8
             if pe_offset and len(binary) >= pe_offset + 0x8:
-                num_sections = struct.unpack("H", binary[pe_offset + 0x6 : pe_offset + 0x8])[0]
+                num_sections = struct.unpack("<H", binary[pe_offset + 0x6 : pe_offset + 0x8])[0]
                 bitness = PeFileLoader.getBitness(binary)
                 if bitness == 64:
                     optional_header_size = 0x108
+            # the section table follows the optional header, whose size the COFF header
+            # declares; the bitness-derived default above is only the usual value for it
+            if pe_offset and len(binary) >= pe_offset + 0x16:
+                declared_size = struct.unpack("<H", binary[pe_offset + 0x14 : pe_offset + 0x16])[0]
+                if declared_size:
+                    optional_header_size = 0x18 + declared_size
             if pe_offset and num_sections and len(binary) >= pe_offset + optional_header_size + num_sections * 0x28:
                 for section_index in range(num_sections):
                     section_offset = section_index * 0x28

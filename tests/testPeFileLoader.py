@@ -49,7 +49,14 @@ class PeFileLoaderTestSuite(unittest.TestCase):
 
     @staticmethod
     def _build_pe_with_section(
-        total_len, virt_size, virt_offset, raw_size, raw_offset, machine_type=0x14C, num_sections=1
+        total_len,
+        virt_size,
+        virt_offset,
+        raw_size,
+        raw_offset,
+        machine_type=0x14C,
+        num_sections=1,
+        size_of_optional_header=None,
     ):
         pe_offset = 0x80
         optional_header_size = 0xF8
@@ -59,6 +66,9 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         binary[pe_offset : pe_offset + 4] = b"PE\x00\x00"
         binary[pe_offset + 4 : pe_offset + 6] = machine_type.to_bytes(2, "little")
         binary[pe_offset + 6 : pe_offset + 8] = num_sections.to_bytes(2, "little")
+        if size_of_optional_header is not None:
+            binary[pe_offset + 0x14 : pe_offset + 0x16] = size_of_optional_header.to_bytes(2, "little")
+            optional_header_size = 0x18 + size_of_optional_header
         section_offset = pe_offset + optional_header_size
         slice_start = section_offset + 0x8
         binary[slice_start : slice_start + 4] = virt_size.to_bytes(4, "little")
@@ -237,6 +247,25 @@ class PeFileLoaderTestSuite(unittest.TestCase):
         for name, intervals, expected in test_cases:
             with self.subTest(msg=name):
                 self.assertEqual(PeFileLoader.mergeCodeAreas(intervals), expected)
+
+    def test_mapBinary_locates_sections_via_declared_optional_header_size(self):
+        virt_offset = 0x1000
+        virt_size = 0x200
+        raw_size = 0x200
+        raw_offset = 0x200
+        binary = self._build_pe_with_section(
+            0x400,
+            virt_size,
+            virt_offset,
+            raw_size,
+            raw_offset,
+            size_of_optional_header=0xE8,
+        )
+
+        mapped = PeFileLoader.mapBinary(binary)
+
+        self.assertEqual(len(mapped), virt_offset + virt_size)
+        self.assertEqual(mapped[virt_offset : virt_offset + raw_size], binary[raw_offset : raw_offset + raw_size])
 
 
 if __name__ == "__main__":
