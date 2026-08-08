@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaBasicBlock import SmdaBasicBlock
 from smda.common.SmdaFunction import INTEL_PIC_HASH_ESCAPE_VERSION, LazyIntKeyDict, SmdaFunction
 from smda.common.SmdaInstruction import SmdaInstruction
@@ -482,6 +483,17 @@ class TestCommonModels(unittest.TestCase):
         function.apirefs = {0x1000: ("Ljava/io/PrintStream;", "println")}
 
         self.assertTrue(function.isApiThunk())
+
+
+class TestBinaryInfoCodeAreas(unittest.TestCase):
+    def test_address_one_past_the_image_is_not_inside(self):
+        binary_info = BinaryInfo(b"\x90" * 0x100)
+        binary_info.base_addr = 0x400000
+        binary_info.binary_size = 0x100
+
+        self.assertTrue(binary_info.isInCodeAreas(0x400000))
+        self.assertTrue(binary_info.isInCodeAreas(0x4000FF))
+        self.assertFalse(binary_info.isInCodeAreas(0x400100))
 
 
 if __name__ == "__main__":
