@@ -32,5 +32,33 @@ class TestGoSymbolProvider(unittest.TestCase):
         self.assertEqual(result, {0x100: "main.f"})
 
 
+class TestPcLntabOffsetValidation(unittest.TestCase):
+    def test_a_candidate_offset_without_a_header_falls_back_to_the_scan(self):
+        provider = GoSymbolProvider(None)
+        header = b"\xfb\xff\xff\xff\x00\x00\x01\x08"
+        binary = b"\x00" * 0x40 + header + b"\x00" * 0x40
+
+        class _StubBinaryInfo:
+            pass
+
+        binary_info = _StubBinaryInfo()
+        binary_info.binary = binary
+        binary_info.bitness = 64
+        binary_info.architecture = "intel"
+        binary_info.getLiefBinary = lambda: None
+
+        self.assertEqual(provider.getPcLntabOffset(binary_info), 0x40)
+        self.assertEqual(provider._readPcLntabHeader(binary, 0x40)["version"], "1.12")
+        self.assertIsNone(provider._readPcLntabHeader(binary, 0x10))
+
+    def test_truncated_function_table_stops_instead_of_raising(self):
+        provider = GoSymbolProvider(None)
+        header = b"\xfb\xff\xff\xff\x00\x00\x01\x08"
+        # claims 64 functions but carries no table bytes at all
+        binary = header + struct.pack("<Q", 64) + b"\x00" * 8
+
+        self.assertEqual(provider._parse_pclntab(0, binary), {})
+
+
 if __name__ == "__main__":
     unittest.main()
