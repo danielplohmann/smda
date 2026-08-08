@@ -372,9 +372,10 @@ class DalvikInstructionEscaper:
                 return "OFFSET"
             return opstring
         # Keep "{v0, v1}" as one field, then split the rest.
-        register_list = _LEADING_REGISTER_LIST.match(opstring.strip())
+        stripped = opstring.strip()
+        register_list = _LEADING_REGISTER_LIST.match(stripped)
         if register_list:
-            remainder = opstring.strip()[register_list.end() :].lstrip(", ")
+            remainder = stripped[register_list.end() :].lstrip(", ")
             fields = [register_list.group(0)] + (remainder.split(",") if remainder else [])
         else:
             fields = opstring.split(",")
