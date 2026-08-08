@@ -47,15 +47,17 @@ def derefs(smda_report, p):
     chain = []
     current = p
     depth = 0
+    word_size = 8 if smda_report.bitness == 64 else 4
+    word_format = "<Q" if word_size == 8 else "<I"
     while True:
         if not smda_report.isAddrWithinMemoryImage(current):
             break
         chain.append(current)
 
-        bytes_ = read_bytes(smda_report, current, num_bytes=4)
-        if len(bytes_) < 4:
+        bytes_ = read_bytes(smda_report, current, num_bytes=word_size)
+        if len(bytes_) < word_size:
             break
-        val = struct.unpack("I", bytes_)[0]
+        val = struct.unpack(word_format, bytes_)[0]
 
         # sanity: pointer points to self or creates a loop
         if val == current or val in chain:
@@ -186,7 +188,7 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int, int,
                     if len(operands) == 2:
                         # check if the second instruction has an immediate value as second operand
                         try:
-                            potential_string_len = int(operands[1])
+                            potential_string_len = int(operands[1], 0)
                             if potential_string_len > 0:
                                 string_result = read_string(f.smda_report, data_ref, potential_string_len)
                                 if string_result:
