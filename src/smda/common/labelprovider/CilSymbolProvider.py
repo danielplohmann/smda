@@ -19,6 +19,7 @@ class CilSymbolProvider(AbstractLabelProvider):
         # addr:func_name
         self._addr_to_func_symbols = {}
         self._func_symbol_to_addr = {}
+        self._ambiguous_func_symbols = set()
 
     def isSymbolProvider(self):
         return True
@@ -36,6 +37,7 @@ class CilSymbolProvider(AbstractLabelProvider):
     def update(self, binary_info):
         self._addr_to_func_symbols = {}
         self._func_symbol_to_addr = {}
+        self._ambiguous_func_symbols = set()
         try:
             pe = dnfile.dnPE(data=binary_info.raw_data)
         except Exception as exc:
@@ -60,12 +62,20 @@ class CilSymbolProvider(AbstractLabelProvider):
                 LOGGER.debug("Skipping malformed CIL MethodDef row: %s", exc)
                 continue
             self._addr_to_func_symbols[addr] = func_name
-            self._func_symbol_to_addr[func_name] = addr
+            if func_name in self._func_symbol_to_addr:
+                # a name is not a key: .ctor and every overload set repeat, and resolving
+                # one to whichever row happened to be parsed last rewrites a call operand
+                # to a different method that merely shares the name
+                self._ambiguous_func_symbols.add(func_name)
+            else:
+                self._func_symbol_to_addr[func_name] = addr
 
     def getSymbol(self, address):
         return self._addr_to_func_symbols.get(address, "")
 
     def getAddress(self, func_symbol):
+        if func_symbol in self._ambiguous_func_symbols:
+            return None
         return self._func_symbol_to_addr.get(func_symbol, None)
 
     def getFunctionSymbols(self):

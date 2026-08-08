@@ -53,5 +53,54 @@ class CilRobustnessTestSuite(unittest.TestCase):
         self.assertEqual(report.num_functions, 64)
 
 
+class CilMetadataSignatureTestSuite(unittest.TestCase):
+    def test_a_corrupted_metadata_signature_reports_no_methods_instead_of_raising(self):
+        # dnfile leaves pe.net without tables when the "BSJB" signature is unreadable; the
+        # symbol provider already degrades on that, and the disassembler must too
+        njrat = bytearray(_load_njrat())
+        signature_at = njrat.find(b"BSJB")
+        self.assertNotEqual(signature_at, -1)
+        njrat[signature_at : signature_at + 4] = b"XXXX"
+
+        report = Disassembler(SmdaConfig(), backend="cil").disassembleUnmappedBuffer(bytes(njrat))
+
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.num_functions, 0)
+
+
+class CilLeafFunctionTestSuite(unittest.TestCase):
+    def test_a_method_that_calls_is_not_reported_as_a_leaf(self):
+        report = Disassembler(SmdaConfig(), backend="cil").disassembleUnmappedBuffer(_load_njrat())
+
+        self.assertEqual(report.num_functions, 64)
+        self.assertLess(report.statistics.num_leaf_functions, report.num_functions)
+
+
+class CilSymbolAmbiguityTestSuite(unittest.TestCase):
+    def test_a_name_shared_by_several_methods_resolves_to_none(self):
+        from smda.common.labelprovider.CilSymbolProvider import CilSymbolProvider
+
+        provider = CilSymbolProvider(SmdaConfig())
+        provider._addr_to_func_symbols = {0x100: ".ctor", 0x200: ".ctor", 0x300: "Send"}
+        provider._func_symbol_to_addr = {".ctor": 0x100, "Send": 0x300}
+        provider._ambiguous_func_symbols = {".ctor"}
+
+        self.assertIsNone(provider.getAddress(".ctor"))
+        self.assertEqual(provider.getAddress("Send"), 0x300)
+
+    def test_repeated_names_are_recorded_as_ambiguous_while_parsing(self):
+        njrat = _load_njrat()
+        from smda.common.BinaryInfo import BinaryInfo
+        from smda.common.labelprovider.CilSymbolProvider import CilSymbolProvider
+
+        binary_info = BinaryInfo(njrat)
+        binary_info.raw_data = njrat
+        provider = CilSymbolProvider(SmdaConfig())
+        provider.update(binary_info)
+
+        self.assertIn(".ctor", provider._ambiguous_func_symbols)
+        self.assertIsNone(provider.getAddress(".ctor"))
+
+
 if __name__ == "__main__":
     unittest.main()
