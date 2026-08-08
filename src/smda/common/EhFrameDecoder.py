@@ -131,7 +131,9 @@ def _parse_cie(data, pos, end, pointer_size):
             return unsupported
         aug_data_end = pos + aug_length
         for char in augmentation[1:]:
-            if pos >= aug_data_end:
+            # 'S' (signal frame) and 'B' (AArch64 PAC) carry no augmentation data, so the
+            # cursor legitimately sits at aug_data_end for a trailing one
+            if char in "LPR" and pos >= aug_data_end:
                 return unsupported
             if char == "L":
                 pos += 1
@@ -176,18 +178,21 @@ def decodeEhFrameFdeRanges(data, section_va, pointer_size=8, max_records=MAX_REC
         pos += 4
         if length == 0:
             break  # ZERO terminator
+        id_size = 4
         if length == 0xFFFFFFFF:
             # 8-byte extended length; read it so oversized records can be skipped
             if pos + 8 > total:
                 break
             length = int.from_bytes(data[pos : pos + 8], "little")
             pos += 8
+            # in the 64-bit DWARF format the CIE id / CIE pointer widens with the length
+            id_size = 8
         record_end = pos + length
         if length > total or record_end > total:
             break  # malformed/truncated record: cannot trust the cursor anymore
         id_pos = pos
-        cie_id = int.from_bytes(data[pos : pos + 4], "little") if pos + 4 <= record_end else None
-        pos += 4
+        cie_id = int.from_bytes(data[pos : pos + id_size], "little") if pos + id_size <= record_end else None
+        pos += id_size
         if cie_id is None:
             break
         if cie_id == 0:
