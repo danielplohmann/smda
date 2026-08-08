@@ -56,7 +56,7 @@ class IndirectCallAnalyzer:
         raw_bytes = self.disassembly.getBytes(addr, 4)
         if raw_bytes is None or len(raw_bytes) < 4:
             return None
-        return struct.unpack("I", raw_bytes)[0]
+        return struct.unpack("<I", raw_bytes)[0]
 
     def _resolveDwordPointerValue(self, addr):
         dll, api = self.disassembler.resolveApi(addr, addr)
@@ -129,43 +129,34 @@ class IndirectCallAnalyzer:
                 # mov <reg>, qword ptr [reg + <addr>]
                 match4 = self.RE_REG_QWORD_PTR_RIP_ADDR.match(ins[3])
                 if match4:
+                    # rip-relative addressing already resolves the slot; the register then
+                    # receives the whole qword stored there, not rip plus its low half
                     rip = ins[0] + ins[1]
-                    dword = self.getDword(rip + int(match4.group("addr"), 16))
-                    if dword:
-                        registers[match4.group("reg")] = rip + dword
+                    slot = rip + int(match4.group("addr"), 16)
+                    qword = self.disassembly.dereferenceQword(slot)
+                    if qword:
+                        registers[match4.group("reg")] = qword
                         LOGGER.debug(
-                            "**moved value 0x%08x + 0x%08x == 0x%08x to register %s",
-                            rip,
-                            dword,
-                            rip + dword,
+                            "**moved value 0x%08x from slot 0x%08x to register %s",
+                            qword,
+                            slot,
                             match4.group("reg"),
                         )
                         if match4.group("reg") == register_name:
                             abs_value_found = True
             elif ins[2] == "lea":
                 LOGGER.debug("*checking %s %s", ins[2], ins[3])
-                # lea <reg>, dword ptr [<addr>]
-                match1 = self.RE_REG_DWORD_PTR_ADDR.match(ins[3])
-                if match1:
-                    dword = self.getDword(int(match1.group("addr"), 16))
-                    if dword:
-                        registers[match1.group("reg")] = dword
+                # lea <reg>, dword ptr [<addr>] and lea <reg>, [<addr>]
+                # lea computes an address; the register receives the address itself, so
+                # dereferencing it here would resolve the call against the wrong target
+                for pattern in (self.RE_REG_DWORD_PTR_ADDR, self.RE_REG_ADDR):
+                    match1 = pattern.match(ins[3])
+                    if match1:
+                        address = int(match1.group("addr"), 16)
+                        registers[match1.group("reg")] = address
                         LOGGER.debug(
-                            "**moved value 0x%08x to register %s",
-                            dword,
-                            match1.group("reg"),
-                        )
-                        if match1.group("reg") == register_name:
-                            abs_value_found = True
-                # lea <reg>, [<addr>]
-                match1 = self.RE_REG_ADDR.match(ins[3])
-                if match1:
-                    dword = self.getDword(int(match1.group("addr"), 16))
-                    if dword:
-                        registers[match1.group("reg")] = dword
-                        LOGGER.debug(
-                            "**moved value 0x%08x to register %s",
-                            dword,
+                            "**moved address 0x%08x to register %s",
+                            address,
                             match1.group("reg"),
                         )
                         if match1.group("reg") == register_name:
