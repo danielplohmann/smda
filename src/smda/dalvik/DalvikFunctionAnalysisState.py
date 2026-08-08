@@ -193,6 +193,11 @@ class DalvikFunctionAnalysisState:
 
     def revertAnalysis(self):
         self.disassembly.function_borders.pop(self.start_addr, None)
+        self.disassembly.function_symbols.pop(self.start_addr, None)
+        self.disassembly.function_metadata.pop(self.start_addr, None)
+        self.disassembly.recursive_functions.discard(self.start_addr)
+        self.disassembly.leaf_functions.discard(self.start_addr)
+        self.disassembly.thunk_functions.discard(self.start_addr)
         for ins in self.instructions:
             self.disassembly.instructions.pop(ins[0], None)
             for byte in range(ins[1]):
