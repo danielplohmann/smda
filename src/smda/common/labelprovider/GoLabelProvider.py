@@ -167,17 +167,16 @@ class GoSymbolProvider(AbstractLabelProvider):
         pclntab_buffer = binary[pclntab_offset:]
 
         # marker are defined here https://go.dev/src/debug/gosym/pclntab.go
+        # the whole table is written in the target's byte order, so a big-endian build (s390x,
+        # ppc64, mips) - which offset discovery already accepts - has to be read that way too
+        endianness = "<"
         marker = struct.unpack("<I", pclntab_buffer[0:4])[0]
-        if marker == 0xFFFFFFFB:
-            version = "1.12"
-        elif marker == 0xFFFFFFFA:
-            version = "1.16"
-        elif marker == 0xFFFFFFF0:
-            version = "1.18"
-        elif marker == 0xFFFFFFF1:
-            version = "1.20"
-        else:
+        if marker not in _PCLNTAB_VERSIONS:
+            endianness = ">"
+            marker = struct.unpack(">I", pclntab_buffer[0:4])[0]
+        if marker not in _PCLNTAB_VERSIONS:
             raise ValueError(f"Could not recognize Golang version marker: 0x{marker:08X}")
+        version = _PCLNTAB_VERSIONS[marker]
 
         bitness_indicator = struct.unpack("<B", pclntab_buffer[7:8])[0]
         bitness = None
@@ -191,18 +190,22 @@ class GoSymbolProvider(AbstractLabelProvider):
         field_size = 8 if bitness == 64 else 4
         field_indicator = "Q" if bitness == 64 else "I"
         if version == "1.12":
-            number_of_functions = struct.unpack("<I", pclntab_buffer[8:12])[0]
+            number_of_functions = struct.unpack(endianness + "I", pclntab_buffer[8:12])[0]
             function_name_offset = pclntab_offset
             weird_table_offset = pclntab_offset + 16 if bitness == 64 else pclntab_offset + 12
             start_text = 0
         elif version == "1.16":
-            parsed_pclntab_fields = struct.unpack("<" + 7 * field_indicator, pclntab_buffer[8 : 8 + 7 * field_size])
+            parsed_pclntab_fields = struct.unpack(
+                endianness + 7 * field_indicator, pclntab_buffer[8 : 8 + 7 * field_size]
+            )
             number_of_functions = parsed_pclntab_fields[0]
             function_name_offset = pclntab_offset + parsed_pclntab_fields[2]
             weird_table_offset = pclntab_offset + parsed_pclntab_fields[6]
             start_text = 0
-        elif version == "1.18" or version == "1.20":
-            parsed_pclntab_fields = struct.unpack("<" + 8 * field_indicator, pclntab_buffer[8 : 8 + 8 * field_size])
+        else:
+            parsed_pclntab_fields = struct.unpack(
+                endianness + 8 * field_indicator, pclntab_buffer[8 : 8 + 8 * field_size]
+            )
             number_of_functions = parsed_pclntab_fields[0]
             start_text = parsed_pclntab_fields[2]
             function_name_offset = pclntab_offset + parsed_pclntab_fields[3]
@@ -219,12 +222,12 @@ class GoSymbolProvider(AbstractLabelProvider):
                 if read_offset + 2 * field_size > len(table_buffer):
                     break
                 offsets[index] = struct.unpack(
-                    "<" + field_indicator,
+                    endianness + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
                 )[0]
                 read_offset += field_size
                 func_info_offsets[index] = struct.unpack(
-                    "<" + field_indicator,
+                    endianness + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
                 )[0]
                 read_offset += field_size
@@ -233,7 +236,7 @@ class GoSymbolProvider(AbstractLabelProvider):
                 if read_offset + field_size > len(table_buffer):
                     break
                 offsets[index] = struct.unpack(
-                    "<" + field_indicator,
+                    endianness + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
                 )[0]
                 read_offset += 2 * field_size
@@ -241,7 +244,7 @@ class GoSymbolProvider(AbstractLabelProvider):
             if version == "1.18" or version == "1.20":
                 if read_offset + 4 > len(table_buffer):
                     break
-                offsets[index] = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
+                offsets[index] = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
                 read_offset += 8
 
         functions = {}
@@ -253,7 +256,7 @@ class GoSymbolProvider(AbstractLabelProvider):
                 if info_offset < 0 or info_offset + 2 * field_size > len(pclntab_buffer):
                     continue
                 name_offset = struct.unpack(
-                    "<" + field_indicator,
+                    endianness + field_indicator,
                     pclntab_buffer[info_offset + field_size : info_offset + 2 * field_size],
                 )[0]
                 # only take lower 32bit in case of 64bit binaries.
@@ -267,14 +270,14 @@ class GoSymbolProvider(AbstractLabelProvider):
                     offsets2.pop(offset)
                     continue
                 try:
-                    bytes_read = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
+                    bytes_read = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
                     read_offset += 4
                     while bytes_read != function_offset:
-                        bytes_read = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
+                        bytes_read = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
                         read_offset += 4
                     if version == "1.16" and bitness == 64:
                         read_offset += 4
-                    name_offset = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
+                    name_offset = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
                     read_offset += 4
                 except struct.error:
                     delete = True
