@@ -109,7 +109,7 @@ class LanguageAnalyzer:
     def getDelphiScore(self):
         delphi_score = 0.0
         # Check if Delphi-Locales are present in strings
-        if b"Borland\\locales" in self.getStrings():
+        if re.search(rb"Borland\\Locales", self.disassembly.binary_info.binary, re.IGNORECASE):
             delphi_score = max(delphi_score, 0.25)
         if self._getPETimestamp() == 0x2A425E19:
             delphi_score = max(delphi_score, 0.25)
@@ -118,7 +118,7 @@ class LanguageAnalyzer:
             match.group("string")
             # Regex: <DWORD_LEN_STRING><STRING><TERMINATOR>
             for match in re.finditer(
-                b"\x00\x00.(?P<length>.)(?P<string>[ -~]{6,128})\x00",
+                b"\x00\x00[\\S\\s](?P<length>[\\S\\s])(?P<string>[ -~]{6,128})\x00",
                 self.disassembly.binary_info.binary,
             )
             if len(match.group("string")) == ord(match.group("length"))

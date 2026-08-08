@@ -290,5 +290,18 @@ class TestLanguageAnalyzer(unittest.TestCase):
             self.assertEqual(analyzer.getDelphiScore(), 0.9)
 
 
+class TestDelphiHeuristics(unittest.TestCase):
+    def test_real_world_locales_registry_key_is_delphi_evidence(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00Software\\Borland\\Locales\x00"))
+
+        self.assertEqual(analyzer.getDelphiScore(), 0.25)
+
+    def test_delphi_string_table_counts_a_newline_length_byte(self):
+        delphi_string = b"\x00\x00\x01\x0aABCDEFGHIJ\x00"
+        analyzer = LanguageAnalyzer(_DummyDisassembly(delphi_string * 101))
+
+        self.assertEqual(analyzer.getDelphiScore(), 0.35)
+
+
 if __name__ == "__main__":
     unittest.main()
