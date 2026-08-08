@@ -123,5 +123,55 @@ class TestPcLntabHeaderBounds(unittest.TestCase):
         self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, bytes(buf)), {0x2000: "main.main"})
 
 
+class TestBigEndianPcLntab(unittest.TestCase):
+    """Offset discovery accepts either byte order, so the parser has to as well."""
+
+    @staticmethod
+    def _table_112(endianness):
+        buf = bytearray(0x100)
+        buf[0:4] = struct.pack(endianness + "I", 0xFFFFFFFB)
+        buf[4:6] = b"\x00\x00"
+        buf[6] = 1
+        buf[7] = 8
+        buf[8:12] = struct.pack(endianness + "I", 1)
+        buf[16:24] = struct.pack(endianness + "Q", 0x2000)
+        buf[24:32] = struct.pack(endianness + "Q", 0x40)
+        buf[0x48:0x50] = struct.pack(endianness + "Q", 0x80)
+        buf[0x80:0x8A] = b"main.main\x00"
+        return bytes(buf)
+
+    @staticmethod
+    def _table_120(endianness):
+        buf = bytearray(0x200)
+        buf[0:4] = struct.pack(endianness + "I", 0xFFFFFFF1)
+        buf[4:6] = b"\x00\x00"
+        buf[6] = 1
+        buf[7] = 8
+        fields = (1, 0, 0x1000, 0x100, 0, 0, 0, 0x80)
+        buf[8:72] = struct.pack(endianness + "Q" * 8, *fields)
+        buf[0x80:0x84] = struct.pack(endianness + "I", 0x2000)
+        buf[0x88:0x8C] = struct.pack(endianness + "I", 0x2000)
+        buf[0x8C:0x90] = struct.pack(endianness + "I", 0x40)
+        buf[0x140:0x14A] = b"main.main\x00"
+        return bytes(buf)
+
+    def test_both_byte_orders_recover_the_same_symbols(self):
+        for name, builder, expected in (
+            ("1.12", self._table_112, {0x2000: "main.main"}),
+            ("1.20", self._table_120, {0x3000: "main.main"}),
+        ):
+            for endianness in ("<", ">"):
+                with self.subTest(version=name, endianness=endianness):
+                    binary = builder(endianness)
+                    self.assertIsNotNone(GoSymbolProvider._readPcLntabHeader(binary, 0))
+                    self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), expected)
+
+    def test_an_unknown_marker_is_still_rejected(self):
+        binary = struct.pack("<I", 0xFFFFFFEE) + b"\x00\x00\x01\x08" + b"\x00" * 0x40
+
+        with self.assertRaises(ValueError):
+            GoSymbolProvider(None)._parse_pclntab(0, binary)
+
+
 if __name__ == "__main__":
     unittest.main()
