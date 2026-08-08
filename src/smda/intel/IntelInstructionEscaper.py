@@ -105,6 +105,7 @@ class IntelInstructionEscaper:
         "shlx",
         "shrx",
         "sarx",
+        "rorx",
         "rorxl",
         "rorxq",
         "sarxl",
@@ -180,6 +181,7 @@ class IntelInstructionEscaper:
         "cmpsb",
         "cmpsd",
         "cmpsw",
+        "cmpsq",
         "iret",
         "iretd",
         "iretq",
@@ -284,6 +286,7 @@ class IntelInstructionEscaper:
         "movl",
         "movsd",
         "movsw",
+        "movsq",
         "movsx",
         "movsxd",
         "movzx",
@@ -333,12 +336,14 @@ class IntelInstructionEscaper:
         "pop",
         "popad",
         "popal",
+        "popaw",
         "popf",
         "popfd",
         "popfq",
         "push",
         "pushad",
         "pushal",
+        "pushaw",
         "pushf",
         "pushfd",
         "pushfq",
@@ -459,6 +464,7 @@ class IntelInstructionEscaper:
         "xsaves",
         "xsaves64",
         "xsetbv",
+        "xgetbv",
         "xtest",
         "pcommit",
         # AMD lightweight profiling
@@ -1446,7 +1452,6 @@ class IntelInstructionEscaper:
         "cmpneqss",
         "cmpnlesd",
         "cmpnltsd",
-        "cmpsq",
         "comisd",
         "comiss",
         "cvtpd2dq",
@@ -1481,7 +1486,6 @@ class IntelInstructionEscaper:
         "movntdq",
         "movq",
         "movsldup",
-        "movsq",
         "mulsd",
         "mulss",
         "pabsd",
@@ -1535,7 +1539,6 @@ class IntelInstructionEscaper:
         "pmulld",
         "pmullw",
         "pmuludq",
-        "popaw",
         "por",
         "psadbw",
         "pshufb",
@@ -1570,10 +1573,8 @@ class IntelInstructionEscaper:
         "punpckldq",
         "punpcklqdq",
         "punpcklwd",
-        "pushaw",
         "pxor",
         "rcpss",
-        "rorx",
         "roundsd",
         "sqrtsd",
         "sqrtss",
@@ -1686,7 +1687,6 @@ class IntelInstructionEscaper:
         "vucomiss",
         "vzeroall",
         "vzeroupper",
-        "xgetbv",
         "vsubss",
         "vpmuldq",
         "vcvttsd2usi",
@@ -2086,7 +2086,16 @@ class IntelInstructionEscaper:
                 escaped_field = "REG"
             elif op_field in IntelInstructionEscaper._segment_registers:
                 escaped_field = "SREG"
-            elif op_field in IntelInstructionEscaper._extended_registers or re.search("zmm[0-9]+", op_field):
+            elif op_field in IntelInstructionEscaper._extended_registers or re.fullmatch(
+                r"(?:[xyz]mm|k)[0-9]+(?:\s*\{[^}]*\})*", op_field
+            ):
+                # the explicit table stops at xmm15/ymm15, so AVX-512 widens it here: the
+                # high halves of the vector file and the mask registers otherwise passed
+                # through unescaped and leaked a raw register name into the escaped operand.
+                # EVEX writemask decorations ride on the register operand capstone emits,
+                # so the tail has to be part of the match - and it repeats, because the
+                # zeroing form is spelled as two brace groups separated by a space:
+                # "zmm0 {k1}", "zmm0 {k1} {z}"
                 escaped_field = "XREG"
             elif op_field in IntelInstructionEscaper._control_registers:
                 escaped_field = "CREG"
@@ -2128,7 +2137,10 @@ class IntelInstructionEscaper:
                 escaped_field = "CONST"
             except ValueError:
                 pass
-            if ":" in op_field:
+            # a far pointer is seg:off and carries no memory operand; without the bracket
+            # test this also reclassified every segment-qualified memory operand
+            # ("dword ptr es:[edi]", "fs:[0x30]") from PTR to CONST
+            if ":" in op_field and "[" not in op_field:
                 escaped_field = "CONST"
         if not escaped_field:
             escaped_field = op_field
