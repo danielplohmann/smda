@@ -137,8 +137,10 @@ class PeSynthesizer(BinarySynthesizer):
         idescs = bytearray(20 * (len(dll_funcs) + 1))
         return dll_funcs, idescs, hint_buf, dll_strs, dll_str_offsets, hint_offsets
 
-    def _writeThunkAt(self, regions, rva, value, ptr_size):
+    def _writeThunkAt(self, regions, rva, value, ptr_size, data_only=False):
         for region in regions:
+            if data_only and region["executable"]:
+                continue
             if region["vaddr"] <= rva and rva + ptr_size <= region["vaddr"] + len(region["raw"]):
                 struct.pack_into("<I" if ptr_size == 4 else "<Q", region["raw"], rva - region["vaddr"], value)
                 return True
@@ -175,14 +177,16 @@ class PeSynthesizer(BinarySynthesizer):
                 if va in all_rvas:
                     va += ptr_size
                     continue
-                if self._writeThunkAt(regions, va, ordinal_flag, ptr_size):
+                # gap and terminator slots are invented, not recovered: an address the report
+                # never reported as an import must not be written over planted code
+                if self._writeThunkAt(regions, va, ordinal_flag, ptr_size, data_only=True):
                     padded += 1
                 va += ptr_size
             if padded:
                 self._warn("%d gap slot(s) in IAT group for %s padded with ordinal-0 thunks", padded, dll_name)
             terminator = last + ptr_size
             if terminator not in all_rvas:
-                self._writeThunkAt(regions, terminator, 0, ptr_size)
+                self._writeThunkAt(regions, terminator, 0, ptr_size, data_only=True)
 
     def _patchDescriptors(self, raw, dll_funcs, sec_vaddr, idesc_off, dll_off, dll_str_offsets, hint_off):
         for index, (dll_name, funcs) in enumerate(dll_funcs):
@@ -206,22 +210,24 @@ class PeSynthesizer(BinarySynthesizer):
         if not import_rvas:
             return None
 
+        last = max(regions, key=lambda region: region["vaddr"] + region["vsize"])
+        sec_vaddr = align_up(last["vaddr"] + last["vsize"], section_alignment)
+        iat_size = self._relocateUnplantableSlots(regions, import_rvas, sec_vaddr, ptr_size)
+
         dll_funcs, idescs, hint_buf, dll_strs, dll_str_offsets, hint_offsets = self._buildImportTables(
             import_rvas, ptr_size
         )
 
-        last = max(regions, key=lambda region: region["vaddr"] + region["vsize"])
-        sec_vaddr = align_up(last["vaddr"] + last["vsize"], section_alignment)
-        hint_off = align_up(len(idescs), 4)
+        idesc_off = iat_size
+        hint_off = idesc_off + align_up(len(idescs), 4)
         dll_off = hint_off + len(hint_buf)
         content_size = dll_off + len(dll_strs)
         raw_size = align_up(content_size, file_alignment)
         raw = bytearray(raw_size)
-        raw[0 : len(idescs)] = idescs
+        raw[idesc_off : idesc_off + len(idescs)] = idescs
         raw[hint_off : hint_off + len(hint_buf)] = hint_buf
         raw[dll_off : dll_off + len(dll_strs)] = dll_strs
-        self._patchDescriptors(raw, dll_funcs, sec_vaddr, 0, dll_off, dll_str_offsets, hint_off)
-        self._writeThunks(regions, import_rvas, dll_funcs, sec_vaddr, hint_off, hint_offsets, ptr_size)
+        self._patchDescriptors(raw, dll_funcs, sec_vaddr, idesc_off, dll_off, dll_str_offsets, hint_off)
 
         regions.append(
             {
@@ -233,7 +239,44 @@ class PeSynthesizer(BinarySynthesizer):
                 "executable": False,
             }
         )
-        return sec_vaddr, len(idescs)
+        # after .bspack exists, so the relocated slots resolve to it
+        self._writeThunks(regions, import_rvas, dll_funcs, sec_vaddr, hint_off, hint_offsets, ptr_size)
+        return sec_vaddr + idesc_off, len(idescs)
+
+    def _relocateUnplantableSlots(self, regions, import_rvas, sec_vaddr, ptr_size):
+        """Moves import slots that no data section can hold into a synthetic IAT at sec_vaddr.
+
+        Runtime-built and mis-attributed IATs put slots inside code or outside the image
+        entirely; planting a thunk there destroys the recovered instructions, and skipping it
+        leaves a descriptor pointing at a slot that was never written. Rewriting those slots
+        into one contiguous run keeps both the code and the import table intact. Returns the
+        number of bytes reserved for that run.
+        """
+        displaced = {}
+        for rva in sorted(import_rvas):
+            if not any(
+                not region["executable"]
+                and region["vaddr"] <= rva
+                and rva + ptr_size <= region["vaddr"] + region["vsize"]
+                for region in regions
+            ):
+                displaced.setdefault(import_rvas[rva][0] or "unknown.dll", []).append(rva)
+        if not displaced:
+            return 0
+
+        cursor = sec_vaddr
+        for slots in displaced.values():
+            for rva in slots:
+                import_rvas[cursor] = import_rvas.pop(rva)
+                cursor += ptr_size
+            # every group ends on a zero slot, which .bspack already provides
+            cursor += ptr_size
+        self._warn(
+            "%d import slot(s) fit no data section, relocated to the synthetic IAT at 0x%x",
+            sum(len(slots) for slots in displaced.values()),
+            sec_vaddr,
+        )
+        return cursor - sec_vaddr
 
     def _buildHeader(self, regions, optional_header, machine, characteristics, size_of_headers):
         header = bytearray(0x40)
@@ -402,8 +445,10 @@ class PeSynthesizer(BinarySynthesizer):
         import_map = self._getImportMap() if with_imports else {}
         string_addrs = [data_addr for data_addr, _ in self._iterStringRefs()] if with_strings else []
 
-        if import_map:
-            iat_rvas = [addr - base for addr in import_map]
+        # a slot below the image base has no RVA; _buildImportSection drops it too, and keeping
+        # it here would place .smdaIAT at a negative RVA that no header field can hold
+        iat_rvas = [addr - base for addr in import_map if addr >= base]
+        if iat_rvas:
             iat_vaddr = align_down(min(iat_rvas), section_alignment)
             iat_end = align_up(max(iat_rvas) + ptr_size, 16)
             iat_size = align_up(iat_end, section_alignment) - iat_vaddr
@@ -439,18 +484,27 @@ class PeSynthesizer(BinarySynthesizer):
                     "string refs span 0x%x bytes, too sparse for a synthetic section; strings skipped", max_s - min_s
                 )
             else:
-                str_vaddr = align_down(min_s, section_alignment)
+                # a section at RVA 0 would straddle the headers, and one spanning .text or
+                # .smdaIAT would swallow them; both make the image unmappable
+                str_vaddr = max(align_down(min_s, section_alignment), section_alignment)
                 str_size = align_up(max_s, section_alignment) - str_vaddr
-                regions.append(
-                    {
-                        "name": ".rdata",
-                        "vaddr": str_vaddr,
-                        "vsize": str_size,
-                        "chars": SECTION_CHARS_DATA,
-                        "raw": bytearray(str_size),
-                        "executable": False,
-                    }
+                overlaps = any(
+                    region["vaddr"] < str_vaddr + str_size and str_vaddr < region["vaddr"] + region["vsize"]
+                    for region in regions
                 )
+                if str_size <= 0 or overlaps:
+                    self._warn("string range overlaps an existing synthetic section, strings skipped")
+                else:
+                    regions.append(
+                        {
+                            "name": ".rdata",
+                            "vaddr": str_vaddr,
+                            "vsize": str_size,
+                            "chars": SECTION_CHARS_DATA,
+                            "raw": bytearray(str_size),
+                            "executable": False,
+                        }
+                    )
 
         regions.sort(key=lambda region: region["vaddr"])
 
