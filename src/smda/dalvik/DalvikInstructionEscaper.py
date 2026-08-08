@@ -6,8 +6,10 @@ from smda.dalvik.DalvikOpcodeDecoder import OPCODES
 
 LOGGER = logging.getLogger(__name__)
 
-# Split invoke register lists without breaking "{v0, v1}, Lfoo;->m()V"
-_OPERAND_SPLIT = re.compile(r",\s*(?![^{]*\})")
+# A brace group is only ever the leading register list of an invoke-*; matching it from the
+# start keeps "{v0, v1}, Lfoo;->m()V" in one piece without treating a lone brace inside a
+# string constant ("const-string v0, \"}\"") as the end of a register list.
+_LEADING_REGISTER_LIST = re.compile(r"^\{[^}]*\}")
 
 
 class DalvikInstructionEscaper:
@@ -346,6 +348,7 @@ class DalvikInstructionEscaper:
                 (
                     '"',
                     "L",
+                    "[",
                     "(",
                     "string@",
                     "type@",
@@ -369,7 +372,12 @@ class DalvikInstructionEscaper:
                 return "OFFSET"
             return opstring
         # Keep "{v0, v1}" as one field, then split the rest.
-        fields = _OPERAND_SPLIT.split(opstring)
+        register_list = _LEADING_REGISTER_LIST.match(opstring.strip())
+        if register_list:
+            remainder = opstring.strip()[register_list.end() :].lstrip(", ")
+            fields = [register_list.group(0)] + (remainder.split(",") if remainder else [])
+        else:
+            fields = opstring.split(",")
         escaped = []
         for field in fields:
             field = field.strip()

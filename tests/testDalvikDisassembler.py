@@ -1233,5 +1233,71 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertIn("CDEX", report.message or "")
 
 
+class DalvikAuditRegressionTestSuite(unittest.TestCase):
+    def test_five_byte_sleb128_sign_extends(self):
+        from smda.dalvik.DalvikOpcodeDecoder import read_sleb128
+
+        self.assertEqual(read_sleb128(b"\xff\xff\xff\xff\x7f", 0), (-1, 5))
+        self.assertEqual(read_sleb128(b"\xff\xff\xff\xff\x07", 0), (0x7FFFFFFF, 5))
+        self.assertEqual(read_sleb128(b"\x7f", 0), (-1, 1))
+        self.assertEqual(read_sleb128(b"\x01", 0), (1, 1))
+
+    def test_a_brace_inside_a_string_constant_does_not_join_operands(self):
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        class _Instruction:
+            def __init__(self, mnemonic, operands):
+                self.mnemonic = mnemonic
+                self.operands = operands
+
+        self.assertEqual(DalvikInstructionEscaper.escapeOperands(_Instruction("const-string", 'v0, "}"')), "REG, PTR")
+        self.assertEqual(
+            DalvikInstructionEscaper.escapeOperands(_Instruction("invoke-virtual", "{v0, v1}, Lfoo;->m()V")),
+            "{REG, REG}, PTR",
+        )
+
+    def test_an_array_type_descriptor_is_escaped(self):
+        from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
+
+        self.assertEqual(DalvikInstructionEscaper.escapeField("[B"), "PTR")
+        self.assertEqual(DalvikInstructionEscaper.escapeField("[[Ljava/lang/String;"), "PTR")
+
+    def test_an_unrenderable_type_yields_a_deterministic_marker(self):
+        from smda.dalvik.DalvikDisassembler import DexReferenceResolver
+
+        resolver = DexReferenceResolver.__new__(DexReferenceResolver)
+
+        class _Opaque:
+            name = None
+
+            def __str__(self):
+                return "<lief._lief.DEX.Type object at 0x10bb30cb0>"
+
+        rendered = resolver._formatTypeUncached(_Opaque())
+
+        self.assertEqual(rendered, "<_Opaque>")
+        self.assertNotIn("0x", rendered)
+
+    def test_a_call_site_that_cannot_be_decoded_degrades(self):
+        from smda.dalvik.DalvikDisassembler import DexReferenceResolver
+
+        disassembler = DexReferenceResolver.__new__(DexReferenceResolver)
+        disassembler.raw_data = b"\x00" * 0x20
+
+        def _explode(raw, offset):
+            raise RecursionError("maximum recursion depth exceeded")
+
+        disassembler._readEncodedArray = _explode
+
+        self.assertEqual(
+            disassembler._parseCallSiteItem(0x10),
+            {"offset": 0x10, "values": [], "display": "call_site@off=16"},
+        )
+        self.assertEqual(
+            disassembler._parseCallSiteItem(-1),
+            {"offset": -1, "values": [], "display": "call_site@off=-1"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

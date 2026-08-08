@@ -32,6 +32,12 @@ def read_sleb128(data, offset):
         if byte & 0x80 == 0:
             if shift < size and byte & 0x40:
                 result |= -(1 << shift)
+            # a five-byte encoding carries bits past the 32-bit value width, so the
+            # sign-extension test above cannot fire; keep the low 32 bits and take their
+            # sign, or the padding ones read back as a large positive number
+            result &= 0xFFFFFFFF
+            if result & 0x80000000:
+                result -= 0x100000000
             return result, current
         if shift > 35:
             break

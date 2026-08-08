@@ -235,12 +235,16 @@ class DexReferenceResolver:
         if name:
             return self._normalizeTypeString(name)
         with contextlib.suppress(Exception):
-            type_as_string = self._normalizeTypeString(str(type_obj))
-            if type_as_string and not type_as_string.startswith("<lief.") and " - " not in type_as_string:
-                return type_as_string
-        with contextlib.suppress(Exception):
-            return repr(type_obj)
-        return "<?>"
+            # the object-repr guard has to run before normalization: normalization rewrites
+            # dots to slashes and wraps the result as "L...;", so "<lief.DEX.Type object at
+            # 0x...>" comes back as a plausible-looking descriptor with a memory address in
+            # it and no longer starts with "<lief."
+            raw_type_string = str(type_obj)
+            if not raw_type_string.startswith("<") and " - " not in raw_type_string:
+                type_as_string = self._normalizeTypeString(raw_type_string)
+                if type_as_string:
+                    return type_as_string
+        return f"<{type(type_obj).__name__}>"
 
     def _formatProto(self, prototype):
         if prototype is None:
@@ -413,11 +417,15 @@ class DexReferenceResolver:
           [3..] bootstrap linker args.
         """
         raw = self.raw_data
-        if raw is None or call_site_off >= len(raw):
+        if raw is None or call_site_off < 0 or call_site_off >= len(raw):
             return {"offset": call_site_off, "values": [], "display": f"call_site@off={call_site_off}"}
         try:
             values, _ = self._readEncodedArray(raw, call_site_off)
-        except (ValueError, struct.error):
+        except Exception as exc:
+            # a crafted call_site_ids entry reaches an arbitrary encoded_value tree, whose
+            # nested arrays and annotations can exhaust the stack or index out of range as
+            # well as fail to parse; none of that should end the run
+            reraise_non_operational_exception(exc)
             return {"offset": call_site_off, "values": [], "display": f"call_site@off={call_site_off}"}
         handle_idx = None
         name_idx = None
