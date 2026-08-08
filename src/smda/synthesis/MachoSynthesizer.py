@@ -2,7 +2,7 @@ import struct
 from typing import Any, Dict, List
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
-from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_up
+from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 MH_MAGIC = 0xFEEDFACE
 MH_MAGIC_64 = 0xFEEDFACF
@@ -537,14 +537,24 @@ class MachoSynthesizer(BinarySynthesizer):
         if entry_va is not None:
             sizeofcmds += 24
 
-        file_cursor = header_size + sizeofcmds
+        # __TEXT maps from file offset 0, so the mach header and load commands sit at the image
+        # base, ahead of its first section. Readers derive the base from min(vmaddr - fileoff),
+        # which lands a page low for every segment when __TEXT starts past the header instead.
+        prologue = header_size + sizeofcmds
+        first_content = min(
+            (section["va_start"] for section in segments[0]["sections"] if not section["zerofill"]),
+            default=segments[0]["va_end"],
+        )
+        file_cursor = 0 if first_content - segments[0]["va_start"] >= prologue else prologue
         for segment in segments:
-            file_cursor = align_up(file_cursor, PAGE_SIZE) + segment["va_start"] % PAGE_SIZE
-            segment["fileoff"] = file_cursor
+            file_off = align_down(file_cursor, PAGE_SIZE) + segment["va_start"] % PAGE_SIZE
+            if file_off < file_cursor:
+                file_off += PAGE_SIZE
+            segment["fileoff"] = file_off
             segment["filesize"] = segment["va_end"] - segment["va_start"]
             for section in segment["sections"]:
-                section["fileoff"] = file_cursor + (section["va_start"] - segment["va_start"])
-            file_cursor += segment["filesize"]
+                section["fileoff"] = file_off + (section["va_start"] - segment["va_start"])
+            file_cursor = file_off + segment["filesize"]
 
         symoff = stroff = indirectoff = 0
         if import_map:
@@ -684,7 +694,9 @@ class MachoSynthesizer(BinarySynthesizer):
                 raw = section["raw"]
                 copy_length = min(len(raw), max(0, len(segment_raw) - start))
                 segment_raw[start : start + copy_length] = raw[:copy_length]
-            output += segment_raw
+            # the header and load commands already cover the front of a segment mapped from
+            # file offset 0; only the bytes past them are the segment's own
+            output += segment_raw[max(0, len(output) - segment["fileoff"]) :]
 
         if import_map:
             output += b"\x00" * (symoff - len(output))
