@@ -6,6 +6,7 @@ from unittest import mock
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.labelprovider import MachoDemangler
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.MachoDemangler import demangle_macho_symbol
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
@@ -335,6 +336,45 @@ class TestSwiftDemangleCorpusRegression(unittest.TestCase):
         )
         self.assertIsNotNone(typed_function)
         self.assertEqual(typed_function.function_name, self._JOKERSPY_TYPE_DEMANGLED)
+
+
+class TestMachoDemanglerToolFanout(unittest.TestCase):
+    def setUp(self):
+        MachoDemangler._UNUSABLE_DEMANGLERS.clear()
+        MachoDemangler._find_demangler.cache_clear()
+        MachoDemangler.demangle_macho_symbol.cache_clear()
+        self.addCleanup(MachoDemangler._UNUSABLE_DEMANGLERS.clear)
+        self.addCleanup(MachoDemangler._find_demangler.cache_clear)
+        self.addCleanup(MachoDemangler.demangle_macho_symbol.cache_clear)
+
+    def test_a_demangler_that_cannot_run_is_not_retried_per_symbol(self):
+        calls = []
+
+        def _explode(argv, **kwargs):
+            calls.append(argv)
+            raise OSError("cannot execute")
+
+        with (
+            mock.patch.object(MachoDemangler.shutil, "which", return_value="/usr/bin/swift"),
+            mock.patch.object(MachoDemangler.subprocess, "run", _explode),
+        ):
+            names = [f"_$s4test{index}Vyyf" for index in range(25)]
+            self.assertEqual([MachoDemangler.demangle_macho_symbol(name) for name in names], names)
+
+        self.assertEqual(len(calls), 1)
+
+    def test_the_executable_lookup_happens_once_per_command(self):
+        lookups = []
+
+        def _which(command):
+            lookups.append(command)
+            return None
+
+        with mock.patch.object(MachoDemangler.shutil, "which", _which):
+            for index in range(25):
+                MachoDemangler.demangle_macho_symbol(f"_$s4test{index}Vyyf")
+
+        self.assertEqual(lookups, ["swift"])
 
 
 if __name__ == "__main__":

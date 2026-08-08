@@ -43,9 +43,21 @@ def _finalize_demangled(raw_name, demangled):
     return None
 
 
+@lru_cache(maxsize=8)
+def _find_demangler(command):
+    return shutil.which(command)
+
+
+# a command that could not be executed once will not work for the next symbol either;
+# without this every remaining symbol pays another process spawn, or another full timeout
+_UNUSABLE_DEMANGLERS = set()
+
+
 def _demangle_with_tools(name, commands, prefix_args):
     for command in commands:
-        executable = shutil.which(command)
+        if command in _UNUSABLE_DEMANGLERS:
+            continue
+        executable = _find_demangler(command)
         if not executable:
             continue
         try:
@@ -58,6 +70,7 @@ def _demangle_with_tools(name, commands, prefix_args):
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             LOGGER.debug("Demangler %s failed for %s: %s", command, name, exc)
+            _UNUSABLE_DEMANGLERS.add(command)
             continue
         if completed.returncode != 0:
             continue
