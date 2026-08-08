@@ -23,6 +23,7 @@ class FunctionAnalysisState:
         self.start_addr = start_addr
         self.disassembly = disassembly
         self.block_queue = [start_addr]
+        self._queued_blocks = {start_addr}
         self.current_block = []
         self.blocks = []
         self.num_blocks_analyzed = 0
@@ -57,15 +58,23 @@ class FunctionAnalysisState:
 
     def chooseNextBlock(self):
         self.is_block_ending_instruction = False
+        # is_jmp is a one-instruction latch: the instruction that books a jump ref consumes
+        # it in its own addInstruction call. Any path that leaves a block without booking
+        # that instruction must clear it, or the next block's first fall-through edge is
+        # recorded as a jump target and splits a basic block that has no branch into it.
+        self.is_jmp = False
         self.block_start = self.block_queue.pop()
+        self._queued_blocks.discard(self.block_start)
         self.processed_blocks.add(self.block_start)
         return self.block_start
 
     def addBlockToQueue(self, block_start):
-        if block_start not in self.processed_blocks:
+        if block_start not in self.processed_blocks and block_start not in self._queued_blocks:
+            self._queued_blocks.add(block_start)
             self.block_queue.append(block_start)
 
     def endBlock(self):
+        self.is_jmp = False
         if self.current_block:
             self.num_blocks_analyzed += 1
             # self.blocks.append(self.current_block)
@@ -214,6 +223,10 @@ class FunctionAnalysisState:
         Remove the analysis results from the disassembly
         """
         self.disassembly.function_borders.pop(self.start_addr, None)
+        self.disassembly.function_symbols.pop(self.start_addr, None)
+        self.disassembly.recursive_functions.discard(self.start_addr)
+        self.disassembly.leaf_functions.discard(self.start_addr)
+        self.disassembly.thunk_functions.discard(self.start_addr)
         for ins in self.instructions:
             self.disassembly.instructions.pop(ins[0], None)
             for byte in range(ins[1]):
@@ -284,7 +297,7 @@ class FunctionAnalysisState:
         return self.blocks
 
     def hasUnprocessedBlocks(self):
-        return len(set(self.block_queue).difference(self.processed_blocks)) > 0
+        return bool(self._queued_blocks - self.processed_blocks)
 
     def isProcessed(self, addr):
         return addr in self.processed_bytes

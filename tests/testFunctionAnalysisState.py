@@ -95,5 +95,93 @@ class DalvikFunctionAnalysisStateTestSuite(unittest.TestCase):
         self.assertNotIn(0x106, state.jump_targets)
 
 
+class _RecordingDisassembly:
+    def __init__(self):
+        self.function_borders = {}
+        self.function_symbols = {}
+        self.instructions = {}
+        self.code_map = {}
+        self.ins2fn = {}
+        self.data_map = set()
+        self.functions = {}
+        self.recursive_functions = set()
+        self.leaf_functions = set()
+        self.thunk_functions = set()
+
+    def addCodeRefs(self, addr_from, addr_to):
+        pass
+
+    def removeCodeRefs(self, addr_from, addr_to):
+        pass
+
+    def addDataRefs(self, addr_from, addr_to):
+        pass
+
+    def removeDataRefs(self, addr_from, addr_to):
+        pass
+
+
+class BlockQueueTestSuite(unittest.TestCase):
+    def test_a_block_is_queued_once_however_often_it_is_referenced(self):
+        state = _BareState(0x100)
+        state.addBlockToQueue(0x200)
+        state.addBlockToQueue(0x200)
+        state.addBlockToQueue(0x300)
+
+        self.assertEqual(state.block_queue, [0x100, 0x200, 0x300])
+
+        state.chooseNextBlock()
+        state.addBlockToQueue(0x300)
+
+        self.assertEqual(state.block_queue, [0x100, 0x200])
+        self.assertTrue(state.hasUnprocessedBlocks())
+
+    def test_jump_latch_does_not_survive_a_block_that_never_booked_it(self):
+        # a branch books its jump ref, then the instruction is dropped (already claimed
+        # elsewhere) so addInstruction never consumes the latch; the next block's first
+        # fall-through edge must not be recorded as a jump target
+        state = _BareState(0x100)
+        state.addCodeRef(0x100, 0x300, by_jump=True)
+        self.assertTrue(state.is_jmp)
+
+        state.endBlock()
+        self.assertFalse(state.is_jmp)
+
+        state.addBlockToQueue(0x200)
+        state.addCodeRef(0x400, 0x500, by_jump=True)
+        state.chooseNextBlock()
+        self.assertFalse(state.is_jmp)
+
+        state.addInstruction(0x200, 2, "mov", "", b"\x00\x00")
+        self.assertNotIn(0x202, state.jump_targets)
+
+
+class RevertAnalysisTestSuite(unittest.TestCase):
+    def test_revert_undoes_every_start_addr_keyed_result(self):
+        disassembly = _RecordingDisassembly()
+        state = FunctionAnalysisState(0x100, disassembly)
+        state.CALL_MNEMONICS = frozenset(["call"])
+        state.END_MNEMONICS = frozenset(["ret"])
+        state.label = "some_function"
+        state.addInstruction(0x100, 2, "ret", "", b"\xc3\x90")
+        state.endBlock()
+        state.is_recursive = True
+        state.is_thunk_call = True
+        state._finalizeRegularAnalysis()
+
+        self.assertEqual(disassembly.function_symbols[0x100], "some_function")
+        self.assertEqual(disassembly.leaf_functions, {0x100})
+        self.assertEqual(disassembly.recursive_functions, {0x100})
+        self.assertEqual(disassembly.thunk_functions, {0x100})
+
+        state.revertAnalysis()
+
+        self.assertNotIn(0x100, disassembly.functions)
+        self.assertNotIn(0x100, disassembly.function_symbols)
+        self.assertEqual(disassembly.leaf_functions, set())
+        self.assertEqual(disassembly.recursive_functions, set())
+        self.assertEqual(disassembly.thunk_functions, set())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1472,7 +1472,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.oep, 0x534)
         self.assertEqual(len(self.report.xcfg), 278)
         self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19881)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3525)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3497)
         self.assertIsNotNone(self.report.getFunction(0x400534))
 
     def test_real_fixture_gap_scan_recovery(self):
