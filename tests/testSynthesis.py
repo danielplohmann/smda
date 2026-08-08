@@ -429,6 +429,36 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
         self.assertIn(0x1004, written)
         self.assertIn(0x1008, written)
 
+    def test_an_executable_section_is_mapped_executable_wherever_it_lands(self):
+        from smda.synthesis.MachoSynthesizer import VM_PROT_EXECUTE, VM_PROT_WRITE, MachoSynthesizer
+
+        synthesizer = MachoSynthesizer.__new__(MachoSynthesizer)
+        synthesizer.warnings = []
+        sections = [
+            {
+                "name": "__text",
+                "segment": "__SOMETHINGELSE",
+                "executable": True,
+                "va_start": 0x1000,
+                "va_end": 0x2000,
+            },
+            {
+                "name": "__data",
+                "segment": "__DATA",
+                "executable": False,
+                "va_start": 0x4000,
+                "va_end": 0x5000,
+            },
+        ]
+
+        segments = synthesizer._buildSegmentsHeuristic(sections)
+
+        by_name = {segment["sections"][0]["name"]: segment for segment in segments}
+        self.assertTrue(by_name["__text"]["perms"] & VM_PROT_EXECUTE)
+        self.assertFalse(by_name["__text"]["perms"] & VM_PROT_WRITE)
+        self.assertTrue(by_name["__data"]["perms"] & VM_PROT_WRITE)
+        self.assertFalse(by_name["__data"]["perms"] & VM_PROT_EXECUTE)
+
 
 if __name__ == "__main__":
     unittest.main()

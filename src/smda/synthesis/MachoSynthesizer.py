@@ -256,7 +256,10 @@ class MachoSynthesizer(BinarySynthesizer):
         different class are merged into one segment with unioned permissions."""
         segments: List[Dict[str, Any]] = []
         for section in sections:
-            perms = VM_PROT_READ | (VM_PROT_EXECUTE if section["segment"] == "__TEXT" else VM_PROT_WRITE)
+            # a section is executable because it holds recovered function bytes, not because
+            # of the segment name it was grouped under: code placed anywhere else would
+            # otherwise be mapped writable-but-not-executable
+            perms = VM_PROT_READ | (VM_PROT_EXECUTE if section["executable"] else VM_PROT_WRITE)
             if segments and (
                 segments[-1]["segment"] == section["segment"] or section["va_start"] < segments[-1]["page_end"]
             ):
@@ -309,7 +312,7 @@ class MachoSynthesizer(BinarySynthesizer):
                 target = {
                     "name": "__SMDA",
                     "segment": "__SMDA",
-                    "perms": VM_PROT_READ | VM_PROT_WRITE,
+                    "perms": VM_PROT_READ | (VM_PROT_EXECUTE if section["executable"] else VM_PROT_WRITE),
                     "va_start": section["va_start"],
                     "va_end": section["va_end"],
                     "page_end": align_up(section["va_end"], PAGE_SIZE),
