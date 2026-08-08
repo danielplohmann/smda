@@ -256,5 +256,37 @@ class BracketQueueTestSuite(unittest.TestCase):
         self.assertIs(next(queue), low)
 
 
+class _ScoredCandidate:
+    def __init__(self, addr, score, num_call_refs=0):
+        self.addr = addr
+        self.call_ref_sources = list(range(num_call_refs))
+        self.score = score
+
+    def getScore(self):
+        return self.score
+
+
+class BracketQueueOrderTestSuite(unittest.TestCase):
+    def testAddKeepsHighestScoreFirstOut(self):
+        queue = BracketQueue()
+        for addr, score in ((0x10, 0.1), (0x20, 0.9), (0x30, 0.5)):
+            queue.add(_ScoredCandidate(addr, score))
+
+        self.assertEqual([candidate.addr for candidate in queue], [0x20, 0x30, 0x10])
+
+    def testUpdateKeepsHighestScoreFirstOutInTargetBracket(self):
+        queue = BracketQueue()
+        high = _ScoredCandidate(0x10, 0.9, num_call_refs=1)
+        low = _ScoredCandidate(0x20, 0.1)
+        queue.add(high)
+        queue.add(low)
+
+        low.call_ref_sources = [0]
+        queue.update(target_candidate=low)
+
+        self.assertEqual(len(queue.brackets[0]), 0)
+        self.assertEqual([candidate.addr for candidate in queue], [0x10, 0x20])
+
+
 if __name__ == "__main__":
     unittest.main()

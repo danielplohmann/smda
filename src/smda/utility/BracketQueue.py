@@ -35,6 +35,7 @@ class BracketQueue:
             if other_index != bracket_index:
                 self.brackets[other_index].pop(candidate.addr, None)
         self.brackets[bracket_index][candidate.addr] = candidate
+        self._sort_bracket(bracket_index)
 
     def update(self, target_candidate=None):
         if target_candidate:
@@ -46,17 +47,21 @@ class BracketQueue:
                     self.update_shift_count += 1
                     self.brackets[bracket_index].pop(target_candidate.addr)
                     self.brackets[updated_bracket_index][target_candidate.addr] = target_candidate
+                    self._sort_bracket(updated_bracket_index)
                     break
+
+    def _sort_bracket(self, bracket_index):
+        self.brackets[bracket_index] = dict(
+            sorted(
+                self.brackets[bracket_index].items(),
+                key=lambda x: x[1].getScore(),
+            )
+        )
 
     def ensure_order(self):
         for bracket_index in range(2, -1, -1):
             if self.brackets[bracket_index]:
-                self.brackets[bracket_index] = dict(
-                    sorted(
-                        self.brackets[bracket_index].items(),
-                        key=lambda x: x[1].getScore(),
-                    )
-                )
+                self._sort_bracket(bracket_index)
 
     def __str__(self):
         return f"BracketQueue | 2: {len(self.brackets[2])} candidates, 1: {len(self.brackets[1])} candidates, 0: {len(self.brackets[0])} candidates,"
