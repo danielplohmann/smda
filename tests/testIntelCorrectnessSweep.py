@@ -47,6 +47,13 @@ class IntelTerminatorTestSuite(unittest.TestCase):
     def test_ud2_ends_the_function(self):
         self.assertEqual(self._first_function_mnemonics(b"\x0f\x0b\x90\x90\xc3"), ["ud2"])
 
+    def test_sysret_ends_the_function(self):
+        # capstone reports sysret/sysexit in its own "iret" group: no fallthrough successor
+        self.assertEqual(self._first_function_mnemonics(b"\x0f\x07\x90\x90\xc3"), ["sysret"])
+
+    def test_sysexit_ends_the_function(self):
+        self.assertEqual(self._first_function_mnemonics(b"\x0f\x35\x90\x90\xc3", bitness=32), ["sysexit"])
+
 
 class IntelFarCallTestSuite(unittest.TestCase):
     class _RecordingState:

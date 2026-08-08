@@ -27,7 +27,26 @@ LOOP_INS = frozenset({"loop", "loopne", "loope"})
 JMP_INS = frozenset({"jmp", "ljmp"})
 CALL_INS = frozenset({"call", "lcall"})
 RET_INS = frozenset({"ret", "retn", "retf", "retfq", "iret", "iretd", "iretq"})
-END_INS = frozenset({"ret", "retn", "retf", "retfq", "iret", "iretd", "iretq", "int3", "hlt", "ud0", "ud1", "ud2"})
+END_INS = frozenset(
+    {
+        "ret",
+        "retn",
+        "retf",
+        "retfq",
+        "iret",
+        "iretd",
+        "iretq",
+        # capstone puts sysret/sysexit in its own "iret" group: control transfers with no
+        # fallthrough successor, like the iret forms above
+        "sysret",
+        "sysexit",
+        "int3",
+        "hlt",
+        "ud0",
+        "ud1",
+        "ud2",
+    }
+)
 REGS_32BIT = frozenset({"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"})
 REGS_64BIT = frozenset(
     {
