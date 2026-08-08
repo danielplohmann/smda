@@ -80,15 +80,20 @@ def _analyzeOneFile(task):
 def collectInputFiles(paths, input_root=None):
     """Expand files and directories into a sorted list of (path, report_stem) pairs."""
     collected = []
+    # with several inputs, each path's own directory is not a usable root: two of them can
+    # relativize distinct samples to the same stem and overwrite each other's report
+    shared_root = input_root
+    if shared_root is None and len(paths) > 1:
+        shared_root = os.path.commonpath([os.path.abspath(path) for path in paths])
     for path in paths:
         if os.path.isdir(path):
-            root = input_root or path
+            root = shared_root or path
             for dirpath, _, filenames in os.walk(path):
                 for filename in sorted(filenames):
                     file_path = os.path.join(dirpath, filename)
                     collected.append((file_path, deriveReportStem(file_path, root)))
         elif os.path.isfile(path):
-            root = input_root or os.path.dirname(os.path.abspath(path)) or os.sep
+            root = shared_root or os.path.dirname(os.path.abspath(path)) or os.sep
             collected.append((path, deriveReportStem(path, root)))
         else:
             raise FileNotFoundError(path)

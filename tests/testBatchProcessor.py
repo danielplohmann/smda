@@ -118,5 +118,42 @@ class TestBatchProcessor(unittest.TestCase):
         self.assertGreaterEqual(getDefaultWorkerCount(), 1)
 
 
+class TestCollectInputFilesRoots(unittest.TestCase):
+    def _write_sample(self, directory, name):
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, name)
+        with open(path, "wb") as f_out:
+            f_out.write(b"MZ")
+        return path
+
+    def test_same_named_samples_in_separate_input_dirs_get_distinct_stems(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            first = os.path.join(tmp_dir, "first")
+            second = os.path.join(tmp_dir, "second")
+            self._write_sample(first, "sample.bin")
+            self._write_sample(second, "sample.bin")
+
+            stems = [stem for _, stem in collectInputFiles([first, second])]
+
+            self.assertEqual(sorted(stems), ["first_sample.bin", "second_sample.bin"])
+
+    def test_same_named_samples_passed_as_files_get_distinct_stems(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            first = self._write_sample(os.path.join(tmp_dir, "first"), "sample.bin")
+            second = self._write_sample(os.path.join(tmp_dir, "second"), "sample.bin")
+
+            stems = [stem for _, stem in collectInputFiles([first, second])]
+
+            self.assertEqual(sorted(stems), ["first_sample.bin", "second_sample.bin"])
+
+    def test_single_directory_still_relativizes_against_itself(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self._write_sample(os.path.join(tmp_dir, "only"), "sample.bin")
+
+            stems = [stem for _, stem in collectInputFiles([os.path.join(tmp_dir, "only")])]
+
+            self.assertEqual(stems, ["sample.bin"])
+
+
 if __name__ == "__main__":
     unittest.main()
