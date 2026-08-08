@@ -357,5 +357,78 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         assert _verify_planted_blocks(report, sections) == []
 
 
+class SynthesisRobustnessTestSuite(unittest.TestCase):
+    def test_a_function_with_no_blocks_is_skipped_instead_of_raising(self):
+        from smda.synthesis.BinarySynthesizer import BinarySynthesizer
+
+        report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("cutwail_xored"))
+        offsets = sorted(report.xcfg)
+        blockless = report.xcfg[offsets[0]]
+        blockless.blocks = {}
+
+        synthesizer = BinarySynthesizer.__new__(BinarySynthesizer)
+        synthesizer.report = report
+        synthesizer.warnings = []
+
+        resolved = synthesizer._resolveFunctionOffsets(None)
+
+        self.assertNotIn(offsets[0], resolved)
+        self.assertEqual(len(resolved), len(offsets) - 1)
+
+    def test_scattered_import_slots_do_not_pad_the_whole_gap(self):
+        from smda.synthesis.PeSynthesizer import MAX_IAT_PADDING_SPAN, PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.warnings = []
+        written = []
+
+        def _record(regions, rva, thunk_value, ptr_size):
+            written.append(rva)
+            return True
+
+        synthesizer._writeThunkAt = _record
+        synthesizer._parseOrdinal = lambda func: 1
+        # two slots of one DLL a megabyte apart: only the real slots may be written
+        far = 0x1000 + 0x100000
+        synthesizer._writeThunks(
+            [],
+            {0x1000: ("kernel32.dll", "a"), far: ("kernel32.dll", "b")},
+            [("kernel32.dll", [(0x1000, "a"), (far, "b")])],
+            0,
+            0,
+            {},
+            4,
+        )
+
+        self.assertEqual(sorted(written), [0x1000, far])
+        self.assertGreater(far - 0x1000, MAX_IAT_PADDING_SPAN)
+
+    def test_adjacent_import_slots_still_pad_their_gap(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.warnings = []
+        written = []
+
+        def _record(regions, rva, thunk_value, ptr_size):
+            written.append(rva)
+            return True
+
+        synthesizer._writeThunkAt = _record
+        synthesizer._parseOrdinal = lambda func: 1
+        synthesizer._writeThunks(
+            [],
+            {0x1000: ("kernel32.dll", "a"), 0x100C: ("kernel32.dll", "b")},
+            [("kernel32.dll", [(0x1000, "a"), (0x100C, "b")])],
+            0,
+            0,
+            {},
+            4,
+        )
+
+        self.assertIn(0x1004, written)
+        self.assertIn(0x1008, written)
+
+
 if __name__ == "__main__":
     unittest.main()

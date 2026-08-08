@@ -46,6 +46,7 @@ class RecursiveDisassembler:
         self.symbol_providers = []
         self.active_api_providers = []
         self.active_symbol_providers = []
+        self._pdb_info = None
         self._addLabelProviders()
         self.fc_manager = None
         self.tailcall_analyzer = None
@@ -79,13 +80,21 @@ class RecursiveDisassembler:
         if provider.isSymbolProvider():
             self.symbol_providers.append(provider)
 
-    def _updateLabelProviders(self, binary_info):
+    def _runLabelProviderUpdate(self, binary_info):
         for provider in self.label_providers:
             try:
                 provider.update(binary_info)
             except Exception as exc:
                 reraise_non_operational_exception(exc)
                 LOGGER.error("Label provider %s failed to update: %r", provider.__class__.__name__, exc)
+
+    def _updateLabelProviders(self, binary_info):
+        self._runLabelProviderUpdate(binary_info)
+        # a provider clears its symbol map at the top of update(), so a PDB supplied before
+        # analysis would be wiped by this pass; re-apply it afterwards instead
+        pdb_info = getattr(self, "_pdb_info", None)
+        if pdb_info is not None:
+            self._runLabelProviderUpdate(pdb_info)
         self.active_api_providers = [p for p in self.api_providers if p.is_active()]
         self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
@@ -95,12 +104,8 @@ class RecursiveDisassembler:
             pdb_info = BinaryInfo(b"")
             pdb_info.file_path = pdb_path
             pdb_info.base_addr = binary_info.base_addr
-            for provider in self.label_providers:
-                try:
-                    provider.update(pdb_info)
-                except Exception as exc:
-                    reraise_non_operational_exception(exc)
-                    LOGGER.error("Label provider %s failed to update: %r", provider.__class__.__name__, exc)
+            self._pdb_info = pdb_info
+            self._runLabelProviderUpdate(pdb_info)
             self.active_api_providers = [p for p in self.api_providers if p.is_active()]
             self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 

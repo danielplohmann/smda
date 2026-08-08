@@ -39,7 +39,11 @@ class BinarySynthesizer:
 
     def _resolveFunctionOffsets(self, function_offsets):
         offsets = sorted(self.report.xcfg.keys()) if function_offsets is None else list(function_offsets)
-        resolved = sorted(offset for offset in offsets if offset in self.report.xcfg)
+        # a function with no blocks contributes no bytes to plant, and its extent is the max
+        # of an empty sequence -- drop it here rather than raising further down
+        resolved = sorted(
+            offset for offset in offsets if offset in self.report.xcfg and self.report.xcfg[offset].blocks
+        )
         skipped = len(offsets) - len(resolved)
         if skipped:
             self._warn("synthesis: %d requested function offsets are not in the report", skipped)
