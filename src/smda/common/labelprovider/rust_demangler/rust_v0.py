@@ -805,7 +805,10 @@ class Printer:
         self.check_recursion_limit()
         try:
             if self.eat("B"):
-                return self.backref_printer().print_const()
+                prin = self.backref_printer()
+                prin.print_const()
+                self.out = prin.out
+                return
 
             ty_tag = self.parser_mut().next_func()
             if ty_tag == "p":

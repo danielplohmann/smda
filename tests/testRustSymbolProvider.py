@@ -565,5 +565,11 @@ class TestUtilityFunctions(unittest.TestCase):
         self.assertEqual(remove_bad_spaces("Foo< Bar Baz >"), "Foo<Bar_Baz>")
 
 
+class TestRustV0ConstBackrefs(unittest.TestCase):
+    def test_a_const_backref_reproduces_the_referenced_value(self):
+        self.assertEqual(demangle("_RIC1aKh4_KB4_E"), demangle("_RIC1aKh4_Kh4_E"))
+        self.assertEqual(demangle("_RIC1aKh4_KB4_E"), "a::<4, 4>")
+
+
 if __name__ == "__main__":
     unittest.main()
