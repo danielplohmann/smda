@@ -5,6 +5,7 @@ import unittest
 
 from smda.Disassembler import Disassembler
 from smda.intel.IndirectCallAnalyzer import IndirectCallAnalyzer
+from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 from smda.intel.JumpTableAnalyzer import JumpTableAnalyzer
 from smda.intel.X86Backend import X86Backend
 from smda.SmdaConfig import SmdaConfig
@@ -180,6 +181,46 @@ class JumpTableBacktrackWindowTestSuite(unittest.TestCase):
 
         self.assertEqual(analyzer._directHandler("eax", state, backtracked), 0x403000)
         self.assertEqual(state.data_refs, [(0x1000, 0x403000, 4)])
+
+
+class IntelEscaperClassificationTestSuite(unittest.TestCase):
+    def test_a_segment_qualified_memory_operand_stays_a_pointer(self):
+        for operand in ("dword ptr es:[edi]", "dword ptr ds:[esi]", "qword ptr fs:[0x30]"):
+            with self.subTest(operand=operand):
+                self.assertEqual(IntelInstructionEscaper.escapeField(operand), "PTR")
+
+    def test_a_far_pointer_immediate_is_still_a_constant(self):
+        self.assertEqual(IntelInstructionEscaper.escapeField("0x33:0x401000"), "CONST")
+
+    def test_avx512_vector_halves_and_mask_registers_are_escaped(self):
+        for operand in ("xmm20", "ymm18", "zmm3", "k0", "k1"):
+            with self.subTest(operand=operand):
+                self.assertEqual(IntelInstructionEscaper.escapeField(operand), "XREG")
+
+    def test_a_writemasked_vector_operand_is_escaped(self):
+        # capstone attaches the EVEX writemask to the register operand, and spells the
+        # zeroing form as two brace groups separated by a space
+        for operand in ("zmm0 {k1}", "zmm0 {k1} {z}", "xmm20 {k7}", "ymm18 {k3} {z}"):
+            with self.subTest(operand=operand):
+                self.assertEqual(IntelInstructionEscaper.escapeField(operand), "XREG")
+
+    def test_a_broadcast_memory_operand_stays_a_pointer(self):
+        self.assertEqual(IntelInstructionEscaper.escapeField("dword ptr [rax]{1to16}"), "PTR")
+
+    def test_string_and_system_mnemonics_share_their_family_group(self):
+        for mnemonic, sibling in (
+            ("movsq", "movsw"),
+            ("cmpsq", "cmpsw"),
+            ("popaw", "popal"),
+            ("pushaw", "pushal"),
+            ("xgetbv", "xsetbv"),
+            ("rorx", "sarx"),
+        ):
+            with self.subTest(mnemonic=mnemonic):
+                self.assertEqual(
+                    IntelInstructionEscaper.escapeMnemonic(mnemonic),
+                    IntelInstructionEscaper.escapeMnemonic(sibling),
+                )
 
 
 if __name__ == "__main__":
