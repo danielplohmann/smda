@@ -409,7 +409,7 @@ class FunctionCandidateManager:
             LOGGER.debug("Knowledge Base Objects parsed.")
             # apply relocations with imaginary base_addr at 0x400000 (provided by file loader)
             relocations = self.lang_analyzer.delphi_kb_resolver.getRelocations()
-            image_base_as_bytes = struct.pack("I", self.disassembly.binary_info.base_addr)
+            image_base_as_bytes = struct.pack("<I", self.disassembly.binary_info.base_addr)
             LOGGER.debug("Iterating relocations.")
             binary_as_array = bytearray(self.disassembly.binary_info.binary)
             for relocation_offset in relocations:

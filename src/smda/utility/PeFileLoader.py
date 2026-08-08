@@ -55,7 +55,7 @@ class PeFileLoader:
                     section_offset = section_index * 0x28
                     slice_start = pe_offset + optional_header_size + section_offset + 0x8
                     slice_end = pe_offset + optional_header_size + section_offset + 0x8 + 0x10
-                    virt_size, virt_offset, raw_size, raw_offset = struct.unpack("IIII", binary[slice_start:slice_end])
+                    virt_size, virt_offset, raw_size, raw_offset = struct.unpack("<IIII", binary[slice_start:slice_end])
                     section_info = {
                         "section_index": section_index,
                         "virt_size": virt_size,
@@ -133,9 +133,9 @@ class PeFileLoader:
         if pe_offset and len(binary) >= pe_offset + 0x38:
             bitness = PeFileLoader.getBitness(binary)
             if bitness == 32:
-                base_addr = struct.unpack("I", binary[pe_offset + 0x34 : pe_offset + 0x38])[0]
+                base_addr = struct.unpack("<I", binary[pe_offset + 0x34 : pe_offset + 0x38])[0]
             elif bitness == 64:
-                base_addr = struct.unpack("Q", binary[pe_offset + 0x30 : pe_offset + 0x38])[0]
+                base_addr = struct.unpack("<Q", binary[pe_offset + 0x30 : pe_offset + 0x38])[0]
         if base_addr:
             LOGGER.debug(
                 "Changing base address from 0 to: 0x%x for inference of reference counts (based on PE header)",
@@ -146,7 +146,7 @@ class PeFileLoader:
     @staticmethod
     def getPeOffset(binary):
         if len(binary) >= 0x40:
-            pe_offset = struct.unpack("I", binary[0x3C : 0x3C + 4])[0]
+            pe_offset = struct.unpack("<I", binary[0x3C : 0x3C + 4])[0]
             return pe_offset
         return 0
 
@@ -154,7 +154,7 @@ class PeFileLoader:
     def getMachineType(binary):
         pe_offset = PeFileLoader.getPeOffset(binary)
         if pe_offset and len(binary) >= pe_offset + 0x6 and binary[pe_offset : pe_offset + 4] == b"PE\x00\x00":
-            return struct.unpack("H", binary[pe_offset + 0x4 : pe_offset + 0x6])[0]
+            return struct.unpack("<H", binary[pe_offset + 0x4 : pe_offset + 0x6])[0]
         return 0
 
     @staticmethod
@@ -163,7 +163,7 @@ class PeFileLoader:
         if PeFileLoader.checkPe(binary):
             pe_offset = PeFileLoader.getPeOffset(binary)
             if pe_offset and len(binary) >= pe_offset + 0x2C:
-                oep_rva = struct.unpack("I", binary[pe_offset + 0x28 : pe_offset + 0x2C])[0]
+                oep_rva = struct.unpack("<I", binary[pe_offset + 0x28 : pe_offset + 0x2C])[0]
         return oep_rva
 
     @staticmethod

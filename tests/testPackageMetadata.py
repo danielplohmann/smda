@@ -43,5 +43,25 @@ class TestPackageMetadata(unittest.TestCase):
         self.assertTrue(any(isinstance(handler, logging.NullHandler) for handler in handlers))
 
 
+class TestStructEndianness(unittest.TestCase):
+    """Every binary field SMDA decodes belongs to a little-endian format.
+
+    A native-endian format string decodes correctly on x86 hosts and silently wrongly
+    everywhere else, so it cannot be caught by running the suite. Assert the convention
+    on the source instead.
+    """
+
+    IMPLICIT_FORMAT = re.compile(r"struct\.(?:pack|unpack|unpack_from|pack_into)\(\s*[\"']([^<>!=@\"'])")
+
+    def test_no_struct_call_uses_an_implicit_byte_order(self):
+        offenders = []
+        for path in sorted((REPO_ROOT / "src" / "smda").rglob("*.py")):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if self.IMPLICIT_FORMAT.search(line):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{number}: {line.strip()}")
+
+        self.assertEqual(offenders, [], "struct format strings must start with '<'")
+
+
 if __name__ == "__main__":
     unittest.main()

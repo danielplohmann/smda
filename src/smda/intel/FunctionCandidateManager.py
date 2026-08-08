@@ -279,13 +279,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
             if addr_block is None or len(addr_block) < 4:
                 return None
-            function_pointer = struct.unpack("I", addr_block)[0]
+            function_pointer = struct.unpack("<I", addr_block)[0]
             return self.disassembly.dereferenceDword(function_pointer)
         if self.bitness == 64:
             addr_block = self.disassembly.getRawBytes(offset + 2, 4)
             if addr_block is None or len(addr_block) < 4:
                 return None
-            function_pointer = struct.unpack("i", addr_block)[0]
+            function_pointer = struct.unpack("<i", addr_block)[0]
             # we need to calculate RIP + offset + 7 (48 ff 25 ** ** ** **)
             if self.disassembly.getRawBytes(offset, 2) == b"\xff\x25":
                 function_pointer += offset + 7
@@ -326,7 +326,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             if len(self.disassembly.binary_info.binary) - call_match.start() >= 5:
                 packed_call = self.disassembly.getRawBytes(call_match.start() + 1, 4)
-                rel_call_offset = struct.unpack("i", packed_call)[0]
+                rel_call_offset = struct.unpack("<i", packed_call)[0]
                 # ignore zero offset calls, as they will likely not lead to functions but are rather used for positioning in shellcode etc
                 if rel_call_offset == 0:
                     continue
