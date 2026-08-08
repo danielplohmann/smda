@@ -44,6 +44,7 @@ _CC_MNEMONICS = frozenset(
         "cset",
         "csetm",
         "cinc",
+        "cinv",
         "cneg",
         "ccmp",
         "ccmn",
@@ -101,6 +102,9 @@ _CONTROL_FLOW_MNEMONICS = frozenset(
     | INDIRECT_JUMP_INS
 )
 _VECTOR_OPERAND = re.compile(r"v[0-9]+\.[0-9]*[bhsd](?:\[[^\]]+\])?", re.IGNORECASE)
+# advanced-SIMD scalar forms address the vector file through b/h/s/d/q registers and carry
+# no ".<layout>" suffix for the layout regex above to find
+_SCALAR_SIMD_OPERAND = re.compile(r"\b[bhsdq][0-9]+\b", re.IGNORECASE)
 
 
 def normalize_capstone_text(text: str) -> str:
@@ -230,6 +234,8 @@ def classify_mnemonic_fallback(
         return "M"
     if mnemonic in stack_mnemonics or mnemonic.startswith(("pac", "aut")):
         return "S"
+    if _SCALAR_SIMD_OPERAND.search(operands):
+        return "V"
     if mnemonic in aritlog_mnemonics:
         return "A"
     for prefixes, group in prefix_fallbacks:
