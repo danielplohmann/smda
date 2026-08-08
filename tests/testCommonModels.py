@@ -330,6 +330,31 @@ class TestCommonModels(unittest.TestCase):
 
         self.assertEqual(imported.pic_hash, stored_pic_hash)
 
+    def test_imported_report_with_a_suffixed_version_recalculates_instead_of_raising(self):
+        report = _disassemble_intel_bytes(b"\xc3")  # ret
+        function = report.getFunction(INTEL_BASE)
+        expected_pic_hash = function.pic_hash
+        function_dict = function.toDict()
+        function_dict["metadata"]["pic_hash"] = 0x0123456789ABCDEF
+
+        imported = SmdaFunction.fromDict(function_dict, version="4.4.4-dev", smda_report=report)
+
+        self.assertEqual(imported.pic_hash, expected_pic_hash)
+
+    def test_imported_report_skips_hashing_against_an_unlocated_binary_info(self):
+        report = _disassemble_intel_bytes(b"\xc3")  # ret
+        function_dict = report.getFunction(INTEL_BASE).toDict()
+        stored_pic_hash = 0x0123456789ABCDEF
+        function_dict["metadata"]["pic_hash"] = stored_pic_hash
+        unlocated = BinaryInfo(b"\xc3")
+        unlocated.architecture = "intel"
+        unlocated.base_addr = None
+        unlocated.binary_size = None
+
+        imported = SmdaFunction.fromDict(function_dict, binary_info=unlocated, version="1.0.0")
+
+        self.assertEqual(imported.pic_hash, stored_pic_hash)
+
     def test_num_calls_and_returns_count_prefixed_mnemonics(self):
         # capstone prepends mandatory prefixes (bnd/rep/lock/...) to the mnemonic string;
         # a bnd-prefixed call/ret must still be counted as such.
@@ -494,6 +519,34 @@ class TestBinaryInfoCodeAreas(unittest.TestCase):
         self.assertTrue(binary_info.isInCodeAreas(0x400000))
         self.assertTrue(binary_info.isInCodeAreas(0x4000FF))
         self.assertFalse(binary_info.isInCodeAreas(0x400100))
+
+
+class TestSmdaFunctionRobustness(unittest.TestCase):
+    def test_escaper_is_declared_for_instances_built_without_a_disassembly(self):
+        self.assertIsNone(SmdaFunction()._escaper)
+        self.assertIsNone(SmdaFunction.__new__(SmdaFunction)._escaper)
+
+    def test_try_range_without_bounds_is_skipped(self):
+        function = SmdaFunction()
+        function.offset = 0x100
+        function.blocks = {0x100: []}
+        function.blockrefs = {}
+        function.architecture_metadata = {"try_ranges": [{"handlers": [{"target_addr": 0x200}]}]}
+
+        self.assertEqual(function.getNormalizedBlockRefs(), {0x100: []})
+
+    def test_code_xrefs_skip_a_function_whose_offset_is_not_an_instruction(self):
+        report = SmdaReport(None)
+        report._offset2ins = {0x2000: object()}
+        report._has_codexrefs = True
+        function = SmdaFunction()
+        function.smda_report = report
+        function.offset = 0x1000
+        function.inrefs = [0x2000]
+        function.outrefs = {0x1000: [0x2000]}
+
+        self.assertEqual(list(function.getCodeInrefs()), [])
+        self.assertEqual(list(function.getCodeOutrefs()), [])
 
 
 if __name__ == "__main__":

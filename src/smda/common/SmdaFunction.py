@@ -172,6 +172,7 @@ class SmdaFunction:
     function_name = ""
     pic_hash = None
     opc_hash = None
+    _escaper = None
     nesting_depth = 0
     strongly_connected_components = None
     tfidf = None
@@ -391,11 +392,11 @@ class SmdaFunction:
         self.smda_report.initCodeXrefs()
         if self.code_inrefs is None:
             self.code_inrefs = []
-            for inref in self.inrefs:
-                if inref in self.smda_report._offset2ins:
-                    self.code_inrefs.append(
-                        CodeXref(self.smda_report._offset2ins[inref], self.smda_report._offset2ins[self.offset])
-                    )
+            own_instruction = self.smda_report._offset2ins.get(self.offset)
+            if own_instruction is not None:
+                for inref in self.inrefs:
+                    if inref in self.smda_report._offset2ins:
+                        self.code_inrefs.append(CodeXref(self.smda_report._offset2ins[inref], own_instruction))
         yield from self.code_inrefs
 
     def getCodeOutrefs(self):
@@ -403,11 +404,12 @@ class SmdaFunction:
         if self.code_outrefs is None:
             self.code_outrefs = []
             for outref_src, outref_dsts in self.outrefs.items():
+                source_instruction = self.smda_report._offset2ins.get(outref_src)
+                if source_instruction is None:
+                    continue
                 for target in outref_dsts:
                     if target in self.smda_report._offset2ins:
-                        self.code_outrefs.append(
-                            CodeXref(self.smda_report._offset2ins[outref_src], self.smda_report._offset2ins[target])
-                        )
+                        self.code_outrefs.append(CodeXref(source_instruction, self.smda_report._offset2ins[target]))
         yield from self.code_outrefs
 
     def _calculateSccs(self):
@@ -548,6 +550,10 @@ class SmdaFunction:
                 raw_targets.append(try_range["catch_all_addr"])
             if not raw_targets:
                 continue
+            range_start = try_range.get("start_addr")
+            range_end = try_range.get("end_addr")
+            if range_start is None or range_end is None:
+                continue
 
             normalized_targets = set()
             for target_addr in raw_targets:
@@ -556,9 +562,7 @@ class SmdaFunction:
                     block_start = target_addr
                 normalized_targets.add(block_start)
 
-            active_try_ranges.append(
-                {"start": try_range["start_addr"], "end": try_range["end_addr"], "targets": normalized_targets}
-            )
+            active_try_ranges.append({"start": range_start, "end": range_end, "targets": normalized_targets})
 
         # 2. Iterate blocks once to build normalized_blockrefs and apply try_ranges
         for block_start, block in self.blocks.items():
@@ -717,6 +721,8 @@ class SmdaFunction:
             smda_function.stringrefs = stringrefs
         smda_function._escaper = cls.getInstructionEscaper(function_architecture)
         hash_context = binary_info
+        if hash_context is not None and (hash_context.base_addr is None or hash_context.binary_size is None):
+            hash_context = None
         if (
             hash_context is None
             and smda_report is not None
@@ -728,7 +734,7 @@ class SmdaFunction:
         if version and version.startswith("MCRIT4IDA"):
             version = version.rsplit(" ", 1)[-1]
         # modernize older reports on import
-        if version and re.match(r"(v)?\d+(.\d+)*", version):
+        if version and re.fullmatch(r"v?\d+(\.\d+)*", version):
             version = version.replace("v", "")
             version = [int(v) for v in version.split(".")]
             recalculate_pic_hash = version < [1, 3, 0]
