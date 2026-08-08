@@ -67,7 +67,10 @@ def _collect_group_mismatches(report, fixture_id):
         for instruction in function.getInstructions():
             capstone_instruction = instruction.getDetailed()
             expected_group = expected_mnemonic_group(capstone_instruction, capstone_engine)
-            actual_group = Escaper.escapeMnemonicForInstruction(instruction)
+            # escapeMnemonicForInstruction delegates to expected_mnemonic_group whenever
+            # capstone detail is available, so comparing against it compares a function to
+            # itself. The table-driven classifier is the half that can actually drift.
+            actual_group = Escaper.escapeMnemonic(instruction.mnemonic, instruction.operands)
             if actual_group != expected_group:
                 group_mismatches[
                     (fixture_id, instruction.mnemonic, instruction.operands, actual_group, expected_group)
@@ -215,6 +218,42 @@ class TestAArch64StaticEscaperCapstoneVerification(_CapstoneVerificationGatesMix
 
     def _disassemble(self):
         return _disassemble_raw(_xor_fixture(STATIC_FIXTURE.read_bytes()))
+
+
+class TableClassifierGapTestSuite(unittest.TestCase):
+    """The corpora do not contain these encodings, so only a direct check catches a table
+    that disagrees with capstone about them."""
+
+    ENCODINGS = {
+        "cinv x0, x1, lt": b"\x20\xa0\x81\xda",
+        "smsubl x0, w1, w2, x3": b"\x20\x8c\x22\x9b",
+        "smnegl x0, w1, w2": b"\x20\xfc\x22\x9b",
+        "add d22, d7, d12": b"\xf6\x84\xec\x5e",
+        "neg d17, d3": b"\x71\xb8\xe0\x7e",
+        "ldr d0, [x1]": b"\x20\x00\x40\xfd",
+        "fadd d0, d1, d2": b"\x20\x28\x62\x1e",
+    }
+
+    def test_the_table_classifier_agrees_with_capstone(self):
+        import capstone
+
+        engine = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+        engine.detail = True
+        for label, code in self.ENCODINGS.items():
+            for instruction in engine.disasm(code, 0x1000):
+                with self.subTest(instruction=label):
+                    self.assertEqual(
+                        Escaper.escapeMnemonic(instruction.mnemonic, instruction.op_str),
+                        expected_mnemonic_group(instruction, engine),
+                    )
+
+    def test_a_conditional_alias_escapes_its_condition_operand(self):
+        import capstone
+
+        engine = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+        engine.detail = True
+        for instruction in engine.disasm(b"\x20\xa0\x81\xda", 0x1000):
+            self.assertEqual(expected_escaped_operands(instruction), "REG, REG, COND")
 
 
 if __name__ == "__main__":
