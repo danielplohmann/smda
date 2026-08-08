@@ -29,6 +29,11 @@ class JumpTableAnalyzer:
         jmp     rcx
     """
 
+    # Deliberately register-only. The pattern-B bound check above compares a stack slot, but
+    # widening this to any `cmp <mem>, <imm>` matches unrelated compares in the backtrack
+    # window, and _findJumpTableSize takes the first hit without tying it to the jump index:
+    # measured on the bundled mirai_x64 fixture, that enables a bogus direct table and costs
+    # one recovered function. Recognizing pattern B needs index tracking, not a wider regex.
     RE_CMP_SIZE = re.compile(r"[a-z0-9]{2,4}, (([0-9])|(0x[0-9a-f]+))")
 
     def __init__(self, disassembler):
@@ -70,7 +75,7 @@ class JumpTableAnalyzer:
         register = jump_instruction_op_str.lower()
         data_ref_instruction_addr = None
         off_jumptable = None
-        for instr in backtracked[:0:-1]:
+        for instr in backtracked[::-1]:
             if instr[2] == "mov" and re.match(r"[a-z0-9]{2,3}, dword ptr \[[^ ]+ \+ 0x[0-9a-f]+\]", instr[3]):
                 data_ref_instruction_addr = instr[0]
                 off_jumptable = self.disassembler.getReferencedAddr(instr[3])
@@ -115,7 +120,7 @@ class JumpTableAnalyzer:
                 raw_entry_bytes = self.disassembly.getBytes(off_jumptable + index * 4, 4)
                 if raw_entry_bytes is None or len(raw_entry_bytes) < 4:
                     continue
-                entry = struct.unpack("I", raw_entry_bytes)[0]
+                entry = struct.unpack("<I", raw_entry_bytes)[0]
                 jump_targets.add(entry)
         return sorted(jump_targets)
 
@@ -156,10 +161,10 @@ class JumpTableAnalyzer:
         bitness = self.disassembly.binary_info.bitness
         if bitness == 32:
             entry_size = 4
-            entry_format = "I"
+            entry_format = "<I"
         elif bitness == 64:
             entry_size = 8
-            entry_format = "Q"
+            entry_format = "<Q"
         else:
             LOGGER.warning("Unsupported %s-bit jump table analysis", bitness)
             return jumptable_addresses

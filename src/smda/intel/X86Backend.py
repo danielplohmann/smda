@@ -155,10 +155,13 @@ class X86Backend(ArchBackend):
         i_address, i_size, i_mnemonic, i_op_str = i
         state.setLeaf(False)
         # case = "FALLTHROUGH"
+        # case = "LONG-CALL": a far call names a segment and an offset. capstone separates
+        # the pair with a comma for lcall (a colon only for ljmp), so the operand string
+        # still starts with "0x" and the direct-call arm below would book a code ref to the
+        # segment selector. There is no in-image target to book, so drop it like _analyzeJmp.
+        if i_mnemonic.split(" ")[-1] == "lcall":
+            return
         call_destination = d.getReferencedAddr(i_op_str)
-        if ":" in i_op_str:
-            # case = "LONG-CALL"
-            pass
         if i_op_str.startswith("dword ptr ["):
             # reg+offset is currently ignored as it is a minority of calls
             # case = "DWORD-PTR-REG"
@@ -449,7 +452,7 @@ class X86Backend(ArchBackend):
                 if d.fc_manager.isHotpatchPrologue(instruction_bytes[:5]):
                     seed_address = i_address
                 else:
-                    seed_address = previous_address + (16 - previous_address % 16)
+                    seed_address = (i_address + 15) & ~15
                 # MSVC also int3/nop-pads mid-function (after noreturn calls, loop-head
                 # alignment) on PE images, so alignment-only evidence (no candidate hit at
                 # i_address) needs its seed to actually decode as a function entry before
@@ -493,7 +496,7 @@ class X86Backend(ArchBackend):
                         if d.fc_manager.isHotpatchPrologue(instruction_bytes[:5]):
                             next_candidate_address = i_address
                         else:
-                            next_candidate_address = previous_address + (16 - previous_address % 16)
+                            next_candidate_address = (i_address + 15) & ~15
                         if LOGGER.isEnabledFor(logging.DEBUG):
                             LOGGER.debug(
                                 "  Adding: 0x%x as candidate.",
