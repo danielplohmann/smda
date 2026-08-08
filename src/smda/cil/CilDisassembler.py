@@ -247,14 +247,12 @@ class CilDisassembler:
                     pass
                 else:
                     state.addCodeRef(i_address, target, by_jump=True)
-            if i_mnemonic in ["ldstr"]:
-                # we possibly want to extract and collect these and put them in the stringref part of SmdaFunction
-                # format_operand only wraps the operand in quotes when the resolved user string
-                # is a str; an unreadable #US entry falls through to str(InvalidToken), where
-                # the unconditional [1:-1] would chop two real characters off the string ref
-                string_ref = i_op_str[1:-1] if i_op_str.startswith('"') and i_op_str.endswith('"') else i_op_str
-                self.disassembly.addStringRef(start_addr, i_address, string_ref)
+            # format_operand only quotes a resolved user string; an unreadable #US entry
+            # falls through to the token's own text, which is not a recovered string
+            if i_mnemonic == "ldstr" and i_op_str.startswith('"') and i_op_str.endswith('"'):
+                self.disassembly.addStringRef(start_addr, i_address, i_op_str[1:-1])
             if i_mnemonic in ["call", "calli", "callvirt"]:
+                state.is_leaf_function = False
                 self._updateApiInformation(i_address, i_bytes, i_op_str)
                 # https://blog.objektkultur.de/about-tail-recursion-in-.net/
                 if state.prev_opcode.startswith("tail"):
@@ -299,7 +297,13 @@ class CilDisassembler:
 
         LOGGER.debug("Starting parser-based analysis.")
         pe = dnfile.dnPE(data=binary_info.raw_data)
-        for row in pe.net.mdtables.MethodDef:
+        # a corrupted metadata signature leaves dnfile with no tables at all; the symbol
+        # provider already degrades on that, so the disassembler must not raise on it
+        method_defs = getattr(getattr(getattr(pe, "net", None), "mdtables", None), "MethodDef", None)
+        if not method_defs:
+            LOGGER.error("No readable .NET MethodDef table, no methods to analyze")
+            method_defs = []
+        for row in method_defs:
             if not row.Rva or not row.ImplFlags.miIL or any((row.Flags.mdAbstract, row.Flags.mdPinvokeImpl)):
                 continue
             try:
