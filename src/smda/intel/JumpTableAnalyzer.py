@@ -2,6 +2,8 @@ import logging
 import re
 import struct
 
+from smda.intel.definitions import RET_INS
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -63,7 +65,7 @@ class JumpTableAnalyzer:
     def _findJumpTableSize(self, backtracked):
         jumptable_size = 0
         for instr in backtracked[::-1]:
-            if instr[2].split(" ")[-1].startswith("ret"):
+            if instr[2].split(" ")[-1] in RET_INS:
                 break
             if instr[2] == "cmp" and self.RE_CMP_SIZE.match(instr[3]):
                 jumptable_size = int(instr[3].split(",")[-1].strip(), base=16) + 1
