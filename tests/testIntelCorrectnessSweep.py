@@ -223,5 +223,26 @@ class IntelEscaperClassificationTestSuite(unittest.TestCase):
                 )
 
 
+class JumpTableDirectEntriesTestSuite(unittest.TestCase):
+    def test_direct_table_entries_are_read_little_endian(self):
+        analyzer = JumpTableAnalyzer.__new__(JumpTableAnalyzer)
+        table = b"\x00\x10\x40\x00" + b"\x20\x10\x40\x00"
+
+        class _StubDisassembly:
+            @staticmethod
+            def isAddrWithinMemoryImage(addr):
+                return True
+
+            @staticmethod
+            def getBytes(addr, size):
+                start = addr - 0x403000
+                chunk = table[start : start + size]
+                return chunk if len(chunk) == size else None
+
+        analyzer.disassembly = _StubDisassembly()
+
+        self.assertEqual(analyzer._extractDirectTableOffsets(2, 0x403000), [0x401000, 0x401020])
+
+
 if __name__ == "__main__":
     unittest.main()
