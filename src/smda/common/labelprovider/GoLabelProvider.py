@@ -81,6 +81,11 @@ class GoSymbolProvider(AbstractLabelProvider):
                         pclntab_offset = section.offset + symbol.value
         except Exception as exc:
             reraise_non_operational_exception(exc)
+        # the section locations above are file offsets, while binary_bytes is the mapped
+        # image; where the two layouts differ the candidate points at unrelated bytes, so
+        # confirm the header before preferring it over the scan
+        if pclntab_offset is not None and self._readPcLntabHeader(binary_bytes, pclntab_offset) is None:
+            pclntab_offset = None
         if pclntab_offset is None:
             # scan for offset of structure
             hits = [match.start() for match in _PCLNTAB_HEADER_RE.finditer(binary_bytes)]
@@ -100,7 +105,13 @@ class GoSymbolProvider(AbstractLabelProvider):
         """
         binary_bytes = binary.binary if hasattr(binary, "binary") else binary
         pclntab_offset = self.getPcLntabOffset(binary)
-        if pclntab_offset is None or pclntab_offset < 0 or pclntab_offset + 8 > len(binary_bytes):
+        if pclntab_offset is None:
+            return None
+        return self._readPcLntabHeader(binary_bytes, pclntab_offset)
+
+    @staticmethod
+    def _readPcLntabHeader(binary_bytes, pclntab_offset):
+        if pclntab_offset < 0 or pclntab_offset + 8 > len(binary_bytes):
             return None
         header = binary_bytes[pclntab_offset : pclntab_offset + 8]
         markers = (struct.unpack("<I", header[:4])[0], struct.unpack(">I", header[:4])[0])
@@ -206,6 +217,8 @@ class GoSymbolProvider(AbstractLabelProvider):
         for index in range(number_of_functions):
             # need to parse a second table in this case
             if version == "1.12":
+                if read_offset + 2 * field_size > len(table_buffer):
+                    break
                 offsets[index] = struct.unpack(
                     "<" + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
@@ -218,6 +231,8 @@ class GoSymbolProvider(AbstractLabelProvider):
                 read_offset += field_size
             # advance element pointer
             if version == "1.16":
+                if read_offset + field_size > len(table_buffer):
+                    break
                 offsets[index] = struct.unpack(
                     "<" + field_indicator,
                     table_buffer[read_offset : read_offset + field_size],
@@ -225,6 +240,8 @@ class GoSymbolProvider(AbstractLabelProvider):
                 read_offset += 2 * field_size
             # here we have a more compact structure for both x86/x64, no need to skip
             if version == "1.18" or version == "1.20":
+                if read_offset + 4 > len(table_buffer):
+                    break
                 offsets[index] = struct.unpack("<I", table_buffer[read_offset : read_offset + 4])[0]
                 read_offset += 8
 
@@ -234,6 +251,8 @@ class GoSymbolProvider(AbstractLabelProvider):
         if version == "1.12":
             for index, info_offset in func_info_offsets.items():
                 function_offset = offsets[index]
+                if info_offset < 0 or info_offset + 2 * field_size > len(pclntab_buffer):
+                    continue
                 name_offset = struct.unpack(
                     "<" + field_indicator,
                     pclntab_buffer[info_offset + field_size : info_offset + 2 * field_size],
