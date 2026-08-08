@@ -128,5 +128,43 @@ class IdaInterfaceSingletonTestSuite(unittest.TestCase):
         self.assertIsNone(IdaInterface.instance)
 
 
+class _FakeAArch64IdaInterface(_FakeIdaInterface):
+    """One IDA "instruction" that SMDA splits into two: a macro head."""
+
+    def __init__(self, function_addr, instruction_bytes, out_ref_target):
+        super().__init__(function_addr, instruction_bytes)
+        self.out_ref_target = out_ref_target
+
+    def getArchitecture(self):
+        return "aarch64"
+
+    def getCodeOutRefs(self, offset):
+        return [(offset, self.out_ref_target)]
+
+
+class IdaExporterMacroSplitTestSuite(unittest.TestCase):
+    def test_an_out_ref_is_anchored_on_the_instruction_that_leaves(self):
+        # two AArch64 instructions that IDA reports as one macro head at 0x1000; the edge
+        # leaves from 0x1004, not from the head
+        macro = b"\x1f\x20\x03\xd5" * 2
+        exporter = IdaExporter.__new__(IdaExporter)
+        exporter.config = SmdaConfig()
+        exporter.bitness = 64
+        exporter.architecture = "aarch64"
+        exporter.disassembly = DisassemblyResult()
+        exporter.ida_interface = _FakeAArch64IdaInterface(0x1000, macro, 0x2000)
+        exporter._initCapstone()
+
+        binary_info = BinaryInfo(macro)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 64
+        binary_info.architecture = "aarch64"
+        report = exporter.analyzeBuffer(binary_info)
+
+        self.assertEqual(len(report.functions[0x1000][0]), 2, "the macro head must split into two")
+        self.assertEqual(report.code_refs_from.get(0x1004), {0x2000})
+        self.assertNotIn(0x1000, report.code_refs_from)
+
+
 if __name__ == "__main__":
     unittest.main()
