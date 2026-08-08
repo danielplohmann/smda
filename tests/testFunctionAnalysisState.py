@@ -183,5 +183,31 @@ class RevertAnalysisTestSuite(unittest.TestCase):
         self.assertEqual(disassembly.thunk_functions, set())
 
 
+class DalvikRevertAnalysisTestSuite(unittest.TestCase):
+    def test_revert_undoes_every_start_addr_keyed_result(self):
+        disassembly = _RecordingDisassembly()
+        disassembly.function_metadata = {}
+        state = DalvikFunctionAnalysisState(0x100, disassembly)
+        state.label = "Lfoo;->bar()V"
+        state.addInstruction(0x100, 2, "return-void", "", b"\x0e\x00")
+        state.endBlock()
+        state.is_recursive = True
+        state.is_thunk_call = True
+        state._finalizeRegularAnalysis()
+
+        self.assertEqual(disassembly.function_symbols[0x100], "Lfoo;->bar()V")
+        self.assertIn(0x100, disassembly.function_metadata)
+        self.assertEqual(disassembly.leaf_functions, {0x100})
+
+        state.revertAnalysis()
+
+        self.assertNotIn(0x100, disassembly.functions)
+        self.assertNotIn(0x100, disassembly.function_symbols)
+        self.assertNotIn(0x100, disassembly.function_metadata)
+        self.assertEqual(disassembly.leaf_functions, set())
+        self.assertEqual(disassembly.recursive_functions, set())
+        self.assertEqual(disassembly.thunk_functions, set())
+
+
 if __name__ == "__main__":
     unittest.main()
