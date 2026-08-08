@@ -675,7 +675,12 @@ class MachoSynthesizer(BinarySynthesizer):
                 if section["zerofill"]:
                     continue
                 start = section["va_start"] - segment["va_start"]
-                segment_raw[start : start + len(section["raw"])] = section["raw"]
+                # clamp to the segment's own filesize and use the same length on both sides:
+                # a section whose extent runs past it would otherwise grow segment_raw
+                # through the slice assignment and shift every following segment's fileoff
+                raw = section["raw"]
+                copy_length = min(len(raw), max(0, len(segment_raw) - start))
+                segment_raw[start : start + copy_length] = raw[:copy_length]
             output += segment_raw
 
         if import_map:

@@ -16,6 +16,10 @@ SECTION_CHARS_CODE = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_
 SECTION_CHARS_DATA = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ
 SECTION_CHARS_DATA_RW = SECTION_CHARS_DATA | IMAGE_SCN_MEM_WRITE
 
+# Largest gap between a DLL's first and last recovered import slot that is still worth
+# filling with placeholder thunks. One page of pointers is far more than any real IAT run.
+MAX_IAT_PADDING_SPAN = 0x1000
+
 IMAGE_DIRECTORY_ENTRY_IMPORT = 1
 IMAGE_FILE_EXECUTABLE_IMAGE = 0x0002
 IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x0020
@@ -157,6 +161,14 @@ class PeSynthesizer(BinarySynthesizer):
                 continue
             first = min(rva for rva, _ in funcs)
             last = max(rva for rva, _ in funcs)
+            # a real IAT is contiguous, so the gaps worth filling are small. When the
+            # recovered slots are scattered across the image instead, filling every
+            # pointer-sized gap between them adds megabytes of thunks and nothing else.
+            if last - first > MAX_IAT_PADDING_SPAN:
+                self._warn(
+                    "synthesis: import slots for %s span 0x%x bytes, not padding the gaps", dll_name, last - first
+                )
+                continue
             padded = 0
             va = first
             while va <= last:

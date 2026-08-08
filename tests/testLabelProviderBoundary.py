@@ -79,5 +79,59 @@ class LabelProviderBoundaryTestSuite(unittest.TestCase):
         self.assertEqual(report.status, "ok")
 
 
+class PdbSeedSurvivalTestSuite(unittest.TestCase):
+    def test_a_supplied_pdb_is_reapplied_after_the_binary_pass(self):
+        from smda.common.BinaryInfo import BinaryInfo
+        from smda.common.RecursiveDisassembler import RecursiveDisassembler
+
+        updated_with = []
+
+        class _RecordingProvider:
+            def update(self, binary_info):
+                updated_with.append(binary_info.file_path)
+
+            def is_active(self):
+                return True
+
+        disassembler = RecursiveDisassembler.__new__(RecursiveDisassembler)
+        disassembler.label_providers = [_RecordingProvider()]
+        disassembler.api_providers = []
+        disassembler.symbol_providers = []
+        binary_info = BinaryInfo(b"")
+        binary_info.file_path = "sample.exe"
+        binary_info.base_addr = 0x400000
+
+        disassembler.addPdbFile(binary_info, "sample.pdb")
+        disassembler._updateLabelProviders(binary_info)
+
+        # a provider resets its symbol map at the top of update(), so the binary pass would
+        # otherwise discard everything the PDB seeded before analysis started
+        self.assertEqual(updated_with, ["sample.pdb", "sample.exe", "sample.pdb"])
+
+    def test_no_pdb_means_no_second_pass(self):
+        from smda.common.BinaryInfo import BinaryInfo
+        from smda.common.RecursiveDisassembler import RecursiveDisassembler
+
+        updated_with = []
+
+        class _RecordingProvider:
+            def update(self, binary_info):
+                updated_with.append(binary_info.file_path)
+
+            def is_active(self):
+                return True
+
+        disassembler = RecursiveDisassembler.__new__(RecursiveDisassembler)
+        disassembler.label_providers = [_RecordingProvider()]
+        disassembler.api_providers = []
+        disassembler.symbol_providers = []
+        binary_info = BinaryInfo(b"")
+        binary_info.file_path = "sample.exe"
+
+        disassembler._updateLabelProviders(binary_info)
+
+        self.assertEqual(updated_with, ["sample.exe"])
+
+
 if __name__ == "__main__":
     unittest.main()
