@@ -69,12 +69,16 @@ class DominatorTree:
             return self.label.get(v, v)
 
     def COMPRESS(self, v):
-        if self.ancestor[v] in self.ancestor:
-            self.COMPRESS(self.ancestor[v])
-            w = self.ancestor[v]
-            if self.semi[self.label.get(w, w)] < self.semi[self.label.get(v, v)]:
-                self.label[v] = self.label.get(w, w)
-            self.ancestor[v] = self.ancestor[w]
+        path = []
+        node = v
+        while self.ancestor[node] in self.ancestor:
+            path.append(node)
+            node = self.ancestor[node]
+        for node in reversed(path):
+            w = self.ancestor[node]
+            if self.semi[self.label.get(w, w)] < self.semi[self.label.get(node, node)]:
+                self.label[node] = self.label.get(w, w)
+            self.ancestor[node] = self.ancestor[w]
 
     def steps_2_3(self):
         for w in self.vertex[:0:-1]:
