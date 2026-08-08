@@ -102,6 +102,19 @@ class TestDominatorTree(unittest.TestCase):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
 
+    def test_deep_ancestor_chain_does_not_exhaust_the_recursion_limit(self):
+        # the back edge is what makes this deep: every node from the tail up to node 1 is
+        # already LINKed by the time node 1 is processed, so EVAL walks the whole chain
+        size = 1500
+        G = {i: [i + 1] for i in range(size)}
+        G[size] = [1]
+
+        inv = build_dominator_tree(G, 0)
+
+        self.assertEqual(inv[0], [1])
+        self.assertEqual(inv[size - 1], [size])
+        self.assertNotIn(size, inv)
+
 
 if __name__ == "__main__":
     unittest.main()
