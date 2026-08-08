@@ -84,9 +84,8 @@ class GoSymbolProvider(AbstractLabelProvider):
         # the section locations above are file offsets, while binary_bytes is the mapped
         # image; where the two layouts differ the candidate points at unrelated bytes, so
         # confirm the header before preferring it over the scan
-        if pclntab_offset is not None and self._readPcLntabHeader(binary_bytes, pclntab_offset) is None:
+        if pclntab_offset is None or self._readPcLntabHeader(binary_bytes, pclntab_offset) is None:
             pclntab_offset = None
-        if pclntab_offset is None:
             # scan for offset of structure
             hits = [match.start() for match in _PCLNTAB_HEADER_RE.finditer(binary_bytes)]
             if len(hits) == 1:
