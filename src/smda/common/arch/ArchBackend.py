@@ -61,6 +61,12 @@ class ArchBackend:
         """Heuristically determine bitness when it is not supplied by the loader."""
         raise NotImplementedError
 
+    def recordImportSlotLoads(self, disassembler, state):
+        """Record APIs whose slot is loaded into a register rather than called through.
+
+        Optional annotation pass; a backend that does not implement it records nothing.
+        """
+
     # --- per-instruction control-flow analysis ---------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):
         """Analyze a single decoded instruction and update ``state`` accordingly.

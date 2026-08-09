@@ -1,13 +1,18 @@
+import os
 import struct
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from smda.common.arch.ArchBackend import ArchBackend
+from smda.common.RecursiveDisassembler import RecursiveDisassembler
 from smda.common.SmdaReport import SmdaReport
+from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.FunctionAnalysisState import FunctionAnalysisState
 from smda.intel.IndirectCallAnalyzer import IndirectCallAnalyzer
 from smda.intel.X86Backend import X86Backend
+from smda.SmdaConfig import SmdaConfig
 
 BASE = 0x400000
 SLOT_TABLE = 0x403000
@@ -34,6 +39,94 @@ def _analyzer(disassembly, resolved=("kernel32.dll", "CreateFileA")):
     disassembler.resolveApi.return_value = resolved
     disassembler.config.MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
     return IndirectCallAnalyzer(disassembler)
+
+
+class ImportSlotLoadTestSuite(unittest.TestCase):
+    """A slot that is only loaded into a register still names the API it holds.
+
+    A language runtime that dispatches its own syscalls (Go on Windows is the
+    common case) never issues "call [slot]" - it loads the slot and hands the
+    pointer to a shared helper, so a call/jmp-driven pass sees no API at all.
+    """
+
+    def _run(self, mnemonic, op_str, address=0x401000, size=7):
+        disassembly = _disassembly()
+        state = FunctionAnalysisState(address, disassembly)
+        state.addInstruction(address, size, mnemonic, op_str, b"")
+        disassembler = MagicMock()
+        disassembler.disassembly = disassembly
+        disassembler.getReferencedAddr = lambda operands: RecursiveDisassembler.getReferencedAddr(
+            disassembler, operands
+        )
+        X86Backend.recordImportSlotLoads(X86Backend, disassembler, state)
+        return disassembler._handleApiTarget.call_args_list
+
+    def test_a_rip_relative_slot_load_is_recorded_against_its_slot(self):
+        # 0x401000 + 7 + 0x2009 == 0x403010, the qword slot holding 0x500000
+        calls = self._run("mov", "rax, qword ptr [rip + 0x2009]")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0], ((0x401000, 0x403010, 0x500000), {"slot": 0x403010}))
+
+    def test_a_negative_rip_displacement_resolves_behind_the_instruction(self):
+        calls = self._run("mov", "rax, qword ptr [rip - 0x1ff7]", address=0x405000)
+
+        self.assertEqual(calls[0][0][1], 0x403010)
+
+    def test_an_absolute_dword_slot_load_is_recorded(self):
+        calls = self._run("mov", "eax, dword ptr [0x403008]")
+
+        self.assertEqual(calls[0], ((0x401000, 0x403008, 0x500000), {"slot": 0x403008}))
+
+    def test_an_instruction_that_is_not_a_mov_is_ignored(self):
+        # lea takes the address of the slot rather than the pointer inside it
+        self.assertEqual(self._run("lea", "rax, qword ptr [rip + 0x2009]"), [])
+
+    def test_a_prefixed_mov_is_still_recognised(self):
+        self.assertEqual(len(self._run("rep mov", "rax, qword ptr [rip + 0x2009]")), 1)
+
+    def test_a_store_into_a_slot_is_not_a_load(self):
+        # writing to a slot is import patching, a different fact
+        self.assertEqual(self._run("mov", "qword ptr [rip + 0x2009], rax"), [])
+
+    def test_a_register_relative_slot_stays_on_the_computed_slot_path(self):
+        self.assertEqual(self._run("mov", "rax, qword ptr [rbx + 0x10]"), [])
+
+    def test_a_slot_outside_the_image_dereferences_to_nothing(self):
+        self.assertEqual(self._run("mov", "rax, qword ptr [0x999999]"), [])
+
+    def test_a_backend_without_the_pass_records_nothing(self):
+        # the base hook is a no-op so a backend that has no such shape opts out by doing nothing
+        self.assertIsNone(ArchBackend.recordImportSlotLoads(ArchBackend, MagicMock(), MagicMock()))
+
+
+class ImportSlotLoadConfigTestSuite(unittest.TestCase):
+    """The pass is opt-in, and enabling it must not move CFG recovery."""
+
+    @staticmethod
+    def _asprox():
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "asprox_0x008D0000_xored")
+        with open(path, "rb") as handle:
+            return bytes(byte ^ (index % 256) for index, byte in enumerate(handle.read()))
+
+    def test_the_flag_is_off_by_default(self):
+        self.assertFalse(SmdaConfig().RECORD_IMPORT_SLOT_LOADS)
+
+    def test_enabling_the_pass_annotates_without_moving_recovery(self):
+        buffer = self._asprox()
+        reports = {}
+        for flag in (False, True):
+            config = SmdaConfig()
+            config.RECORD_IMPORT_SLOT_LOADS = flag
+            reports[flag] = Disassembler(config=config).disassembleBuffer(buffer, 0x8D0000)
+
+        # the pass books no code refs and no candidates, so recovery is identical by construction
+        self.assertEqual(reports[True].num_functions, reports[False].num_functions)
+        self.assertEqual(reports[True].num_instructions, reports[False].num_instructions)
+        self.assertEqual(
+            sorted(f.offset for f in reports[True].getFunctions()),
+            sorted(f.offset for f in reports[False].getFunctions()),
+        )
 
 
 class CollectComputedSlotTestSuite(unittest.TestCase):

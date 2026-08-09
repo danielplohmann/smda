@@ -1,3 +1,4 @@
+import logging
 import unittest
 from types import SimpleNamespace
 
@@ -947,6 +948,35 @@ class TestIntelDisassembler(unittest.TestCase):
         # other int vectors are unaffected (not treated as a syscall gate at all)
         state = self._analyze(backend, "int", "0x2e", [self._ins("mov", "eax, 1")])
         self.assertFalse(state.is_sanely_ending)
+
+    def test_int0x80_exit_reports_the_program_end_at_debug_level(self):
+        # the whole suite runs under a global logging.disable(), which suppresses records
+        # regardless of logger level, so the debug arm needs that lifted rather than just a
+        # level change - restore the previous value so later tests keep their quiet output
+        backend = X86Backend()
+        logger = logging.getLogger("smda.intel.X86Backend")
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        try:
+            with self.assertLogs(logger, level=logging.DEBUG) as captured:
+                state = self._analyze(backend, "int", "0x80", [self._ins("mov", "eax, 1")])
+        finally:
+            logging.disable(previous_disable)
+
+        self.assertTrue(state.is_sanely_ending)
+        self.assertTrue(any("program ending instruction" in line for line in captured.output))
+
+    def test_an_import_stub_of_pure_padding_resolves_to_no_slot(self):
+        # endbr/nop are skipped while looking for the stub's jmp, so a window holding
+        # nothing else runs the scan out of instructions with no slot to report
+        binary_info = SimpleNamespace(_plt_ranges=[(0x1000, 0x1010)], _macho_stub_ranges=[])
+        disassembler = SimpleNamespace(
+            disassembly=SimpleNamespace(binary_info=binary_info),
+            capstone=Cs(CS_ARCH_X86, CS_MODE_64),
+            _getDisasmWindowBuffer=lambda addr: b"\xf3\x0f\x1e\xfa" + b"\x90" * 4,
+        )
+
+        self.assertIsNone(X86Backend._resolveImportSlot(disassembler, 0x1000))
 
     def _analyzeCallAlignmentCut(self, tail_bytes, lief_type="PE", bitness=64, candidate_addrs=None):
         # lays out: call rel32 @ call_addr; effective-NOP padding ("mov eax, eax" x5,
