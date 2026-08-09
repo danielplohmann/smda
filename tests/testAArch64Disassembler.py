@@ -1674,6 +1674,19 @@ class TestAArch64Analyzers(unittest.TestCase):
         # the slot the pointer was loaded from is what reaches imported_functions
         self.assertEqual(disassembly.import_slots, {0x401010: ("GLIBC_2.2.5", "puts")})
 
+    def test_aarch64_indexed_load_reports_no_single_import_slot(self):
+        from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+
+        from smda.aarch64.analyzers import AArch64IndirectCallAnalyzer
+
+        capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        capstone.detail = True
+        # ldr x8, [x9, x10] addresses a table, not one slot, so there is nothing to record
+        decoded = [next(capstone.disasm(w.to_bytes(4, "little"), 0x401000 + i * 4)) for i, w in enumerate([0xF86A6928])]
+        analyzer = AArch64IndirectCallAnalyzer(SimpleNamespace(disassembly=None, capstone=capstone))
+
+        self.assertIsNone(analyzer._loadSlotFor(decoded, "x8"))
+
     def test_aarch64_indirect_call_clears_stale_register_after_unknown_mov(self):
         from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 
