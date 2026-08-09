@@ -1,6 +1,9 @@
+import pathlib
 import struct
 import unittest
+from types import SimpleNamespace
 
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 
 
@@ -213,6 +216,109 @@ class TestPcLntab116EntryWidth(unittest.TestCase):
         binary = _table_116_64("<", 0x400000, name_bytes="main.run·dwrap·1\x00".encode())
 
         self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), {0x400000: "main.run.dwrap.1"})
+
+
+def _table_118_or_120(magic, text_start_field, name_bytes=b"main.main\x00"):
+    """A 1.18/1.20 table with one function, whose entry is an offset from the text start."""
+    buf = bytearray(0x200)
+    buf[0:4] = struct.pack("<I", magic)
+    buf[4:6] = b"\x00\x00"
+    buf[6] = 1
+    buf[7] = 8
+    # nfunc, nfiles, textStart, funcnameOffset, cuOffset, filetabOffset, pctabOffset, pclnOffset
+    # the eight-quadword field block runs to 0x48, so the name table has to start past it
+    buf[8:72] = struct.pack("<8Q", 1, 0, text_start_field, 0xC0, 0, 0, 0, 0x80)
+    buf[0xC0:0xC8] = b"decoy\x00\x00\x00"
+    buf[0xC8 : 0xC8 + len(name_bytes)] = name_bytes
+    # functab: entry offset, then the offset of its _func
+    buf[0x80:0x84] = struct.pack("<I", 0x1000)
+    buf[0x88:0x8C] = struct.pack("<I", 0x1000)
+    buf[0x8C:0x90] = struct.pack("<I", 8)
+    return bytes(buf)
+
+
+class TestPcLntabTextStart(unittest.TestCase):
+    """Go stopped maintaining the header's text start, so the container has to supply it."""
+
+    def test_a_supplied_text_start_wins_over_the_header_field(self):
+        # an externally linked build leaves the header field at 0 and its entries relative
+        binary = _table_118_or_120(0xFFFFFFF1, 0)
+
+        self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), {0x1000: "main.main"})
+        self.assertEqual(
+            GoSymbolProvider(None)._parse_pclntab(0, binary, 0x100001B30),
+            {0x100002B30: "main.main"},
+        )
+
+    def test_the_header_field_is_still_used_when_the_container_offers_nothing(self):
+        binary = _table_118_or_120(0xFFFFFFF0, 0x400000)
+
+        self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), {0x401000: "main.main"})
+
+    def test_a_supplied_text_start_of_zero_is_honoured_rather_than_treated_as_absent(self):
+        binary = _table_118_or_120(0xFFFFFFF1, 0x400000)
+
+        self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary, 0), {0x1000: "main.main"})
+
+
+def _fixture(name):
+    raw = (pathlib.Path(__file__).resolve().parent / name).read_bytes()
+    return bytes(byte ^ (index % 256) for index, byte in enumerate(raw))
+
+
+class TestTextStartSources(unittest.TestCase):
+    """Where the text start comes from when no runtime.text symbol is available."""
+
+    def test_an_elf_falls_back_to_its_text_section(self):
+        binary_info = BinaryInfo(_fixture("bashlite_xored"))
+
+        self.assertEqual(GoSymbolProvider(None).getTextStart(binary_info), 0x400100)
+
+    def test_a_pe_section_address_is_lifted_by_the_image_base(self):
+        # LIEF reports a PE section address as an RVA, unlike ELF and Mach-O
+        binary_info = BinaryInfo(_fixture("pe_export_label_test_xored"))
+        lief_binary = binary_info.getLiefBinary()
+
+        text_start = GoSymbolProvider(None).getTextStart(binary_info)
+
+        self.assertEqual(text_start, lief_binary.get_section(".text").virtual_address + lief_binary.imagebase)
+
+    def test_a_container_without_a_text_section_offers_nothing(self):
+        stub = SimpleNamespace(
+            getLiefBinary=lambda: SimpleNamespace(symbols=[], get_section=lambda name: None),
+            bitness=64,
+            architecture="intel",
+        )
+
+        self.assertIsNone(GoSymbolProvider(None).getTextStart(stub))
+
+    def test_a_container_that_cannot_be_read_offers_nothing(self):
+        def _explode():
+            raise ValueError("unreadable container")
+
+        stub = SimpleNamespace(getLiefBinary=_explode, bitness=64, architecture="intel")
+
+        self.assertIsNone(GoSymbolProvider(None).getTextStart(stub))
+
+
+class TestPcLntabBitnessMarker(unittest.TestCase):
+    def test_an_unrecognized_pointer_size_is_rejected(self):
+        binary = bytearray(_table_116_64("<", 0x400000))
+        binary[7] = 2
+
+        with self.assertRaises(ValueError):
+            GoSymbolProvider(None)._parse_pclntab(0, bytes(binary))
+
+
+class TestGoProviderCapabilities(unittest.TestCase):
+    def test_a_symbol_only_provider_resolves_no_api(self):
+        # the dispatcher never asks, because isApiProvider is False, but the pair it would
+        # get has to be the empty one every other provider returns for "not mine"
+        provider = GoSymbolProvider(None)
+
+        self.assertFalse(provider.isApiProvider())
+        self.assertTrue(provider.isSymbolProvider())
+        self.assertEqual(provider.getApi(0x401000), ("", ""))
 
 
 if __name__ == "__main__":

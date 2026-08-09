@@ -124,6 +124,39 @@ class GoSymbolProvider(AbstractLabelProvider):
             return None
         return {"offset": pclntab_offset, "version": _PCLNTAB_VERSIONS[marker], "bitness": header[7] * 8}
 
+    def getTextStart(self, binary_info):
+        """Virtual address of the text section, or ``None``.
+
+        Go stopped storing a usable text start in the pclntab header - the field is a
+        placeholder there, because keeping it would have needed a relocation - so its own
+        readers take this from the container instead, preferring a ``runtime.text`` symbol
+        over the section address. An externally linked (cgo) build is where the difference
+        shows: the system linker assigns the final addresses, and the header field reads 0.
+        """
+        try:
+            lief_binary = binary_info.getLiefBinary()
+            if isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
+                lief_binary = get_active_macho_binary(
+                    lief_binary,
+                    bitness=getattr(binary_info, "bitness", None),
+                    architecture=getattr(binary_info, "architecture", ""),
+                )
+            if lief_binary is None:
+                return None
+            for symbol in getattr(lief_binary, "symbols", []):
+                if symbol.name in ("runtime.text", "_runtime.text") and symbol.value:
+                    return symbol.value
+            for name in (".text", "__text"):
+                section = lief_binary.get_section(name)
+                if section is not None and section.virtual_address:
+                    address = section.virtual_address
+                    if isinstance(lief_binary, lief.PE.Binary):
+                        address += lief_binary.optional_header.imagebase
+                    return address
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+        return None
+
     def update(self, binary_info):
         self._func_symbols = {}
         binary = binary_info.binary
@@ -131,7 +164,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         # if we found a valid offset, do the pclntab parsing
         if pclntab_offset is not None:
             try:
-                result = self._parse_pclntab(pclntab_offset, binary)
+                result = self._parse_pclntab(pclntab_offset, binary, self.getTextStart(binary_info))
                 if result:
                     self._func_symbols = result
             except Exception as exc:
@@ -168,7 +201,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         # period, so a name reported here matches what go tool nm prints for the same function
         return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ".")
 
-    def _parse_pclntab(self, pclntab_offset, binary):
+    def _parse_pclntab(self, pclntab_offset, binary, text_start=None):
         pclntab_buffer = binary[pclntab_offset:]
 
         # marker are defined here https://go.dev/src/debug/gosym/pclntab.go
@@ -212,7 +245,9 @@ class GoSymbolProvider(AbstractLabelProvider):
                 endianness + 8 * field_indicator, pclntab_buffer[8 : 8 + 8 * field_size]
             )
             number_of_functions = parsed_pclntab_fields[0]
-            start_text = parsed_pclntab_fields[2]
+            # 1.18+ entries are offsets from the text start, and the header's own copy of it
+            # is a placeholder Go no longer maintains - so the container's value wins
+            start_text = parsed_pclntab_fields[2] if text_start is None else text_start
             function_name_offset = pclntab_offset + parsed_pclntab_fields[3]
             weird_table_offset = pclntab_offset + parsed_pclntab_fields[7]
 
