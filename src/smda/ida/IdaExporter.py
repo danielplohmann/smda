@@ -130,6 +130,10 @@ class IdaExporter:
                                 self.disassembly.addCodeRefs(smda_instruction[0], out_ref[1])
                                 if out_ref[1] in api_map:
                                     self.disassembly.addr_to_api[smda_instruction[0]] = api_map[out_ref[1]]
+                                    # api_map is keyed by the import entry, so out_ref[1] is
+                                    # the slot this API is reached through
+                                    dll, _, api = api_map[out_ref[1]].rpartition("!")
+                                    self.disassembly.addImportSlot(out_ref[1], dll, api)
                 converted_function.append(converted_block)
             self.disassembly.functions[function_offset] = converted_function
             if self.disassembly.isRecursiveFunction(function_offset):
