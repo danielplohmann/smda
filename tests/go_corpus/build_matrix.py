@@ -19,6 +19,7 @@ silently.
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -29,11 +30,15 @@ import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))
 
+from smda.common.BinaryInfo import BinaryInfo  # noqa: E402
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider  # noqa: E402
 
 SCHEMA_VERSION = 1
 HERE = os.path.dirname(os.path.abspath(__file__))
 SAMPLE = os.path.join(HERE, "sample", "main.go")
+# a package importing "C" forces external linking, where the system linker - not Go's -
+# assigns the final addresses. That is the layout the pclntab header cannot describe.
+CGO_SAMPLE = os.path.join(HERE, "sample", "cgo", "main.go")
 
 # one release per minor; darwin/arm64 hosts cannot run a toolchain older than 1.16
 DEFAULT_VERSIONS = [
@@ -62,7 +67,14 @@ PLATFORMS = [
     ("darwin", "arm64"),
 ]
 
-MODES = ["default", "stripped", "pie"]
+MODES = ["default", "stripped", "pie", "cgo"]
+
+# cgo cannot cross-compile without a C toolchain for the target, so those cells only run
+# where the host is the target
+HOST_PLATFORM = (
+    {"Darwin": "darwin", "Linux": "linux", "Windows": "windows"}.get(platform.system()),
+    {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "AMD64": "amd64", "i386": "386"}.get(platform.machine()),
+)
 
 # go tool nm reports section boundary markers alongside functions; they have no pclntab entry
 NM_MARKERS = {
@@ -130,13 +142,14 @@ def dist_list(go_bin):
 
 def build(go_bin, goos, goarch, mode, out_path):
     """Build the sample, returning None on success or a short failure reason."""
-    env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0", GOFLAGS="", GO111MODULE="off")
+    cgo = mode == "cgo"
+    env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="1" if cgo else "0", GOFLAGS="", GO111MODULE="off")
     command = [go_bin, "build", "-o", out_path]
     if mode == "stripped":
         command += ["-ldflags", "-s -w"]
     elif mode == "pie":
         command += ["-buildmode", "pie"]
-    command.append(SAMPLE)
+    command.append(CGO_SAMPLE if cgo else SAMPLE)
     result = subprocess.run(command, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         return (result.stderr.strip().splitlines() or ["build failed"])[-1][:200]
@@ -151,7 +164,9 @@ def reference_symbols(nm_go_bin, path, goos):
     symbols = {}
     for line in result.stdout.splitlines():
         fields = line.split()
-        if len(fields) != 3 or fields[1] not in ("T", "t") or fields[2] in NM_MARKERS:
+        # "runtime.duffzero+8" is an interior entry point of a function the table lists once;
+        # external linking is what puts these in the symbol table
+        if len(fields) != 3 or fields[1] not in ("T", "t") or fields[2] in NM_MARKERS or "+" in fields[2]:
             continue
         name = NM_ABI_SUFFIX.sub("", fields[2])
         # reading a PE, nm takes names from the COFF table and leaves the middle dot as
@@ -170,6 +185,7 @@ def measure(path, reference):
     with open(path, "rb") as handle:
         binary = handle.read()
     provider = GoSymbolProvider(None)
+    binary_info = BinaryInfo(binary)
     cell = {"size": len(binary)}
     try:
         offset = provider.getPcLntabOffset(binary)
@@ -178,14 +194,16 @@ def measure(path, reference):
     if offset is None:
         return dict(cell, status="no_pclntab_found")
     header = provider._readPcLntabHeader(binary, offset)
+    text_start = provider.getTextStart(binary_info)
     cell.update(
         status="parsed",
         pclntab_offset=offset,
         pclntab_version=header["version"] if header else None,
         pclntab_bitness=header["bitness"] if header else None,
+        text_start=text_start,
     )
     try:
-        symbols = provider._parse_pclntab(offset, binary)
+        symbols = provider._parse_pclntab(offset, binary, text_start)
     except Exception as exc:
         return dict(cell, status="parse_error", error=f"{type(exc).__name__}: {exc}"[:200])
     cell["symbols_recovered"] = len(symbols)
@@ -256,6 +274,17 @@ def main():
                     continue
                 default_reference = None
                 for mode in MODES:
+                    if mode == "cgo" and (goos, goarch) != HOST_PLATFORM:
+                        cells.append(
+                            {
+                                "go_version": version,
+                                "goos": goos,
+                                "goarch": goarch,
+                                "mode": mode,
+                                "status": "cgo_needs_host_target",
+                            }
+                        )
+                        continue
                     # "default" runs first so a stripped build can inherit its reference
                     cell, reference = run_cell(
                         go_bin, args.nm_go, version, goos, goarch, mode, workdir, default_reference

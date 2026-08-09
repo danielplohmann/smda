@@ -16,7 +16,8 @@
       "reference_symbols": 1455,
       "size": 1943255,
       "status": "parsed",
-      "symbols_recovered": 1459
+      "symbols_recovered": 1459,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -34,7 +35,8 @@
       "reference_symbols": 1455,
       "size": 1359872,
       "status": "parsed",
-      "symbols_recovered": 1459
+      "symbols_recovered": 1459,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -52,7 +54,15 @@
       "reference_symbols": 1455,
       "size": 2270974,
       "status": "parsed",
-      "symbols_recovered": 1459
+      "symbols_recovered": 1459,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -70,7 +80,8 @@
       "reference_symbols": 1502,
       "size": 1761764,
       "status": "parsed",
-      "symbols_recovered": 1505
+      "symbols_recovered": 1505,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -88,7 +99,8 @@
       "reference_symbols": 1502,
       "size": 1191936,
       "status": "parsed",
-      "symbols_recovered": 1505
+      "symbols_recovered": 1505,
+      "text_start": 134516736
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -97,6 +109,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -114,7 +133,8 @@
       "reference_symbols": 1425,
       "size": 1938791,
       "status": "parsed",
-      "symbols_recovered": 1429
+      "symbols_recovered": 1429,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -132,7 +152,8 @@
       "reference_symbols": 1425,
       "size": 1376256,
       "status": "parsed",
-      "symbols_recovered": 1429
+      "symbols_recovered": 1429,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -150,7 +171,15 @@
       "reference_symbols": 1425,
       "size": 2267486,
       "status": "parsed",
-      "symbols_recovered": 1429
+      "symbols_recovered": 1429,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -168,7 +197,8 @@
       "reference_symbols": 1423,
       "size": 2025996,
       "status": "parsed",
-      "symbols_recovered": 1427
+      "symbols_recovered": 1427,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -186,7 +216,8 @@
       "reference_symbols": 1423,
       "size": 1441792,
       "status": "parsed",
-      "symbols_recovered": 1427
+      "symbols_recovered": 1427,
+      "text_start": 69632
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -195,6 +226,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -212,7 +250,8 @@
       "reference_symbols": 1471,
       "size": 2103296,
       "status": "parsed",
-      "symbols_recovered": 1476
+      "symbols_recovered": 1476,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -230,7 +269,8 @@
       "reference_symbols": 1471,
       "size": 1503232,
       "status": "parsed",
-      "symbols_recovered": 1476
+      "symbols_recovered": 1476,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -248,7 +288,15 @@
       "reference_symbols": 1471,
       "size": 2103296,
       "status": "parsed",
-      "symbols_recovered": 1476
+      "symbols_recovered": 1476,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -266,7 +314,8 @@
       "reference_symbols": 1516,
       "size": 1923072,
       "status": "parsed",
-      "symbols_recovered": 1519
+      "symbols_recovered": 1519,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -284,7 +333,8 @@
       "reference_symbols": 1516,
       "size": 1325056,
       "status": "parsed",
-      "symbols_recovered": 1519
+      "symbols_recovered": 1519,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -302,7 +352,15 @@
       "reference_symbols": 1516,
       "size": 1923072,
       "status": "parsed",
-      "symbols_recovered": 1519
+      "symbols_recovered": 1519,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -320,7 +378,8 @@
       "reference_symbols": 1550,
       "size": 2032144,
       "status": "parsed",
-      "symbols_recovered": 1554
+      "symbols_recovered": 1554,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -338,7 +397,8 @@
       "reference_symbols": 1550,
       "size": 1532432,
       "status": "parsed",
-      "symbols_recovered": 1554
+      "symbols_recovered": 1554,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -356,7 +416,15 @@
       "reference_symbols": 1550,
       "size": 2106192,
       "status": "parsed",
-      "symbols_recovered": 1554
+      "symbols_recovered": 1554,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.16.15",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -374,7 +442,8 @@
       "reference_symbols": 1530,
       "size": 2076386,
       "status": "parsed",
-      "symbols_recovered": 1534
+      "symbols_recovered": 1534,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -392,7 +461,8 @@
       "reference_symbols": 1530,
       "size": 1581026,
       "status": "parsed",
-      "symbols_recovered": 1534
+      "symbols_recovered": 1534,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -410,7 +480,27 @@
       "reference_symbols": 1530,
       "size": 2076386,
       "status": "parsed",
-      "symbols_recovered": 1534
+      "symbols_recovered": 1534,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.0,
+      "go_version": "go1.16.15",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 0,
+      "matched_exactly": 0,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 918880,
+      "pclntab_version": "1.16",
+      "recall": 0.0,
+      "reference": "go tool nm",
+      "reference_symbols": 1561,
+      "size": 2114050,
+      "status": "parsed",
+      "symbols_recovered": 0,
+      "text_start": 4294974032
     },
     {
       "address_recall": 1.0,
@@ -428,7 +518,8 @@
       "reference_symbols": 1366,
       "size": 1777533,
       "status": "parsed",
-      "symbols_recovered": 1367
+      "symbols_recovered": 1367,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -446,7 +537,8 @@
       "reference_symbols": 1366,
       "size": 1204224,
       "status": "parsed",
-      "symbols_recovered": 1367
+      "symbols_recovered": 1367,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -464,7 +556,15 @@
       "reference_symbols": 1366,
       "size": 2060348,
       "status": "parsed",
-      "symbols_recovered": 1367
+      "symbols_recovered": 1367,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -482,7 +582,8 @@
       "reference_symbols": 1394,
       "size": 1640043,
       "status": "parsed",
-      "symbols_recovered": 1394
+      "symbols_recovered": 1394,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -500,7 +601,8 @@
       "reference_symbols": 1394,
       "size": 1101824,
       "status": "parsed",
-      "symbols_recovered": 1394
+      "symbols_recovered": 1394,
+      "text_start": 134516736
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -509,6 +611,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -526,7 +635,8 @@
       "reference_symbols": 1306,
       "size": 1841163,
       "status": "parsed",
-      "symbols_recovered": 1307
+      "symbols_recovered": 1307,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -544,7 +654,8 @@
       "reference_symbols": 1306,
       "size": 1310720,
       "status": "parsed",
-      "symbols_recovered": 1307
+      "symbols_recovered": 1307,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -562,7 +673,15 @@
       "reference_symbols": 1306,
       "size": 2169922,
       "status": "parsed",
-      "symbols_recovered": 1307
+      "symbols_recovered": 1307,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -580,7 +699,8 @@
       "reference_symbols": 1301,
       "size": 1861845,
       "status": "parsed",
-      "symbols_recovered": 1302
+      "symbols_recovered": 1302,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -598,7 +718,8 @@
       "reference_symbols": 1301,
       "size": 1310720,
       "status": "parsed",
-      "symbols_recovered": 1302
+      "symbols_recovered": 1302,
+      "text_start": 69632
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -607,6 +728,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -624,7 +752,8 @@
       "reference_symbols": 1408,
       "size": 1934848,
       "status": "parsed",
-      "symbols_recovered": 1409
+      "symbols_recovered": 1409,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -642,7 +771,8 @@
       "reference_symbols": 1408,
       "size": 1343488,
       "status": "parsed",
-      "symbols_recovered": 1409
+      "symbols_recovered": 1409,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -660,7 +790,15 @@
       "reference_symbols": 1408,
       "size": 1934848,
       "status": "parsed",
-      "symbols_recovered": 1409
+      "symbols_recovered": 1409,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -678,7 +816,8 @@
       "reference_symbols": 1416,
       "size": 1804800,
       "status": "parsed",
-      "symbols_recovered": 1416
+      "symbols_recovered": 1416,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -696,7 +835,8 @@
       "reference_symbols": 1416,
       "size": 1235968,
       "status": "parsed",
-      "symbols_recovered": 1416
+      "symbols_recovered": 1416,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -714,7 +854,15 @@
       "reference_symbols": 1416,
       "size": 1804800,
       "status": "parsed",
-      "symbols_recovered": 1416
+      "symbols_recovered": 1416,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -732,7 +880,8 @@
       "reference_symbols": 1478,
       "size": 1877760,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -750,7 +899,8 @@
       "reference_symbols": 1478,
       "size": 1382144,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -768,7 +918,15 @@
       "reference_symbols": 1478,
       "size": 1941648,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.17.13",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -786,7 +944,8 @@
       "reference_symbols": 1421,
       "size": 1932770,
       "status": "parsed",
-      "symbols_recovered": 1422
+      "symbols_recovered": 1422,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -804,7 +963,8 @@
       "reference_symbols": 1421,
       "size": 1470434,
       "status": "parsed",
-      "symbols_recovered": 1422
+      "symbols_recovered": 1422,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -822,7 +982,27 @@
       "reference_symbols": 1421,
       "size": 1932770,
       "status": "parsed",
-      "symbols_recovered": 1422
+      "symbols_recovered": 1422,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.0,
+      "go_version": "go1.17.13",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 0,
+      "matched_exactly": 0,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 830656,
+      "pclntab_version": "1.16",
+      "recall": 0.0,
+      "reference": "go tool nm",
+      "reference_symbols": 1453,
+      "size": 1975426,
+      "status": "parsed",
+      "symbols_recovered": 0,
+      "text_start": 4294974032
     },
     {
       "address_recall": 1.0,
@@ -840,7 +1020,8 @@
       "reference_symbols": 1380,
       "size": 1769003,
       "status": "parsed",
-      "symbols_recovered": 1381
+      "symbols_recovered": 1381,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -858,7 +1039,8 @@
       "reference_symbols": 1380,
       "size": 1183744,
       "status": "parsed",
-      "symbols_recovered": 1381
+      "symbols_recovered": 1381,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -876,7 +1058,15 @@
       "reference_symbols": 1380,
       "size": 1884034,
       "status": "parsed",
-      "symbols_recovered": 1381
+      "symbols_recovered": 1381,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -894,7 +1084,8 @@
       "reference_symbols": 1417,
       "size": 1692865,
       "status": "parsed",
-      "symbols_recovered": 1417
+      "symbols_recovered": 1417,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -912,7 +1103,8 @@
       "reference_symbols": 1417,
       "size": 1130496,
       "status": "parsed",
-      "symbols_recovered": 1417
+      "symbols_recovered": 1417,
+      "text_start": 134516736
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -921,6 +1113,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -938,7 +1137,8 @@
       "reference_symbols": 1370,
       "size": 1802658,
       "status": "parsed",
-      "symbols_recovered": 1371
+      "symbols_recovered": 1371,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -956,7 +1156,8 @@
       "reference_symbols": 1370,
       "size": 1245184,
       "status": "parsed",
-      "symbols_recovered": 1371
+      "symbols_recovered": 1371,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -974,7 +1175,15 @@
       "reference_symbols": 1370,
       "size": 1935073,
       "status": "parsed",
-      "symbols_recovered": 1371
+      "symbols_recovered": 1371,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -992,7 +1201,8 @@
       "reference_symbols": 1318,
       "size": 1947618,
       "status": "parsed",
-      "symbols_recovered": 1319
+      "symbols_recovered": 1319,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1010,7 +1220,8 @@
       "reference_symbols": 1318,
       "size": 1376256,
       "status": "parsed",
-      "symbols_recovered": 1319
+      "symbols_recovered": 1319,
+      "text_start": 69632
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -1019,6 +1230,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1036,7 +1254,8 @@
       "reference_symbols": 1412,
       "size": 1901056,
       "status": "parsed",
-      "symbols_recovered": 1413
+      "symbols_recovered": 1413,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1054,7 +1273,8 @@
       "reference_symbols": 1412,
       "size": 1299968,
       "status": "parsed",
-      "symbols_recovered": 1413
+      "symbols_recovered": 1413,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1072,7 +1292,15 @@
       "reference_symbols": 1412,
       "size": 1901056,
       "status": "parsed",
-      "symbols_recovered": 1413
+      "symbols_recovered": 1413,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1090,7 +1318,8 @@
       "reference_symbols": 1437,
       "size": 1837056,
       "status": "parsed",
-      "symbols_recovered": 1437
+      "symbols_recovered": 1437,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1108,7 +1337,8 @@
       "reference_symbols": 1437,
       "size": 1244160,
       "status": "parsed",
-      "symbols_recovered": 1437
+      "symbols_recovered": 1437,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1126,7 +1356,15 @@
       "reference_symbols": 1437,
       "size": 1837056,
       "status": "parsed",
-      "symbols_recovered": 1437
+      "symbols_recovered": 1437,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1144,7 +1382,8 @@
       "reference_symbols": 1478,
       "size": 1858864,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -1162,7 +1401,8 @@
       "reference_symbols": 1478,
       "size": 1350960,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -1180,7 +1420,15 @@
       "reference_symbols": 1478,
       "size": 1883312,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.18.10",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1198,7 +1446,8 @@
       "reference_symbols": 1478,
       "size": 1893426,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -1216,7 +1465,8 @@
       "reference_symbols": 1478,
       "size": 1398066,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -1234,7 +1484,27 @@
       "reference_symbols": 1478,
       "size": 1893426,
       "status": "parsed",
-      "symbols_recovered": 1479
+      "symbols_recovered": 1479,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9868,
+      "go_version": "go1.18.10",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1495,
+      "matched_exactly": 1493,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 806176,
+      "pclntab_version": "1.18",
+      "recall": 0.9855,
+      "reference": "go tool nm",
+      "reference_symbols": 1515,
+      "size": 1967074,
+      "status": "parsed",
+      "symbols_recovered": 1496,
+      "text_start": 4294974032
     },
     {
       "address_recall": 1.0,
@@ -1252,7 +1522,8 @@
       "reference_symbols": 1419,
       "size": 1825651,
       "status": "parsed",
-      "symbols_recovered": 1420
+      "symbols_recovered": 1420,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1270,7 +1541,8 @@
       "reference_symbols": 1419,
       "size": 1220608,
       "status": "parsed",
-      "symbols_recovered": 1420
+      "symbols_recovered": 1420,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1288,7 +1560,15 @@
       "reference_symbols": 1419,
       "size": 1948706,
       "status": "parsed",
-      "symbols_recovered": 1420
+      "symbols_recovered": 1420,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1306,7 +1586,8 @@
       "reference_symbols": 1473,
       "size": 1768117,
       "status": "parsed",
-      "symbols_recovered": 1473
+      "symbols_recovered": 1473,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -1324,7 +1605,8 @@
       "reference_symbols": 1473,
       "size": 1175552,
       "status": "parsed",
-      "symbols_recovered": 1473
+      "symbols_recovered": 1473,
+      "text_start": 134516736
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -1333,6 +1615,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1350,7 +1639,8 @@
       "reference_symbols": 1417,
       "size": 1825802,
       "status": "parsed",
-      "symbols_recovered": 1418
+      "symbols_recovered": 1418,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1368,7 +1658,8 @@
       "reference_symbols": 1417,
       "size": 1245184,
       "status": "parsed",
-      "symbols_recovered": 1418
+      "symbols_recovered": 1418,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1386,7 +1677,15 @@
       "reference_symbols": 1417,
       "size": 1958105,
       "status": "parsed",
-      "symbols_recovered": 1418
+      "symbols_recovered": 1418,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1404,7 +1703,8 @@
       "reference_symbols": 1368,
       "size": 1979255,
       "status": "parsed",
-      "symbols_recovered": 1369
+      "symbols_recovered": 1369,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1422,7 +1722,8 @@
       "reference_symbols": 1368,
       "size": 1376256,
       "status": "parsed",
-      "symbols_recovered": 1369
+      "symbols_recovered": 1369,
+      "text_start": 69632
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -1431,6 +1732,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1448,7 +1756,8 @@
       "reference_symbols": 1448,
       "size": 1958400,
       "status": "parsed",
-      "symbols_recovered": 1449
+      "symbols_recovered": 1449,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1466,7 +1775,8 @@
       "reference_symbols": 1448,
       "size": 1334272,
       "status": "parsed",
-      "symbols_recovered": 1449
+      "symbols_recovered": 1449,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1484,7 +1794,15 @@
       "reference_symbols": 1448,
       "size": 1958400,
       "status": "parsed",
-      "symbols_recovered": 1449
+      "symbols_recovered": 1449,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1502,7 +1820,8 @@
       "reference_symbols": 1483,
       "size": 1901056,
       "status": "parsed",
-      "symbols_recovered": 1483
+      "symbols_recovered": 1483,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1520,7 +1839,8 @@
       "reference_symbols": 1483,
       "size": 1281024,
       "status": "parsed",
-      "symbols_recovered": 1483
+      "symbols_recovered": 1483,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1538,7 +1858,15 @@
       "reference_symbols": 1483,
       "size": 1901056,
       "status": "parsed",
-      "symbols_recovered": 1483
+      "symbols_recovered": 1483,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1556,7 +1884,8 @@
       "reference_symbols": 1532,
       "size": 1928416,
       "status": "parsed",
-      "symbols_recovered": 1533
+      "symbols_recovered": 1533,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -1574,7 +1903,8 @@
       "reference_symbols": 1532,
       "size": 1395936,
       "status": "parsed",
-      "symbols_recovered": 1533
+      "symbols_recovered": 1533,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -1592,7 +1922,15 @@
       "reference_symbols": 1532,
       "size": 1958448,
       "status": "parsed",
-      "symbols_recovered": 1533
+      "symbols_recovered": 1533,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.19.13",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1610,7 +1948,8 @@
       "reference_symbols": 1534,
       "size": 1948706,
       "status": "parsed",
-      "symbols_recovered": 1535
+      "symbols_recovered": 1535,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -1628,7 +1967,8 @@
       "reference_symbols": 1534,
       "size": 1436834,
       "status": "parsed",
-      "symbols_recovered": 1535
+      "symbols_recovered": 1535,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -1646,7 +1986,27 @@
       "reference_symbols": 1534,
       "size": 1948706,
       "status": "parsed",
-      "symbols_recovered": 1535
+      "symbols_recovered": 1535,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9873,
+      "go_version": "go1.19.13",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1551,
+      "matched_exactly": 1549,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 827584,
+      "pclntab_version": "1.18",
+      "recall": 0.986,
+      "reference": "go tool nm",
+      "reference_symbols": 1571,
+      "size": 2020674,
+      "status": "parsed",
+      "symbols_recovered": 1552,
+      "text_start": 4294974032
     },
     {
       "address_recall": 1.0,
@@ -1664,7 +2024,8 @@
       "reference_symbols": 1445,
       "size": 1858439,
       "status": "parsed",
-      "symbols_recovered": 1447
+      "symbols_recovered": 1447,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1682,7 +2043,8 @@
       "reference_symbols": 1445,
       "size": 1232896,
       "status": "parsed",
-      "symbols_recovered": 1447
+      "symbols_recovered": 1447,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1700,7 +2062,15 @@
       "reference_symbols": 1445,
       "size": 1989638,
       "status": "parsed",
-      "symbols_recovered": 1447
+      "symbols_recovered": 1447,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1718,7 +2088,8 @@
       "reference_symbols": 1505,
       "size": 1794231,
       "status": "parsed",
-      "symbols_recovered": 1506
+      "symbols_recovered": 1506,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -1736,7 +2107,8 @@
       "reference_symbols": 1505,
       "size": 1187840,
       "status": "parsed",
-      "symbols_recovered": 1506
+      "symbols_recovered": 1506,
+      "text_start": 134516736
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -1745,6 +2117,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1762,7 +2141,8 @@
       "reference_symbols": 1441,
       "size": 1908108,
       "status": "parsed",
-      "symbols_recovered": 1443
+      "symbols_recovered": 1443,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1780,7 +2160,8 @@
       "reference_symbols": 1441,
       "size": 1310720,
       "status": "parsed",
-      "symbols_recovered": 1443
+      "symbols_recovered": 1443,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1798,7 +2179,15 @@
       "reference_symbols": 1441,
       "size": 2106739,
       "status": "parsed",
-      "symbols_recovered": 1443
+      "symbols_recovered": 1443,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1816,7 +2205,8 @@
       "reference_symbols": 1393,
       "size": 1994952,
       "status": "parsed",
-      "symbols_recovered": 1395
+      "symbols_recovered": 1395,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -1834,7 +2224,8 @@
       "reference_symbols": 1393,
       "size": 1376256,
       "status": "parsed",
-      "symbols_recovered": 1395
+      "symbols_recovered": 1395,
+      "text_start": 69632
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -1843,6 +2234,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1860,7 +2258,8 @@
       "reference_symbols": 1468,
       "size": 1977856,
       "status": "parsed",
-      "symbols_recovered": 1470
+      "symbols_recovered": 1470,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1878,7 +2277,8 @@
       "reference_symbols": 1468,
       "size": 1342976,
       "status": "parsed",
-      "symbols_recovered": 1470
+      "symbols_recovered": 1470,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1896,7 +2296,15 @@
       "reference_symbols": 1468,
       "size": 1977856,
       "status": "parsed",
-      "symbols_recovered": 1470
+      "symbols_recovered": 1470,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1914,7 +2322,8 @@
       "reference_symbols": 1508,
       "size": 1928704,
       "status": "parsed",
-      "symbols_recovered": 1509
+      "symbols_recovered": 1509,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1932,7 +2341,8 @@
       "reference_symbols": 1508,
       "size": 1297920,
       "status": "parsed",
-      "symbols_recovered": 1509
+      "symbols_recovered": 1509,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -1950,7 +2360,15 @@
       "reference_symbols": 1508,
       "size": 1928704,
       "status": "parsed",
-      "symbols_recovered": 1509
+      "symbols_recovered": 1509,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -1968,7 +2386,8 @@
       "reference_symbols": 1565,
       "size": 1958912,
       "status": "parsed",
-      "symbols_recovered": 1567
+      "symbols_recovered": 1567,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -1986,7 +2405,8 @@
       "reference_symbols": 1565,
       "size": 1414144,
       "status": "parsed",
-      "symbols_recovered": 1567
+      "symbols_recovered": 1567,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -2004,7 +2424,15 @@
       "reference_symbols": 1565,
       "size": 1989952,
       "status": "parsed",
-      "symbols_recovered": 1567
+      "symbols_recovered": 1567,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.20.14",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2022,7 +2450,8 @@
       "reference_symbols": 1567,
       "size": 1984562,
       "status": "parsed",
-      "symbols_recovered": 1569
+      "symbols_recovered": 1569,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -2040,7 +2469,8 @@
       "reference_symbols": 1567,
       "size": 1456178,
       "status": "parsed",
-      "symbols_recovered": 1569
+      "symbols_recovered": 1569,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -2058,7 +2488,27 @@
       "reference_symbols": 1567,
       "size": 1984562,
       "status": "parsed",
-      "symbols_recovered": 1569
+      "symbols_recovered": 1569,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9875,
+      "go_version": "go1.20.14",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1584,
+      "matched_exactly": 1582,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 832768,
+      "pclntab_version": "1.20",
+      "recall": 0.9863,
+      "reference": "go tool nm",
+      "reference_symbols": 1604,
+      "size": 2077202,
+      "status": "parsed",
+      "symbols_recovered": 1586,
+      "text_start": 4294984144
     },
     {
       "address_recall": 1.0,
@@ -2076,7 +2526,8 @@
       "reference_symbols": 1482,
       "size": 1812032,
       "status": "parsed",
-      "symbols_recovered": 1484
+      "symbols_recovered": 1484,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2094,7 +2545,8 @@
       "reference_symbols": 1482,
       "size": 1179648,
       "status": "parsed",
-      "symbols_recovered": 1484
+      "symbols_recovered": 1484,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2112,7 +2564,15 @@
       "reference_symbols": 1482,
       "size": 1922823,
       "status": "parsed",
-      "symbols_recovered": 1484
+      "symbols_recovered": 1484,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2130,7 +2590,8 @@
       "reference_symbols": 1536,
       "size": 1725547,
       "status": "parsed",
-      "symbols_recovered": 1537
+      "symbols_recovered": 1537,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -2148,7 +2609,8 @@
       "reference_symbols": 1536,
       "size": 1130496,
       "status": "parsed",
-      "symbols_recovered": 1537
+      "symbols_recovered": 1537,
+      "text_start": 134516736
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -2157,6 +2619,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2174,7 +2643,8 @@
       "reference_symbols": 1481,
       "size": 1854301,
       "status": "parsed",
-      "symbols_recovered": 1483
+      "symbols_recovered": 1483,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -2192,7 +2662,8 @@
       "reference_symbols": 1481,
       "size": 1245184,
       "status": "parsed",
-      "symbols_recovered": 1483
+      "symbols_recovered": 1483,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -2210,7 +2681,15 @@
       "reference_symbols": 1481,
       "size": 1985492,
       "status": "parsed",
-      "symbols_recovered": 1483
+      "symbols_recovered": 1483,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2228,7 +2707,8 @@
       "reference_symbols": 1429,
       "size": 1991996,
       "status": "parsed",
-      "symbols_recovered": 1431
+      "symbols_recovered": 1431,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -2246,7 +2726,8 @@
       "reference_symbols": 1429,
       "size": 1376256,
       "status": "parsed",
-      "symbols_recovered": 1431
+      "symbols_recovered": 1431,
+      "text_start": 69632
     },
     {
       "error": "clang: error: linker command failed with exit code 1 (use -v to see invocation)",
@@ -2255,6 +2736,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2272,7 +2760,8 @@
       "reference_symbols": 1508,
       "size": 1907712,
       "status": "parsed",
-      "symbols_recovered": 1510
+      "symbols_recovered": 1510,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2290,7 +2779,8 @@
       "reference_symbols": 1508,
       "size": 1276928,
       "status": "parsed",
-      "symbols_recovered": 1510
+      "symbols_recovered": 1510,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2308,7 +2798,15 @@
       "reference_symbols": 1508,
       "size": 1907712,
       "status": "parsed",
-      "symbols_recovered": 1510
+      "symbols_recovered": 1510,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2326,7 +2824,8 @@
       "reference_symbols": 1554,
       "size": 1807872,
       "status": "parsed",
-      "symbols_recovered": 1555
+      "symbols_recovered": 1555,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2344,7 +2843,8 @@
       "reference_symbols": 1554,
       "size": 1206272,
       "status": "parsed",
-      "symbols_recovered": 1555
+      "symbols_recovered": 1555,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2362,7 +2862,15 @@
       "reference_symbols": 1554,
       "size": 1807872,
       "status": "parsed",
-      "symbols_recovered": 1555
+      "symbols_recovered": 1555,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2380,7 +2888,8 @@
       "reference_symbols": 1605,
       "size": 1919584,
       "status": "parsed",
-      "symbols_recovered": 1607
+      "symbols_recovered": 1607,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -2398,7 +2907,8 @@
       "reference_symbols": 1605,
       "size": 1354336,
       "status": "parsed",
-      "symbols_recovered": 1607
+      "symbols_recovered": 1607,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -2416,7 +2926,15 @@
       "reference_symbols": 1605,
       "size": 1943920,
       "status": "parsed",
-      "symbols_recovered": 1607
+      "symbols_recovered": 1607,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.21.13",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2434,7 +2952,8 @@
       "reference_symbols": 1610,
       "size": 1958962,
       "status": "parsed",
-      "symbols_recovered": 1612
+      "symbols_recovered": 1612,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -2452,7 +2971,8 @@
       "reference_symbols": 1610,
       "size": 1414066,
       "status": "parsed",
-      "symbols_recovered": 1612
+      "symbols_recovered": 1612,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -2470,7 +2990,27 @@
       "reference_symbols": 1610,
       "size": 1958962,
       "status": "parsed",
-      "symbols_recovered": 1612
+      "symbols_recovered": 1612,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9861,
+      "go_version": "go1.21.13",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1629,
+      "matched_exactly": 1629,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 819936,
+      "pclntab_version": "1.20",
+      "recall": 0.9861,
+      "reference": "go tool nm",
+      "reference_symbols": 1652,
+      "size": 1407752,
+      "status": "parsed",
+      "symbols_recovered": 1631,
+      "text_start": 4294974176
     },
     {
       "address_recall": 1.0,
@@ -2488,7 +3028,8 @@
       "reference_symbols": 1544,
       "size": 1904757,
       "status": "parsed",
-      "symbols_recovered": 1546
+      "symbols_recovered": 1546,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2506,7 +3047,8 @@
       "reference_symbols": 1544,
       "size": 1241240,
       "status": "parsed",
-      "symbols_recovered": 1546
+      "symbols_recovered": 1546,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2524,7 +3066,15 @@
       "reference_symbols": 1544,
       "size": 2023621,
       "status": "parsed",
-      "symbols_recovered": 1546
+      "symbols_recovered": 1546,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2542,7 +3092,8 @@
       "reference_symbols": 1595,
       "size": 1783784,
       "status": "parsed",
-      "symbols_recovered": 1596
+      "symbols_recovered": 1596,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -2560,7 +3111,8 @@
       "reference_symbols": 1595,
       "size": 1171608,
       "status": "parsed",
-      "symbols_recovered": 1596
+      "symbols_recovered": 1596,
+      "text_start": 134516736
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -2569,6 +3121,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2586,7 +3145,8 @@
       "reference_symbols": 1542,
       "size": 1949354,
       "status": "parsed",
-      "symbols_recovered": 1544
+      "symbols_recovered": 1544,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -2604,7 +3164,8 @@
       "reference_symbols": 1542,
       "size": 1310872,
       "status": "parsed",
-      "symbols_recovered": 1544
+      "symbols_recovered": 1544,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -2622,7 +3183,15 @@
       "reference_symbols": 1542,
       "size": 2080706,
       "status": "parsed",
-      "symbols_recovered": 1544
+      "symbols_recovered": 1544,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2640,7 +3209,8 @@
       "reference_symbols": 1489,
       "size": 2022946,
       "status": "parsed",
-      "symbols_recovered": 1491
+      "symbols_recovered": 1491,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -2658,7 +3228,8 @@
       "reference_symbols": 1489,
       "size": 1376408,
       "status": "parsed",
-      "symbols_recovered": 1491
+      "symbols_recovered": 1491,
+      "text_start": 69632
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -2667,6 +3238,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2684,7 +3262,8 @@
       "reference_symbols": 1589,
       "size": 1997824,
       "status": "parsed",
-      "symbols_recovered": 1591
+      "symbols_recovered": 1591,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2702,7 +3281,8 @@
       "reference_symbols": 1589,
       "size": 1338880,
       "status": "parsed",
-      "symbols_recovered": 1591
+      "symbols_recovered": 1591,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2720,7 +3300,15 @@
       "reference_symbols": 1589,
       "size": 1997824,
       "status": "parsed",
-      "symbols_recovered": 1591
+      "symbols_recovered": 1591,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2738,7 +3326,8 @@
       "reference_symbols": 1633,
       "size": 1867264,
       "status": "parsed",
-      "symbols_recovered": 1634
+      "symbols_recovered": 1634,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2756,7 +3345,8 @@
       "reference_symbols": 1633,
       "size": 1247744,
       "status": "parsed",
-      "symbols_recovered": 1634
+      "symbols_recovered": 1634,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2774,7 +3364,15 @@
       "reference_symbols": 1633,
       "size": 1867264,
       "status": "parsed",
-      "symbols_recovered": 1634
+      "symbols_recovered": 1634,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2792,7 +3390,8 @@
       "reference_symbols": 1668,
       "size": 2034640,
       "status": "parsed",
-      "symbols_recovered": 1670
+      "symbols_recovered": 1670,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -2810,7 +3409,8 @@
       "reference_symbols": 1668,
       "size": 1359088,
       "status": "parsed",
-      "symbols_recovered": 1670
+      "symbols_recovered": 1670,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -2828,7 +3428,15 @@
       "reference_symbols": 1668,
       "size": 2034640,
       "status": "parsed",
-      "symbols_recovered": 1670
+      "symbols_recovered": 1670,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.22.12",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2846,7 +3454,8 @@
       "reference_symbols": 1672,
       "size": 2046306,
       "status": "parsed",
-      "symbols_recovered": 1674
+      "symbols_recovered": 1674,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -2864,7 +3473,8 @@
       "reference_symbols": 1672,
       "size": 1382482,
       "status": "parsed",
-      "symbols_recovered": 1674
+      "symbols_recovered": 1674,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -2882,7 +3492,27 @@
       "reference_symbols": 1672,
       "size": 2046306,
       "status": "parsed",
-      "symbols_recovered": 1674
+      "symbols_recovered": 1674,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.986,
+      "go_version": "go1.22.12",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1691,
+      "matched_exactly": 1691,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 860128,
+      "pclntab_version": "1.20",
+      "recall": 0.986,
+      "reference": "go tool nm",
+      "reference_symbols": 1715,
+      "size": 2121842,
+      "status": "parsed",
+      "symbols_recovered": 1693,
+      "text_start": 4294974176
     },
     {
       "address_recall": 1.0,
@@ -2900,7 +3530,8 @@
       "reference_symbols": 1748,
       "size": 2141122,
       "status": "parsed",
-      "symbols_recovered": 1757
+      "symbols_recovered": 1757,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2918,7 +3549,8 @@
       "reference_symbols": 1748,
       "size": 1396888,
       "status": "parsed",
-      "symbols_recovered": 1757
+      "symbols_recovered": 1757,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -2936,7 +3568,15 @@
       "reference_symbols": 1748,
       "size": 2288986,
       "status": "parsed",
-      "symbols_recovered": 1757
+      "symbols_recovered": 1757,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2954,7 +3594,8 @@
       "reference_symbols": 1796,
       "size": 2017605,
       "status": "parsed",
-      "symbols_recovered": 1804
+      "symbols_recovered": 1804,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -2972,7 +3613,8 @@
       "reference_symbols": 1796,
       "size": 1323160,
       "status": "parsed",
-      "symbols_recovered": 1804
+      "symbols_recovered": 1804,
+      "text_start": 134516736
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -2981,6 +3623,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -2998,7 +3647,8 @@
       "reference_symbols": 1746,
       "size": 2157839,
       "status": "parsed",
-      "symbols_recovered": 1755
+      "symbols_recovered": 1755,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3016,7 +3666,8 @@
       "reference_symbols": 1746,
       "size": 1441944,
       "status": "parsed",
-      "symbols_recovered": 1755
+      "symbols_recovered": 1755,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3034,7 +3685,15 @@
       "reference_symbols": 1746,
       "size": 2289167,
       "status": "parsed",
-      "symbols_recovered": 1755
+      "symbols_recovered": 1755,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3052,7 +3711,8 @@
       "reference_symbols": 1686,
       "size": 2230048,
       "status": "parsed",
-      "symbols_recovered": 1695
+      "symbols_recovered": 1695,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3070,7 +3730,8 @@
       "reference_symbols": 1686,
       "size": 1507480,
       "status": "parsed",
-      "symbols_recovered": 1695
+      "symbols_recovered": 1695,
+      "text_start": 69632
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -3079,6 +3740,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3096,7 +3764,8 @@
       "reference_symbols": 1785,
       "size": 2234368,
       "status": "parsed",
-      "symbols_recovered": 1791
+      "symbols_recovered": 1791,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3114,7 +3783,8 @@
       "reference_symbols": 1785,
       "size": 1496064,
       "status": "parsed",
-      "symbols_recovered": 1791
+      "symbols_recovered": 1791,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3132,7 +3802,15 @@
       "reference_symbols": 1785,
       "size": 2234368,
       "status": "parsed",
-      "symbols_recovered": 1791
+      "symbols_recovered": 1791,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3150,7 +3828,8 @@
       "reference_symbols": 1828,
       "size": 2100224,
       "status": "parsed",
-      "symbols_recovered": 1833
+      "symbols_recovered": 1833,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3168,7 +3847,8 @@
       "reference_symbols": 1828,
       "size": 1400320,
       "status": "parsed",
-      "symbols_recovered": 1833
+      "symbols_recovered": 1833,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3186,7 +3866,15 @@
       "reference_symbols": 1828,
       "size": 2100224,
       "status": "parsed",
-      "symbols_recovered": 1833
+      "symbols_recovered": 1833,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3204,7 +3892,8 @@
       "reference_symbols": 1850,
       "size": 2250480,
       "status": "parsed",
-      "symbols_recovered": 1856
+      "symbols_recovered": 1856,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -3222,7 +3911,8 @@
       "reference_symbols": 1850,
       "size": 1506896,
       "status": "parsed",
-      "symbols_recovered": 1856
+      "symbols_recovered": 1856,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -3240,7 +3930,15 @@
       "reference_symbols": 1850,
       "size": 2250480,
       "status": "parsed",
-      "symbols_recovered": 1856
+      "symbols_recovered": 1856,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.23.12",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3258,7 +3956,8 @@
       "reference_symbols": 1854,
       "size": 2243186,
       "status": "parsed",
-      "symbols_recovered": 1860
+      "symbols_recovered": 1860,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -3276,7 +3975,8 @@
       "reference_symbols": 1854,
       "size": 1519042,
       "status": "parsed",
-      "symbols_recovered": 1860
+      "symbols_recovered": 1860,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -3294,7 +3994,27 @@
       "reference_symbols": 1854,
       "size": 2243186,
       "status": "parsed",
-      "symbols_recovered": 1860
+      "symbols_recovered": 1860,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9873,
+      "go_version": "go1.23.12",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1873,
+      "matched_exactly": 1872,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 945472,
+      "pclntab_version": "1.20",
+      "recall": 0.9868,
+      "reference": "go tool nm",
+      "reference_symbols": 1897,
+      "size": 2314690,
+      "status": "parsed",
+      "symbols_recovered": 1879,
+      "text_start": 4294974176
     },
     {
       "address_recall": 1.0,
@@ -3312,7 +4032,8 @@
       "reference_symbols": 1763,
       "size": 2222091,
       "status": "parsed",
-      "symbols_recovered": 1789
+      "symbols_recovered": 1789,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3330,7 +4051,8 @@
       "reference_symbols": 1763,
       "size": 1446072,
       "status": "parsed",
-      "symbols_recovered": 1789
+      "symbols_recovered": 1789,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3348,7 +4070,15 @@
       "reference_symbols": 1763,
       "size": 2381795,
       "status": "parsed",
-      "symbols_recovered": 1789
+      "symbols_recovered": 1789,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3366,7 +4096,8 @@
       "reference_symbols": 1811,
       "size": 2091493,
       "status": "parsed",
-      "symbols_recovered": 1838
+      "symbols_recovered": 1838,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -3384,7 +4115,8 @@
       "reference_symbols": 1811,
       "size": 1368248,
       "status": "parsed",
-      "symbols_recovered": 1838
+      "symbols_recovered": 1838,
+      "text_start": 134516736
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -3393,6 +4125,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3410,7 +4149,8 @@
       "reference_symbols": 1757,
       "size": 2251645,
       "status": "parsed",
-      "symbols_recovered": 1783
+      "symbols_recovered": 1783,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3428,7 +4168,8 @@
       "reference_symbols": 1757,
       "size": 1507512,
       "status": "parsed",
-      "symbols_recovered": 1783
+      "symbols_recovered": 1783,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3446,7 +4187,15 @@
       "reference_symbols": 1757,
       "size": 2448509,
       "status": "parsed",
-      "symbols_recovered": 1783
+      "symbols_recovered": 1783,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3464,7 +4213,8 @@
       "reference_symbols": 1694,
       "size": 2392686,
       "status": "parsed",
-      "symbols_recovered": 1720
+      "symbols_recovered": 1720,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3482,7 +4232,8 @@
       "reference_symbols": 1694,
       "size": 1638584,
       "status": "parsed",
-      "symbols_recovered": 1720
+      "symbols_recovered": 1720,
+      "text_start": 69632
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -3491,6 +4242,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3508,7 +4266,8 @@
       "reference_symbols": 1798,
       "size": 2313728,
       "status": "parsed",
-      "symbols_recovered": 1821
+      "symbols_recovered": 1821,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3526,7 +4285,8 @@
       "reference_symbols": 1798,
       "size": 1543680,
       "status": "parsed",
-      "symbols_recovered": 1821
+      "symbols_recovered": 1821,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3544,7 +4304,15 @@
       "reference_symbols": 1798,
       "size": 2313728,
       "status": "parsed",
-      "symbols_recovered": 1821
+      "symbols_recovered": 1821,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3562,7 +4330,8 @@
       "reference_symbols": 1845,
       "size": 2185728,
       "status": "parsed",
-      "symbols_recovered": 1869
+      "symbols_recovered": 1869,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3580,7 +4349,8 @@
       "reference_symbols": 1845,
       "size": 1452032,
       "status": "parsed",
-      "symbols_recovered": 1869
+      "symbols_recovered": 1869,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3598,7 +4368,15 @@
       "reference_symbols": 1845,
       "size": 2185728,
       "status": "parsed",
-      "symbols_recovered": 1869
+      "symbols_recovered": 1869,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3616,7 +4394,8 @@
       "reference_symbols": 1904,
       "size": 2358432,
       "status": "parsed",
-      "symbols_recovered": 1927
+      "symbols_recovered": 1927,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -3634,7 +4413,8 @@
       "reference_symbols": 1904,
       "size": 1572352,
       "status": "parsed",
-      "symbols_recovered": 1927
+      "symbols_recovered": 1927,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -3652,7 +4432,15 @@
       "reference_symbols": 1904,
       "size": 2358432,
       "status": "parsed",
-      "symbols_recovered": 1927
+      "symbols_recovered": 1927,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.24.13",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3670,7 +4458,8 @@
       "reference_symbols": 1908,
       "size": 2352226,
       "status": "parsed",
-      "symbols_recovered": 1931
+      "symbols_recovered": 1931,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -3688,7 +4477,8 @@
       "reference_symbols": 1908,
       "size": 1589122,
       "status": "parsed",
-      "symbols_recovered": 1931
+      "symbols_recovered": 1931,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -3706,7 +4496,27 @@
       "reference_symbols": 1908,
       "size": 2352226,
       "status": "parsed",
-      "symbols_recovered": 1931
+      "symbols_recovered": 1931,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9877,
+      "go_version": "go1.24.13",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1929,
+      "matched_exactly": 1929,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 977824,
+      "pclntab_version": "1.20",
+      "recall": 0.9877,
+      "reference": "go tool nm",
+      "reference_symbols": 1953,
+      "size": 2420674,
+      "status": "parsed",
+      "symbols_recovered": 1952,
+      "text_start": 4294974256
     },
     {
       "address_recall": 1.0,
@@ -3724,7 +4534,8 @@
       "reference_symbols": 1827,
       "size": 2261352,
       "status": "parsed",
-      "symbols_recovered": 1852
+      "symbols_recovered": 1852,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3742,7 +4553,8 @@
       "reference_symbols": 1827,
       "size": 1503416,
       "status": "parsed",
-      "symbols_recovered": 1852
+      "symbols_recovered": 1852,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3760,7 +4572,15 @@
       "reference_symbols": 1827,
       "size": 2429848,
       "status": "parsed",
-      "symbols_recovered": 1852
+      "symbols_recovered": 1852,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "amd64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3778,7 +4598,8 @@
       "reference_symbols": 1878,
       "size": 2152191,
       "status": "parsed",
-      "symbols_recovered": 1905
+      "symbols_recovered": 1905,
+      "text_start": 134516736
     },
     {
       "address_recall": 1.0,
@@ -3796,7 +4617,8 @@
       "reference_symbols": 1878,
       "size": 1429688,
       "status": "parsed",
-      "symbols_recovered": 1905
+      "symbols_recovered": 1905,
+      "text_start": 134516736
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -3805,6 +4627,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "386",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3822,7 +4651,8 @@
       "reference_symbols": 1820,
       "size": 2293779,
       "status": "parsed",
-      "symbols_recovered": 1845
+      "symbols_recovered": 1845,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3840,7 +4670,8 @@
       "reference_symbols": 1820,
       "size": 1573048,
       "status": "parsed",
-      "symbols_recovered": 1845
+      "symbols_recovered": 1845,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3858,7 +4689,15 @@
       "reference_symbols": 1820,
       "size": 2490523,
       "status": "parsed",
-      "symbols_recovered": 1845
+      "symbols_recovered": 1845,
+      "text_start": 69632
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "arm64",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3876,7 +4715,8 @@
       "reference_symbols": 1762,
       "size": 2373703,
       "status": "parsed",
-      "symbols_recovered": 1787
+      "symbols_recovered": 1787,
+      "text_start": 69632
     },
     {
       "address_recall": 1.0,
@@ -3894,7 +4734,8 @@
       "reference_symbols": 1762,
       "size": 1638584,
       "status": "parsed",
-      "symbols_recovered": 1787
+      "symbols_recovered": 1787,
+      "text_start": 69632
     },
     {
       "error": "-buildmode=pie requires external (cgo) linking, but cgo is not enabled",
@@ -3903,6 +4744,13 @@
       "goos": "linux",
       "mode": "pie",
       "status": "build_failed"
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "s390x",
+      "goos": "linux",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3920,7 +4768,8 @@
       "reference_symbols": 1847,
       "size": 2338816,
       "status": "parsed",
-      "symbols_recovered": 1872
+      "symbols_recovered": 1872,
+      "text_start": 5368713216
     },
     {
       "address_recall": 1.0,
@@ -3938,7 +4787,8 @@
       "reference_symbols": 1847,
       "size": 1594880,
       "status": "parsed",
-      "symbols_recovered": 1872
+      "symbols_recovered": 1872,
+      "text_start": 5368713216
     },
     {
       "address_recall": 1.0,
@@ -3956,7 +4806,15 @@
       "reference_symbols": 1847,
       "size": 2338816,
       "status": "parsed",
-      "symbols_recovered": 1872
+      "symbols_recovered": 1872,
+      "text_start": 5368713216
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "amd64",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -3974,7 +4832,8 @@
       "reference_symbols": 1892,
       "size": 2224640,
       "status": "parsed",
-      "symbols_recovered": 1919
+      "symbols_recovered": 1919,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -3992,7 +4851,8 @@
       "reference_symbols": 1892,
       "size": 1498112,
       "status": "parsed",
-      "symbols_recovered": 1919
+      "symbols_recovered": 1919,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -4010,7 +4870,15 @@
       "reference_symbols": 1892,
       "size": 2224640,
       "status": "parsed",
-      "symbols_recovered": 1919
+      "symbols_recovered": 1919,
+      "text_start": 4198400
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "386",
+      "goos": "windows",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -4028,7 +4896,8 @@
       "reference_symbols": 1943,
       "size": 2435264,
       "status": "parsed",
-      "symbols_recovered": 1965
+      "symbols_recovered": 1965,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -4046,7 +4915,8 @@
       "reference_symbols": 1943,
       "size": 1622304,
       "status": "parsed",
-      "symbols_recovered": 1965
+      "symbols_recovered": 1965,
+      "text_start": 16781312
     },
     {
       "address_recall": 1.0,
@@ -4064,7 +4934,15 @@
       "reference_symbols": 1943,
       "size": 2435264,
       "status": "parsed",
-      "symbols_recovered": 1965
+      "symbols_recovered": 1965,
+      "text_start": 16781312
+    },
+    {
+      "go_version": "go1.25.12",
+      "goarch": "amd64",
+      "goos": "darwin",
+      "mode": "cgo",
+      "status": "cgo_needs_host_target"
     },
     {
       "address_recall": 1.0,
@@ -4082,7 +4960,8 @@
       "reference_symbols": 1946,
       "size": 2421378,
       "status": "parsed",
-      "symbols_recovered": 1968
+      "symbols_recovered": 1968,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -4100,7 +4979,8 @@
       "reference_symbols": 1946,
       "size": 1622978,
       "status": "parsed",
-      "symbols_recovered": 1968
+      "symbols_recovered": 1968,
+      "text_start": 4294971392
     },
     {
       "address_recall": 1.0,
@@ -4118,7 +4998,27 @@
       "reference_symbols": 1946,
       "size": 2421378,
       "status": "parsed",
-      "symbols_recovered": 1968
+      "symbols_recovered": 1968,
+      "text_start": 4294971392
+    },
+    {
+      "address_recall": 0.9879,
+      "go_version": "go1.25.12",
+      "goarch": "arm64",
+      "goos": "darwin",
+      "matched_address_only": 1967,
+      "matched_exactly": 1967,
+      "mode": "cgo",
+      "pclntab_bitness": 64,
+      "pclntab_offset": 998528,
+      "pclntab_version": "1.20",
+      "recall": 0.9879,
+      "reference": "go tool nm",
+      "reference_symbols": 1991,
+      "size": 2489074,
+      "status": "parsed",
+      "symbols_recovered": 1989,
+      "text_start": 4294974256
     },
     {
       "address_recall": 1.0,
@@ -4136,7 +5036,8 @@
       "reference_symbols": 2918,
       "size": 3505989,
       "status": "parsed",
-      "symbols_recovered": 2925
+      "symbols_recovered": 2925,
+      "text_start": 4198400
     },
     {
       "address_recall": 1.0,
@@ -4154,7 +5055,8 @@
       "reference_symbols": 2979,
       "size": 3682816,
       "status": "parsed",
-      "symbols_recovered": 2987
+      "symbols_recovered": 2987,
+      "text_start": 4198400
     }
   ],
   "reference": "go tool nm, text symbols, abi suffixes and boundary markers removed",
