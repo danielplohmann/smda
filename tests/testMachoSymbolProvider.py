@@ -147,6 +147,25 @@ class TestMachoSymbolProviderBehavior(unittest.TestCase):
         sample_name = next(iter(symbols.values()))
         self.assertNotIn("·", sample_name)
 
+    def test_go_provider_takes_the_text_start_from_the_container(self):
+        # the header's own copy is a placeholder Go no longer maintains, and an externally
+        # linked build leaves it at 0, so every recovered address would be text-relative
+        _, raw, loader = _load_fixture("objective-see/turtle")
+        binary_info = _binary_info(raw, loader)
+        provider = GoSymbolProvider(None)
+
+        text_start = provider.getTextStart(binary_info)
+
+        self.assertIsNotNone(text_start)
+        self.assertGreaterEqual(text_start, loader.getBaseAddress())
+        provider.update(binary_info)
+        self.assertTrue(all(address >= text_start for address in provider.getFunctionSymbols()))
+
+    def test_a_binary_lief_cannot_parse_offers_no_text_start(self):
+        binary_info = BinaryInfo(b"not a container")
+
+        self.assertIsNone(GoSymbolProvider(None).getTextStart(binary_info))
+
 
 class TestMachoCorpusIntegration(unittest.TestCase):
     def test_bluenoroff_symbols_exports_and_imports(self):
