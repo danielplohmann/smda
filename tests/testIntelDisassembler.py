@@ -545,6 +545,7 @@ class TestIntelDisassembler(unittest.TestCase):
         disassembler.disassembly = SimpleNamespace(
             apis={},
             addApiReference=lambda *a, **kw: None,
+            addImportSlot=lambda *a, **kw: None,
             dereferenceDword=lambda addr: 0x9999 if addr == 0x1020 else None,
             isAddrWithinMemoryImage=lambda addr: True,
         )
@@ -567,6 +568,7 @@ class TestIntelDisassembler(unittest.TestCase):
         disassembler.disassembly = SimpleNamespace(
             apis={},
             addApiReference=lambda *a, **kw: None,
+            addImportSlot=lambda *a, **kw: None,
             dereferenceDword=lambda addr: 0x9999 if addr == 0x1020 else None,
             isAddrWithinMemoryImage=lambda addr: True,
         )
@@ -587,6 +589,7 @@ class TestIntelDisassembler(unittest.TestCase):
         disassembler.disassembly = SimpleNamespace(
             apis={},
             addApiReference=lambda *a, **kw: None,
+            addImportSlot=lambda *a, **kw: None,
             functions={},
             isAddrWithinMemoryImage=lambda addr: True,
         )
@@ -607,6 +610,7 @@ class TestIntelDisassembler(unittest.TestCase):
         disassembler.disassembly = SimpleNamespace(
             apis={},
             addApiReference=lambda *a, **kw: None,
+            addImportSlot=lambda *a, **kw: None,
             functions={},
             isAddrWithinMemoryImage=lambda addr: True,
         )

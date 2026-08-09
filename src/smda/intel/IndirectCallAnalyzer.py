@@ -22,6 +22,7 @@ class IndirectCallAnalyzer:
         self.disassembler = disassembler
         self.disassembly = self.disassembler.disassembly
         self.current_calling_addr = 0
+        self.current_slot = None
         self.state = None
 
     def searchBlock(self, analysis_state, address):
@@ -63,6 +64,47 @@ class IndirectCallAnalyzer:
         if dll or api:
             return addr, dll, api
         return self.getDword(addr), dll, api
+
+    def _recordComputedImportSlot(self, base_value, displacement, ptr_size):
+        slot = base_value + displacement
+        dereferenced = (
+            self.disassembly.dereferenceQword(slot) if ptr_size == 8 else self.disassembly.dereferenceDword(slot)
+        )
+        if dereferenced is None:
+            return
+        dll, api = self.disassembler.resolveApi(slot, dereferenced)
+        if dll or api:
+            LOGGER.debug("resolved computed import slot 0x%08x: %s %s", slot, dll, api)
+            self.disassembly.addApiReference(dereferenced, self.current_calling_addr, dll, api)
+            self.disassembly.addImportSlot(slot, dll, api)
+
+    def resolveComputedImportSlots(self, analysis_state, block_depth=3):
+        """Resolve "call/jmp dword ptr [<reg> + <disp>]", the shape a runtime-built IAT is used through.
+
+        Records the API and the slot it lives in without booking a code ref or a function
+        candidate, so a heuristic base-register value cannot move CFG recovery.
+        """
+        # same backward walk as resolveRegisterCalls, so it takes the same per-block cap.
+        # That one was forced by a Go sample with 130k register calls; this shape -
+        # call through a register plus displacement - is C++ virtual dispatch, which packs
+        # denser per block than "call <reg>" ever did, so it needs the backstop more.
+        max_calls = getattr(self.disassembler.config, "MAX_INDIRECT_CALLS_PER_BASIC_BLOCK", 50)
+        calls_per_block = {}
+        for calling_addr, register_name, displacement, ptr_size in analysis_state.call_memreg_ins:
+            self.current_calling_addr = calling_addr
+            self.current_slot = (displacement, ptr_size)
+            self.state = analysis_state
+            start_block = [ins for ins in self.searchBlock(analysis_state, calling_addr) if ins[0] <= calling_addr]
+            if not start_block:
+                continue
+            # keyed on the block's start address rather than its first instruction: the
+            # instruction is a sequence, and only happens to be a hashable one
+            block_addr = start_block[0][0]
+            calls_per_block[block_addr] = calls_per_block.get(block_addr, 0) + 1
+            if calls_per_block[block_addr] > max_calls:
+                continue
+            self.processBlock(analysis_state, start_block, {}, register_name, [], block_depth)
+        self.current_slot = None
 
     def processBlock(self, analysis_state, block, registers, register_name, processed, depth):
         if not block:
@@ -166,6 +208,11 @@ class IndirectCallAnalyzer:
             # if the absolute value was found for the call <reg> instruction, detect API
             if abs_value_found:
                 candidate = registers.get(register_name, None)
+                if self.current_slot is not None:
+                    # annotation only: leave leaf state and the CFG to the regular analysis
+                    if candidate:
+                        self._recordComputedImportSlot(candidate, *self.current_slot)
+                    return True
                 self.state.setLeaf(False)
                 if candidate:
                     LOGGER.debug(
@@ -178,6 +225,10 @@ class IndirectCallAnalyzer:
                     if dll or api:
                         LOGGER.debug("successfully resolved: %s %s", dll, api)
                         self.disassembly.addApiReference(candidate, self.current_calling_addr, dll, api)
+                        # _resolveDwordPointerValue keeps a known import slot instead of
+                        # dereferencing it, so an in-image candidate is that slot
+                        if self.disassembly.isAddrWithinMemoryImage(candidate):
+                            self.disassembly.addImportSlot(candidate, dll, api)
                     elif self.disassembly.isAddrWithinMemoryImage(candidate):
                         LOGGER.debug("successfully resolved: 0x%x", candidate)
                         self.disassembler.fc_manager.addCandidate(candidate, reference_source=self.current_calling_addr)

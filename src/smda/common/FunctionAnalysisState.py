@@ -36,6 +36,7 @@ class FunctionAnalysisState:
         self.jump_targets = set()
         self.jump_refs = set()
         self.call_register_ins = []
+        self.call_memreg_ins = []
         self.block_start = 0xFFFFFFFF
         self.data_bytes = set()
         self.data_refs = set()

@@ -171,9 +171,24 @@ class SmdaReport:
             self.xmetadata = {
                 "exported_functions": disassembly.binary_info.getExportedFunctions(),
                 "exported_symbols": disassembly.binary_info.getExportedSymbols(),
-                "imported_functions": disassembly.binary_info.getImportedFunctions(),
+                "imported_functions": self._mergeImportedFunctions(disassembly),
                 "symbols": disassembly.binary_info.getSymbols(),
             }
+
+    @staticmethod
+    def _mergeImportedFunctions(disassembly):
+        """Static IAT entries plus the slots APIs were resolved through at analysis time.
+
+        Samples that build their own import table at runtime have no parseable IAT, so the
+        static view alone understates - or entirely misses - what the sample actually imports.
+        """
+        static_imports = disassembly.binary_info.getImportedFunctions()
+        if not disassembly.import_slots:
+            # None distinguishes "no symbol provider" from "no imports"; keep it
+            return static_imports
+        merged = {slot: ((dll or "").lower(), api) for slot, (dll, api) in disassembly.import_slots.items()}
+        merged.update(static_imports or {})
+        return merged
 
     def _convertCfg(self, disassembly, config=None):
         function_results = {}

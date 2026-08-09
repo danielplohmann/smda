@@ -194,12 +194,14 @@ class RecursiveDisassembler:
         if state.start_addr == to_addr:
             state.setRecursion(True)
 
-    def _handleApiTarget(self, from_addr, to_addr, dereferenced):
+    def _handleApiTarget(self, from_addr, to_addr, dereferenced, slot=None):
         if to_addr:
             # identify API calls on the fly
             dll, api = self.resolveApi(to_addr, dereferenced)
             if dll or api:
                 self._updateApiInformation(from_addr, dereferenced, dll, api)
+                if slot is not None:
+                    self.disassembly.addImportSlot(slot, dll, api)
                 return (dll, api)
             elif not self.disassembly.isAddrWithinMemoryImage(to_addr):
                 LOGGER.debug("potentially uncovered DLL address: 0x%08x", to_addr)
@@ -391,6 +393,10 @@ class RecursiveDisassembler:
         if analysis_result:
             if self.config.RESOLVE_REGISTER_CALLS:
                 self.indcall_analyzer.resolveRegisterCalls(state)
+            # only the intel backend fills call_memreg_ins, so the non-empty check also
+            # keeps this off analyzers that have no such pass
+            if self.config.RESOLVE_COMPUTED_IMPORT_SLOTS and state.call_memreg_ins:
+                self.indcall_analyzer.resolveComputedImportSlots(state)
             # finalizeFunction is the only place that flushes TailcallAnalyzer's per-function
             # jumps into its cross-function state, and initFunction() clears them at the start
             # of every function - so gating it on RESOLVE_REGISTER_CALLS made RESOLVE_TAILCALLS

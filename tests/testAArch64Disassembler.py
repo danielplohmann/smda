@@ -573,8 +573,9 @@ class TestAArch64PltResolution(unittest.TestCase):
                 self.api_targets = []
                 self.call_targets = []
 
-            def _handleApiTarget(self, from_addr, to_addr, dereferenced):
+            def _handleApiTarget(self, from_addr, to_addr, dereferenced, slot=None):
                 self.api_targets.append((from_addr, to_addr, dereferenced))
+                self.disassembly.addImportSlot(slot, "GLIBC_2.2.5", "puts")
                 return ("GLIBC_2.2.5", "puts")
 
             def _handleCallTarget(self, state, from_addr, to_addr):
