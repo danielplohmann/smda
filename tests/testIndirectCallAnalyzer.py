@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from smda.DisassemblyResult import DisassemblyResult
@@ -117,6 +118,7 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         memory_value = 0x500000
         disassembler = MagicMock()
         disassembler.disassembly = DisassemblyResult()
+        disassembler.disassembly.binary_info = SimpleNamespace(base_addr=0x400000, binary_size=0x10000)
         disassembler.resolveApi.return_value = ("kernel32.dll", "CreateFileA")
         analyzer = IndirectCallAnalyzer(disassembler)
         analyzer.getDword = MagicMock(return_value=memory_value)
@@ -145,6 +147,10 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
                 "dll_name": "kernel32.dll",
                 "api_name": "CreateFileA",
             },
+        )
+        self.assertEqual(
+            disassembler.disassembly.import_slots,
+            {import_slot: ("kernel32.dll", "CreateFileA")},
         )
 
     def test_api_reference_deduplication_preserves_list_shape(self):

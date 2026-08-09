@@ -50,6 +50,9 @@ class SmdaConfig:
     # truth for the Mach-O corpus
     USE_MACHO_ADDRESS_REF_CANDIDATES = False
     RESOLVE_REGISTER_CALLS = True
+    # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
+    # record the API plus the slot it lives in; annotation only, it books no code refs
+    RESOLVE_COMPUTED_IMPORT_SLOTS = True
     # limit this to avoid blowing up analysis time for weird samples
     MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
     # backstops against memory usage explosion during candidate identification on pathological/junk samples

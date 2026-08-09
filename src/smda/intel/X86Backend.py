@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import logging
+import re
 
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
@@ -27,6 +28,15 @@ from .MnemonicTfIdf import MnemonicTfIdf
 
 LOGGER = logging.getLogger(__name__)
 
+# a call/jmp through a pointer slot the sample computes itself ("dword ptr [ebx + 0x2c]"),
+# the shape a runtime-built import table is used through. An index register is excluded on
+# purpose: the slot is then not a single address, and those operands belong to jump tables.
+# capstone prints a displacement below 10 as a bare decimal digit, so "[esi + 8]" - the most
+# common slot stride - has no 0x prefix to match on.
+MEM_REG_SLOT_RE = re.compile(
+    r"^(?P<size>dword|qword) ptr \[(?P<reg>[a-z][a-z0-9]{1,3})"
+    r"(?: (?P<sign>[+-]) (?P<disp>0x[0-9a-f]{1,16}|[0-9]))?\]$"
+)
 
 SYSCALL_BACKTRACK_BOUNDARY = (
     set(CALL_INS)
@@ -163,15 +173,16 @@ class X86Backend(ArchBackend):
             return
         call_destination = d.getReferencedAddr(i_op_str)
         if i_op_str.startswith("dword ptr ["):
-            # reg+offset is currently ignored as it is a minority of calls
-            # case = "DWORD-PTR-REG"
             if i_op_str.startswith("dword ptr [0x"):
                 # case = "DWORD-PTR"
                 dereferenced = d.disassembly.dereferenceDword(call_destination)
                 if dereferenced is not None:
                     state.addCodeRef(i_address, dereferenced)
                     d._handleCallTarget(state, i_address, dereferenced)
-                    d._handleApiTarget(i_address, call_destination, dereferenced)
+                    d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
+            else:
+                # case = "DWORD-PTR-REG"
+                self._collectMemRegSlot(state, i_address, i_op_str)
         elif i_op_str.startswith("qword ptr [rip"):
             rip = i_address + i_size
             call_destination = rip + d.getReferencedAddr(i_op_str)
@@ -181,16 +192,16 @@ class X86Backend(ArchBackend):
                 # against the real destination, like the 32-bit dword-ptr path does
                 state.addCodeRef(i_address, dereferenced)
                 d._handleCallTarget(state, i_address, dereferenced)
-                d._handleApiTarget(i_address, call_destination, dereferenced)
+                d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
             else:
                 # import-like case: keep the reference on the slot itself
                 state.addCodeRef(i_address, call_destination)
                 if dereferenced is not None:
-                    d._handleApiTarget(i_address, call_destination, dereferenced)
+                    d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
         elif i_op_str.startswith("0x"):
             # case = "DIRECT"
             import_slot = self._resolveImportSlot(d, call_destination)
-            if import_slot is not None and d._handleApiTarget(i_address, import_slot, import_slot):
+            if import_slot is not None and d._handleApiTarget(i_address, import_slot, import_slot, slot=import_slot):
                 state.addCodeRef(i_address, call_destination)
             else:
                 d._handleCallTarget(state, i_address, call_destination)
@@ -199,6 +210,21 @@ class X86Backend(ArchBackend):
             # case = "REG"
             # this is resolved by backtracking at the end of function analysis.
             state.call_register_ins.append(i_address)
+        elif i_op_str.startswith("qword ptr ["):
+            # case = "QWORD-PTR-REG"
+            self._collectMemRegSlot(state, i_address, i_op_str)
+
+    @staticmethod
+    def _collectMemRegSlot(state, i_address, i_op_str):
+        match = MEM_REG_SLOT_RE.match(i_op_str)
+        if match is None:
+            return
+        displacement = int(match.group("disp"), 0) if match.group("disp") else 0
+        if match.group("sign") == "-":
+            displacement = -displacement
+        state.call_memreg_ins.append(
+            (i_address, match.group("reg"), displacement, 8 if match.group("size") == "qword" else 4)
+        )
 
     def _analyzeCondJmpInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
@@ -278,6 +304,7 @@ class X86Backend(ArchBackend):
                     state.addBlockToQueue(int(i_op_str, 16))
             state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
         else:
+            self._collectMemRegSlot(state, i_address, i_op_str)
             jumptable_targets = d.jumptable_analyzer.getJumpTargets(i, state)
             for target in jumptable_targets:
                 if d.disassembly.isAddrWithinMemoryImage(target):
@@ -288,7 +315,7 @@ class X86Backend(ArchBackend):
 
     @staticmethod
     def _handleApiJumpTarget(d, state, instruction_addr, import_slot, dereferenced):
-        resolved_api = d._handleApiTarget(instruction_addr, import_slot, dereferenced)
+        resolved_api = d._handleApiTarget(instruction_addr, import_slot, dereferenced, slot=import_slot)
         if resolved_api and state.isFirstInstruction():
             # the entire function body is this one jmp-to-import: a thunk, not a real routine
             state.setThunkCall(True)

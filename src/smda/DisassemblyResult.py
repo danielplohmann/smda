@@ -36,6 +36,8 @@ class DisassemblyResult:
         self.code_refs_to = {}
         # key: address of API in target DLL, value: {referencing_addr, api_name, dll_name}
         self.apis = {}
+        # key: address of the pointer slot an API was reached through, value: (dll_name, api_name)
+        self.import_slots = {}
         self._api_ref_sources = {}
         self._api_refs_initialized = False
         self.addr_to_api = {}
@@ -365,6 +367,9 @@ class DisassemblyResult:
             api_entry["referencing_addr"].append(referencing_addr)
         self.apis[api_addr] = api_entry
         self._api_refs_initialized = False
+
+    def addImportSlot(self, slot_addr, dll_name, api_name):
+        self.import_slots[slot_addr] = (dll_name, api_name)
 
     def getAllApiRefs(self):
         all_api_refs = {}
