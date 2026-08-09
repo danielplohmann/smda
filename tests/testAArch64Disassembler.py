@@ -1671,6 +1671,8 @@ class TestAArch64Analyzers(unittest.TestCase):
         self.assertIn(0x401020, disassembly.apis)
         self.assertEqual(disassembly.apis[0x401020]["api_name"], "puts")
         self.assertFalse(fake_state.leaf)
+        # the slot the pointer was loaded from is what reaches imported_functions
+        self.assertEqual(disassembly.import_slots, {0x401010: ("GLIBC_2.2.5", "puts")})
 
     def test_aarch64_indirect_call_clears_stale_register_after_unknown_mov(self):
         from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs

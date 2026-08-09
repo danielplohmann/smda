@@ -18,6 +18,7 @@ def _memory_image():
     image = bytearray(0x10000)
     struct.pack_into("<I", image, SLOT_TABLE - BASE + 8, 0x500000)
     struct.pack_into("<Q", image, SLOT_TABLE - BASE + 0x10, 0x500000)
+    struct.pack_into("<Q", image, SLOT_TABLE - BASE + 0x1000, 0x600000)
     return bytes(image)
 
 
@@ -182,6 +183,25 @@ class ResolveComputedSlotTestSuite(unittest.TestCase):
         analyzer.resolveComputedImportSlots(state)
 
         self.assertEqual(disassembly.import_slots, {})
+
+
+class RipRelativeSlotTestSuite(unittest.TestCase):
+    """A rip-relative slot can sit either side of the instruction that loads it."""
+
+    def _load(self, op_str):
+        disassembly = _disassembly()
+        analyzer = _analyzer(disassembly)
+        analyzer.state = MagicMock()
+        registers = {}
+        # rip is 0x403027: -0x17 reaches the slot at 0x403010, +0xfd9 the one at 0x404000
+        analyzer.processBlock(MagicMock(), [[0x403020, 7, "mov", op_str]], registers, "rax", [], 0)
+        return registers
+
+    def test_a_slot_behind_the_instruction_resolves(self):
+        self.assertEqual(self._load("rax, qword ptr [rip - 0x17]"), {"rax": 0x500000})
+
+    def test_a_slot_ahead_of_the_instruction_resolves(self):
+        self.assertEqual(self._load("rax, qword ptr [rip + 0xfd9]"), {"rax": 0x600000})
 
 
 class MergeImportedFunctionsTestSuite(unittest.TestCase):

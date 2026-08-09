@@ -94,6 +94,21 @@ class IdaExporterReuseTestSuite(unittest.TestCase):
         self.assertIn(0x2000, second_report.functions)
         self.assertNotIn(0x1000, second_report.functions)
 
+    def test_an_api_the_database_names_is_reported_as_an_import(self):
+        # IDA keys its import map by the import entry, so the code ref target is the slot
+        ret = b"\xc3"
+        interface = _FakeIdaInterface(0x1000, ret)
+        interface.getApiMap = lambda: {0x2000: "kernel32.dll!ExitProcess", 0x2008: "MessageBoxA"}
+        interface.getCodeOutRefs = lambda offset: [(offset, 0x2000), (offset, 0x2008)]
+        exporter = self._exporter(interface)
+
+        disassembly = exporter.analyzeBuffer(_binary_info(0x1000, ret))
+
+        self.assertEqual(
+            disassembly.import_slots,
+            {0x2000: ("kernel32.dll", "ExitProcess"), 0x2008: ("", "MessageBoxA")},
+        )
+
     def test_analyze_buffer_populates_report_metadata(self):
         # a bare `self.disassembly.binary_info = binary_info` assignment skipped
         # setBinaryInfo(), so IDA reports never populated exported_functions or oep
