@@ -30,8 +30,18 @@ Known limits:
 - Offset discovery prefers the container's own section (`.gopclntab`, `__gopclntab`, or the
   `runtime.pclntab` symbol on PE) and otherwise scans for the header, accepting only an
   unambiguous single hit rather than guessing between several.
-- Addresses are the ones the table records, so a position-independent binary loaded at a base
-  other than its link-time one reports link-time addresses.
+- Symbol addresses are built on the text start taken from the container - a `runtime.text`
+  symbol when present, otherwise the text section address - because Go stopped maintaining the
+  copy in the pclntab header. A binary loaded at a base other than its link-time one therefore
+  reports link-time addresses.
+- **A pre-1.18 table in an externally linked Mach-O recovers nothing.** Those layouts store a
+  pointer-wide entry address per function, and Apple's linker writes pointer-wide fields as dyld
+  chained-fixup entries: the on-disk word packs a target offset and a next-pointer stride rather
+  than an address, so `0x0020000000001a50` is how `0x100001a50` is stored. Go's own linker writes
+  plain pointers, so only cgo builds are affected, and only on Go 1.17 and earlier - 1.18 replaced
+  the entry with a `uint32` offset, which needs no fixup. Resolving these needs the Mach-O rebase
+  map rather than a pclntab change; `AArch64FunctionCandidateManager._machoFixupState` already
+  builds one and currently declines chained slots for the same reason.
 
 No Go binaries are committed. A hello-world Go binary is 1.5-2 MB and the sweep builds a few
 hundred of them, so `build_matrix.py` builds each sample, measures it, and deletes it; only the
@@ -75,3 +85,16 @@ what changes how a pclntab is located and read - container format, pointer size,
 rather than for architecture coverage: `linux/s390x` is there because it is the only big-endian
 target Go still ships, and `windows/386` because a 32-bit PE exercises both the 32-bit table
 layout and the PE offset-discovery path.
+
+## The cgo axis
+
+`cgo` cells build a package that imports `"C"`, which forces **external linking**: the system
+linker assigns the final addresses instead of Go's own. That is the one configuration where the
+text start recorded in the pclntab header reads 0, so it is the axis that proves symbol
+addresses come from the container rather than the header.
+
+Two consequences worth knowing when reading those rows. Cross-compiling cgo needs a C toolchain
+for the target, so these cells only run where the host is the target; every other platform is
+recorded as `cgo_needs_host_target`. And an externally linked binary contains C functions that
+`go tool nm` reports while the pclntab, which only ever describes Go functions, does not - so a
+cgo cell has a recall floor a little under 1.0 with every Go function still recovered.
