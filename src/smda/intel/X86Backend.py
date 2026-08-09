@@ -38,6 +38,13 @@ MEM_REG_SLOT_RE = re.compile(
     r"(?: (?P<sign>[+-]) (?P<disp>0x[0-9a-f]{1,16}|[0-9]))?\]$"
 )
 
+# a load of an import slot into a register: "mov rax, qword ptr [rip + 0x...]" (64-bit) or
+# "mov eax, dword ptr [0x...]" (32-bit). The memory operand must be the source - a store to a
+# slot is IAT patching, which is a different fact and is deliberately not recorded here.
+IMPORT_SLOT_LOAD_RE = re.compile(
+    r"^[a-z][a-z0-9]{1,4}, (?P<size>dword|qword) ptr \[(?P<rip>rip [+-] )?0x[0-9a-f]{1,16}\]$"
+)
+
 SYSCALL_BACKTRACK_BOUNDARY = (
     set(CALL_INS)
     | set(JMP_INS)
@@ -225,6 +232,25 @@ class X86Backend(ArchBackend):
         state.call_memreg_ins.append(
             (i_address, match.group("reg"), displacement, 8 if match.group("size") == "qword" else 4)
         )
+
+    def recordImportSlotLoads(self, disassembler, state):
+        d = disassembler
+        for i_address, i_size, i_mnemonic, i_op_str, _ in state.instructions:
+            if i_mnemonic.split(" ")[-1] != "mov":
+                continue
+            match = IMPORT_SLOT_LOAD_RE.match(i_op_str)
+            if match is None:
+                continue
+            displacement = d.getReferencedAddr(i_op_str)
+            slot = i_address + i_size + displacement if match.group("rip") else displacement
+            if match.group("size") == "qword":
+                dereferenced = d.disassembly.dereferenceQword(slot)
+            else:
+                dereferenced = d.disassembly.dereferenceDword(slot)
+            # resolveApi() gates this: a slot that names no import resolves to (None, None)
+            # and books nothing, so a non-import load costs one map lookup
+            if dereferenced is not None:
+                d._handleApiTarget(i_address, slot, dereferenced, slot=slot)
 
     def _analyzeCondJmpInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i

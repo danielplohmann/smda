@@ -53,6 +53,10 @@ class SmdaConfig:
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
     # record the API plus the slot it lives in; annotation only, it books no code refs
     RESOLVE_COMPUTED_IMPORT_SLOTS = True
+    # also record an API whose import slot is only loaded into a register, never called through
+    # the slot itself - the shape a language runtime that dispatches its own syscalls produces.
+    # Off by default: it widens an apiref from "calls this API" to "references this API".
+    RECORD_IMPORT_SLOT_LOADS = False
     # limit this to avoid blowing up analysis time for weird samples
     MAX_INDIRECT_CALLS_PER_BASIC_BLOCK = 50
     # backstops against memory usage explosion during candidate identification on pathological/junk samples

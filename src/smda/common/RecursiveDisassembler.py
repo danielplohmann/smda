@@ -397,6 +397,8 @@ class RecursiveDisassembler:
             # keeps this off analyzers that have no such pass
             if self.config.RESOLVE_COMPUTED_IMPORT_SLOTS and state.call_memreg_ins:
                 self.indcall_analyzer.resolveComputedImportSlots(state)
+            if self.config.RECORD_IMPORT_SLOT_LOADS:
+                self.backend.recordImportSlotLoads(self, state)
             # finalizeFunction is the only place that flushes TailcallAnalyzer's per-function
             # jumps into its cross-function state, and initFunction() clears them at the start
             # of every function - so gating it on RESOLVE_REGISTER_CALLS made RESOLVE_TAILCALLS
