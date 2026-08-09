@@ -399,7 +399,28 @@ class AArch64IndirectCallAnalyzer:
             block_index=block_index,
         )
         constants = propagateConstants(cap_insns, self.disassembler)
-        return constants.get(norm_reg(reg_name))
+        return constants.get(norm_reg(reg_name)), self._loadSlotFor(cap_insns, norm_reg(reg_name))
+
+    def _loadSlotFor(self, cap_insns, reg_name):
+        """The image slot the register was last loaded from, when a load is what defined it.
+
+        aarch64 has no absolute "call [addr]" form, so an import reached as
+        "ldr x8, [slot]; blr x8" is the only place its slot address appears.
+        """
+        history = propagateConstantsHistory(cap_insns, self.disassembler)
+        for cap_ins, constants_before in zip(reversed(cap_insns), reversed(history), strict=True):
+            operands = cap_ins.operands
+            if not operands or operands[0].type != 1 or norm_reg(cap_ins.reg_name(operands[0].reg)) != reg_name:
+                continue
+            # the last write to the register decides; anything but a plain load has no slot
+            if cap_ins.mnemonic not in ("ldr", "ldur") or len(operands) < 2 or operands[1].type != 3:
+                return None
+            memory = operands[1].mem
+            if memory.index:
+                return None
+            base = constants_before.get(norm_reg(cap_ins.reg_name(memory.base)))
+            return None if base is None else base + memory.disp
+        return None
 
     def recoverStackStrings(self, analysis_state):
         """danielplohmann/smda#173: reconstruct strings built byte-by-byte on the
@@ -472,12 +493,14 @@ class AArch64IndirectCallAnalyzer:
                 continue
             reg_name = cap_ins.reg_name(target_op.reg)
 
-            candidate = self._resolveRegister(analysis_state, calling_addr, reg_name, block_depth)
+            candidate, slot = self._resolveRegister(analysis_state, calling_addr, reg_name, block_depth)
             if candidate:
                 analysis_state.setLeaf(False)
                 dll, api = d.resolveApi(candidate, candidate)
                 if dll or api:
                     d.disassembly.addApiReference(candidate, calling_addr, dll, api)
+                    if slot is not None:
+                        d.disassembly.addImportSlot(slot, dll, api)
                 elif d.disassembly.isAddrWithinMemoryImage(candidate):
                     d.fc_manager.addCandidate(candidate, reference_source=calling_addr)
 

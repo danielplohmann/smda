@@ -15,7 +15,10 @@ class IndirectCallAnalyzer:
     RE_MOV_REG_REG = re.compile(r"(?P<reg1>[a-z0-9]{2,4}), (?P<reg2>[a-z0-9]{2,4})$")
     RE_MOV_REG_CONST = re.compile(r"(?P<reg>[a-z0-9]{2,4}), (?P<val>0x[0-9a-f]{1,16})$")
     RE_REG_DWORD_PTR_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), dword ptr \[(?P<addr>0x[0-9a-f]{1,16})\]$")
-    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{1,16})\]$")
+    # a rip-relative slot behind the instruction is as ordinary as one ahead of it
+    RE_REG_QWORD_PTR_RIP_ADDR = re.compile(
+        r"(?P<reg>[a-z0-9]{2,4}), qword ptr \[rip (?P<sign>[+-]) (?P<addr>0x[0-9a-f]{1,16})\]$"
+    )
     RE_REG_ADDR = re.compile(r"(?P<reg>[a-z0-9]{2,4}), \[(?P<addr>0x[0-9a-f]{1,16})\]$")
 
     def __init__(self, disassembler):
@@ -174,7 +177,8 @@ class IndirectCallAnalyzer:
                     # rip-relative addressing already resolves the slot; the register then
                     # receives the whole qword stored there, not rip plus its low half
                     rip = ins[0] + ins[1]
-                    slot = rip + int(match4.group("addr"), 16)
+                    displacement = int(match4.group("addr"), 16)
+                    slot = rip + (-displacement if match4.group("sign") == "-" else displacement)
                     qword = self.disassembly.dereferenceQword(slot)
                     if qword:
                         registers[match4.group("reg")] = qword
