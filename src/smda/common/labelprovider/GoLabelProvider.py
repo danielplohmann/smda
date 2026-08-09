@@ -19,6 +19,9 @@ LOGGER = logging.getLogger(__name__)
 # truncated/corrupt name table cannot pull the entire (potentially multi-MB) binary tail into
 # one symbol string.
 _MAX_SYMBOL_NAME_LEN = 4096
+# Go defines exactly four table magics (internal/abi/symtab.go). Each names the release that
+# introduced the layout, and covers every release until the next one: 1.12 here means Go 1.2
+# through 1.15, and 1.20 is still current. A newer Go therefore needs no new marker.
 _PCLNTAB_VERSIONS = {
     0xFFFFFFFB: "1.12",
     0xFFFFFFFA: "1.16",
@@ -161,7 +164,9 @@ class GoSymbolProvider(AbstractLabelProvider):
             null_byte_index = min(len(buffer), _MAX_SYMBOL_NAME_LEN)
         # errors="replace" is intentional: a single bad byte should not abort parsing of the
         # entire symbol table (the old hex-decode path raised and lost all symbols for the binary).
-        return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ":")
+        # the middle dot separates a package path from a symbol; debug/gosym renders it as a
+        # period, so a name reported here matches what go tool nm prints for the same function
+        return buffer[:null_byte_index].decode("utf-8", errors="replace").replace("\u00b7", ".")
 
     def _parse_pclntab(self, pclntab_offset, binary):
         pclntab_buffer = binary[pclntab_offset:]
@@ -264,19 +269,23 @@ class GoSymbolProvider(AbstractLabelProvider):
                 function_name = self._readUtf8(function_name_buffer[name_offset:])
                 functions[function_offset + start_text] = function_name
         else:
+            # a 1.16 _func opens with a pointer-wide entry address, where 1.18+ has a uint32
+            # offset from textStart. Matching it at its real width is what lets a big-endian
+            # table and an image based above 4GB (Mach-O) find their entries at all; the scan
+            # still steps 4 bytes at a time so an entry can never be stepped over.
+            entry_format = endianness + (field_indicator if version == "1.16" else "I")
+            entry_size = field_size if version == "1.16" else 4
             delete = False
             for offset, function_offset in offsets.items():
                 if delete:
                     offsets2.pop(offset)
                     continue
                 try:
-                    bytes_read = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
-                    read_offset += 4
-                    while bytes_read != function_offset:
-                        bytes_read = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
+                    while struct.unpack(entry_format, table_buffer[read_offset : read_offset + entry_size])[0] != (
+                        function_offset
+                    ):
                         read_offset += 4
-                    if version == "1.16" and bitness == 64:
-                        read_offset += 4
+                    read_offset += entry_size
                     name_offset = struct.unpack(endianness + "I", table_buffer[read_offset : read_offset + 4])[0]
                     read_offset += 4
                 except struct.error:

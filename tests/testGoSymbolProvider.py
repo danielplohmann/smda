@@ -173,5 +173,47 @@ class TestBigEndianPcLntab(unittest.TestCase):
             GoSymbolProvider(None)._parse_pclntab(0, binary)
 
 
+def _table_116_64(endianness, text_base, name_bytes=b"main.main\x00"):
+    """A 1.16 table with one function, whose _func opens with a pointer-wide entry address."""
+    buf = bytearray(0x200)
+    buf[0:4] = struct.pack(endianness + "I", 0xFFFFFFFA)
+    buf[4:6] = b"\x00\x00"
+    buf[6] = 1
+    buf[7] = 8
+    # nfunc, nfiles, funcnameOffset, cuOffset, filetabOffset, pctabOffset, pclnOffset
+    buf[8:64] = struct.pack(endianness + "Q" * 7, 1, 0, 0x40, 0, 0, 0, 0x80)
+    # a decoy at name offset 0, so reading the wrong field (or none) cannot pass by accident
+    buf[0x40:0x48] = b"decoy\x00\x00\x00"
+    buf[0x48 : 0x48 + len(name_bytes)] = name_bytes
+    # functab: entry address, then the offset of its _func
+    buf[0x80:0x88] = struct.pack(endianness + "Q", text_base)
+    buf[0x88:0x90] = struct.pack(endianness + "Q", 0x10)
+    # _func: the same entry address, pointer-wide, then a uint32 name offset
+    buf[0x90:0x98] = struct.pack(endianness + "Q", text_base)
+    buf[0x98:0x9C] = struct.pack(endianness + "I", 8)
+    return bytes(buf)
+
+
+class TestPcLntab116EntryWidth(unittest.TestCase):
+    """A 1.16 _func entry is pointer-wide; reading half of it matches the wrong bytes."""
+
+    def test_a_text_base_above_four_gigabytes_still_resolves(self):
+        # a 64-bit Mach-O image is based at 0x100000000, so the entry does not fit in 32 bits
+        binary = _table_116_64("<", 0x100001000)
+
+        self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), {0x100001000: "main.main"})
+
+    def test_a_big_endian_table_resolves_the_name_and_not_a_neighbouring_field(self):
+        binary = _table_116_64(">", 0x400000)
+
+        self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), {0x400000: "main.main"})
+
+    def test_a_middle_dot_is_rendered_the_way_go_renders_it(self):
+        # debug/gosym maps U+00B7 to a period; compiler-generated wrappers carry it
+        binary = _table_116_64("<", 0x400000, name_bytes="main.run·dwrap·1\x00".encode())
+
+        self.assertEqual(GoSymbolProvider(None)._parse_pclntab(0, binary), {0x400000: "main.run.dwrap.1"})
+
+
 if __name__ == "__main__":
     unittest.main()
