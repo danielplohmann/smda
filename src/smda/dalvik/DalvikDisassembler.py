@@ -1416,11 +1416,17 @@ class DalvikDisassembler:
         scan = data_off + ((4 - (data_off % 4)) % 4)
         # Sort intervals for linear skip advancement.
         claimed_intervals.sort()
+        # scan only ever increases, so an interval ending at or before it stays dead.
+        first_alive = 0
+        num_intervals = len(claimed_intervals)
         while scan + 16 <= data_end and len(candidates) < max_candidates:
             if decode_attempts >= self._MAX_ORPHAN_DECODE_ATTEMPTS:
                 break
+            while first_alive < num_intervals and claimed_intervals[first_alive][1] <= scan:
+                first_alive += 1
             advanced = False
-            for a, b in claimed_intervals:
+            for index in range(first_alive, num_intervals):
+                a, b = claimed_intervals[index]
                 if a <= scan < b:
                     scan = b if b % 4 == 0 else b + (4 - (b % 4))
                     advanced = True
@@ -1461,6 +1467,8 @@ class DalvikDisassembler:
                 candidates.append(accepted)
                 self._claimCodeItemRange(claimed_intervals, scan, hdr["insns_size"])
                 claimed_intervals.sort()
+                first_alive = 0
+                num_intervals = len(claimed_intervals)
             scan += 4
         return candidates
 

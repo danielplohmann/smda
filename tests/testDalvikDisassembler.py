@@ -1112,6 +1112,27 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         found = disassembler._discoverOrphanCodeItems(bytes(raw), known_code_offsets=set())
         self.assertIn(orphan_header_off + 16, found)
 
+    def testSecondOrphanFoundAfterTheFirstClaimsItsRange(self):
+        """Accepting an orphan re-sorts the claimed intervals; the scan must keep finding later ones."""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        code_item = build_code_item(bytes.fromhex("0e00"))
+        header = bytearray(build_dex_header(version=b"039", file_size=0x300, data_off=0x100, data_size=0x200))
+        raw = bytearray(0x300)
+        raw[:0x70] = header[:0x70]
+        first_off, second_off = 0x100, 0x120
+        raw[first_off : first_off + len(code_item)] = code_item
+        raw[second_off : second_off + len(code_item)] = code_item
+        struct.pack_into("<I", raw, 0x20, len(raw))
+        struct.pack_into("<I", raw, 0x68, 0x200)
+        struct.pack_into("<I", raw, 0x6C, 0x100)
+
+        disassembler = DalvikDisassembler(config)
+        found = disassembler._discoverOrphanCodeItems(bytes(raw), known_code_offsets=set())
+
+        self.assertIn(first_off + 16, found)
+        self.assertIn(second_off + 16, found)
+
     def testOrphanWithSwitchPayloadAccepted(self):
         """An orphan body with packed-switch + payload must not be rejected."""
         from smda.dalvik.DalvikDisassembler import DalvikDisassembler
