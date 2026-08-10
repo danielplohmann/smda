@@ -282,12 +282,19 @@ class DisassemblyResult:
             verified_refs = sorted(block_starts.intersection(self.code_refs_from[last_ins_addr]))
             if verified_refs:
                 block_refs[block[0][0]] = verified_refs
+        # block_refs was seeded from sorted(block_starts), so it only needs re-sorting if the
+        # exception pass introduced a key that was not already a block start
+        added_key = False
         for block_start, successors in self._getExceptionSuccessors(func_addr, blocks).items():
             merged_successors = set(block_refs.get(block_start, []))
             merged_successors.update(successors)
             block_refs[block_start] = sorted(merged_successors)
             for successor in successors:
-                block_refs.setdefault(successor, [])
+                if successor not in block_refs:
+                    block_refs[successor] = []
+                    added_key = True
+        if not added_key:
+            return block_refs
         return {block_start: block_refs[block_start] for block_start in sorted(block_refs)}
 
     def getInRefs(self, func_addr):
@@ -297,11 +304,9 @@ class DisassemblyResult:
         return sorted(in_refs)
 
     def getOutRefs(self, func_addr):
-        ins_addrs = set()
         code_refs_from = self.code_refs_from
-        for block in self.functions[func_addr]:
-            for ins in block:
-                ins_addrs.add(ins[0])
+        blocks = self.functions[func_addr]
+        ins_addrs = {ins[0] for block in blocks for ins in block}
         # function may be recursive
         ins_addrs.discard(func_addr)
         out_refs = {}

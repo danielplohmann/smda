@@ -4,6 +4,7 @@ import hashlib
 import logging
 import re
 import struct
+from operator import itemgetter
 from typing import Any, Dict, List, Optional
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
@@ -413,7 +414,11 @@ class SmdaFunction:
         yield from self.code_outrefs
 
     def _calculateSccs(self):
-        tarjan = Tarjan(self.getNormalizedBlockRefs())
+        normalized_blockrefs = self.getNormalizedBlockRefs()
+        # a one-node graph has exactly one component whether or not it self-loops
+        if len(normalized_blockrefs) == 1:
+            return [list(normalized_blockrefs)]
+        tarjan = Tarjan(normalized_blockrefs)
         tarjan.calculateScc()
         return tarjan.getResult()
 
@@ -423,6 +428,9 @@ class SmdaFunction:
             normalized_blockrefs = self.getNormalizedBlockRefs()
             root = self._getCfgRoot(normalized_blockrefs)
             if normalized_blockrefs and root is not None:
+                # a one-node graph dominates only itself, so the tree is empty and the depth 0
+                if len(normalized_blockrefs) == 1:
+                    return 0
                 tree = build_dominator_tree(normalized_blockrefs, root)
                 if tree:
                     nesting_depth = get_nesting_depth(normalized_blockrefs, tree, root)
@@ -434,27 +442,39 @@ class SmdaFunction:
         return struct.unpack("<Q", hashlib.sha256(self.getPicHashSequence(binary_info)).digest()[:8])[0]
 
     def getPicHashSequence(self, binary_info):
-        escaped_binary_seqs = []
-        for key in self._sorted_block_keys:
-            for instruction in self.blocks[key]:
-                escaped_binary_seqs.append(
-                    instruction.getEscapedBinary(
-                        self._escaper,
-                        escape_intraprocedural_jumps=True,
-                        lower_addr=binary_info.base_addr,
-                        upper_addr=binary_info.base_addr + binary_info.binary_size,
-                    )
+        escaper = self._escaper
+        blocks = self.blocks
+        if escaper is None:
+            escaped_binary_seqs = [instruction.bytes for key in self._sorted_block_keys for instruction in blocks[key]]
+        else:
+            lower_addr = binary_info.base_addr
+            upper_addr = lower_addr + binary_info.binary_size
+            escaped_binary_seqs = [
+                escaper.escapeBinary(
+                    instruction,
+                    escape_intraprocedural_jumps=True,
+                    lower_addr=lower_addr,
+                    upper_addr=upper_addr,
                 )
+                for key in self._sorted_block_keys
+                for instruction in blocks[key]
+            ]
         return "".join(escaped_binary_seqs).encode("ascii")
 
     def getOpcHash(self):
         return struct.unpack("<Q", hashlib.sha256(self.getOpcHashSequence()).digest()[:8])[0]
 
     def getOpcHashSequence(self):
-        escaped_binary_seqs = []
-        for key in self._sorted_block_keys:
-            for instruction in self.blocks[key]:
-                escaped_binary_seqs.append(instruction.getEscapedToOpcodeOnly(self._escaper))
+        escaper = self._escaper
+        blocks = self.blocks
+        if escaper is None:
+            escaped_binary_seqs = [instruction.bytes for key in self._sorted_block_keys for instruction in blocks[key]]
+        else:
+            escaped_binary_seqs = [
+                escaper.escapeToOpcodeOnly(instruction)
+                for key in self._sorted_block_keys
+                for instruction in blocks[key]
+            ]
         return "".join(escaped_binary_seqs).encode("ascii")
 
     def _parseBlocksFromTuples(self, disasm_blocks):
@@ -468,14 +488,13 @@ class SmdaFunction:
         """
         self.blocks = {}
         for block in disasm_blocks:
-            instructions = []
             block_start = block[0][0]
-            for ins_addr, _, ins_mnem, ins_ops, ins_raw_bytes in block:
-                instructions.append(
-                    SmdaInstruction([ins_addr, ins_raw_bytes.hex(), str(ins_mnem), str(ins_ops)], smda_function=self)
-                )
-            self.blocks[block_start] = instructions
-            self.binweight += sum(len(ins.bytes or "") / 2 for ins in instructions)
+            self.blocks[block_start] = [
+                SmdaInstruction([ins[0], ins[4].hex(), str(ins[2]), str(ins[3])], smda_function=self) for ins in block
+            ]
+            # len(hex) == 2 * len(raw), so the per-instruction len(hex)/2 this replaces summed to
+            # the raw byte count; binweight is serialized, so it must stay that value and a float
+            self.binweight += float(sum(map(len, map(itemgetter(4), block))))
         self._sorted_block_keys = sorted(self.blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
         self._basic_blocks = None

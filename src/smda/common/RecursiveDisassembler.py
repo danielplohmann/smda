@@ -4,6 +4,7 @@ import datetime
 import logging
 import re
 from bisect import bisect_right
+from itertools import chain
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -284,7 +285,7 @@ class RecursiveDisassembler:
                 LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
             # in capstone, disassembly is more expensive than calling the function, so we use the maximum instruction
             # size as look-ahead. disasm_lite() also provides faster disassembly than disasm(), so we work with tuples.
-            cache = list(self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start))
+            cache = self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start)
             cache_pos = 0
             previous_i = None
             while True:
@@ -301,12 +302,12 @@ class RecursiveDisassembler:
                             i_mnemonic + " " + i_op_str,
                         )
                     cache_pos += i_size
-                    state.setNextInstructionReachable(True)
+                    state.is_next_instruction_reachable = True
                     # count "suspicious" all-zero instructions (e.g. x86 `00 00`,
                     # AArch64 `udf #0`) that indicate non-function code. Testing for an
                     # all-zero decoded instruction is architecture-independent; a
                     # fixed-width constant would never match wider fixed-width ISAs.
-                    if i_bytes and not any(i_bytes):
+                    if i_bytes and not i_bytes[0] and not any(i_bytes):
                         state.suspicious_ins_count += 1
                         LOGGER.debug(
                             "    analyzeFunction() found suspicious function @0x%08x",
@@ -326,7 +327,7 @@ class RecursiveDisassembler:
                     if (
                         i_address not in self.disassembly.code_map
                         and i_address not in self.disassembly.data_map
-                        and not state.isProcessed(i_address)
+                        and i_address not in state.processed_bytes
                     ):
                         if debug_logging:
                             LOGGER.debug(
@@ -356,23 +357,24 @@ class RecursiveDisassembler:
                     else:
                         LOGGER.debug("  analyzeFunction() was already present in local function.")
                         state.setBlockEndingInstruction(True)
-                    if state.isBlockEndingInstruction():
+                    if state.is_block_ending_instruction:
                         state.endBlock()
                         break
                 else:
                     # if the inner loop did not break, we need to refill the cache in order to finish the block-analysis
-                    cache = list(
-                        self.capstone.disasm_lite(
-                            self._getDisasmWindowBuffer(state.block_start + cache_pos),
-                            state.block_start + cache_pos,
-                        )
+                    cache = self.capstone.disasm_lite(
+                        self._getDisasmWindowBuffer(state.block_start + cache_pos),
+                        state.block_start + cache_pos,
                     )
-                    if not cache:
+                    # a generator is always truthy, so emptiness has to be probed by consuming
+                    first_of_refill = next(cache, None)
+                    if first_of_refill is None:
                         break
+                    cache = chain((first_of_refill,), cache)
                     continue
                 # if the inner loop did break, the cache didn't run empty and thus block-analysis is finished
                 break
-            if not state.isBlockEndingInstruction():
+            if not state.is_block_ending_instruction:
                 if i is not None:
                     i_address, i_size, i_mnemonic, i_op_str = i
                     LOGGER.debug(

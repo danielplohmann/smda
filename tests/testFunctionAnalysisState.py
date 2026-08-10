@@ -107,6 +107,8 @@ class _RecordingDisassembly:
         self.recursive_functions = set()
         self.leaf_functions = set()
         self.thunk_functions = set()
+        self.code_refs_from = {}
+        self.code_refs_to = {}
 
     def addCodeRefs(self, addr_from, addr_to):
         pass
@@ -207,6 +209,35 @@ class DalvikRevertAnalysisTestSuite(unittest.TestCase):
         self.assertEqual(disassembly.leaf_functions, set())
         self.assertEqual(disassembly.recursive_functions, set())
         self.assertEqual(disassembly.thunk_functions, set())
+
+
+class FunctionBorderTestSuite(unittest.TestCase):
+    """Instructions reach finalize in analysis order, which is not address order."""
+
+    def test_cil_borders_span_the_lowest_and_highest_instruction(self):
+        disassembly = _RecordingDisassembly()
+        state = CilFunctionAnalysisState(0x200, 0x200, disassembly)
+        state.addInstruction(0x200, 1, "nop", "", b"\x00")
+        state.addInstruction(0x100, 2, "nop", "", b"\x00\x00")
+        state.addInstruction(0x300, 4, "ret", "", b"\x2a")
+
+        state.finalizeAnalysis()
+
+        self.assertEqual((0x100, 0x304), disassembly.function_borders[0x200])
+
+    def test_dalvik_borders_span_the_lowest_and_highest_instruction(self):
+        disassembly = _RecordingDisassembly()
+        disassembly.function_metadata = {}
+        state = DalvikFunctionAnalysisState(0x200, disassembly)
+        state.label = "Lfoo;->bar()V"
+        state.addInstruction(0x200, 2, "nop", "", b"\x00\x00")
+        state.addInstruction(0x100, 2, "nop", "", b"\x00\x00")
+        state.addInstruction(0x300, 2, "return-void", "", b"\x0e\x00")
+        state.endBlock()
+
+        state._finalizeRegularAnalysis()
+
+        self.assertEqual((0x100, 0x302), disassembly.function_borders[0x200])
 
 
 class CilBlockCollisionTestSuite(unittest.TestCase):
