@@ -1082,5 +1082,69 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertEqual(fc_manager.added_candidates, [align_addr])
 
 
+class _StubChainCandidateManager(FunctionCandidateManager):
+    """Drives locateStubChainCandidates without the init/queue machinery: the real block
+    regexes, address arithmetic and data_map bookkeeping run, only candidate creation is
+    recorded."""
+
+    BASE_ADDR = 0x400000
+
+    def __init__(self, binary):
+        self.bitness = 64
+        self._code_areas = []
+        self.candidates = {}
+        self.recovered = []
+        self.disassembly = SimpleNamespace(
+            binary_info=SimpleNamespace(binary=binary, base_addr=self.BASE_ADDR),
+            data_map=set(),
+        )
+
+    def ensureCandidate(self, addr):
+        self.recovered.append(addr)
+        return True
+
+
+class StubChainCandidateTestSuite(unittest.TestCase):
+    PAD = b"\x00" * 16
+
+    def _locate(self, chain):
+        manager = _StubChainCandidateManager(self.PAD + chain + self.PAD)
+        manager.locateStubChainCandidates()
+        return manager
+
+    def test_jmp_stub_chain_yields_one_candidate_per_entry(self):
+        chain = b"\xff\x25\x11\x22\x33\x44" + b"\xff\x25\x55\x66\x77\x88"
+
+        manager = self._locate(chain)
+
+        base = _StubChainCandidateManager.BASE_ADDR + len(self.PAD)
+        self.assertEqual([base, base + 6], manager.recovered)
+
+    def test_plt_chain_yields_one_candidate_per_entry_and_marks_the_interleaved_bytes(self):
+        entry = b"\xff\x25\x11\x22\x33\x44\x68\x00\x00\x00\x00\xe9\x00\x00\x00\x00"
+        chain = entry + entry
+
+        manager = self._locate(chain)
+
+        base = _StubChainCandidateManager.BASE_ADDR + len(self.PAD)
+        self.assertEqual([base, base + 16], manager.recovered)
+        self.assertTrue(set(range(base + 6, base + 16)).issubset(manager.disassembly.data_map))
+
+    def test_plt_sec_chain_yields_one_candidate_per_endbr64_guarded_entry(self):
+        entry = b"\xf3\x0f\x1e\xfa\xf2\xff\x25\x11\x22\x33\x44\x0f\x1f\x44\x00\x00"
+        chain = entry + entry
+
+        manager = self._locate(chain)
+
+        base = _StubChainCandidateManager.BASE_ADDR + len(self.PAD)
+        self.assertEqual([base, base + 16], manager.recovered)
+        self.assertTrue(set(range(base + 7, base + 12)).issubset(manager.disassembly.data_map))
+
+    def test_a_lone_stub_is_not_a_chain(self):
+        manager = self._locate(b"\xff\x25\x11\x22\x33\x44")
+
+        self.assertEqual([], manager.recovered)
+
+
 if __name__ == "__main__":
     unittest.main()
