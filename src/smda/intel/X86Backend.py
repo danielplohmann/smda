@@ -102,6 +102,22 @@ INT80_EXIT_NUMBERS = {1, 252}  # exit, exit_group
 _TRAP_TERMINATOR_INS = frozenset({"int3", "hlt"})
 _SYSCALL_INS = frozenset({"syscall"})
 
+_KIND_CALL, _KIND_JMP, _KIND_LOOP, _KIND_CJMP, _KIND_RET, _KIND_TRAP, _KIND_SYSCALL = range(7)
+_KIND_TABLES = (
+    (CALL_INS, _KIND_CALL),
+    (JMP_INS, _KIND_JMP),
+    (LOOP_INS, _KIND_LOOP),
+    (CJMP_INS, _KIND_CJMP),
+    (RET_INS, _KIND_RET),
+    (_TRAP_TERMINATOR_INS, _KIND_TRAP),
+    (_SYSCALL_INS, _KIND_SYSCALL),
+)
+# one lookup replaces the membership chain that 77% of instructions fell all the way through;
+# collapsing to a single dict is only valid while the tables stay disjoint
+_INS_KIND = {mnemonic: kind for table, kind in _KIND_TABLES for mnemonic in table}
+if len(_INS_KIND) != sum(len(table) for table, _ in _KIND_TABLES):
+    raise AssertionError("intel control-flow mnemonic tables overlap")
+
 
 class X86Backend(ArchBackend):
     """x86/x64 backend: capstone setup, x86 collaborators and the x86 control-flow
@@ -255,7 +271,9 @@ class X86Backend(ArchBackend):
     def _analyzeCondJmpInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
         state.addBlockToQueue(i_address + i_size)
-        jump_destination = d.getReferencedAddr(i_op_str)
+        # capstone always prints a bare "0x..." rel8/rel32 target here, which the queue and the
+        # code ref below already parsed with int(op_str, 16); one parse serves all three
+        jump_destination = int(i_op_str, 16)
         # case = "FALLTHROUGH"
         d.tailcall_analyzer.addJump(i_address, jump_destination)
         if jump_destination:
@@ -268,17 +286,17 @@ class X86Backend(ArchBackend):
                 pass
             else:
                 # case = "OFFSET-QUEUE"
-                state.addBlockToQueue(int(i_op_str, 16))
-            state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
+                state.addBlockToQueue(jump_destination)
+            state.addCodeRef(i_address, jump_destination, by_jump=True)
         state.setBlockEndingInstruction(True)
 
     def _analyzeLoopInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
-        jump_destination = d.getReferencedAddr(i_op_str)
+        jump_destination = int(i_op_str, 16)
         if jump_destination:
             # loops are conditional branches: queue the taken edge as well
             state.addBlockToQueue(jump_destination)
-            state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
+            state.addCodeRef(i_address, jump_destination, by_jump=True)
         # loops have two exits and should thus be handled as block ending instruction
         state.addBlockToQueue(i_address + i_size)
         state.setBlockEndingInstruction(True)
@@ -309,7 +327,7 @@ class X86Backend(ArchBackend):
             if dereferenced is not None:
                 self._handleApiJumpTarget(d, state, i_address, jump_destination, dereferenced)
         elif i_op_str.startswith("0x"):
-            jump_destination = d.getReferencedAddr(i_op_str)
+            jump_destination = int(i_op_str, 16)
             d.tailcall_analyzer.addJump(i_address, jump_destination)
             if jump_destination in d.disassembly.functions:
                 # case = "TAILCALL!"
@@ -327,8 +345,8 @@ class X86Backend(ArchBackend):
                     pass
                 else:
                     # case = "OFFSET-QUEUE"
-                    state.addBlockToQueue(int(i_op_str, 16))
-            state.addCodeRef(i_address, int(i_op_str, 16), by_jump=True)
+                    state.addBlockToQueue(jump_destination)
+            state.addCodeRef(i_address, jump_destination, by_jump=True)
         else:
             self._collectMemRegSlot(state, i_address, i_op_str)
             jumptable_targets = d.jumptable_analyzer.getJumpTargets(i, state)
@@ -410,23 +428,26 @@ class X86Backend(ArchBackend):
         i_address, i_size, i_mnemonic, i_op_str = i
         if previous_instruction is not None:
             previous_address = previous_instruction[0]
-            previous_mnemonic = previous_instruction[2].split(" ")[-1]
-            previous_op_str = previous_instruction[3].strip()
+            previous_mnemonic = previous_instruction[2]
+            if " " in previous_mnemonic:
+                previous_mnemonic = previous_mnemonic.rpartition(" ")[2]
         else:
             previous_address = None
             previous_mnemonic = None
-            previous_op_str = None
         # remove potential "bnd" prefix
-        i_mnemonic_noprefix = i_mnemonic.split(" ")[-1]
-        if i_mnemonic_noprefix in CALL_INS:
+        i_mnemonic_noprefix = i_mnemonic
+        if " " in i_mnemonic_noprefix:
+            i_mnemonic_noprefix = i_mnemonic_noprefix.rpartition(" ")[2]
+        i_kind = _INS_KIND.get(i_mnemonic_noprefix)
+        if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)
-        elif i_mnemonic_noprefix in JMP_INS:
+        elif i_kind == _KIND_JMP:
             self._analyzeJmpInstruction(d, i, state)
-        elif i_mnemonic_noprefix in LOOP_INS:
+        elif i_kind == _KIND_LOOP:
             self._analyzeLoopInstruction(d, i, state)
-        elif i_mnemonic_noprefix in CJMP_INS:
+        elif i_kind == _KIND_CJMP:
             self._analyzeCondJmpInstruction(d, i, state)
-        elif i_mnemonic_noprefix.startswith("j"):
+        elif i_kind is None and i_mnemonic_noprefix.startswith("j"):
             LOGGER.error(
                 "unsupported jump @0x%08x (0x%08x): %s %s",
                 i_address,
@@ -435,7 +456,7 @@ class X86Backend(ArchBackend):
                 i_op_str,
             )
             # we do not analyze any potential exception handler (tricks), so treat breakpoints as exit condition
-        elif i_mnemonic_noprefix in RET_INS:
+        elif i_kind == _KIND_RET:
             self._analyzeEndInstruction(state)
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
@@ -443,7 +464,7 @@ class X86Backend(ArchBackend):
                     i_address,
                 )
             if previous_address is not None and previous_mnemonic == "push":
-                push_ret_destination = d.getReferencedAddr(previous_op_str)
+                push_ret_destination = d.getReferencedAddr(previous_instruction[3].strip())
                 if d.disassembly.isAddrWithinMemoryImage(push_ret_destination):
                     LOGGER.debug(
                         "  analyzeFunction() found push-return jump obfuscation: @0x%08x",
@@ -451,14 +472,14 @@ class X86Backend(ArchBackend):
                     )
                     state.addBlockToQueue(push_ret_destination)
                     state.addCodeRef(i_address, push_ret_destination, by_jump=True)
-        elif i_mnemonic_noprefix in _TRAP_TERMINATOR_INS:
+        elif i_kind == _KIND_TRAP:
             self._analyzeEndInstruction(state)
             if LOGGER.isEnabledFor(logging.DEBUG):
                 LOGGER.debug(
                     "  analyzeFunction() found ending instruction @0x%08x",
                     i_address,
                 )
-        elif i_mnemonic_noprefix in _SYSCALL_INS:
+        elif i_kind == _KIND_SYSCALL:
             syscall_number = self._resolveSyscallNumber(state.current_block, d.disassembly.binary_info.bitness)
             if syscall_number in SYSCALL_EXIT_NUMBERS:
                 self._analyzeEndInstruction(state)

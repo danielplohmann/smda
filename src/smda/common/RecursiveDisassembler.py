@@ -24,6 +24,9 @@ from smda.DisassemblyResult import DisassemblyResult
 
 LOGGER = logging.getLogger(__name__)
 
+# a leading sign is preserved so that negative displacements ("[rip - 0x20]") resolve correctly
+_REFERENCED_ADDR_RE = re.compile(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)")
+
 
 class RecursiveDisassembler:
     """Architecture-agnostic recursive CFG-recovery engine.
@@ -157,7 +160,7 @@ class RecursiveDisassembler:
     def getReferencedAddr(self, op_str):
         # preserve a leading sign so that negative displacements (e.g. "qword ptr [rip - 0x20]")
         # resolve to the correct address instead of being treated as positive
-        referenced_addr = re.search(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)", op_str)
+        referenced_addr = _REFERENCED_ADDR_RE.search(op_str)
         if referenced_addr:
             value = int(referenced_addr.group("value"), 16)
             return -value if referenced_addr.group("sign") == "-" else value

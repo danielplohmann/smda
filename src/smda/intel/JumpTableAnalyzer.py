@@ -6,6 +6,10 @@ from smda.intel.definitions import RET_INS
 
 LOGGER = logging.getLogger(__name__)
 
+_DIRECT_TABLE_RE = re.compile(r"[a-z0-9]{2,3}, dword ptr \[[^ ]+ \+ 0x[0-9a-f]+\]")
+_X64_LEA_TABLE_RE = re.compile(r"[a-z0-9]{2,3}, \[rip (\+|\-) 0x[0-9a-f]+\]")
+_X64_BONUS_OFFSET_RE = re.compile(r"[a-z0-9]{2,3},.*0x[0-9a-f]+\]")
+
 
 class JumpTableAnalyzer:
     """Perform jump table handling.
@@ -78,7 +82,7 @@ class JumpTableAnalyzer:
         data_ref_instruction_addr = None
         off_jumptable = None
         for instr in backtracked[::-1]:
-            if instr[2] == "mov" and re.match(r"[a-z0-9]{2,3}, dword ptr \[[^ ]+ \+ 0x[0-9a-f]+\]", instr[3]):
+            if instr[2] == "mov" and _DIRECT_TABLE_RE.match(instr[3]):
                 data_ref_instruction_addr = instr[0]
                 off_jumptable = self.disassembler.getReferencedAddr(instr[3])
                 state.addDataRef(data_ref_instruction_addr, off_jumptable, size=4)
@@ -95,7 +99,7 @@ class JumpTableAnalyzer:
     def _x64Handler(self, state, backtracked, target_register=None):
         off_jumptable = None
         for instr in backtracked[::-1]:
-            if instr[2] == "lea" and re.match(r"[a-z0-9]{2,3}, \[rip (\+|\-) 0x[0-9a-f]+\]", instr[3]):
+            if instr[2] == "lea" and _X64_LEA_TABLE_RE.match(instr[3]):
                 if target_register and target_register not in instr[3]:
                     continue
                 data_ref_instruction_addr = instr[0]
@@ -110,7 +114,7 @@ class JumpTableAnalyzer:
     def _getx64BonusOffset(self, backtracked):
         bonus_offset = 0
         for instr in backtracked[::-1][:3]:
-            if instr[2] == "mov" and re.match(r"[a-z0-9]{2,3},.*0x[0-9a-f]+\]", instr[3]):
+            if instr[2] == "mov" and _X64_BONUS_OFFSET_RE.match(instr[3]):
                 bonus_offset = self.disassembler.getReferencedAddr(instr[3])
                 break
         return bonus_offset

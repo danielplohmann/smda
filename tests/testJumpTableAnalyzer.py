@@ -199,3 +199,21 @@ class TestJumpTableSignedness(unittest.TestCase):
             jumptable_size=4, off_jumptable=0x2000, alternative_base=None, bonus_offset=0
         )
         self.assertEqual(result, [0x1000])
+
+
+class X64BonusOffsetTestSuite(unittest.TestCase):
+    def test_bonus_offset_taken_from_the_first_matching_mov(self):
+        analyzer = _makeAnalyzer(bitness=64)
+        analyzer.disassembler.getReferencedAddr.return_value = 0x140
+        backtracked = [
+            ("ignored", 0, "lea", "rax, [rip + 0x10]"),
+            (0x2000, 7, "mov", "eax, dword ptr [rcx + rax*4 + 0x140]"),
+        ]
+
+        self.assertEqual(0x140, analyzer._getx64BonusOffset(backtracked))
+
+    def test_no_bonus_offset_without_a_matching_mov(self):
+        analyzer = _makeAnalyzer(bitness=64)
+        backtracked = [(0x2000, 3, "add", "rax, rcx")]
+
+        self.assertEqual(0, analyzer._getx64BonusOffset(backtracked))
