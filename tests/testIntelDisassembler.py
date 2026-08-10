@@ -734,6 +734,43 @@ class TestIntelDisassembler(unittest.TestCase):
 
                 self.assertEqual(manager.candidates, {})
 
+    def _seed_prologues_32bit(self, buf, code_areas=None):
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = len(buf)
+
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        manager.bitness = 32
+        if code_areas:
+            manager._code_areas = code_areas
+
+        manager.locatePrologueCandidates()
+        return manager.candidates.keys()
+
+    def test_prologue_scan_skips_the_body_behind_a_hotpatch_pad(self):
+        # MSVC emits `mov edi, edi` ahead of `push ebp; mov ebp, esp` and the pad is the
+        # function's entry, so the bare 3-byte prologue also matching two bytes in must not
+        # seed a second candidate there -- ground truth counts only the pad.
+        candidates = self._seed_prologues_32bit(bytes.fromhex("8bff558bec" + "90" * 11 + "558bec"))
+
+        self.assertIn(0x1000, candidates)
+        self.assertNotIn(0x1002, candidates)
+        # a bare prologue with no pad in front of it is still seeded where it matches
+        self.assertIn(0x1010, candidates)
+
+    def test_prologue_scan_seeds_the_body_when_the_pad_is_outside_the_code_area(self):
+        # The pad two bytes back is normally seeded by the 5-byte pattern scanned first, which
+        # is what makes skipping the body safe. When the code filter rejected the pad, nothing
+        # stands behind the body, so it must be seeded rather than dropped.
+        candidates = self._seed_prologues_32bit(
+            bytes.fromhex("8bff558bec" + "90" * 11 + "558bec"), code_areas=[[0x1002, 0x1020]]
+        )
+
+        self.assertNotIn(0x1000, candidates)
+        self.assertIn(0x1002, candidates)
+
     def test_prefixed_call_keeps_fallthrough_in_same_block(self):
         state = FunctionAnalysisState(0x1000, SimpleNamespace())
         state.instructions = [

@@ -382,11 +382,24 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     def _seedPrologueMatches(self, pattern):
         """returns True once the analysis timeout trips, so callers can stop scanning
         further patterns instead of each one re-discovering the timeout on its own first match."""
-        for match_count, prologue_match in enumerate(re.finditer(pattern, self.disassembly.binary_info.binary)):
+        binary = self.disassembly.binary_info.binary
+        for match_count, prologue_match in enumerate(re.finditer(pattern, binary)):
             if match_count % 4096 == 0 and self._candidateTimeoutTripped():
                 return True
-            candidate_addr = (self.disassembly.binary_info.base_addr + prologue_match.start()) & self.getBitMask()
+            offset = prologue_match.start()
+            candidate_addr = (self.disassembly.binary_info.base_addr + offset) & self.getBitMask()
             if not self._passesCodeFilter(candidate_addr):
+                continue
+            # MSVC precedes `push ebp; mov ebp, esp` with a `mov edi, edi` hotpatch pad, and the
+            # pad is the function's entry -- a bare prologue match two bytes into one names the
+            # body, not a function start. The pad is itself a DEFAULT_PROLOGUES entry scanned
+            # before the bare form, so it is already a candidate here; requiring that keeps the
+            # body seed whenever the pad was rejected (outside a code area, candidate cap).
+            if (
+                offset >= 2
+                and self.isHotpatchPrologue(binary[offset - 2 : offset + 3])
+                and (candidate_addr - 2) & self.getBitMask() in self.candidates
+            ):
                 continue
             self.addPrologueCandidate(candidate_addr)
             self.setInitialCandidate(candidate_addr)
