@@ -94,7 +94,8 @@ if __name__ == "__main__":
 
     os.makedirs(ARGS.output_path, exist_ok=True)
 
-    TOTAL = len(collectInputFiles(ARGS.input_paths))
+    COLLECTED = collectInputFiles(ARGS.input_paths)
+    TOTAL = len(COLLECTED)
     WORKERS = ARGS.workers if ARGS.workers > 0 else getDefaultWorkerCount()
     print(f"Disassembling {TOTAL} file(s) with {WORKERS} worker(s) into {ARGS.output_path}")
     if ARGS.timeout is None:
@@ -107,6 +108,7 @@ if __name__ == "__main__":
         timeout=ARGS.timeout,
         resume=ARGS.resume,
         max_tasks_per_child=ARGS.max_tasks_per_child,
+        collected=COLLECTED,
     )
 
     START = time.time()
