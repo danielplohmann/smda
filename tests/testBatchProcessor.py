@@ -217,14 +217,20 @@ class TestPartitionDriver(unittest.TestCase):
 
 class TestLargePartitionSizing(unittest.TestCase):
     def test_budget_is_a_fraction_of_physical_memory(self):
-        self.assertGreater(getMemoryBudget(), 0)
+        # os.sysconf is POSIX-only; on Windows the budget is unknown by design and the
+        # worker count alone governs admission
+        if hasattr(os, "sysconf"):
+            self.assertGreater(getMemoryBudget(), 0)
+        else:
+            self.assertIsNone(getMemoryBudget())
 
     def test_budget_is_unknown_without_sysconf(self):
-        with mock.patch.object(os, "sysconf", None):
+        # create=True so this also runs where the attribute never existed
+        with mock.patch.object(os, "sysconf", None, create=True):
             self.assertIsNone(getMemoryBudget())
 
     def test_budget_is_unknown_when_sysconf_rejects_the_key(self):
-        with mock.patch.object(os, "sysconf", side_effect=ValueError):
+        with mock.patch.object(os, "sysconf", side_effect=ValueError, create=True):
             self.assertIsNone(getMemoryBudget())
 
     def test_budget_caps_concurrency_below_the_worker_count(self):
