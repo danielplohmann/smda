@@ -8,9 +8,12 @@ def computeReportIdentityHash(report, exclude=("timestamp", "execution_time")):
     Covers the CFG, per-function hashes, statistics, xrefs and xmetadata in one number, because
     all of them are serialized inside toDict().
     """
-    as_dict = report.toDict()
-    for field in exclude:
-        as_dict.pop(field, None)
+    return computeReportDictIdentityHash(report.toDict(), exclude=exclude)
+
+
+def computeReportDictIdentityHash(report_dict, exclude=("timestamp", "execution_time")):
+    """Same hash for a caller that already has the serialized dict and would else rebuild it."""
+    as_dict = {key: value for key, value in report_dict.items() if key not in exclude}
     serialized = json.dumps(as_dict, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 

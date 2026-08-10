@@ -70,17 +70,16 @@ class WinApiResolver(AbstractLabelProvider):
         api_map = {}
         for dll_entry in api_db["dlls"]:
             LOGGER.debug("  building address map for: %s", dll_entry)
-            for export in api_db["dlls"][dll_entry]["exports"]:
+            dll = api_db["dlls"][dll_entry]
+            dll_name = "_".join(dll_entry.split("_")[2:])
+            has_64bit |= dll["bitness"] == 64
+            base_address = dll["base_address"]
+            for export in dll["exports"]:
                 num_apis_loaded += 1
-                api_name = "{}".format(export["name"])
+                api_name = str(export["name"])
                 if api_name == "None":
                     api_name = "None<{}>".format(export["ordinal"])
-                dll_name = "_".join(dll_entry.split("_")[2:])
-                bitness = api_db["dlls"][dll_entry]["bitness"]
-                has_64bit |= bitness == 64
-                base_address = api_db["dlls"][dll_entry]["base_address"]
-                virtual_address = base_address + export["address"]
-                api_map[virtual_address] = (dll_name, api_name)
+                api_map[base_address + export["address"]] = (dll_name, api_name)
         LOGGER.debug(
             "loaded %d exports from %d DLLs (%s).",
             num_apis_loaded,

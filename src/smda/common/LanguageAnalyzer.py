@@ -15,6 +15,9 @@ from smda.utility.MachoBinary import get_active_macho_binary
 
 LOGGER = logging.getLogger(__name__)
 
+_PRINTABLE_STRINGS_RE = re.compile(b"[ -~]{6,128}")
+_BORLAND_LOCALES = b"borland\\locales"
+
 
 class LanguageAnalyzer:
     def __init__(self, disassembly):
@@ -55,10 +58,8 @@ class LanguageAnalyzer:
 
     def getStrings(self):
         if self.strings is None:
-            self.strings = [
-                match.group("string")
-                for match in re.finditer(b"(?P<string>[ -~]{6,128})", self.disassembly.binary_info.binary)
-            ]
+            # single-group findall yields the group directly, so this is the same list
+            self.strings = _PRINTABLE_STRINGS_RE.findall(self.disassembly.binary_info.binary)
         return self.strings
 
     def getVisualBasicScore(self):
@@ -113,10 +114,26 @@ class LanguageAnalyzer:
             self._delphi_score = self._computeDelphiScore()
         return self._delphi_score
 
+    @staticmethod
+    def _containsBorlandLocales(data):
+        """Case-insensitive search for the literal "Borland\\Locales".
+
+        Anchored on the backslash rather than lowercasing the whole image: the needle has no
+        regex metacharacters, so this is a plain substring predicate over a buffer that can be
+        megabytes wide.
+        """
+        position = data.find(b"\\", 7)
+        while position != -1:
+            # the start index is kept >= 7 so a negative slice can never wrap to the tail
+            if data[position - 7 : position + 8].lower() == _BORLAND_LOCALES:
+                return True
+            position = data.find(b"\\", position + 1)
+        return False
+
     def _computeDelphiScore(self):
         delphi_score = 0.0
         # Check if Delphi-Locales are present in strings
-        if re.search(rb"Borland\\Locales", self.disassembly.binary_info.binary, re.IGNORECASE):
+        if self._containsBorlandLocales(self.disassembly.binary_info.binary):
             delphi_score = max(delphi_score, 0.25)
         if self._getPETimestamp() == 0x2A425E19:
             delphi_score = max(delphi_score, 0.25)
