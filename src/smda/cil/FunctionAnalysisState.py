@@ -2,8 +2,8 @@ import logging
 
 LOGGER = logging.getLogger(__name__)
 
-CALL_INS = ["call", "calli", "callvirt"]
-END_INS = ["ret", "throw", "rethrow", "endfinally", "endfilter"]
+CALL_INS = frozenset(["call", "calli", "callvirt"])
+END_INS = frozenset(["ret", "throw", "rethrow", "endfinally", "endfilter"])
 
 
 class FunctionAnalysisState:
@@ -121,39 +121,41 @@ class FunctionAnalysisState:
         if self.blocks:
             return self.blocks
         self.instructions.sort()
-        ins = {i[0]: ind for ind, i in enumerate(self.instructions)}
+        instructions = self.instructions
+        last_index = len(instructions) - 1
+        code_refs_from = self.code_refs_from
+        code_refs_to = self.code_refs_to
+        ins = {i[0]: ind for ind, i in enumerate(instructions)}
         potential_starts = {self.code_start_addr}
-        potential_starts.update(list(self.jump_targets))
+        potential_starts.update(self.jump_targets)
         blocks = []
         for start in sorted(potential_starts):
             if start not in ins:
                 continue
             block = []
-            for i in range(ins[start], len(self.instructions)):
-                current = self.instructions[i]
+            for i in range(ins[start], last_index + 1):
+                current = instructions[i]
                 block.append(current)
+                current_addr = current[0]
+                is_last = i == last_index
+                next_ins_addr = -1 if is_last else instructions[i + 1][0]
                 # if one code reference is to another address than the next
+                refs_from = code_refs_from.get(current_addr)
+                if refs_from is not None and current[2] not in CALL_INS and not is_last:
+                    num_refs_from = len(refs_from)
+                    if num_refs_from > 1 or (num_refs_from == 1 and next_ins_addr not in refs_from):
+                        # if we can reach a colliding address from here, the block is broken and should end.
+                        reachable_collisions = refs_from.intersection(self.colliding_addresses)
+                        next_addr = current_addr + current[1]
+                        is_next_addr = next_addr in reachable_collisions
+                        if reachable_collisions and is_next_addr:
+                            # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
+                            self.removeCodeRef(current_addr, next_addr)
+                        break
                 if (
-                    current[0] in self.code_refs_from
-                    and current[2] not in CALL_INS
-                    and i != len(self.instructions) - 1
-                    and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
-                ):
-                    # if we can reach a colliding address from here, the block is broken and should end.
-                    reachable_collisions = self.code_refs_from[current[0]].intersection(self.colliding_addresses)
-                    next_addr = current[0] + current[1]
-                    is_next_addr = next_addr in reachable_collisions
-                    if reachable_collisions and is_next_addr:
-                        # we should remove the from/to code references for this collision as there should be no non CFG instruction references between instructions of different functions
-                        self.removeCodeRef(current[0], next_addr)
-                    break
-                if (
-                    i != len(self.instructions) - 1
-                    and self.instructions[i + 1][0] in self.code_refs_to
-                    and (
-                        len(self.code_refs_to[self.instructions[i + 1][0]]) > 1
-                        or self.instructions[i + 1][0] in potential_starts
-                    )
+                    not is_last
+                    and next_ins_addr in code_refs_to
+                    and (next_ins_addr in potential_starts or len(code_refs_to[next_ins_addr]) > 1)
                 ):
                     break
                 if current[2] in END_INS:

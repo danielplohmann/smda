@@ -4,24 +4,26 @@ LOGGER = logging.getLogger(__name__)
 
 # Dalvik-specific lists for block derivation
 # Any invoke-* is a call
-CALL_INS = [
-    "invoke-virtual",
-    "invoke-super",
-    "invoke-direct",
-    "invoke-static",
-    "invoke-interface",
-    "invoke-virtual/range",
-    "invoke-super/range",
-    "invoke-direct/range",
-    "invoke-static/range",
-    "invoke-interface/range",
-    "invoke-polymorphic",
-    "invoke-polymorphic/range",
-    "invoke-custom",
-    "invoke-custom/range",
-]
+CALL_INS = frozenset(
+    [
+        "invoke-virtual",
+        "invoke-super",
+        "invoke-direct",
+        "invoke-static",
+        "invoke-interface",
+        "invoke-virtual/range",
+        "invoke-super/range",
+        "invoke-direct/range",
+        "invoke-static/range",
+        "invoke-interface/range",
+        "invoke-polymorphic",
+        "invoke-polymorphic/range",
+        "invoke-custom",
+        "invoke-custom/range",
+    ]
+)
 # Any return-* or throw is an end instruction
-END_INS = ["return-void", "return", "return-wide", "return-object", "throw"]
+END_INS = frozenset(["return-void", "return", "return-wide", "return-object", "throw"])
 
 
 class DalvikFunctionAnalysisState:
@@ -213,32 +215,33 @@ class DalvikFunctionAnalysisState:
         if self.blocks:
             return self.blocks
         self.instructions.sort()
-        ins = {i[0]: ind for ind, i in enumerate(self.instructions)}
+        instructions = self.instructions
+        last_index = len(instructions) - 1
+        code_refs_from = self.code_refs_from
+        code_refs_to = self.code_refs_to
+        ins = {i[0]: ind for ind, i in enumerate(instructions)}
         potential_starts = {self.start_addr}
-        potential_starts.update(list(self.jump_targets))
+        potential_starts.update(self.jump_targets)
         potential_starts.update(self.block_starts)
         blocks = []
         for start in sorted(potential_starts):
             if start not in ins:
                 continue
             block = []
-            for i in range(ins[start], len(self.instructions)):
-                current = self.instructions[i]
+            for i in range(ins[start], last_index + 1):
+                current = instructions[i]
                 block.append(current)
+                is_last = i == last_index
+                next_ins_addr = -1 if is_last else instructions[i + 1][0]
+                refs_from = code_refs_from.get(current[0])
+                if refs_from is not None and current[2] not in CALL_INS and not is_last:
+                    num_refs_from = len(refs_from)
+                    if num_refs_from > 1 or (num_refs_from == 1 and next_ins_addr not in refs_from):
+                        break
                 if (
-                    current[0] in self.code_refs_from
-                    and current[2] not in CALL_INS
-                    and i != len(self.instructions) - 1
-                    and any(r != self.instructions[i + 1][0] for r in self.code_refs_from[current[0]])
-                ):
-                    break
-                if (
-                    i != len(self.instructions) - 1
-                    and self.instructions[i + 1][0] in self.code_refs_to
-                    and (
-                        len(self.code_refs_to[self.instructions[i + 1][0]]) > 1
-                        or self.instructions[i + 1][0] in potential_starts
-                    )
+                    not is_last
+                    and next_ins_addr in code_refs_to
+                    and (next_ins_addr in potential_starts or len(code_refs_to[next_ins_addr]) > 1)
                 ):
                     break
                 if current[2] in END_INS:
