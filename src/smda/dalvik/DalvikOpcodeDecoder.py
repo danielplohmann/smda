@@ -851,6 +851,38 @@ _OPCODE_DECODE: Dict[int, tuple] = {
 }
 
 
+def _null_resolve(ref_kind, ref_index):
+    return ""
+
+
+def decode_instruction_shallow(bytecode, byte_idx):
+    """Return ``(size_bytes, payload_idx)`` without building a full decoded instruction.
+
+    The linear start sweep consumes only those two fields, but paid for operand formatting,
+    register lists and reference resolution at every offset of the bytecode. The validity
+    checks below are the same three, in the same order, so this raises ValueError on exactly
+    the offsets decode_instruction rejects. Where an opcode declares a payload the real format
+    decoder still produces the target, so payload_idx cannot drift from the full decode.
+    """
+    opcode_value = bytecode[byte_idx]
+    entry = _OPCODE_DECODE.get(opcode_value)
+    if entry is None:
+        raise ValueError(f"Unknown Dalvik opcode 0x{opcode_value:02x}")
+    opcode, decoder = entry
+
+    size_bytes = opcode.size_units * 2
+    if byte_idx + size_bytes > len(bytecode):
+        raise ValueError("Truncated Dalvik instruction")
+
+    if decoder is None:
+        raise ValueError(f"Unsupported Dalvik format {opcode.fmt}")
+
+    if not opcode.payload_kind:
+        return size_bytes, None
+    raw_bytes = bytes(bytecode[byte_idx : byte_idx + size_bytes])
+    return size_bytes, decoder(raw_bytes, byte_idx, opcode, _null_resolve).get("payload_idx")
+
+
 def decode_instruction(bytecode, byte_idx, resolve_ref):
     opcode_value = bytecode[byte_idx]
     entry = _OPCODE_DECODE.get(opcode_value)
