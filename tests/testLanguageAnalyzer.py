@@ -282,12 +282,50 @@ class TestLanguageAnalyzer(unittest.TestCase):
 
         with mock.patch.object(analyzer, "getDelphiObjects", return_value={0x1000: "TObject"}):
             self.assertEqual(analyzer.getDelphiScore(), 0.6)
+
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"TObject"))
         with mock.patch.object(
             analyzer,
             "getDelphiObjects",
             return_value={address: f"TObject{address}" for address in range(5)},
         ):
             self.assertEqual(analyzer.getDelphiScore(), 0.9)
+
+
+class TestLanguageEvidenceMemoization(unittest.TestCase):
+    def test_delphi_score_is_stable_between_identify_and_check_delphi(self):
+        delphi_string = b"\x00\x00\x01\x0aABCDEFGHIJ\x00"
+        analyzer = LanguageAnalyzer(_DummyDisassembly(delphi_string * 101))
+
+        identified = analyzer.identify()
+
+        self.assertEqual(analyzer.getDelphiScore(), identified["delphi"])
+        self.assertEqual(analyzer.checkDelphi(), identified["delphi"] > 0.5)
+
+    def test_cpp_symbol_score_is_stable_between_identify_and_rescore(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32, functions={}))
+        binary = SimpleNamespace(
+            exported_functions=[],
+            exported_symbols=[],
+            symtab_symbols=[SimpleNamespace(name=f"_ZN4test{index}barEv") for index in range(3)],
+            dynamic_symbols=[],
+            symbols=[],
+        )
+        with (
+            mock.patch.object(analyzer.disassembly.binary_info, "getLiefBinary", return_value=binary),
+            mock.patch("smda.common.LanguageAnalyzer.get_active_macho_binary", return_value=binary),
+        ):
+            identified = analyzer.identify()
+            rescored = analyzer.rescore(dict(identified), 100)
+
+        self.assertEqual(rescored["c++"], identified["c++"])
+        self.assertEqual(analyzer.getCppSymbolScore()[0], identified["c++"])
+
+    def test_empty_string_scan_is_not_repeated(self):
+        analyzer = LanguageAnalyzer(_DummyDisassembly(b"\x00" * 32))
+
+        self.assertEqual(analyzer.getStrings(), [])
+        self.assertIs(analyzer.getStrings(), analyzer.strings)
 
 
 class TestDelphiHeuristics(unittest.TestCase):

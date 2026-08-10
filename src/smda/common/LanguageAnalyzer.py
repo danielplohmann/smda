@@ -28,6 +28,8 @@ class LanguageAnalyzer:
         self._cpp_symbol_count = 0
         self._guess = None
         self._delphi_objects = None
+        self._delphi_score = None
+        self._cpp_symbol_score = None
 
     def validPEHeader(self):
         is_pe = self.disassembly.binary_info.binary[0:2] == b"\x4d\x5a"
@@ -52,7 +54,7 @@ class LanguageAnalyzer:
             return 0
 
     def getStrings(self):
-        if not self.strings:
+        if self.strings is None:
             self.strings = [
                 match.group("string")
                 for match in re.finditer(b"(?P<string>[ -~]{6,128})", self.disassembly.binary_info.binary)
@@ -107,6 +109,11 @@ class LanguageAnalyzer:
         return self.getDelphiScore() > 0.5
 
     def getDelphiScore(self):
+        if self._delphi_score is None:
+            self._delphi_score = self._computeDelphiScore()
+        return self._delphi_score
+
+    def _computeDelphiScore(self):
         delphi_score = 0.0
         # Check if Delphi-Locales are present in strings
         if re.search(rb"Borland\\Locales", self.disassembly.binary_info.binary, re.IGNORECASE):
@@ -171,6 +178,11 @@ class LanguageAnalyzer:
         The returned count is capped at ``CPP_SYMBOL_EVIDENCE_THRESHOLD``; it reports
         how much evidence was needed, not how many C++ symbols the binary holds.
         """
+        if self._cpp_symbol_score is None:
+            self._cpp_symbol_score = self._computeCppSymbolScore()
+        return self._cpp_symbol_score
+
+    def _computeCppSymbolScore(self):
         try:
             lief_binary = self.disassembly.binary_info.getLiefBinary()
         except Exception as exc:
