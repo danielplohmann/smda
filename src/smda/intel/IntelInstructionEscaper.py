@@ -44,6 +44,8 @@ _COND_JUMP_MNEMONICS = frozenset(
     }
 )
 _ALL_JUMP_MNEMONICS = _JUMP_CALL_MNEMONICS | _COND_JUMP_MNEMONICS
+_IMMEDIATE_RE = re.compile(r"0x[0-9a-fA-F]{1,16}")
+_PTR_REF_RE = re.compile(r"\[(rip (\+|\-) )?(?P<dword_offset>0x[a-fA-F0-9]+)\]")
 
 
 class IntelInstructionEscaper:
@@ -2167,10 +2169,11 @@ class IntelInstructionEscaper:
     @classmethod
     def _getPrefixLen(cls, ins_bytes):
         prefixes = cls._PREFIXES
-        return next(
-            (i for i in range(0, len(ins_bytes), 2) if ins_bytes[i : i + 2] not in prefixes),
-            len(ins_bytes),
-        )
+        length = len(ins_bytes)
+        index = 0
+        while index < length and ins_bytes[index : index + 2] in prefixes:
+            index += 2
+        return index
 
     @staticmethod
     def escapeToOpcodeOnly(ins):
@@ -2200,34 +2203,38 @@ class IntelInstructionEscaper:
     @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
         escaped_sequence = ins.bytes
-        mnemonic = ins.mnemonic.split(" ")[-1]
+        mnemonic = ins.mnemonic
+        if " " in mnemonic:
+            mnemonic = mnemonic.rpartition(" ")[2]
         # remove segment, operand, address, repeat override prefixes
-        if mnemonic in _JUMP_CALL_MNEMONICS or mnemonic in _COND_JUMP_MNEMONICS:
-            escaped_sequence = IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
+        if mnemonic in _ALL_JUMP_MNEMONICS:
+            return IntelInstructionEscaper.escapeBinaryJumpCall(ins, escape_intraprocedural_jumps)
+        operands = ins.operands
+        # every test below needs "0x" as a substring, and capstone emits lowercase hex only
+        if "0x" not in operands:
             return escaped_sequence
-        if "ptr [0x" in ins.operands or "[rip + 0x" in ins.operands or "[rip - 0x" in ins.operands:
+        if "ptr [0x" in operands or "[rip + 0x" in operands or "[rip - 0x" in operands:
             escaped_sequence = IntelInstructionEscaper.escapeBinaryPtrRef(ins)
         if (
             lower_addr is not None
+            and lower_addr > 0x00100000
             and upper_addr is not None
-            and (
-                ins.operands.startswith("0x")
-                or ", 0x" in ins.operands
-                or "+ 0x" in ins.operands
-                or "- 0x" in ins.operands
-            )
+            and (operands.startswith("0x") or ", 0x" in operands or "+ 0x" in operands or "- 0x" in operands)
         ):
-            immediates = []
-            for immediate_match in re.finditer(r"0x[0-9a-fA-F]{1,16}", ins.operands):
+            for immediate_match in _IMMEDIATE_RE.finditer(operands):
                 immediate = int(immediate_match.group()[2:], 16)
-                if lower_addr > 0x00100000 and lower_addr <= immediate < upper_addr:
-                    immediates.append(immediate)
+                if lower_addr <= immediate < upper_addr:
                     escaped_sequence = IntelInstructionEscaper.escapeBinaryValue(ins, escaped_sequence, immediate)
         return escaped_sequence
 
     @staticmethod
     def escapeBinaryJumpCall(ins, escape_intraprocedural_jumps=False):
-        clean_bytes = IntelInstructionEscaper.getByteWithoutPrefixes(ins)
+        ins_bytes = ins.bytes
+        prefixes = IntelInstructionEscaper._PREFIXES
+        prefix_len = 0
+        while prefix_len < len(ins_bytes) and ins_bytes[prefix_len : prefix_len + 2] in prefixes:
+            prefix_len += 2
+        clean_bytes = ins_bytes[prefix_len:]
         if escape_intraprocedural_jumps and (clean_bytes.startswith(("7", "e0", "e1", "e2", "e3", "eb"))):
             return ins.bytes[:-2] + "??"
         if escape_intraprocedural_jumps and clean_bytes.startswith("0f8"):
@@ -2259,7 +2266,7 @@ class IntelInstructionEscaper:
     @staticmethod
     def escapeBinaryPtrRef(ins):
         escaped_sequence = ins.bytes
-        addr_match = re.search(r"\[(rip (\+|\-) )?(?P<dword_offset>0x[a-fA-F0-9]+)\]", ins.operands)
+        addr_match = _PTR_REF_RE.search(ins.operands)
         if addr_match:
             offset = int(addr_match.group("dword_offset"), 16)
             disp_size = 4
