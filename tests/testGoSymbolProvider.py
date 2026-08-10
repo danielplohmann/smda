@@ -1,10 +1,42 @@
 import pathlib
+import random
 import struct
 import unittest
 from types import SimpleNamespace
 
+import lief
+
 from smda.common.BinaryInfo import BinaryInfo
-from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
+from smda.common.labelprovider.GoLabelProvider import (
+    _PCLNTAB_HEADER_RE,
+    GoSymbolProvider,
+    findPcLntabHeaderOffsets,
+)
+
+_ELF_PCLNTAB_OFFSET = 64
+
+
+def _build_elf_with_gopclntab(pclntab):
+    """Smallest ELF64 lief will parse that carries a named .gopclntab section."""
+    shstr = b"\x00.gopclntab\x00.shstrtab\x00"
+    ehsize, shent = 64, 64
+    pcl_off = ehsize
+    shstr_off = pcl_off + len(pclntab)
+    shoff = (shstr_off + len(shstr) + 7) & ~7
+    header = bytearray(ehsize)
+    header[0:4] = b"\x7fELF"
+    header[4], header[5], header[6] = 2, 1, 1
+    struct.pack_into("<HHIQQQIHHHHHH", header, 16, 2, 62, 1, 0, 0, shoff, 0, ehsize, 56, 0, shent, 3, 2)
+    out = bytearray(header) + pclntab + shstr
+    out += b"\x00" * (shoff - len(out))
+
+    def section(name_offset, section_type, offset, size, addr=0):
+        return struct.pack("<IIQQQQIIQQ", name_offset, section_type, 0, addr, offset, size, 0, 0, 1, 0)
+
+    out += section(0, 0, 0, 0)
+    out += section(shstr.index(b".gopclntab"), 1, pcl_off, len(pclntab), 0x400000)
+    out += section(shstr.index(b".shstrtab"), 3, shstr_off, len(shstr))
+    return bytes(out)
 
 
 def _build_truncated_pclntab_116_64():
@@ -319,6 +351,90 @@ class TestGoProviderCapabilities(unittest.TestCase):
         self.assertFalse(provider.isApiProvider())
         self.assertTrue(provider.isSymbolProvider())
         self.assertEqual(provider.getApi(0x401000), ("", ""))
+
+
+class PcLntabHeaderScanTestSuite(unittest.TestCase):
+    """The anchored scan must accept exactly the offsets the header pattern itself matches."""
+
+    @staticmethod
+    def _reference(data):
+        return [match.start() for match in _PCLNTAB_HEADER_RE.finditer(data)]
+
+    def test_both_endian_spellings_are_found(self):
+        little = b"\xfa\xff\xff\xff\x00\x00\x01\x08"
+        big = b"\xff\xff\xff\xfa\x00\x00\x01\x08"
+        for header in (little, big):
+            with self.subTest(header=header.hex()):
+                data = b"\x90" * 32 + header + b"\x90" * 32
+                self.assertEqual([32], findPcLntabHeaderOffsets(data))
+                self.assertEqual(self._reference(data), findPcLntabHeaderOffsets(data))
+
+    def test_a_bare_anchor_run_is_not_a_header(self):
+        # the literal anchor alone must not be accepted without the rest of the shape
+        data = b"\xff" * 64
+        self.assertEqual([], findPcLntabHeaderOffsets(data))
+        self.assertEqual(self._reference(data), findPcLntabHeaderOffsets(data))
+
+    def test_an_anchor_at_offset_zero_does_not_probe_before_the_buffer(self):
+        data = b"\xff\xff\xff\xfb\x00\x00\x02\x04"
+        self.assertEqual([0], findPcLntabHeaderOffsets(data))
+
+    def test_matches_the_pattern_on_the_bundled_go_corpus(self):
+        corpus = pathlib.Path(__file__).parent / "go_corpus"
+        checked = 0
+        for path in sorted(corpus.rglob("*")):
+            if not path.is_file():
+                continue
+            data = path.read_bytes()
+            self.assertEqual(self._reference(data), findPcLntabHeaderOffsets(data), str(path))
+            checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_matches_the_pattern_on_adversarial_random_buffers(self):
+        rng = random.Random(1234)
+        alphabet = bytes([0x00, 0x01, 0x02, 0x04, 0x08, 0xF0, 0xF1, 0xFA, 0xFB, 0xFF])
+        for _ in range(2000):
+            data = bytes(rng.choice(alphabet) for _ in range(rng.randint(0, 40)))
+            self.assertEqual(self._reference(data), findPcLntabHeaderOffsets(data), data.hex())
+
+
+class PcLntabRejectionTestSuite(unittest.TestCase):
+    """Malformed headers must be rejected rather than parsed as Go metadata."""
+
+    def test_header_with_bad_padding_quantum_or_pointer_size_is_rejected(self):
+        provider = GoSymbolProvider(None)
+        for label, quantum, ptr, pad in (
+            ("padding", 1, 8, b"\x01\x00"),
+            ("quantum", 3, 8, b"\x00\x00"),
+            ("pointer size", 1, 6, b"\x00\x00"),
+        ):
+            with self.subTest(field=label):
+                buf = struct.pack("<I", 0xFFFFFFFA) + pad + bytes([quantum, ptr]) + b"\x00" * 32
+                self.assertIsNone(provider._readPcLntabHeader(buf, 0))
+
+    def test_a_32_bit_table_is_parsed_rather_than_rejected(self):
+        # pointer size 4 selects the 32-bit field widths for the whole table
+        buf = struct.pack("<I", 0xFFFFFFFB) + b"\x00\x00\x01\x04" + struct.pack("<I", 0) + b"\x00" * 64
+
+        self.assertEqual({}, GoSymbolProvider(None)._parse_pclntab(0, buf))
+
+    def test_unrecognized_bitness_marker_raises(self):
+        provider = GoSymbolProvider(None)
+        # valid version marker, but a pointer size that is neither 4 nor 8
+        buf = struct.pack("<I", 0xFFFFFFFA) + b"\x00\x00\x01\x06" + b"\x00" * 64
+        with self.assertRaises(ValueError):
+            provider._parse_pclntab(0, buf)
+
+    def test_elf_gopclntab_section_offset_is_preferred_over_the_scan(self):
+        header = struct.pack("<I", 0xFFFFFFFA) + b"\x00\x00\x01\x08"
+        data = _build_elf_with_gopclntab(header + b"\x00" * 64)
+        lief_elf = lief.parse(data)
+        binary_info = SimpleNamespace(binary=data, getLiefBinary=lambda: lief_elf)
+
+        provider = GoSymbolProvider(None)
+
+        # the section header names the table directly, so the whole-image scan is not needed
+        self.assertEqual(_ELF_PCLNTAB_OFFSET, provider.getPcLntabOffset(binary_info))
 
 
 if __name__ == "__main__":
