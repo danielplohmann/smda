@@ -37,6 +37,18 @@ _PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
 # still admitting its one strong signal (0x55 "push ebp/rbp", scored 51/33).
 _ENTRY_SHAPE_MIN_SCORE = 30
 
+# Written as `A(BA)+B` rather than the equivalent `(AB){2,}` so the pattern starts with a literal:
+# only then does the regex engine emit a prefix fast-search instead of entering the matcher at
+# every offset of the mapped image.
+_RE_STUB_BLOCK = re.compile(b"\xff\x25(?:.{4}\xff\x25)+.{4}", re.DOTALL)
+_RE_STUB_ENTRY = re.compile(b"\xff\x25(?P<function>.{4})", re.DOTALL)
+_RE_PLT_BLOCK = re.compile(b"\xff\x25(?:.{4}\x68.{4}\xe9.{4}\xff\x25)+.{4}\x68.{4}\xe9.{4}", re.DOTALL)
+_RE_PLTSEC_BLOCK = re.compile(
+    b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?:.{4}\x0f\x1f\x44\x00\x00\xf3\x0f\x1e\xfa\xf2\xff\x25)+.{4}\x0f\x1f\x44\x00\x00",
+    re.DOTALL,
+)
+_RE_PLTSEC_ENTRY = re.compile(b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?P<function>.{4})", re.DOTALL)
+
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
@@ -396,8 +408,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
     def locateStubChainCandidates(self):
         # binaries often contain long sequences of stubs, consisting only of jmp dword ptr <offset>, add such chains as candidates
-        for block in re.finditer(b"(?P<block>(\xff\x25[\\S\\s]{4}){2,})", self.disassembly.binary_info.binary):
-            for match in re.finditer(b"\xff\x25(?P<function>[\\S\\s]{4})", block.group("block")):
+        for block in _RE_STUB_BLOCK.finditer(self.disassembly.binary_info.binary):
+            for match in _RE_STUB_ENTRY.finditer(block.group(0)):
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
@@ -407,11 +419,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if stub_addr_masked in self.candidates:
                     self.candidates[stub_addr_masked].setIsStub(True)
         # structure for plt entries is similar but interleaved with additional code not considered functions
-        for block in re.finditer(
-            b"(?P<block>(\xff\x25[\\S\\s]{4}\x68[\\S\\s]{4}\xe9[\\S\\s]{4}){2,})",
-            self.disassembly.binary_info.binary,
-        ):
-            for match in re.finditer(b"\xff\x25(?P<function>[\\S\\s]{4})", block.group("block")):
+        for block in _RE_PLT_BLOCK.finditer(self.disassembly.binary_info.binary):
+            for match in _RE_STUB_ENTRY.finditer(block.group(0)):
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
@@ -440,14 +449,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         .plt.sec:000000000000CF74                                           ; ---------------------------------------------------------------------------
         .plt.sec:000000000000CF7B 0F 1F 44 00 00                                            align 20h
         """
-        for block in re.finditer(
-            b"(?P<block>(\xf3\x0f\x1e\xfa\xf2\xff\x25[\\S\\s]{4}\x0f\x1f\x44\x00\x00){2,})",
-            self.disassembly.binary_info.binary,
-        ):
-            for match in re.finditer(
-                b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?P<function>[\\S\\s]{4})",
-                block.group("block"),
-            ):
+        for block in _RE_PLTSEC_BLOCK.finditer(self.disassembly.binary_info.binary):
+            for match in _RE_PLTSEC_ENTRY.finditer(block.group(0)):
                 stub_addr = self.disassembly.binary_info.base_addr + block.start() + match.start()
                 if not self._passesCodeFilter(stub_addr):
                     continue
