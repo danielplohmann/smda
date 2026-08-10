@@ -162,7 +162,10 @@ class JumpTableAnalyzer:
         return sorted(jump_targets)
 
     def _resolveExplicitTable(self, jump_instruction_address, state, jumptable_address, jumptable_size=None):
-        jumptable_size = jumptable_size if jumptable_size is not None else 0xFF
+        # _findJumpTableSize reports an unrecovered bound as 0, not None, so testing against
+        # None here read "zero entries" and abandoned the table -- mirror the truthiness test
+        # _extractRelativeTableOffsets uses, and let the per-entry image bound stop the scan.
+        jumptable_size = jumptable_size if jumptable_size else 0xFF
         jumptable_addresses = []
         bitness = self.disassembly.binary_info.bitness
         if bitness == 32:

@@ -1,3 +1,4 @@
+import struct
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -163,6 +164,41 @@ class JumpTableAnalyzerTestSuite(unittest.TestCase):
 
         self.assertEqual(result, [])
         state.addDataRef.assert_not_called()
+
+    def test_resolveExplicitTable_scans_when_the_size_was_not_recovered(self):
+        # _findJumpTableSize reports "no bound found" as 0, which MSVC /Od reaches routinely
+        # because it spills the switch value and compares a stack slot. Treating that 0 as a
+        # real size abandoned the table; it must fall back to a bounded scan instead, and the
+        # per-entry image check is what ends it -- here after the three in-image entries.
+        analyzer = _makeAnalyzer(bitness=32)
+        entries = [0x1100, 0x1200, 0x1300]
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(side_effect=lambda addr: addr in (0x1090, *entries))
+        table = b"".join(struct.pack("<I", entry) for entry in entries) + struct.pack("<I", 0xDEADBEEF)
+        analyzer.disassembly.getBytes = MagicMock(
+            side_effect=lambda addr, size: table[addr - 0x1090 : addr - 0x1090 + size]
+        )
+
+        result = analyzer._resolveExplicitTable(
+            jump_instruction_address=0x2000, state=MagicMock(), jumptable_address=0x1090, jumptable_size=0
+        )
+
+        self.assertEqual(result, entries)
+
+    def test_resolveExplicitTable_honours_a_recovered_size(self):
+        # a real bound must still cap the scan, so the entry past the switch is not claimed
+        analyzer = _makeAnalyzer(bitness=32)
+        entries = [0x1100, 0x1200, 0x1300]
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(return_value=True)
+        table = b"".join(struct.pack("<I", entry) for entry in entries)
+        analyzer.disassembly.getBytes = MagicMock(
+            side_effect=lambda addr, size: table[addr - 0x1090 : addr - 0x1090 + size]
+        )
+
+        result = analyzer._resolveExplicitTable(
+            jump_instruction_address=0x2000, state=MagicMock(), jumptable_address=0x1090, jumptable_size=2
+        )
+
+        self.assertEqual(result, entries[:2])
 
 
 if __name__ == "__main__":
