@@ -8,7 +8,7 @@ from multiprocessing import get_context
 
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
-from smda.utility.common import computeReportIdentityHash
+from smda.utility.common import computeReportDictIdentityHash
 
 LOGGER = logging.getLogger(__name__)
 
@@ -80,11 +80,14 @@ def _analyzeOneFile(task):
         summary["num_functions"] = report.num_functions
         summary["num_instructions"] = report.num_instructions
         summary["execution_time"] = report.execution_time
-        summary["report_hash"] = computeReportIdentityHash(report)
+        # one toDict() serves both the identity hash and the file, instead of building the
+        # whole report dict twice
+        as_dict = report.toDict()
+        summary["report_hash"] = computeReportDictIdentityHash(as_dict)
         if task["output_dir"]:
             output_path = os.path.join(task["output_dir"], task["report_stem"] + ".smda")
             with open(output_path, "w", encoding="utf-8") as f_out:
-                json.dump(report.toDict(), f_out, indent=1, sort_keys=True)
+                f_out.write(json.dumps(as_dict, indent=1, sort_keys=True))
             summary["output_path"] = output_path
         if task["return_reports"]:
             summary["report"] = report

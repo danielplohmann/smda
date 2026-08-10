@@ -238,14 +238,17 @@ class ElfFileLoader:
                     rva + section.size,
                     section.virtual_address,
                 )
-                # potentially perform zero padding if we have less content than section size
-                content_to_be_mapped = bytearray(section.content)
-                if len(section.content) < section.size:
-                    content_to_be_mapped += b"\x00" * (section.size - len(section.content))
                 # clamp to the remaining capacity so both sides of the assignment have the same
                 # length and a section extending past the sized buffer cannot grow it
                 copy_size = min(section.size, max(0, len(mapped_binary) - rva))
-                mapped_binary[rva : rva + copy_size] = content_to_be_mapped[:copy_size]
+                content = section.content
+                if len(content) >= section.size:
+                    mapped_binary[rva : rva + copy_size] = content[:copy_size]
+                else:
+                    # potentially perform zero padding if we have less content than section size
+                    content_to_be_mapped = bytearray(content)
+                    content_to_be_mapped += b"\x00" * (section.size - len(content))
+                    mapped_binary[rva : rva + copy_size] = content_to_be_mapped[:copy_size]
 
     @staticmethod
     def mapBinary(binary, parsed=_NOT_PROVIDED):

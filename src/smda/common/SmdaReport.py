@@ -578,7 +578,8 @@ class SmdaReport:
 
     def toFile(self, output_filepath) -> None:
         with open(output_filepath, "w", encoding="utf-8") as fout:
-            json.dump(self.toDict(), fout, indent=1, sort_keys=True)
+            # one C-level encode of the whole report instead of json.dump's chunked writes
+            fout.write(json.dumps(self.toDict(), indent=1, sort_keys=True))
             LOGGER.info(f"SmdaReport saved to: {output_filepath}")
 
     def __str__(self):
