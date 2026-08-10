@@ -34,12 +34,12 @@ class CilSymbolProvider(AbstractLabelProvider):
         """ensure a proper utf-8 escaped string"""
         return value.encode("utf-8").decode("utf-8")
 
-    def update(self, binary_info):
+    def update(self, binary_info, parsed=None):
         self._addr_to_func_symbols = {}
         self._func_symbol_to_addr = {}
         self._ambiguous_func_symbols = set()
         try:
-            pe = dnfile.dnPE(data=binary_info.raw_data)
+            pe = dnfile.dnPE(data=binary_info.raw_data) if parsed is None else parsed
         except Exception as exc:
             reraise_non_operational_exception(exc)
             LOGGER.debug("Failed to parse CIL symbols: %s", exc)

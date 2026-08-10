@@ -2,6 +2,7 @@ import unittest
 
 from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 
+from smda.aarch64.AArch64Backend import _hasDataRefImmediate
 from smda.aarch64.dataflow import propagateConstants
 
 
@@ -115,6 +116,28 @@ class AArch64DataflowTestSuite(unittest.TestCase):
         constants = propagateConstants(instructions, _NoImageDisassembler())
 
         self.assertEqual(constants.get("x1"), 0x100)
+
+
+class DataRefImmediateGateTestSuite(unittest.TestCase):
+    """The gate that decides whether _recordDataRefs re-decodes an instruction for details."""
+
+    IN_IMAGE = lambda self, value: False  # noqa: E731
+
+    def test_operands_without_an_immediate_marker_are_rejected_outright(self):
+        self.assertFalse(_hasDataRefImmediate("x0, x1", 0x1000, 0x2000, self.IN_IMAGE))
+
+    def test_immediate_inside_the_image_and_outside_code_areas_is_accepted(self):
+        self.assertTrue(_hasDataRefImmediate("x0, #0x1500", 0x1000, 0x2000, self.IN_IMAGE))
+
+    def test_immediate_outside_the_image_is_rejected(self):
+        self.assertFalse(_hasDataRefImmediate("x0, #0x9000", 0x1000, 0x2000, self.IN_IMAGE))
+
+    def test_immediate_inside_a_code_area_is_rejected(self):
+        self.assertFalse(_hasDataRefImmediate("x0, #0x1500", 0x1000, 0x2000, lambda value: True))
+
+    def test_a_token_int_cannot_parse_is_skipped_rather_than_raising(self):
+        # base 0 rejects a leading zero, so "#08" reaches the ValueError arm
+        self.assertTrue(_hasDataRefImmediate("x0, #08, #0x1500", 0x1000, 0x2000, self.IN_IMAGE))
 
 
 if __name__ == "__main__":

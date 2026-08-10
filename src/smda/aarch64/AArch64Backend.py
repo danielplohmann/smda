@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import contextlib
 import logging
 import re
 
@@ -53,13 +52,19 @@ _HEX_OPERAND = re.compile(r"0x[0-9a-fA-F]+")
 _IMM_TOKEN = re.compile(r"#?-?0x[0-9a-fA-F]+|#-?\d+")
 
 
-def _immediate_tokens(op_str):
-    values = set()
+def _hasDataRefImmediate(op_str, base_addr, upper_addr, is_in_code_areas):
+    """Whether any printed immediate could name a data address, short-circuiting on the first."""
+    # the token pattern cannot match without one of these two markers
+    if "0x" not in op_str and "#" not in op_str:
+        return False
     for match in _IMM_TOKEN.finditer(op_str):
-        token = match.group().lstrip("#")
-        with contextlib.suppress(ValueError):
-            values.add(int(token, 0))
-    return values
+        try:
+            value = int(match.group().lstrip("#"), 0)
+        except ValueError:
+            continue
+        if base_addr <= value < upper_addr and not is_in_code_areas(value):
+            return True
+    return False
 
 
 class AArch64Backend(ArchBackend):
@@ -268,10 +273,7 @@ class AArch64Backend(ArchBackend):
         binary_info = d.disassembly.binary_info
         base_addr = binary_info.base_addr
         upper_addr = base_addr + binary_info.binary_size
-        if not any(
-            base_addr <= value < upper_addr and not binary_info.isInCodeAreas(value)
-            for value in _immediate_tokens(i_op_str)
-        ):
+        if not _hasDataRefImmediate(i_op_str, base_addr, upper_addr, binary_info.isInCodeAreas):
             # no printed immediate can yield a data ref, so the detail re-decode
             # below would record nothing.
             return

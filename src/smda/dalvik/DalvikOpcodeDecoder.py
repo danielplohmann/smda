@@ -843,19 +843,27 @@ def _decode_fmt_51l(raw_bytes, byte_idx, opcode, resolve_ref):
 FORMAT_DECODERS["51l"] = _decode_fmt_51l
 
 
+# the format decoder is resolved once here rather than per decoded instruction, so the hot path
+# does one int-keyed probe instead of two probes plus a string-keyed lookup; an opcode whose
+# format has no decoder keeps a None and still raises at decode time, exactly as before
+_OPCODE_DECODE: Dict[int, tuple] = {
+    value: (opcode, FORMAT_DECODERS.get(opcode.fmt)) for value, opcode in OPCODES.items()
+}
+
+
 def decode_instruction(bytecode, byte_idx, resolve_ref):
     opcode_value = bytecode[byte_idx]
-    if opcode_value not in OPCODES:
+    entry = _OPCODE_DECODE.get(opcode_value)
+    if entry is None:
         raise ValueError(f"Unknown Dalvik opcode 0x{opcode_value:02x}")
+    opcode, decoder = entry
 
-    opcode = OPCODES[opcode_value]
     size_bytes = opcode.size_units * 2
     if byte_idx + size_bytes > len(bytecode):
         raise ValueError("Truncated Dalvik instruction")
 
     raw_bytes = bytes(bytecode[byte_idx : byte_idx + size_bytes])
 
-    decoder = FORMAT_DECODERS.get(opcode.fmt)
     if decoder is None:
         raise ValueError(f"Unsupported Dalvik format {opcode.fmt}")
 

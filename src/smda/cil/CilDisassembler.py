@@ -63,6 +63,10 @@ def resolve_token(pe, token: Token) -> Any:
 
 def format_operand(pe, operand: Any) -> str:
     """ """
+    # half of all operands are None and used to traverse every isinstance arm to reach the
+    # empty-string one at the bottom, seven of those checks going through ABCMeta
+    if operand is None:
+        return ""
     if isinstance(operand, Token):
         operand = resolve_token(pe, operand)
     if isinstance(operand, str):
@@ -91,8 +95,6 @@ def format_operand(pe, operand: Any) -> str:
         return f"TypeSpec({signature.hex()})" if signature else "TypeSpec()"
     elif isinstance(operand, (dnfile.mdtable.FieldRow, dnfile.mdtable.MethodDefRow)):
         return f"{operand.Name}"
-    elif operand is None:
-        return ""
 
     # never fall through to str(operand): the default object repr embeds a memory address,
     # which made every report of the same input serialize differently
@@ -100,16 +102,31 @@ def format_operand(pe, operand: Any) -> str:
 
 
 class DnfileMethodBodyReader(CilMethodBodyReaderBase):
+    _CHUNK = 4096
+
     def __init__(self, pe, row):
         """ """
         self.pe: dnPE = pe
         self.offset: int = self.pe.get_offset_from_rva(row.Rva)
+        self._buf: bytes = b""
+        self._buf_start: int = 0
 
     def read(self, n: int) -> bytes:
         """ """
-        data: bytes = self.pe.get_data(self.pe.get_rva_from_offset(self.offset), n)
+        start = self.offset - self._buf_start
+        if start < 0 or start + n > len(self._buf):
+            # pefile clips a read at the end of the containing section, so a chunk that would
+            # run past it comes back short; fall back to the exact request in that case
+            self._buf = self.pe.get_data(self.pe.get_rva_from_offset(self.offset), self._CHUNK)
+            self._buf_start = self.offset
+            start = 0
+            if len(self._buf) < n:
+                self._buf = b""
+                data: bytes = self.pe.get_data(self.pe.get_rva_from_offset(self.offset), n)
+                self.offset += n
+                return data
         self.offset += n
-        return data
+        return self._buf[start : start + n]
 
     def tell(self) -> int:
         """ """
@@ -139,10 +156,10 @@ class CilDisassembler:
     def _addLabelProviders(self):
         self.label_providers.append(self.cil_label_provider)
 
-    def _updateLabelProviders(self, binary_info):
+    def _updateLabelProviders(self, binary_info, parsed=None):
         for provider in self.label_providers:
             try:
-                provider.update(binary_info)
+                provider.update(binary_info, parsed=parsed)
             except Exception as exc:
                 reraise_non_operational_exception(exc)
                 LOGGER.error("Label provider %s failed to update: %r", provider.__class__.__name__, exc)
@@ -191,9 +208,9 @@ class CilDisassembler:
             i_mnemonic = str(insn.opcode)
             i_op_str = format_operand(pe, insn.operand)
             # https://en.wikipedia.org/wiki/List_of_CIL_instructions
-            if i_mnemonic in ["ret", "endfinally", "endfilter"]:
+            if i_mnemonic in {"ret", "endfinally", "endfilter"}:
                 state.setNextInstructionReachable(False)
-            if i_mnemonic in [
+            if i_mnemonic in {
                 "beq",
                 "beq.s",
                 "bge",
@@ -228,15 +245,15 @@ class CilDisassembler:
                 "brzero.s",
                 "leave",
                 "leave.s",
-            ]:
+            }:
                 target = int(i_op_str, 16)
                 state.addCodeRef(i_address, target, by_jump=True)
                 # an unconditional branch does not fall through; leaving reachability set
                 # emitted a bogus edge to the next instruction, which addCodeRef then also
                 # registered as a jump target (is_jmp was just set by the branch itself)
-                if i_mnemonic in ["br", "br.s", "leave", "leave.s"]:
+                if i_mnemonic in {"br", "br.s", "leave", "leave.s"}:
                     state.setNextInstructionReachable(False)
-            if i_mnemonic in ["jmp"]:
+            if i_mnemonic == "jmp":
                 # jmp's operand is InlineMethod (a tail-jump to another method), not a
                 # same-function branch offset, so i_op_str is usually a method name/token
                 # string here rather than a hex address like the branches above.
@@ -251,7 +268,7 @@ class CilDisassembler:
             # falls through to the token's own text, which is not a recovered string
             if i_mnemonic == "ldstr" and i_op_str.startswith('"') and i_op_str.endswith('"'):
                 self.disassembly.addStringRef(start_addr, i_address, i_op_str[1:-1])
-            if i_mnemonic in ["call", "calli", "callvirt"]:
+            if i_mnemonic in {"call", "calli", "callvirt"}:
                 state.is_leaf_function = False
                 self._updateApiInformation(i_address, i_bytes, i_op_str)
                 # https://blog.objektkultur.de/about-tail-recursion-in-.net/
@@ -265,9 +282,9 @@ class CilDisassembler:
                         method_addr = self.cil_label_provider.getAddress(method_name)
                         if method_addr is not None:
                             i_op_str = f"0x{method_addr:x}"
-            if i_mnemonic in ["throw", "rethrow"]:
+            if i_mnemonic in {"throw", "rethrow"}:
                 state.setNextInstructionReachable(False)
-            if i_mnemonic in ["switch"]:
+            if i_mnemonic == "switch":
                 next_addrs = []
                 for target in insn.operand:
                     next_addrs.append(target)
@@ -284,7 +301,6 @@ class CilDisassembler:
             binary_info.binary_size,
             binary_info.base_addr,
         )
-        self._updateLabelProviders(binary_info)
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
@@ -296,7 +312,9 @@ class CilDisassembler:
         self.disassembly.language = {".net": 1.0}
 
         LOGGER.debug("Starting parser-based analysis.")
+        # one parse feeds both the symbol provider and the MethodDef walk below
         pe = dnfile.dnPE(data=binary_info.raw_data)
+        self._updateLabelProviders(binary_info, parsed=pe)
         # a corrupted metadata signature leaves dnfile with no tables at all; the symbol
         # provider already degrades on that, so the disassembler must not raise on it
         method_defs = getattr(getattr(getattr(pe, "net", None), "mdtables", None), "MethodDef", None)
