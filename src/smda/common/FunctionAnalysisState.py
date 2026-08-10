@@ -84,9 +84,9 @@ class FunctionAnalysisState:
         ins = (i_address, i_size, i_mnemonic, i_op_str, i_bytes)
         self.instructions.append(ins)
         self._instructions_sorted = False
-        self.instruction_start_bytes.add(ins[0])
-        if ins[0] > self.max_instruction_start:
-            self.max_instruction_start = ins[0]
+        self.instruction_start_bytes.add(i_address)
+        if i_address > self.max_instruction_start:
+            self.max_instruction_start = i_address
         self.current_block.append(ins)
         self.processed_bytes.update(range(i_address, i_address + i_size))
         if self.is_next_instruction_reachable:
@@ -95,16 +95,16 @@ class FunctionAnalysisState:
 
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
         self.code_refs.add((addr_from, addr_to))
-        refs_from = self.code_refs_from.get(addr_from)
-        if refs_from is None:
-            self.code_refs_from[addr_from] = {addr_to}
+        code_refs_from = self.code_refs_from
+        if addr_from in code_refs_from:
+            code_refs_from[addr_from].add(addr_to)
         else:
-            refs_from.add(addr_to)
-        refs_to = self.code_refs_to.get(addr_to)
-        if refs_to is None:
-            self.code_refs_to[addr_to] = {addr_from}
+            code_refs_from[addr_from] = {addr_to}
+        code_refs_to = self.code_refs_to
+        if addr_to in code_refs_to:
+            code_refs_to[addr_to].add(addr_from)
         else:
-            refs_to.add(addr_from)
+            code_refs_to[addr_to] = {addr_from}
         if by_jump:
             self.is_jmp = True
             self.jump_refs.add((addr_from, addr_to))
@@ -157,25 +157,40 @@ class FunctionAnalysisState:
         return conflicts
 
     def _finalizeRegularAnalysis(self):
-        fn_min = min(ins[0] for ins in self.instructions)
-        fn_max = max(ins[0] + ins[1] for ins in self.instructions)
-
         self.disassembly.function_symbols[self.start_addr] = self.label
-        self.disassembly.function_borders[self.start_addr] = (fn_min, fn_max)
         instructions_map = self.disassembly.instructions
         code_map = self.disassembly.code_map
         ins2fn = self.disassembly.ins2fn
         start_addr = self.start_addr
-        for ins in self.instructions:
+        instructions = self.instructions
+        fn_min = instructions[0][0]
+        fn_max = fn_min + instructions[0][1]
+        # this loop must stay ahead of getBlocks() below, which sorts self.instructions
+        for ins in instructions:
             ins_addr = ins[0]
+            ins_end = ins_addr + ins[1]
+            if ins_addr < fn_min:
+                fn_min = ins_addr
+            if ins_end > fn_max:
+                fn_max = ins_end
             instructions_map[ins_addr] = (ins[2], ins[1])
-            for byte_addr in range(ins_addr, ins_addr + ins[1]):
+            for byte_addr in range(ins_addr, ins_end):
                 code_map[byte_addr] = ins_addr
                 ins2fn[byte_addr] = start_addr
+        self.disassembly.function_borders[start_addr] = (fn_min, fn_max)
         self.disassembly.data_map.update(self.data_bytes)
         self.disassembly.functions[self.start_addr] = self.getBlocks()
-        for cref in self.code_refs:
-            self.disassembly.addCodeRefs(cref[0], cref[1])
+        code_refs_from = self.disassembly.code_refs_from
+        code_refs_to = self.disassembly.code_refs_to
+        for addr_from, addr_to in self.code_refs:
+            if addr_from in code_refs_from:
+                code_refs_from[addr_from].add(addr_to)
+            else:
+                code_refs_from[addr_from] = {addr_to}
+            if addr_to in code_refs_to:
+                code_refs_to[addr_to].add(addr_from)
+            else:
+                code_refs_to[addr_to] = {addr_from}
         for dref in self.data_refs:
             self.disassembly.addDataRefs(dref[0], dref[1])
         if self.is_recursive:

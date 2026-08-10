@@ -242,6 +242,48 @@ class TestCommonModels(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     SmdaFunction.fromDict(candidate)
 
+    def test_block_refs_are_resorted_when_a_handler_target_is_not_a_block_start(self):
+        from smda.DisassemblyResult import DisassemblyResult
+
+        disassembly = DisassemblyResult()
+        # one block at 0x200; the handler target at 0x100 belongs to no block, so it is
+        # appended as a new key and the sorted order has to be restored
+        disassembly.functions[0x200] = [[(0x200, 2, "nop", "", b"\x00\x00")]]
+        disassembly.function_metadata[0x200] = {
+            "try_ranges": [{"start_addr": 0x200, "end_addr": 0x202, "handlers": [{"target_addr": 0x100}]}]
+        }
+
+        block_refs = disassembly.getBlockRefs(0x200)
+
+        self.assertEqual([0x100, 0x200], list(block_refs))
+        self.assertEqual([], block_refs[0x100])
+        self.assertEqual([0x100], block_refs[0x200])
+
+    def test_block_refs_keep_seeded_order_when_no_handler_target_is_added(self):
+        from smda.DisassemblyResult import DisassemblyResult
+
+        disassembly = DisassemblyResult()
+        disassembly.functions[0x100] = [[(0x100, 2, "jmp", "0x200", b"\x00\x00")], [(0x200, 2, "ret", "", b"\x00\x00")]]
+        disassembly.code_refs_from[0x100] = {0x200}
+
+        block_refs = disassembly.getBlockRefs(0x100)
+
+        self.assertEqual([0x100, 0x200], list(block_refs))
+        self.assertEqual([0x200], block_refs[0x100])
+
+    def test_hash_sequences_fall_back_to_raw_bytes_without_an_escaper(self):
+        # an unsupported architecture leaves _escaper None; both sequences must still be emitted
+        function = SmdaFunction()
+        function.blocks = {
+            0x100: [SmdaInstruction([0x100, "5589e5", "push", "ebp"])],
+            0x200: [SmdaInstruction([0x200, "c3", "ret", ""])],
+        }
+        function._sorted_block_keys = [0x100, 0x200]
+
+        self.assertIsNone(function._escaper)
+        self.assertEqual(b"5589e5c3", function.getPicHashSequence(None))
+        self.assertEqual(b"5589e5c3", function.getOpcHashSequence())
+
     def test_function_hash_helpers_use_little_endian(self):
         function = SmdaFunction()
         function.pic_hash = 0x0102030405060708

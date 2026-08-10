@@ -25,6 +25,14 @@ class TarjanTestSuite(unittest.TestCase):
         sccs = tarjan.getResult()
         self.assertEqual(1001, len(sccs))
 
+    def testSingleNodeGraphsYieldOneComponent(self):
+        """SmdaFunction._calculateSccs returns [[key]] for these without running Tarjan."""
+        for graph in ({0x100: []}, {0x100: [0x100]}):
+            with self.subTest(graph=graph):
+                tarjan = Tarjan(graph)
+                tarjan.calculateScc()
+                self.assertEqual([[0x100]], tarjan.getResult())
+
 
 if __name__ == "__main__":
     unittest.main()
