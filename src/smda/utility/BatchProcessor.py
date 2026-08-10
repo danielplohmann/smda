@@ -2,7 +2,8 @@ import json
 import logging
 import os
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from contextlib import ExitStack
 from multiprocessing import get_context
 
 from smda.Disassembler import Disassembler
@@ -10,6 +11,22 @@ from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import computeReportIdentityHash
 
 LOGGER = logging.getLogger(__name__)
+
+DEFAULT_LARGE_INPUT_BYTES = 1 << 20
+# peak worker RSS observed for an analysis, expressed per byte of input
+LARGE_INPUT_RSS_FACTOR = 500
+MEMORY_BUDGET_FRACTION = 0.5
+
+
+def getMemoryBudget():
+    """Bytes of RSS the large-input partition may occupy, or None where the platform hides RAM size."""
+    sysconf = getattr(os, "sysconf", None)
+    if sysconf is None:
+        return None
+    try:
+        return int(sysconf("SC_PAGE_SIZE") * sysconf("SC_PHYS_PAGES") * MEMORY_BUDGET_FRACTION)
+    except (ValueError, OSError):
+        return None
 
 
 def getDefaultWorkerCount():
@@ -100,6 +117,80 @@ def collectInputFiles(paths, input_root=None):
     return sorted(collected)
 
 
+def _inputSize(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _largeWorkerCount(largest_input_bytes, task_count, worker_count, memory_budget):
+    budget = getMemoryBudget() if memory_budget is None else memory_budget
+    capacity = task_count
+    if budget:
+        capacity = budget // max(1, largest_input_bytes * LARGE_INPUT_RSS_FACTOR)
+    return max(1, min(worker_count, task_count, capacity))
+
+
+def _runPartitions(partitions):
+    """Drive the given (tasks, workers, max_tasks_per_child) pools, yielding summaries as they land.
+
+    Each pool holds at most twice its worker count of tasks in flight, so the parent's own
+    memory stays proportional to the workers rather than to the size of the corpus.
+    """
+    with ExitStack() as stack:
+        streams = []
+        for tasks, worker_count, max_tasks_per_child in partitions:
+            executor = stack.enter_context(
+                ProcessPoolExecutor(
+                    max_workers=worker_count,
+                    # spawn is the strictest context: it re-imports, which proves the task function is
+                    # importable and the payload picklable instead of relying on a forked address space
+                    mp_context=get_context("spawn"),
+                    initializer=_initWorker,
+                    initargs=(logging.getLogger().level,),
+                    max_tasks_per_child=max_tasks_per_child,
+                )
+            )
+            streams.append((executor, iter(tasks), set(), 2 * worker_count))
+
+        owners = {}
+        while True:
+            for executor, pending_tasks, in_flight, limit in streams:
+                while len(in_flight) < limit:
+                    task = next(pending_tasks, None)
+                    if task is None:
+                        break
+                    future = executor.submit(_analyzeOneFile, task)
+                    in_flight.add(future)
+                    owners[future] = (task, in_flight)
+            if not owners:
+                return
+            done, _ = wait(list(owners), return_when=FIRST_COMPLETED)
+            # wait() returns a set; order the batch by path so a rerun yields summaries identically
+            for future in sorted(done, key=lambda finished: owners[finished][0]["path"]):
+                task, in_flight = owners.pop(future)
+                in_flight.discard(future)
+                try:
+                    yield future.result()
+                except Exception as exc:
+                    # a worker that was OOM-killed or died inside capstone/LIEF surfaces here as
+                    # BrokenProcessPool instead of hanging the run
+                    LOGGER.error("Worker failed for %s: %r", task["path"], exc)
+                    yield {
+                        "path": task["path"],
+                        "report_stem": task["report_stem"],
+                        "status": "error",
+                        "output_path": None,
+                        "num_functions": 0,
+                        "num_instructions": 0,
+                        "report_hash": "",
+                        "execution_time": 0.0,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "report": None,
+                    }
+
+
 def disassembleParallel(
     paths,
     output_dir=None,
@@ -109,6 +200,9 @@ def disassembleParallel(
     max_tasks_per_child=None,
     return_reports=False,
     input_root=None,
+    collected=None,
+    large_input_bytes=DEFAULT_LARGE_INPUT_BYTES,
+    memory_budget=None,
 ):
     """Disassemble many files across processes, yielding one summary dict per completed file.
 
@@ -116,6 +210,11 @@ def disassembleParallel(
     exception: a nonzero SmdaConfig.TIMEOUT is wall-clock, so under oversubscription a slow
     sample can time out where a serial run finished. Pass timeout=0 for load-independent
     output.
+
+    Peak worker RSS scales with input size, so inputs of at least large_input_bytes are run on
+    a separate pool whose concurrency is capped by memory_budget (bytes, defaulting to a
+    fraction of physical RAM) and whose workers are recycled after every file. Pass an already
+    collected list of (path, report_stem) pairs to avoid walking the input tree twice.
 
     Reports are written in the worker and only a small summary is returned, because shipping
     whole reports back through the parent makes deserialization the bottleneck. Pass
@@ -126,58 +225,48 @@ def disassembleParallel(
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    collected = collectInputFiles(paths, input_root=input_root)
-    tasks = []
+    if collected is None:
+        collected = collectInputFiles(paths, input_root=input_root)
+    small_tasks = []
+    large_tasks = []
+    largest_input_bytes = 0
     for path, report_stem in collected:
         # resume is decided here, in the parent, so the set of finished reports is never
         # embedded into every task payload
         if resume and output_dir and os.path.exists(os.path.join(output_dir, report_stem + ".smda")):
             LOGGER.debug("Skipping %s, report already exists", path)
             continue
-        tasks.append(
-            {
-                "path": path,
-                "report_stem": report_stem,
-                "output_dir": output_dir,
-                "timeout": timeout,
-                "return_reports": return_reports,
-            }
-        )
+        task = {
+            "path": path,
+            "report_stem": report_stem,
+            "output_dir": output_dir,
+            "timeout": timeout,
+            "return_reports": return_reports,
+        }
+        size = _inputSize(path)
+        if size >= large_input_bytes:
+            large_tasks.append(task)
+            largest_input_bytes = max(largest_input_bytes, size)
+        else:
+            small_tasks.append(task)
 
-    if not tasks:
+    if not small_tasks and not large_tasks:
         return
 
     worker_count = workers if workers > 0 else getDefaultWorkerCount()
-    worker_count = max(1, min(worker_count, len(tasks)))
+    worker_count = max(1, min(worker_count, len(small_tasks) + len(large_tasks)))
 
-    with ProcessPoolExecutor(
-        max_workers=worker_count,
-        # spawn is the strictest context: it re-imports, which proves the task function is
-        # importable and the payload picklable instead of relying on a forked address space
-        mp_context=get_context("spawn"),
-        initializer=_initWorker,
-        initargs=(logging.getLogger().level,),
+    partitions = []
+    large_workers = 0
+    if large_tasks and worker_count > 1:
+        # the second pool must not push total concurrency past the requested worker count
+        reserved = 1 if small_tasks else 0
+        large_workers = _largeWorkerCount(largest_input_bytes, len(large_tasks), worker_count - reserved, memory_budget)
+        partitions.append((large_tasks, large_workers, 1))
+    else:
+        small_tasks = large_tasks + small_tasks
+    if small_tasks:
+        small_workers = max(1, min(worker_count - large_workers, len(small_tasks)))
         # None is the ProcessPoolExecutor default: a worker lives as long as the executor
-        max_tasks_per_child=max_tasks_per_child,
-    ) as executor:
-        futures = {executor.submit(_analyzeOneFile, task): task for task in tasks}
-        for future in as_completed(futures):
-            task = futures[future]
-            try:
-                yield future.result()
-            except Exception as exc:
-                # a worker that was OOM-killed or died inside capstone/LIEF surfaces here as
-                # BrokenProcessPool instead of hanging the run
-                LOGGER.error("Worker failed for %s: %r", task["path"], exc)
-                yield {
-                    "path": task["path"],
-                    "report_stem": task["report_stem"],
-                    "status": "error",
-                    "output_path": None,
-                    "num_functions": 0,
-                    "num_instructions": 0,
-                    "report_hash": "",
-                    "execution_time": 0.0,
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "report": None,
-                }
+        partitions.append((small_tasks, small_workers, max_tasks_per_child))
+    yield from _runPartitions(partitions)
