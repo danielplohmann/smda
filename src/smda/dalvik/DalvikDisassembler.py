@@ -158,6 +158,7 @@ class DexReferenceResolver:
         # resolver's lifetime (resolver tables and analyzeBuffer's method list do);
         # an id reused after GC would alias a stale entry.
         self._type_format_cache = {}
+        self._proto_format_cache = {}
         self._loadExtendedTables()
 
     def _indexItems(self, items):
@@ -247,11 +248,15 @@ class DexReferenceResolver:
     def _formatProto(self, prototype):
         if prototype is None:
             return "()<?>"
-        params = []
-        for param in getattr(prototype, "parameters_type", []):
-            params.append(self._formatType(param))
+        cached = self._proto_format_cache.get(id(prototype))
+        if cached is not None:
+            return cached[1]
+        params = [self._formatType(param) for param in getattr(prototype, "parameters_type", [])]
         return_type = self._formatType(getattr(prototype, "return_type", None))
-        return f"({''.join(params)}){return_type}"
+        result = f"({''.join(params)}){return_type}"
+        # the prototype is stored alongside its result so the cache pins the object whose id keys it
+        self._proto_format_cache[id(prototype)] = (prototype, result)
+        return result
 
     def formatMethod(self, method):
         if method is None:
@@ -1003,7 +1008,7 @@ class DalvikDisassembler:
         # advance by 2 on resync — stepping by 1 wastes a decode attempt at every
         # odd offset on adversarial input.
         while idx < len(bytecode):
-            if any(start <= idx < end for start, end in payload_ranges):
+            if payload_ranges and any(start <= idx < end for start, end in payload_ranges):
                 idx += 2
                 continue
             try:

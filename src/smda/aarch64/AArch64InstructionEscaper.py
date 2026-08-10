@@ -9,6 +9,14 @@ from smda.aarch64.AArch64CapstoneVerification import (
 
 LOGGER = logging.getLogger(__name__)
 
+_KEEP_MASK_MEMO = {}
+# mirrors the _shift_extend class attribute below; additions must be made in both places
+_SHIFT_EXTEND_KEYWORDS = ("lsl", "lsr", "asr", "ror", "sxt", "uxt")
+_SHIFT_EXTEND_IMMEDIATE_RE = re.compile(
+    r"\b(?:lsl|lsr|asr|ror|sxtw|uxtw|sxtb|uxtb|sxth|uxth|sxtx|uxtx)\s*#-?(?:0x[0-9a-fA-F]+|\d+)",
+    re.IGNORECASE,
+)
+
 
 class AArch64InstructionEscaper:
     _aritlog_group = {
@@ -547,9 +555,15 @@ class AArch64InstructionEscaper:
         The check is purely text-based (we look at `ins.operands`) so it
         is independent of capstone's detailed disassembly.
         """
-        operands = (ins.operands or "").strip()
-        if not operands:
+        operands = ins.operands
+        # stripping cannot change whether a "#" is present, and no "#" means no immediate
+        if not operands or "#" not in operands:
             return False
+        # the substitution below only ever deletes text containing "#", so without a
+        # shift/extend keyword the cleaned string still holds the "#" seen above
+        lowered = operands.lower()
+        if not any(keyword in lowered for keyword in _SHIFT_EXTEND_KEYWORDS):
+            return True
         # Strip shift/extend modifiers (e.g. "lsl #3", "sxtw #0") so they
         # don't count as immediates.
         #
@@ -559,13 +573,7 @@ class AArch64InstructionEscaper:
         #
         # Note: the regex below mirrors `_shift_extend` (defined above)
         # so any future additions to that pattern should be mirrored here.
-        cleaned = re.sub(
-            r"\b(?:lsl|lsr|asr|ror|sxtw|uxtw|sxtb|uxtb|sxth|uxth|sxtx|uxtx)\s*#-?(?:0x[0-9a-fA-F]+|\d+)",
-            "",
-            operands,
-            flags=re.IGNORECASE,
-        )
-        return "#" in cleaned
+        return "#" in _SHIFT_EXTEND_IMMEDIATE_RE.sub("", operands)
 
     # Per-mnemonic immediate-field masks. Each entry maps a base mnemonic
     # (after stripping condition codes such as "b.eq" -> "b") to an 8-bit
@@ -651,13 +659,19 @@ class AArch64InstructionEscaper:
         the base mnemonic (so that 'b.eq' resolves via 'b' when no cond
         special case applies).
         """
+        if mnemonic in _KEEP_MASK_MEMO:
+            return _KEEP_MASK_MEMO[mnemonic]
         keep = cls._AARCH64_IMMEDIATE_KEEP_MASKS.get(mnemonic)
-        if keep is not None:
-            return keep
-        for prefix, mask in cls._AARCH64_CONDITIONAL_KEEP_MASKS.items():
-            if mnemonic.startswith(prefix):
-                return mask
-        return cls._AARCH64_IMMEDIATE_KEEP_MASKS.get(cls._baseMnemonic(mnemonic))
+        if keep is None:
+            for prefix, mask in cls._AARCH64_CONDITIONAL_KEEP_MASKS.items():
+                if mnemonic.startswith(prefix):
+                    keep = mask
+                    break
+            else:
+                keep = cls._AARCH64_IMMEDIATE_KEEP_MASKS.get(cls._baseMnemonic(mnemonic))
+        # pure function of a short mnemonic drawn from a bounded vocabulary
+        _KEEP_MASK_MEMO[mnemonic] = keep
+        return keep
 
     @staticmethod
     def escapeToOpcodeOnly(ins):
