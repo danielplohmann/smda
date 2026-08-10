@@ -10,6 +10,7 @@ from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 from smda.dalvik.DalvikOpcodeDecoder import (
     OPCODES,
     decode_instruction,
+    decode_instruction_shallow,
     parse_code_item_header,
     read_sleb128,
     read_uleb128,
@@ -1003,7 +1004,6 @@ class DalvikDisassembler:
         seen_ranges = set(payload_ranges)
         had_backward_payload = False
         idx = 0
-        null_resolve = lambda ref_kind, ref_index: ""  # noqa: E731
         # Dalvik instructions are 16-bit aligned (one "code unit"), so always
         # advance by 2 on resync — stepping by 1 wastes a decode attempt at every
         # odd offset on adversarial input.
@@ -1012,22 +1012,22 @@ class DalvikDisassembler:
                 idx += 2
                 continue
             try:
-                decoded = decode_instruction(bytecode, idx, null_resolve)
+                size_bytes, payload_idx = decode_instruction_shallow(bytecode, idx)
             except ValueError:
                 idx += 2
                 continue
             valid.add(idx)
-            if decoded.payload_idx is not None:
-                payload_size = self._getPayloadSize(bytecode, decoded.payload_idx)
+            if payload_idx is not None:
+                payload_size = self._getPayloadSize(bytecode, payload_idx)
                 if payload_size:
-                    range_pair = (decoded.payload_idx, decoded.payload_idx + payload_size)
+                    range_pair = (payload_idx, payload_idx + payload_size)
                     if range_pair not in seen_ranges:
                         payload_ranges.append(range_pair)
                         seen_ranges.add(range_pair)
                         # Backward or self-overlapping payload relative to this insn.
-                        if decoded.payload_idx <= idx:
+                        if payload_idx <= idx:
                             had_backward_payload = True
-            idx += decoded.size_bytes
+            idx += size_bytes
         return valid, payload_ranges, had_backward_payload
 
     def _buildValidInstructionStarts(self, bytecode):

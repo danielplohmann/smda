@@ -1,7 +1,6 @@
 import contextlib
 import logging
 import sys
-from functools import lru_cache
 
 import lief
 
@@ -79,7 +78,6 @@ def align(v, alignment):
         return v + (alignment - remainder)
 
 
-@lru_cache(maxsize=16)
 def has_bogus_sections(elffile, base_addr=0):
     max_virtual_address = 0
     for section in elffile.sections:
@@ -88,7 +86,6 @@ def has_bogus_sections(elffile, base_addr=0):
     return (max_virtual_address - base_addr) > sys.maxsize
 
 
-@lru_cache(maxsize=16)
 def _calculate_base_address(elffile):
     base_addr = 0
     candidates = [0xFFFFFFFFFFFFFFFF]
@@ -113,12 +110,10 @@ def _calculate_base_address(elffile):
     return base_addr
 
 
-@lru_cache(maxsize=16)
 def _get_sorted_sections(elffile):
     return sorted(elffile.sections, key=lambda section: section.size, reverse=True)
 
 
-@lru_cache(maxsize=16)
 def _get_boundaries(elffile, base_addr=0):
     # find min and max virtual addresses.
     max_virtual_address = 0

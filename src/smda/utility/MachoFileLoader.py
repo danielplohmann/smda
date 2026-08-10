@@ -1,6 +1,5 @@
 import logging
 import struct
-from functools import lru_cache
 
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.common import mergeCodeAreas
@@ -86,17 +85,14 @@ def align(v, alignment):
         return v + (alignment - remainder)
 
 
-@lru_cache(maxsize=16)
 def _get_sorted_sections(macho_file):
     return sorted(macho_file.sections, key=lambda section: section.size, reverse=True)
 
 
-@lru_cache(maxsize=16)
 def _get_sorted_segments(macho_file):
     return sorted(macho_file.segments, key=lambda segment: segment.file_size, reverse=True)
 
 
-@lru_cache(maxsize=16)
 def _calculate_base_address(macho_file):
     base_addr = 0
     if not macho_file:
@@ -115,7 +111,6 @@ def _calculate_base_address(macho_file):
     return base_addr
 
 
-@lru_cache(maxsize=16)
 def _calculate_boundaries(macho_file):
     # find min and max virtual addresses.
     max_virtual_address = 0
