@@ -33,6 +33,28 @@ _PCLNTAB_VERSIONS = {
 _PCLNTAB_HEADER_RE = re.compile(
     b"(?:(?:\xfb|\xfa|\xf0|\xf1)\xff\xff\xff|\xff\xff\xff(?:\xfb|\xfa|\xf0|\xf1))\x00\x00[\x01\x02\x04][\x04\x08]"
 )
+# both alternatives of the pattern above contain this run, at offset 1 in the little-endian
+# spelling and offset 0 in the big-endian one
+_PCLNTAB_ANCHOR = b"\xff\xff\xff"
+
+
+def findPcLntabHeaderOffsets(binary_bytes):
+    """Offsets where _PCLNTAB_HEADER_RE matches, found by anchoring on the literal run.
+
+    The pattern starts with an alternation, so the regex engine has no prefix to fast-search
+    on and enters the matcher at every offset of the image. Locating the anchor first and
+    re-using the same compiled pattern to confirm each candidate keeps the accepted set
+    identical by construction; two matches cannot overlap, so the non-overlapping scan this
+    replaces could not have reported a different count either.
+    """
+    hits = []
+    position = binary_bytes.find(_PCLNTAB_ANCHOR)
+    while position != -1:
+        for start in (position - 1, position):
+            if start >= 0 and _PCLNTAB_HEADER_RE.match(binary_bytes, start):
+                hits.append(start)
+        position = binary_bytes.find(_PCLNTAB_ANCHOR, position + 1)
+    return sorted(set(hits))
 
 
 class GoSymbolProvider(AbstractLabelProvider):
@@ -90,7 +112,7 @@ class GoSymbolProvider(AbstractLabelProvider):
         if pclntab_offset is None or self._readPcLntabHeader(binary_bytes, pclntab_offset) is None:
             pclntab_offset = None
             # scan for offset of structure
-            hits = [match.start() for match in _PCLNTAB_HEADER_RE.finditer(binary_bytes)]
+            hits = findPcLntabHeaderOffsets(binary_bytes)
             if len(hits) == 1:
                 pclntab_offset = hits[0]
         if binary_info is not None:
