@@ -209,5 +209,29 @@ class DalvikRevertAnalysisTestSuite(unittest.TestCase):
         self.assertEqual(disassembly.thunk_functions, set())
 
 
+class CilBlockCollisionTestSuite(unittest.TestCase):
+    def test_fall_through_into_a_colliding_address_drops_the_code_ref(self):
+        state = CilFunctionAnalysisState(0x100, 0x100, None)
+        state.addInstruction(0x100, 2, "br", "", b"\x00\x00")
+        state.addInstruction(0x110, 1, "ret", "", b"\x00")
+        state.colliding_addresses.add(0x102)
+
+        self.assertIn((0x100, 0x102), state.code_refs)
+
+        blocks = state.getBlocks()
+
+        self.assertNotIn((0x100, 0x102), state.code_refs)
+        self.assertEqual([[0x100]], [[ins[0] for ins in block] for block in blocks])
+
+    def test_a_reference_to_the_next_instruction_alone_keeps_the_block_open(self):
+        state = CilFunctionAnalysisState(0x100, 0x100, None)
+        state.addInstruction(0x100, 2, "br", "", b"\x00\x00")
+        state.addInstruction(0x102, 1, "ret", "", b"\x00")
+
+        blocks = state.getBlocks()
+
+        self.assertEqual([[0x100, 0x102]], [[ins[0] for ins in block] for block in blocks])
+
+
 if __name__ == "__main__":
     unittest.main()
