@@ -64,6 +64,13 @@ class SmdaConfig:
     MAX_FUNCTION_CANDIDATES = 200000
     # maximum number of inbound call references tracked per candidate; 0 == unlimited. Bounds set growth and rescoring.
     MAX_CALL_REFS_PER_CANDIDATE = 2000
+    # backstops for batch mode, where peak worker RSS scales with input size. The factor is
+    # peak RSS per byte of input, measured at ~1.6x margin over an 8.1 MB sample; the fraction
+    # is how much of the available memory (physical, or the cgroup limit where one applies)
+    # the large-input pool may claim. Both are here rather than in BatchProcessor so an
+    # operator can move them for a machine whose corpus does not look like the measured one.
+    LARGE_INPUT_RSS_FACTOR = 500
+    MEMORY_BUDGET_FRACTION = 0.5
     HIGH_ACCURACY = True
     RESOLVE_TAILCALLS = False
     # optional metadata generation options; the largest built-in performance lever.

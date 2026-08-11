@@ -272,7 +272,9 @@ class X86Backend(ArchBackend):
         i_address, i_size, i_mnemonic, i_op_str = i
         state.addBlockToQueue(i_address + i_size)
         # capstone always prints a bare "0x..." rel8/rel32 target here, which the queue and the
-        # code ref below already parsed with int(op_str, 16); one parse serves all three
+        # code ref below already parsed with int(op_str, 16); one parse serves all three.
+        # See _analyzeLoopInstruction for why this parse is deliberately unguarded and what
+        # would have to change if capstone ever printed a Jcc operand in another form.
         jump_destination = int(i_op_str, 16)
         # case = "FALLTHROUGH"
         d.tailcall_analyzer.addJump(i_address, jump_destination)
@@ -292,6 +294,12 @@ class X86Backend(ArchBackend):
 
     def _analyzeLoopInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
+        # loop/loope/loopne take a rel8 target, which capstone prints as a bare "0x...", so the
+        # direct parse is safe. It is not tolerant, though: getReferencedAddr() used to return 0
+        # for an operand carrying no hex at all and the guard below then skipped the
+        # instruction, where int() raises. A ValueError here degrades the whole report to
+        # status="error", and the fuzzing oracle will not flag it because ValueError is on its
+        # allowlist - so widen this back to a guarded parse if capstone ever prints another form.
         jump_destination = int(i_op_str, 16)
         if jump_destination:
             # loops are conditional branches: queue the taken edge as well

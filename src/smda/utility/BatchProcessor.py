@@ -13,20 +13,51 @@ from smda.utility.common import computeReportDictIdentityHash
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_LARGE_INPUT_BYTES = 1 << 20
-# peak worker RSS observed for an analysis, expressed per byte of input
-LARGE_INPUT_RSS_FACTOR = 500
-MEMORY_BUDGET_FRACTION = 0.5
+# cgroup v2 exposes the limit as a single value, "max" when the group is unrestricted;
+# cgroup v1 uses a very large sentinel instead, so anything at or above the physical size
+# is treated as no limit
+_CGROUP_MEMORY_LIMIT_PATHS = ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes")
+
+
+def _readCgroupMemoryLimit():
+    """Bytes this process' cgroup may use, or None when it is unrestricted or unreadable."""
+    for path in _CGROUP_MEMORY_LIMIT_PATHS:
+        try:
+            with open(path, encoding="utf-8") as f_limit:
+                raw = f_limit.read().strip()
+        except OSError:
+            continue
+        if raw == "max":
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            continue
+    return None
 
 
 def getMemoryBudget():
-    """Bytes of RSS the large-input partition may occupy, or None where the platform hides RAM size."""
+    """Bytes of RSS the large-input partition may occupy, or None where the platform hides RAM size.
+
+    SC_PHYS_PAGES reports the host, so in a container it can be several times what the process
+    may actually use; the cgroup limit is what a containerized worker is really held to. Take
+    the smaller of the two.
+    """
+    physical = None
     sysconf = getattr(os, "sysconf", None)
-    if sysconf is None:
+    if sysconf is not None:
+        try:
+            physical = sysconf("SC_PAGE_SIZE") * sysconf("SC_PHYS_PAGES")
+        except (ValueError, OSError):
+            physical = None
+    cgroup_limit = _readCgroupMemoryLimit()
+    if cgroup_limit is not None and physical is not None:
+        available = min(physical, cgroup_limit)
+    else:
+        available = physical if cgroup_limit is None else cgroup_limit
+    if not available:
         return None
-    try:
-        return int(sysconf("SC_PAGE_SIZE") * sysconf("SC_PHYS_PAGES") * MEMORY_BUDGET_FRACTION)
-    except (ValueError, OSError):
-        return None
+    return int(available * SmdaConfig.MEMORY_BUDGET_FRACTION)
 
 
 def getDefaultWorkerCount():
@@ -131,7 +162,7 @@ def _largeWorkerCount(largest_input_bytes, task_count, worker_count, memory_budg
     budget = getMemoryBudget() if memory_budget is None else memory_budget
     capacity = task_count
     if budget:
-        capacity = budget // max(1, largest_input_bytes * LARGE_INPUT_RSS_FACTOR)
+        capacity = budget // max(1, largest_input_bytes * SmdaConfig.LARGE_INPUT_RSS_FACTOR)
     return max(1, min(worker_count, task_count, capacity))
 
 
@@ -170,7 +201,8 @@ def _runPartitions(partitions):
             if not owners:
                 return
             done, _ = wait(list(owners), return_when=FIRST_COMPLETED)
-            # wait() returns a set; order the batch by path so a rerun yields summaries identically
+            # wait() returns a set, so order each completed batch by path for a stable read;
+            # ordering across batches still follows completion, which is the point of streaming
             for future in sorted(done, key=lambda finished: owners[finished][0]["path"]):
                 task, in_flight = owners.pop(future)
                 in_flight.discard(future)

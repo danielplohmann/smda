@@ -10,7 +10,6 @@ import pytest
 
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.BatchProcessor import (
-    LARGE_INPUT_RSS_FACTOR,
     _inputSize,
     _largeWorkerCount,
     _runPartitions,
@@ -216,25 +215,50 @@ class TestPartitionDriver(unittest.TestCase):
 
 
 class TestLargePartitionSizing(unittest.TestCase):
-    def test_budget_is_a_fraction_of_physical_memory(self):
-        # os.sysconf is POSIX-only; on Windows the budget is unknown by design and the
-        # worker count alone governs admission
+    def test_budget_is_a_fraction_of_the_available_memory(self):
+        # os.sysconf is POSIX-only; on Windows with no cgroup the budget is unknown by design
+        # and the worker count alone governs admission
         if hasattr(os, "sysconf"):
             self.assertGreater(getMemoryBudget(), 0)
         else:
             self.assertIsNone(getMemoryBudget())
 
-    def test_budget_is_unknown_without_sysconf(self):
+    def test_budget_is_unknown_without_sysconf_or_a_cgroup(self):
         # create=True so this also runs where the attribute never existed
-        with mock.patch.object(os, "sysconf", None, create=True):
+        with (
+            mock.patch.object(os, "sysconf", None, create=True),
+            mock.patch("smda.utility.BatchProcessor._readCgroupMemoryLimit", return_value=None),
+        ):
             self.assertIsNone(getMemoryBudget())
 
     def test_budget_is_unknown_when_sysconf_rejects_the_key(self):
-        with mock.patch.object(os, "sysconf", side_effect=ValueError, create=True):
+        with (
+            mock.patch.object(os, "sysconf", side_effect=ValueError, create=True),
+            mock.patch("smda.utility.BatchProcessor._readCgroupMemoryLimit", return_value=None),
+        ):
             self.assertIsNone(getMemoryBudget())
 
+    def test_a_cgroup_limit_below_physical_memory_wins(self):
+        # the container case: SC_PHYS_PAGES reports the host, the cgroup reports the cap
+        with mock.patch("smda.utility.BatchProcessor._readCgroupMemoryLimit", return_value=1 << 30):
+            self.assertEqual(int((1 << 30) * SmdaConfig.MEMORY_BUDGET_FRACTION), getMemoryBudget())
+
+    @unittest.skipUnless(hasattr(os, "sysconf"), "needs SC_PHYS_PAGES to have a physical size to compare against")
+    def test_a_cgroup_sentinel_above_physical_memory_loses(self):
+        # cgroup v1 spells "unrestricted" as a very large number rather than "max"
+        physical = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        with mock.patch("smda.utility.BatchProcessor._readCgroupMemoryLimit", return_value=1 << 62):
+            self.assertEqual(int(physical * SmdaConfig.MEMORY_BUDGET_FRACTION), getMemoryBudget())
+
+    def test_a_cgroup_limit_carries_a_platform_without_sysconf(self):
+        with (
+            mock.patch.object(os, "sysconf", None, create=True),
+            mock.patch("smda.utility.BatchProcessor._readCgroupMemoryLimit", return_value=1 << 30),
+        ):
+            self.assertEqual(int((1 << 30) * SmdaConfig.MEMORY_BUDGET_FRACTION), getMemoryBudget())
+
     def test_budget_caps_concurrency_below_the_worker_count(self):
-        budget = 2 * (1 << 20) * LARGE_INPUT_RSS_FACTOR
+        budget = 2 * (1 << 20) * SmdaConfig.LARGE_INPUT_RSS_FACTOR
         self.assertEqual(2, _largeWorkerCount(1 << 20, 8, 10, budget))
 
     def test_unknown_budget_leaves_the_worker_count_in_charge(self):
