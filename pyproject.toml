@@ -25,7 +25,11 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "capstone",
+    # capstone 6 renames the arm64 modules and constants to aarch64. Its compatibility shim
+    # is partial - 6 of the 20 ARM64_* constants used here are absent from it, and the shim
+    # only loads at all once capstone.arm64* has been imported - so 6.x is a port, not an
+    # import-order fix. Measured against 6.0.0a10.
+    "capstone<6",
     "dncil",
     "dnfile",
     "lief>=0.16.0",
