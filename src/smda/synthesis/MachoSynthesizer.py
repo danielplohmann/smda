@@ -98,14 +98,25 @@ class MachoSynthesizer(BinarySynthesizer):
             self._warn("Mach-O synthesis from sections failed (%s), falling back to minimal layout", exc)
             return self._synthesizeMinimal(offsets)
 
+    def _hasMachoHeader(self, min_length):
+        """True only when the stored header is long enough AND is itself a Mach-O header.
+
+        A report keeps the header of the binary it came from, whatever format that was, so
+        reading these fields off a PE or ELF header yields whatever those bytes happen to hold.
+        """
+        if not self._hasHeader(min_length):
+            return False
+        magic = struct.unpack("<I", self.report.xheader[0:4])[0]
+        return magic in (MH_MAGIC, MH_CIGAM, MH_MAGIC_64, MH_CIGAM_64)
+
     def _is64(self):
-        if self._hasHeader(4):
+        if self._hasMachoHeader(4):
             magic = struct.unpack("<I", self.report.xheader[0:4])[0]
             return magic in (MH_MAGIC_64, MH_CIGAM_64)
         return self.report.bitness != 32
 
     def _getCpuType(self):
-        if self._hasHeader(8):
+        if self._hasMachoHeader(8):
             cpu_type = struct.unpack("<I", self.report.xheader[4:8])[0]
             if cpu_type:
                 return cpu_type
@@ -114,12 +125,12 @@ class MachoSynthesizer(BinarySynthesizer):
         return CPU_TYPE_X86_64 if self._is64() else CPU_TYPE_I386
 
     def _getCpuSubtype(self):
-        if self._hasHeader(12):
+        if self._hasMachoHeader(12):
             return struct.unpack("<I", self.report.xheader[8:12])[0]
         return 0
 
     def _getFiletype(self):
-        if self._hasHeader(16):
+        if self._hasMachoHeader(16):
             return struct.unpack("<I", self.report.xheader[12:16])[0]
         return MH_EXECUTE
 
