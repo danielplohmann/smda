@@ -157,10 +157,9 @@ class FunctionCandidateManager:
                     and candidate.alignment < self.identified_alignment
                     and not candidate.is_exception_handler
                 ):
-                    # The alignment floor is inferred from where call-referenced candidates
-                    # happen to sit, so it only ever bounds a guess, and an exception record is
-                    # the image's own declaration of a function start. Symbols are declarations
-                    # too but are deliberately NOT exempt: measured, that costs true positives.
+                    # The floor is inferred from call-referenced candidates, so it only bounds
+                    # a guess; an exception record is the image's own declaration. Exempting
+                    # symbols as well was measured to cost true positives -- do not widen this.
                     continue
                 yield candidate
 

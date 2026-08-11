@@ -37,12 +37,17 @@ _PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
 # still admitting its one strong signal (0x55 "push ebp/rbp", scored 51/33).
 _ENTRY_SHAPE_MIN_SCORE = 30
 
-# `mov edi, edi` -- both an effective NOP and the two-byte landing pad MSVC emits as the first
-# instruction of a hotpatchable function.
-_HOTPATCH_PAD_SEQUENCES = frozenset({b"\x8b\xff", b"\x89\xff"})
+# Byte pairs GAP_SEQUENCES treats as skippable filler that a function is also emitted with as
+# its own first instruction. Per bitness and deliberately narrow: on x86 only `mov edi, edi`,
+# the hotpatch landing pad; widening either set was measured to cost true positives. `mov ecx,
+# ecx` is not inert in 64-bit mode -- it truncates rcx, and MSVC opens argument-forwarding
+# thunks with it.
+_ENTRY_PAD_SEQUENCES = {
+    32: frozenset({b"\x8b\xff", b"\x89\xff"}),
+    64: frozenset({b"\x66\x90", b"\x8b\xc9"}),
+}
 
-# MSVC aligns function entries to 16 bytes; a NOP run that does not end on that boundary is
-# not serving alignment.
+# MSVC aligns function entries to 16 bytes.
 _CODE_ALIGNMENT = 16
 
 # Written as `A(BA)+B` rather than the equivalent `(AB){2,}` so the pattern starts with a literal:
@@ -97,13 +102,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # skipping/rounding past that leading NOP and mislocating the start two bytes late.
         return byte_window in COMMON_PROLOGUES["5"].get(self.bitness, {})
 
-    def isUnalignedHotpatchPad(self, byte_sequence, next_addr, next_bytes):
-        # `mov edi, edi` serves two roles: alignment filler and the hotpatch landing pad that
-        # opens a function. Filler only ever exists to reach the next 16-byte boundary and is
-        # always the tail of the NOP run, so a `mov edi, edi` that neither ends on that boundary
-        # nor is followed by more padding is the function's true entry -- a case the 5-byte
-        # COMMON_PROLOGUES window misses for every body other than `push ebp; mov ebp, esp`.
-        if self.bitness != 32 or byte_sequence not in _HOTPATCH_PAD_SEQUENCES:
+    def isUnalignedEntryPad(self, byte_sequence, next_addr, next_bytes):
+        # Filler exists only to reach the next 16-byte boundary and is always the tail of the
+        # NOP run, so a pad that ends off that boundary with real code behind it is an entry.
+        if byte_sequence not in _ENTRY_PAD_SEQUENCES.get(self.bitness, frozenset()):
             return False
         if next_addr % _CODE_ALIGNMENT == 0:
             return False
@@ -165,9 +167,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
         # real argument, not "unset", so a truthiness check would wrongly drop it.
         if start_gap_pointer is not None:
-            # A retained hotpatch pad that produced no function really was padding after all.
-            # Resume just past it rather than following getNextGap() to the next gap, which
-            # would abandon the remainder of this one over a wrong guess.
+            # A retained pad that produced no function was padding after all; resuming past it
+            # keeps getNextGap() from abandoning the rest of this gap over the wrong guess.
             if (
                 self._retained_pad is not None
                 and start_gap_pointer > self._retained_pad
@@ -246,7 +247,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     # it would mislocate the function two bytes late (at the `push ebp`).
                     if self.isHotpatchPrologue(get_window_slice(gap_offset, 5)):
                         break
-                    if self.isUnalignedHotpatchPad(
+                    if self.isUnalignedEntryPad(
                         sequence,
                         self.gap_pointer + gap_length,
                         get_window_slice(gap_offset + gap_length, max(GAP_SEQUENCES.keys())),

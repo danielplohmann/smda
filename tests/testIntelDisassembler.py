@@ -551,19 +551,24 @@ class TestIntelDisassembler(unittest.TestCase):
         # alignment filler and the candidate is the aligned address behind it.
         self.assertEqual(self._first_gap_candidate(b"\x8b\xff\x56\x8b\xf2", stub_off=0x0E), 0x1010)
 
-    def test_is_unaligned_hotpatch_pad_predicate(self):
+    def test_is_unaligned_entry_pad_predicate(self):
         manager = FunctionCandidateManager(SmdaConfig())
         manager.bitness = 32
-        self.assertTrue(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        self.assertTrue(manager.isUnalignedEntryPad(b"\x8b\xff", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
         # ends on a 16-byte boundary -> alignment filler
-        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1010, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        self.assertFalse(manager.isUnalignedEntryPad(b"\x8b\xff", 0x1010, b"\x56\x8b\xf2\x00\x00\x00\x00"))
         # more padding behind it -> still inside the filler run, not the run's function entry
-        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1012, b"\x90\x90\x90\x90\x90\x90\x90"))
-        # a different effective NOP is not a hotpatch pad
-        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x66\x90", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
-        # the hotpatch stub is a 32-bit convention
+        self.assertFalse(manager.isUnalignedEntryPad(b"\x8b\xff", 0x1012, b"\x90\x90\x90\x90\x90\x90\x90"))
+        # the pad set is per bitness: `mov edi, edi` is the x86 hotpatch convention, and widening
+        # x86 to the other effective NOPs was measured to cost true positives
+        self.assertFalse(manager.isUnalignedEntryPad(b"\x66\x90", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
         manager.bitness = 64
-        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        self.assertFalse(manager.isUnalignedEntryPad(b"\x8b\xff", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        self.assertTrue(manager.isUnalignedEntryPad(b"\x66\x90", 0x1012, b"\x0f\xb6\x01\x84\xc0\x74\x24"))
+        self.assertFalse(manager.isUnalignedEntryPad(b"\x66\x90", 0x1010, b"\x0f\xb6\x01\x84\xc0\x74\x24"))
+        # a bitness with no pad set at all matches nothing
+        manager.bitness = 16
+        self.assertFalse(manager.isUnalignedEntryPad(b"\x66\x90", 0x1012, b"\x0f\xb6\x01\x84\xc0\x74\x24"))
 
     def test_retained_hotpatch_pad_that_yields_no_function_resumes_behind_the_pad(self):
         # When the retained pad produces no function it really was padding, so the scan must
