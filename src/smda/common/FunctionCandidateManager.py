@@ -152,7 +152,15 @@ class FunctionCandidateManager:
             if not (candidate.isFinished() or candidate.getScore() == 0):
                 if self.language_candidates_only and candidate.lang_spec is None:
                     continue
-                if self.identified_alignment and candidate.alignment < self.identified_alignment:
+                if (
+                    self.identified_alignment
+                    and candidate.alignment < self.identified_alignment
+                    and not candidate.is_exception_handler
+                ):
+                    # The alignment floor is inferred from where call-referenced candidates
+                    # happen to sit, so it only ever bounds a guess, and an exception record is
+                    # the image's own declaration of a function start. Symbols are declarations
+                    # too but are deliberately NOT exempt: measured, that costs true positives.
                     continue
                 yield candidate
 
