@@ -1,5 +1,5 @@
 import logging
 
-__version__ = "4.4.6"
+__version__ = "4.4.7"
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
