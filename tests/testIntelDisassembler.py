@@ -517,6 +517,68 @@ class TestIntelDisassembler(unittest.TestCase):
         # as an effective NOP and skipped, so it is never returned as the candidate start.
         self.assertNotEqual(self._first_gap_candidate(b"\x8b\xff\x90\x90\x90"), 0x1010)
 
+    def _gap_manager(self, stub, base=0x1000, stub_off=0x10):
+        # Same layout as _first_gap_candidate, but hands back the manager so a test can drive
+        # the scan more than once and observe the retained-pad bookkeeping between calls.
+        buf = bytearray(b"\x90")
+        buf += b"\xcc" * (stub_off - len(buf))
+        buf += stub
+        buf += b"\xcc" * (0x200 - len(buf))
+
+        binary_info = BinaryInfo(bytes(buf))
+        binary_info.base_addr = base
+        binary_info.binary_size = len(buf)
+        binary_info.bitness = 32
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            code_map={base: 1, base + 0x100: 1},
+            data_map={},
+            getRawBytes=lambda offset, n: bytes(buf)[offset : offset + n],
+        )
+        manager.bitness = 32
+        manager.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
+        return manager
+
+    def test_hotpatch_pad_before_a_non_ebp_prologue_is_the_candidate_start(self):
+        # `mov edi, edi` opens every hotpatchable MSVC function, not only those continuing with
+        # `push ebp; mov ebp, esp`. As padding it exists solely to reach the next 16-byte
+        # boundary, so a pad that does not end on one is the function's true entry and must be
+        # the candidate; skipping it would mislocate the start two bytes late.
+        self.assertEqual(self._first_gap_candidate(b"\x8b\xff\x56\x8b\xf2"), 0x1010)
+        self.assertEqual(self._first_gap_candidate(b"\x89\xff\x83\xec\x0c"), 0x1010)
+        # control: the same pad two bytes earlier DOES end on the boundary, so it is genuine
+        # alignment filler and the candidate is the aligned address behind it.
+        self.assertEqual(self._first_gap_candidate(b"\x8b\xff\x56\x8b\xf2", stub_off=0x0E), 0x1010)
+
+    def test_is_unaligned_hotpatch_pad_predicate(self):
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.bitness = 32
+        self.assertTrue(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        # ends on a 16-byte boundary -> alignment filler
+        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1010, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        # more padding behind it -> still inside the filler run, not the run's function entry
+        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1012, b"\x90\x90\x90\x90\x90\x90\x90"))
+        # a different effective NOP is not a hotpatch pad
+        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x66\x90", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+        # the hotpatch stub is a 32-bit convention
+        manager.bitness = 64
+        self.assertFalse(manager.isUnalignedHotpatchPad(b"\x8b\xff", 0x1012, b"\x56\x8b\xf2\x00\x00\x00\x00"))
+
+    def test_retained_hotpatch_pad_that_yields_no_function_resumes_behind_the_pad(self):
+        # When the retained pad produces no function it really was padding, so the scan must
+        # continue two bytes on instead of following the caller's next-gap address, which would
+        # abandon every remaining byte of the current gap.
+        manager = self._gap_manager(b"\x8b\xff\x56\x8b\xf2")
+        self.assertEqual(manager.nextGapCandidate(), 0x1010)
+        self.assertEqual(manager.nextGapCandidate(0x1100), 0x1012)
+
+    def test_retained_hotpatch_pad_that_became_a_function_follows_the_next_gap(self):
+        manager = self._gap_manager(b"\x8b\xff\x56\x8b\xf2")
+        self.assertEqual(manager.nextGapCandidate(), 0x1010)
+        manager.disassembly.code_map[0x1010] = 1
+        self.assertNotEqual(manager.nextGapCandidate(0x1100), 0x1012)
+
     def test_gap_scan_skips_hlt_and_ud2_trap_filler(self):
         # hlt (0xf4) and ud2 (0x0f 0x0b) are trap filler a function never opens with;
         # the gap scanner must skip them like int3 and promote the code behind them.
