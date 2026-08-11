@@ -815,3 +815,55 @@ class SynthesisForeignHeaderTestSuite(unittest.TestCase):
         )
         self.assertTrue(synthesizer._hasElfHeader(0x14))
         self.assertEqual(synthesizer._getMachine(), struct.unpack("<H", bytes(range(4, 0x14))[0x0E:0x10])[0])
+
+
+class SynthesisLowRvaTestSuite(unittest.TestCase):
+    """ELF binaries put their entry stub immediately after the program headers, so a report of
+    one has functions below the RVA where a PE section can start. The image base is what has to
+    move for those to be representable."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("bashlite_xored"))
+
+    def test_functions_below_the_first_section_rva_are_planted(self):
+        parsed = lief.parse(list(bytes(self.report.synthesizeBinary(output_format=FORMAT_PE))))
+
+        lost = 0
+        for function in self.report.getFunctions():
+            for block in function.getBlocks():
+                for instruction in block.getInstructions():
+                    expected = bytes.fromhex(instruction.bytes)
+                    try:
+                        got = bytes(parsed.get_content_from_virtual_address(instruction.offset, len(expected)))
+                    except Exception:
+                        got = b""
+                    lost += got != expected
+        self.assertEqual(lost, 0)
+
+    def test_the_lowered_image_base_stays_64k_aligned(self):
+        parsed = lief.parse(list(bytes(self.report.synthesizeBinary(output_format=FORMAT_PE))))
+
+        self.assertLess(parsed.optional_header.imagebase, self.report.base_addr)
+        self.assertEqual(parsed.optional_header.imagebase % 0x10000, 0)
+
+    def test_the_entry_point_keeps_its_absolute_address(self):
+        parsed = lief.parse(list(bytes(self.report.synthesizeBinary(output_format=FORMAT_PE))))
+        absolute = parsed.optional_header.imagebase + parsed.optional_header.addressof_entrypoint
+
+        self.assertEqual(absolute, self.report.base_addr + self.report.oep)
+
+    def test_a_report_that_already_clears_the_headers_keeps_its_base(self):
+        report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("cutwail_xored"))
+        parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=FORMAT_PE))))
+
+        self.assertEqual(parsed.optional_header.imagebase, report.base_addr)
+
+    def test_the_base_is_never_lowered_below_zero(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.report = types.SimpleNamespace(base_addr=0)
+
+        self.assertEqual(synthesizer._imageBaseFor([0x40], 0x1000), 0)
