@@ -749,6 +749,22 @@ class TestIntelDisassembler(unittest.TestCase):
         manager.locatePrologueCandidates()
         return manager.candidates.keys()
 
+    def test_prologue_seeding_reports_a_tripped_timeout_to_its_caller(self):
+        # locatePrologueCandidates walks several patterns; the first one to see the timeout
+        # returns True so the rest are abandoned instead of each rediscovering it.
+        binary_info = BinaryInfo(bytes.fromhex("558bec"))
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = 3
+
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        manager.bitness = 32
+        manager._cb_analysis_timeout = lambda: True
+
+        self.assertTrue(manager._seedPrologueMatches(b"\x55\x8b\xec"))
+        self.assertEqual({}, manager.candidates)
+
     def test_prologue_scan_skips_the_body_behind_a_hotpatch_pad(self):
         # MSVC emits `mov edi, edi` ahead of `push ebp; mov ebp, esp` and the pad is the
         # function's entry, so the bare 3-byte prologue also matching two bytes in must not
