@@ -362,19 +362,7 @@ class MachoSynthesizer(BinarySynthesizer):
             else:
                 section["raw"] = bytearray(size)
 
-        for offset in offsets:
-            for block_offset, chunk in self._iterFunctionChunks(self.report.xcfg[offset]):
-                for section in sections:
-                    if (
-                        section["executable"]
-                        and section["va_start"] <= block_offset
-                        and block_offset + len(chunk) <= section["va_end"]
-                    ):
-                        start = block_offset - section["va_start"]
-                        section["raw"][start : start + len(chunk)] = chunk
-                        break
-                else:
-                    self._warn("block 0x%x of function 0x%x fits no executable section, skipped", block_offset, offset)
+        self._plantFunctionChunks(sections, offsets)
 
         if with_strings:
             for data_addr, content in self._iterStringRefs():

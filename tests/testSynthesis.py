@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import struct
+import types
 import unittest
 from pathlib import Path
 
@@ -628,3 +629,112 @@ class SynthesisLayoutTestSuite(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SynthesisSectionOverflowTestSuite(unittest.TestCase):
+    """Recovered code can run past the end of the section it starts in — a call at the tail of
+    __text whose fall-through lands in the padding before __stubs. Planting must not drop the
+    whole block over the byte that overflows."""
+
+    def _sections(self, va_start, va_end, next_start=None):
+        sections = [
+            {
+                "name": ".text",
+                "va_start": va_start,
+                "va_end": va_end,
+                "executable": True,
+                "raw": bytearray(b"\x90" * (va_end - va_start)),
+            }
+        ]
+        if next_start is not None:
+            sections.append(
+                {
+                    "name": ".next",
+                    "va_start": next_start,
+                    "va_end": next_start + 0x10,
+                    "executable": True,
+                    "raw": bytearray(b"\x90" * 0x10),
+                }
+            )
+        return sections
+
+    def _synthesizer(self, chunks):
+        from smda.synthesis.BinarySynthesizer import BinarySynthesizer
+
+        synthesizer = BinarySynthesizer.__new__(BinarySynthesizer)
+        synthesizer.report = types.SimpleNamespace(architecture="intel", xcfg={0x1000: object()})
+        synthesizer.warnings = []
+        synthesizer._iterFunctionChunks = staticmethod(lambda _function: iter(chunks))
+        return synthesizer
+
+    def test_a_block_overflowing_its_section_grows_it_into_unclaimed_space(self):
+        # the block needs one byte past .text, and nothing else claims it
+        sections = self._sections(0x1000, 0x1005)
+        synthesizer = self._synthesizer([(0x1000, b"\xe8\x01\x02\x03\x04\x90")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1006)
+        self.assertEqual(bytes(sections[0]["raw"]), b"\xe8\x01\x02\x03\x04\x90")
+        self.assertEqual(synthesizer.warnings, [])
+
+    def test_growth_stops_at_the_next_section_and_the_fitting_bytes_are_still_planted(self):
+        # .next starts immediately, so the overflowing byte has nowhere to go; the five bytes
+        # that do fit must still be planted rather than dropped with the block
+        sections = self._sections(0x1000, 0x1005, next_start=0x1005)
+        synthesizer = self._synthesizer([(0x1000, b"\xe8\x01\x02\x03\x04\xcc")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1005)
+        self.assertEqual(bytes(sections[0]["raw"]), b"\xe8\x01\x02\x03\x04")
+        # the tail lands in the neighbouring executable section, which does cover it
+        self.assertEqual(bytes(sections[1]["raw"][:1]), b"\xcc")
+        self.assertEqual(synthesizer.warnings, [])
+
+    def test_growth_takes_only_the_overflow_not_the_whole_gap(self):
+        sections = self._sections(0x1000, 0x1005, next_start=0x2000)
+        synthesizer = self._synthesizer([(0x1000, b"\xe8\x01\x02\x03\x04\x90")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1006)
+        self.assertEqual(synthesizer.warnings, [])
+
+    def test_a_block_in_a_gap_between_sections_is_reported(self):
+        # nothing to grow: the block starts inside no section at all
+        sections = self._sections(0x1000, 0x1005, next_start=0x2000)
+        synthesizer = self._synthesizer([(0x1500, b"\xe8\x01\x02\x03\x04")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1005)
+        self.assertEqual(len(synthesizer.warnings), 1)
+        self.assertIn("fit no executable section", synthesizer.warnings[0])
+
+    def test_a_block_below_its_section_is_clipped_not_wrapped(self):
+        sections = self._sections(0x1000, 0x1010)
+        synthesizer = self._synthesizer([(0x0FFE, b"\xaa\xbb\xcc")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(bytes(sections[0]["raw"][:1]), b"\xcc")
+        self.assertEqual(bytes(sections[0]["raw"][1:2]), b"\x90")
+        self.assertEqual(len(synthesizer.warnings), 1)
+
+    def test_komplex_round_trips_every_instruction_in_all_three_formats(self):
+        report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("komplex_xored"))
+        for output_format in (FORMAT_PE, FORMAT_ELF, FORMAT_MACHO):
+            parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=output_format))))
+            corrupt = []
+            for function in report.getFunctions():
+                for block in function.getBlocks():
+                    for instruction in block.getInstructions():
+                        expected = bytes.fromhex(instruction.bytes)
+                        try:
+                            got = bytes(parsed.get_content_from_virtual_address(instruction.offset, len(expected)))
+                        except Exception:
+                            got = b""
+                        if got != expected:
+                            corrupt.append(hex(instruction.offset))
+            self.assertEqual(corrupt, [], f"{output_format} lost {len(corrupt)} instructions")
