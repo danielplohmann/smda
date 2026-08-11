@@ -88,6 +88,10 @@ SYSCALL_IMPLICIT_RAX_WRITERS = {
     "aam",
     "daa",
     "das",
+    # capstone spells the 32-bit pop-all forms popal/popad and popaw; both restore eax
+    # from the stack with no explicit operand, so nothing else here can see the write.
+    "popal",
+    "popaw",
 }
 
 SYSCALL_READ_ONLY_INS = {"cmp", "test", "push", "bt"}
