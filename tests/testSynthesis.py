@@ -738,3 +738,80 @@ class SynthesisSectionOverflowTestSuite(unittest.TestCase):
                         if got != expected:
                             corrupt.append(hex(instruction.offset))
             self.assertEqual(corrupt, [], f"{output_format} lost {len(corrupt)} instructions")
+
+
+class SynthesisForeignHeaderTestSuite(unittest.TestCase):
+    """A report keeps the header of the binary it came from. A synthesizer must only read its
+    own format's fields out of it, or it decodes whatever those bytes happen to hold."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # a PE-origin report based above 4 GiB: a 32-bit Mach-O cannot express its addresses
+        cls.pe_origin = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("rust_pe_gnu_xored"))
+
+    def test_a_pe_header_does_not_make_a_64_bit_report_a_32_bit_macho(self):
+        blob = bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_MACHO))
+
+        self.assertEqual(struct.unpack("<I", blob[:4])[0], 0xFEEDFACF)
+
+    def test_a_pe_header_does_not_supply_the_macho_cpu_type(self):
+        blob = bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_MACHO))
+
+        # CPU_TYPE_X86_64, derived from the report, not bytes 4:8 of an MZ header
+        self.assertEqual(struct.unpack("<I", blob[4:8])[0], 0x01000007)
+
+    def test_addresses_above_four_gib_survive_the_macho_round_trip(self):
+        parsed = lief.parse(list(bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_MACHO))))
+
+        lost = 0
+        for function in self.pe_origin.getFunctions():
+            for block in function.getBlocks():
+                for instruction in block.getInstructions():
+                    expected = bytes.fromhex(instruction.bytes)
+                    try:
+                        got = bytes(parsed.get_content_from_virtual_address(instruction.offset, len(expected)))
+                    except Exception:
+                        got = b""
+                    lost += got != expected
+        self.assertEqual(lost, 0)
+
+    def test_a_real_macho_header_still_selects_the_word_size(self):
+        from smda.synthesis.MachoSynthesizer import MachoSynthesizer
+
+        synthesizer = MachoSynthesizer.__new__(MachoSynthesizer)
+        # a 32-bit Mach-O header must still win over a report claiming 64-bit
+        synthesizer.report = types.SimpleNamespace(
+            xheader=struct.pack("<I", 0xFEEDFACE) + b"\x00" * 0x40, bitness=64, architecture="intel"
+        )
+        self.assertFalse(synthesizer._is64())
+
+        synthesizer.report.xheader = struct.pack("<I", 0xFEEDFACF) + b"\x00" * 0x40
+        self.assertTrue(synthesizer._is64())
+
+    def test_a_foreign_header_falls_back_to_the_report_bitness(self):
+        from smda.synthesis.MachoSynthesizer import MachoSynthesizer
+
+        synthesizer = MachoSynthesizer.__new__(MachoSynthesizer)
+        synthesizer.report = types.SimpleNamespace(xheader=b"MZ" + b"\x90" * 0x40, bitness=64, architecture="intel")
+        self.assertTrue(synthesizer._is64())
+
+        synthesizer.report.bitness = 32
+        self.assertFalse(synthesizer._is64())
+
+    def test_a_pe_header_does_not_reach_the_synthesized_elf_identity(self):
+        blob = bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_ELF))
+        e_type = struct.unpack("<H", blob[16:18])[0]
+
+        self.assertEqual(blob[7:16], b"\x00" * 9)  # EI_PAD must be zero
+        self.assertEqual(e_type, 2)  # ET_EXEC, not whatever bytes 16:18 of an MZ header hold
+
+    def test_a_real_elf_header_still_supplies_the_identity(self):
+        from smda.synthesis.ElfSynthesizer import ElfSynthesizer
+
+        synthesizer = ElfSynthesizer.__new__(ElfSynthesizer)
+        synthesizer.report = types.SimpleNamespace(
+            xheader=b"\x7fELF" + bytes(range(4, 0x14)) + b"\x00" * 0x20, bitness=64, architecture="intel"
+        )
+        self.assertTrue(synthesizer._hasElfHeader(0x14))
+        self.assertEqual(synthesizer._getMachine(), struct.unpack("<H", bytes(range(4, 0x14))[0x0E:0x10])[0])

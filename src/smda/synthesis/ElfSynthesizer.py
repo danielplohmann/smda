@@ -95,8 +95,17 @@ class ElfSynthesizer(BinarySynthesizer):
     def _getBitness(self):
         return 64 if self.report.bitness == 64 else 32
 
+    def _hasElfHeader(self, min_length):
+        """True only when the stored header is long enough AND is itself an ELF header.
+
+        A report keeps the header of the binary it came from, whatever format that was, so
+        reading these fields off a PE or Mach-O header yields whatever those bytes happen to
+        hold -- an e_type of 0xb8, say, which is not a defined ELF type at all.
+        """
+        return self._hasHeader(min_length) and bytes(self.report.xheader[0:4]) == b"\x7fELF"
+
     def _getMachine(self):
-        if self._hasHeader(0x14):
+        if self._hasElfHeader(0x14):
             machine = struct.unpack("<H", self.report.xheader[0x12:0x14])[0]
             if machine:
                 return machine
@@ -368,9 +377,9 @@ class ElfSynthesizer(BinarySynthesizer):
         ehdr[4] = 2 if is_64 else 1
         ehdr[5] = 1
         ehdr[6] = 1
-        if self._hasHeader(16):
+        if self._hasElfHeader(16):
             ehdr[7:16] = self.report.xheader[7:16]
-        e_type = struct.unpack("<H", self.report.xheader[16:18])[0] if self._hasHeader(18) else ET_EXEC
+        e_type = struct.unpack("<H", self.report.xheader[16:18])[0] if self._hasElfHeader(18) else ET_EXEC
         machine = self._getMachine()
         entry = 0
         if self.report.oep:
