@@ -72,12 +72,19 @@ class PeSymbolProvider(AbstractLabelProvider):
 
     def parseSymbols(self, lief_binary, base_addr=None):
         active_base = self._resolve_base_addr(lief_binary, base_addr)
+        # lief reports Symbol.section as None for every PE symbol, on 0.17 and 1.0 alike, so
+        # resolving through it dropped the entire COFF symbol table. The 1-based section_idx
+        # carries the same information and is populated across the supported lief range.
+        sections = list(lief_binary.sections)
         function_symbols = {}
+        num_candidates = 0
         for symbol in lief_binary.symbols:
             if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
-                if symbol.section is None:
-                    # section_idx 0/-1/-2 (undefined-external/absolute/debug): not a locally
-                    # defined function, its value is not a usable in-image offset.
+                num_candidates += 1
+                section_idx = getattr(symbol, "section_idx", 0)
+                if not 1 <= section_idx <= len(sections):
+                    # 0/-1/-2 are undefined-external/absolute/debug: not a locally defined
+                    # function, so its value is not a usable in-image offset.
                     continue
                 function_name = ""
                 with contextlib.suppress(UnicodeDecodeError, AttributeError):
@@ -85,9 +92,16 @@ class PeSymbolProvider(AbstractLabelProvider):
                     # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
                     function_name = symbol.name
                 if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
-                    function_offset = active_base + symbol.section.virtual_address + symbol.value
+                    function_offset = active_base + sections[section_idx - 1].virtual_address + symbol.value
                     if function_offset not in function_symbols:
                         function_symbols[function_offset] = function_name
+        if num_candidates and not function_symbols:
+            # the previous failure mode was silent: a whole corpus could be built unnamed
+            # without anything complaining, so say so rather than contributing nothing
+            LOGGER.warning(
+                "PE COFF symbol table holds %d function symbols but none resolved to an in-image offset",
+                num_candidates,
+            )
         return function_symbols
 
     def parseImports(self, lief_binary, base_addr=None):

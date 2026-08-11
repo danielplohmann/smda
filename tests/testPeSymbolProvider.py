@@ -1,10 +1,19 @@
+import logging
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
+
+import lief
+import pytest
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
+from smda.Disassembler import Disassembler
+from smda.SmdaConfig import SmdaConfig
 
 
 class _MockImportEntry:
@@ -50,11 +59,20 @@ class _MockSection:
 
 
 class _MockSymbol:
-    def __init__(self, name, value, *, section=None):
+    """Models what lief actually hands back for a PE COFF symbol.
+
+    Symbol.section is None for every PE symbol on both 0.17 and 1.0, and the section is
+    identified by the 1-based section_idx instead; 0, -1 and -2 mean undefined-external,
+    absolute and debug. The earlier stub gave every symbol a real section object, which is
+    why the suite stayed green while the provider recovered nothing from a real binary.
+    """
+
+    def __init__(self, name, value, *, section_idx=1):
         self.name = name
         self.value = value
         self.complex_type = SimpleNamespace(name="FUNCTION")
-        self.section = section
+        self.section = None
+        self.section_idx = section_idx
 
 
 class _MockPeBinary:
@@ -221,7 +239,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
+            symbols=[_MockSymbol("local_func", 0x200)],
             imagebase=0x140000000,
         )
         symbols = provider.collectSymbols(pe_binary, base_addr=0x400000)
@@ -233,7 +251,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
+            symbols=[_MockSymbol("local_func", 0x200)],
             imagebase=0x140000000,
         )
         symbols = provider.collectSymbols(pe_binary, base_addr=0)
@@ -266,7 +284,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
             imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
+            symbols=[_MockSymbol("local_func", 0x200)],
             imagebase=0x140000000,
         )
         binary_info = BinaryInfo(b"")
@@ -293,7 +311,7 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         pe_binary = _MockPeBinary(
             exported_functions=[_MockExport("exported_func", 0x1000)],
             sections=[_MockSection(0x20000000, 0x1000)],
-            symbols=[_MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000))],
+            symbols=[_MockSymbol("local_func", 0x200)],
             imagebase=0x140000000,
         )
         binary_info = BinaryInfo(b"")
@@ -319,18 +337,104 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
         symbols = provider.parseExports(pe_binary, base_addr=0x400000)
         self.assertEqual(symbols, {0x401000: "real_func"})
 
-    def test_parse_symbols_skips_entries_with_no_section(self):
+    def test_parse_symbols_skips_entries_with_an_out_of_range_section_idx(self):
         provider = PeSymbolProvider(None)
         pe_binary = _MockPeBinary(
             sections=[_MockSection(0x20000000, 0x1000)],
             symbols=[
-                _MockSymbol("local_func", 0x200, section=_MockSection(0x20000000, 0x1000)),
-                _MockSymbol("undefined_func", 0, section=None),
+                _MockSymbol("local_func", 0x200),
+                _MockSymbol("undefined_func", 0, section_idx=0),
             ],
             imagebase=0x140000000,
         )
         symbols = provider.parseSymbols(pe_binary, base_addr=0x400000)
         self.assertEqual(symbols, {0x401200: "local_func"})
+
+    def test_parse_symbols_resolves_a_symbol_whose_section_is_none(self):
+        # danielplohmann/smda#229: lief leaves Symbol.section None for every PE symbol, so a
+        # provider keyed on it recovers nothing from a binary carrying a full COFF symtab
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            sections=[_MockSection(0x20000000, 0x1000), _MockSection(0x40000000, 0x5000)],
+            symbols=[
+                _MockSymbol("first_section_func", 0x200, section_idx=1),
+                _MockSymbol("second_section_func", 0x30, section_idx=2),
+            ],
+            imagebase=0x140000000,
+        )
+        self.assertTrue(all(symbol.section is None for symbol in pe_binary.symbols))
+
+        symbols = provider.parseSymbols(pe_binary, base_addr=0x400000)
+
+        self.assertEqual({0x401200: "first_section_func", 0x405030: "second_section_func"}, symbols)
+
+    def test_parse_symbols_warns_when_a_populated_symtab_yields_nothing(self):
+        # the failure this replaces was silent, so a corpus could be built entirely unnamed
+        provider = PeSymbolProvider(None)
+        pe_binary = _MockPeBinary(
+            sections=[_MockSection(0x20000000, 0x1000)],
+            symbols=[_MockSymbol("undefined_func", 0, section_idx=0)],
+            imagebase=0x140000000,
+        )
+        # several test modules call logging.disable() at import, which would make assertLogs
+        # see no records depending on collection order; lift it for this test only
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+        with self.assertLogs("smda.common.labelprovider.PeSymbolProvider", level="WARNING") as logged:
+            self.assertEqual({}, provider.parseSymbols(pe_binary, base_addr=0x400000))
+        self.assertIn("1 function symbols", logged.output[0])
+
+
+@pytest.mark.slow
+class TestPeCoffSymbolFixture(unittest.TestCase):
+    """danielplohmann/smda#229, against a PE that really carries a COFF symbol table.
+
+    None of the other bundled PEs has one - cutwail is packed, njrat is .NET, and
+    pe_export_label_test is a stub - which is why a provider recovering nothing from a full
+    symtab went unnoticed. The fixture is a Rust hello-world built for
+    x86_64-pc-windows-gnu and linked by mingw-w64, so it is our own build rather than a
+    sample: rustc 1.97.1, release, debuginfo=2.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rust_pe_gnu_xored")
+        raw = Path(fixture).read_bytes()
+        cls.binary = bytes(byte ^ (index % 256) for index, byte in enumerate(raw))
+        with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as handle:
+            handle.write(cls.binary)
+            cls.path = handle.name
+        cls.report = Disassembler(SmdaConfig()).disassembleFile(cls.path)
+
+    @classmethod
+    def tearDownClass(cls):
+        os.unlink(cls.path)
+
+    def test_lief_leaves_every_pe_symbol_without_a_section(self):
+        # the contract the fix rests on: resolve through section_idx, never through section
+        lief_binary = lief.parse(self.path)
+        symbols = list(lief_binary.symbols)
+
+        self.assertGreater(len(symbols), 1000)
+        self.assertTrue(all(symbol.section is None for symbol in symbols))
+        self.assertTrue(any(1 <= symbol.section_idx <= len(list(lief_binary.sections)) for symbol in symbols))
+
+    def test_names_are_recovered_from_the_coff_symbol_table(self):
+        functions = list(self.report.getFunctions())
+        named = [f for f in functions if f.function_name and not f.function_name.startswith("sub_")]
+
+        # before the fix this recovered exactly one name, original_entry_point, from the OEP
+        # handling rather than from the symbol table
+        self.assertGreater(len(named), 1000)
+        self.assertGreater(len(named) / len(functions), 0.75)
+
+    def test_a_known_mingw_entry_point_is_named(self):
+        names = {f.function_name for f in self.report.getFunctions()}
+
+        self.assertIn("mainCRTStartup", names)
+        self.assertIn("__tmainCRTStartup", names)
 
 
 if __name__ == "__main__":
