@@ -8,6 +8,10 @@ run instead of producing an error report.
 
 Found by fuzzing: with lief 1.0.0, lief.MachO.parse(b".") raises
 MemoryError, and MachoFileLoader.parseBinary passed it straight through.
+
+Which of MemoryError and ValueError a malformed header produces depends on the
+lief build and version, so both are exercised here through an injected parser
+rather than through whichever lief this environment resolves.
 """
 
 import logging
@@ -29,6 +33,10 @@ def _raise_bad_alloc(*_args, **_kwargs):
     raise MemoryError("std::bad_alloc")
 
 
+def _raise_value_error(*_args, **_kwargs):
+    raise ValueError("corrupted or unsupported header")
+
+
 class SmdaLiefParseOomTest(unittest.TestCase):
     def test_safe_lief_parse_returns_none_on_allocation_failure(self):
         with mock.patch.object(lief, "parse", _raise_bad_alloc):
@@ -37,6 +45,21 @@ class SmdaLiefParseOomTest(unittest.TestCase):
     def test_safe_lief_parse_honours_a_format_specific_parser(self):
         self.assertIsNone(safe_lief_parse(b".", parser=_raise_bad_alloc))
         self.assertEqual(safe_lief_parse(b".", parser=len), 1)
+
+    def test_safe_lief_parse_returns_none_on_a_native_value_error(self):
+        with mock.patch.object(lief, "parse", _raise_value_error):
+            self.assertIsNone(safe_lief_parse(b"MZ"))
+        self.assertIsNone(safe_lief_parse(b".", parser=_raise_value_error))
+
+    def test_macho_accessors_survive_a_native_value_error(self):
+        crafted = b"\xcf\xfa\xed\xfe" + bytes(60)
+        with (
+            mock.patch.object(lief.MachO, "parse", _raise_value_error),
+            mock.patch.object(lief, "parse", _raise_value_error),
+        ):
+            self.assertEqual(MachoFileLoader.mapBinary(crafted, parsed=None), b"")
+            self.assertEqual(MachoFileLoader.getBaseAddress(crafted, parsed=None), 0)
+            self.assertEqual(MachoFileLoader.getCodeAreas(crafted, parsed=None), [])
 
     def test_macho_parse_binary_degrades_instead_of_raising(self):
         with mock.patch.object(lief.MachO, "parse", _raise_bad_alloc):
