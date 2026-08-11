@@ -221,3 +221,33 @@ class CandidateSafeguardsTestSuite(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExceptionRecordAlignmentExemptionTest(unittest.TestCase):
+    """An exception record is the image's own declaration of a function start, so the
+    inferred alignment floor must not filter it out of the analysis queue."""
+
+    def _manager(self, alignment):
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.bitness = 32
+        manager.identified_alignment = alignment
+        manager._code_areas = []
+        binary_info = types.SimpleNamespace(bitness=32, base_addr=0, binary=b"\x00" * 0x1000)
+        manager.disassembly = types.SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        return manager
+
+    def _yielded(self, alignment, mark):
+        manager = self._manager(alignment)
+        manager.addCandidate(0x1001)
+        mark(manager.candidates[0x1001])
+        manager._buildQueue()
+        return [candidate.addr for candidate in manager.getNextFunctionStartCandidate()]
+
+    def test_unaligned_exception_record_is_still_analyzed(self):
+        self.assertEqual(self._yielded(4, lambda c: c.setIsExceptionHandler(True)), [0x1001])
+
+    def test_unaligned_inferred_candidate_is_still_filtered(self):
+        self.assertEqual(self._yielded(4, lambda c: c.addCallRef(0x2000)), [])
+
+    def test_alignment_floor_of_zero_filters_nothing(self):
+        self.assertEqual(self._yielded(0, lambda c: c.addCallRef(0x2000)), [0x1001])
