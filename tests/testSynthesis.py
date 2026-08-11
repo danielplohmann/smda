@@ -854,11 +854,21 @@ class SynthesisLowRvaTestSuite(unittest.TestCase):
 
         self.assertEqual(absolute, self.report.base_addr + self.report.oep)
 
-    def test_a_report_that_already_clears_the_headers_keeps_its_base(self):
+    def test_the_xheader_path_keeps_the_reported_base(self):
+        # cutwail carries a real PE header, so it synthesizes from that layout rather than from
+        # function extents; the lowering must not reach it
         report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("cutwail_xored"))
         parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=FORMAT_PE))))
 
         self.assertEqual(parsed.optional_header.imagebase, report.base_addr)
+
+    def test_a_base_is_not_lowered_when_the_lowest_function_already_clears_the_headers(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.report = types.SimpleNamespace(base_addr=0x400000)
+
+        self.assertEqual(synthesizer._imageBaseFor([0x401000, 0x402000], 0x1000), 0x400000)
 
     def test_the_base_is_never_lowered_below_zero(self):
         from smda.synthesis.PeSynthesizer import PeSynthesizer
