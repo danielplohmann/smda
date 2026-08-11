@@ -49,6 +49,17 @@ _RE_PLTSEC_BLOCK = re.compile(
 )
 _RE_PLTSEC_ENTRY = re.compile(b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?P<function>.{4})", re.DOTALL)
 
+_PDATA_ENTRY_SIZE = 12
+_PDATA_MIN_ENTRIES = 16
+_PDATA_SEED_ENTRIES = 4
+# A sample only finds a table if it lands inside one with a whole seed window left, so this
+# must stay <= (_PDATA_MIN_ENTRIES - _PDATA_SEED_ENTRIES) * _PDATA_ENTRY_SIZE.
+_PDATA_SAMPLE_STRIDE = 128
+_PDATA_MAX_FUNCTION_SIZE = 0x100000
+# UNWIND_INFO byte 0 packs Version (bits 0-2, always 1) and Flags (bits 3-7), and only
+# EHANDLER/UHANDLER/CHAININFO are defined -- so just these eight byte values are legal.
+_UNWIND_INFO_FIRST_BYTES = frozenset(0x01 | (flags << 3) for flags in range(8))
+
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
@@ -483,7 +494,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self.pdata_end_addresses = set()
             record_pdata_ends = self.config.USE_PE_X64_PDATA_ENDS
             base_addr = self.disassembly.binary_info.base_addr
+            has_sections = False
             for section_info in self.disassembly.binary_info.getSections():
+                has_sections = True
                 section_name, section_va_start, section_va_end = section_info
                 if section_name == ".pdata":
                     rva_start = section_va_start - self.disassembly.binary_info.base_addr
@@ -496,17 +509,103 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                         rva_function_candidate, _rva_function_end, rva_unwind_info = struct.unpack("<III", packed_entry)
                         if rva_function_candidate == 0:
                             break
-                        if self._isChainedUnwindInfo(rva_unwind_info):
-                            # UNW_FLAG_CHAININFO: this entry is a secondary fragment (e.g. a
-                            # split-off cold/epilogue chunk) chained to another function's
-                            # primary RUNTIME_FUNCTION entry, not an independent function start.
-                            continue
-                        self.addExceptionCandidate(base_addr + rva_function_candidate)
-                        if record_pdata_ends and _rva_function_end > rva_function_candidate:
-                            # record .pdata EndAddresses as candidate split points; skip degenerate
-                            # (EndAddress <= BeginAddress) entries and keep them as VAs.
-                            self.pdata_start_addresses.add(base_addr + rva_function_candidate)
-                            self.pdata_end_addresses.add(base_addr + _rva_function_end)
+                        self._admitExceptionRecord(
+                            base_addr,
+                            rva_function_candidate,
+                            _rva_function_end,
+                            rva_unwind_info,
+                            record_pdata_ends,
+                        )
+            if not has_sections:
+                self._carveExceptionRecords(base_addr, record_pdata_ends)
+
+    def _admitExceptionRecord(self, base_addr, rva_function_candidate, rva_function_end, rva_unwind_info, ends):
+        if self._isChainedUnwindInfo(rva_unwind_info):
+            # UNW_FLAG_CHAININFO: this entry is a secondary fragment (e.g. a
+            # split-off cold/epilogue chunk) chained to another function's
+            # primary RUNTIME_FUNCTION entry, not an independent function start.
+            return
+        self.addExceptionCandidate(base_addr + rva_function_candidate)
+        if ends and rva_function_end > rva_function_candidate:
+            # record .pdata EndAddresses as candidate split points; skip degenerate
+            # (EndAddress <= BeginAddress) entries and keep them as VAs.
+            self.pdata_start_addresses.add(base_addr + rva_function_candidate)
+            self.pdata_end_addresses.add(base_addr + rva_function_end)
+
+    def _readExceptionRecord(self, binary, size, offset, previous_end):
+        """returns a validated RUNTIME_FUNCTION triple at offset, or None."""
+        if offset + _PDATA_ENTRY_SIZE > size:
+            return None
+        rva_start, rva_end, rva_unwind_info = struct.unpack_from("<III", binary, offset)
+        # .pdata is sorted and its entries do not overlap, which is what makes a run of them
+        # separable from data that merely happens to hold three plausible RVAs.
+        if rva_start == 0 or rva_start >= rva_end or rva_end > size or rva_start < previous_end:
+            return None
+        if rva_end - rva_start > _PDATA_MAX_FUNCTION_SIZE:
+            return None
+        if rva_unwind_info == 0 or rva_unwind_info >= size or rva_unwind_info & 3:
+            return None
+        if binary[rva_unwind_info] not in _UNWIND_INFO_FIRST_BYTES:
+            return None
+        return rva_start, rva_end, rva_unwind_info
+
+    def _countExceptionRecords(self, binary, size, offset, limit):
+        count = 0
+        previous_end = 0
+        while count < limit:
+            record = self._readExceptionRecord(binary, size, offset, previous_end)
+            if record is None:
+                break
+            previous_end = record[1]
+            offset += _PDATA_ENTRY_SIZE
+            count += 1
+        return count
+
+    def _locateExceptionRecordTable(self, binary):
+        """returns (offset, count) of the longest RUNTIME_FUNCTION run, or (0, 0) if none qualifies."""
+        size = len(binary)
+        best_offset = best_count = 0
+        offset = 0
+        samples = 0
+        while offset + _PDATA_SEED_ENTRIES * _PDATA_ENTRY_SIZE <= size:
+            if samples % 4096 == 0 and self._candidateTimeoutTripped():
+                break
+            samples += 1
+            for phase in (0, 4, 8):
+                seed = offset + phase
+                if self._countExceptionRecords(binary, size, seed, _PDATA_SEED_ENTRIES) < _PDATA_SEED_ENTRIES:
+                    continue
+                # a sample lands anywhere inside the table, so walk back to its real first entry
+                start = seed
+                while start >= _PDATA_ENTRY_SIZE:
+                    previous = self._readExceptionRecord(binary, size, start - _PDATA_ENTRY_SIZE, 0)
+                    if previous is None or previous[1] > struct.unpack_from("<I", binary, start)[0]:
+                        break
+                    start -= _PDATA_ENTRY_SIZE
+                count = self._countExceptionRecords(binary, size, start, size)
+                if count > best_count:
+                    best_offset, best_count = start, count
+                offset = max(offset, start + count * _PDATA_ENTRY_SIZE)
+                break
+            offset += _PDATA_SAMPLE_STRIDE
+        if best_count < _PDATA_MIN_ENTRIES:
+            return 0, 0
+        return best_offset, best_count
+
+    def _carveExceptionRecords(self, base_addr, record_pdata_ends):
+        # A memory dump carries the mapped image but usually not a parseable header, so the
+        # section table -- and with it .pdata -- is gone, costing every guaranteed x64 function
+        # start. The table is self-describing enough to find without one.
+        binary = self.disassembly.binary_info.binary
+        table_offset, table_count = self._locateExceptionRecordTable(binary)
+        if not table_count:
+            return
+        LOGGER.debug("carved %d RUNTIME_FUNCTION entries at 0x%08x", table_count, table_offset)
+        for index in range(table_count):
+            rva_start, rva_end, rva_unwind_info = struct.unpack_from(
+                "<III", binary, table_offset + index * _PDATA_ENTRY_SIZE
+            )
+            self._admitExceptionRecord(base_addr, rva_start, rva_end, rva_unwind_info, record_pdata_ends)
 
     def _isChainedUnwindInfo(self, rva_unwind_info):
         # x64 UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7);
