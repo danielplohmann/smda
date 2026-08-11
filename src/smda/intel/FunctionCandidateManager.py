@@ -37,6 +37,14 @@ _PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
 # still admitting its one strong signal (0x55 "push ebp/rbp", scored 51/33).
 _ENTRY_SHAPE_MIN_SCORE = 30
 
+# `mov edi, edi` -- both an effective NOP and the two-byte landing pad MSVC emits as the first
+# instruction of a hotpatchable function.
+_HOTPATCH_PAD_SEQUENCES = frozenset({b"\x8b\xff", b"\x89\xff"})
+
+# MSVC aligns function entries to 16 bytes; a NOP run that does not end on that boundary is
+# not serving alignment.
+_CODE_ALIGNMENT = 16
+
 # Written as `A(BA)+B` rather than the equivalent `(AB){2,}` so the pattern starts with a literal:
 # only then does the regex engine emit a prefix fast-search instead of entering the matcher at
 # every offset of the mapped image.
@@ -68,8 +76,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         super().__init__(config)
         self.pdata_start_addresses = set()
         self.pdata_end_addresses = set()
+        self._retained_pad = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
+        self._retained_pad = None
         # the gap scan decodes potential NOP instructions, so it needs an x86 capstone
         # matching the binary's bitness; build it before the base init runs discovery
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -86,6 +96,18 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # function's true entry. Recognizing the 5-byte prologue lets callers avoid
         # skipping/rounding past that leading NOP and mislocating the start two bytes late.
         return byte_window in COMMON_PROLOGUES["5"].get(self.bitness, {})
+
+    def isUnalignedHotpatchPad(self, byte_sequence, next_addr, next_bytes):
+        # `mov edi, edi` serves two roles: alignment filler and the hotpatch landing pad that
+        # opens a function. Filler only ever exists to reach the next 16-byte boundary and is
+        # always the tail of the NOP run, so a `mov edi, edi` that neither ends on that boundary
+        # nor is followed by more padding is the function's true entry -- a case the 5-byte
+        # COMMON_PROLOGUES window misses for every body other than `push ebp; mov ebp, esp`.
+        if self.bitness != 32 or byte_sequence not in _HOTPATCH_PAD_SEQUENCES:
+            return False
+        if next_addr % _CODE_ALIGNMENT == 0:
+            return False
+        return not any(next_bytes[:length] in sequences for length, sequences in GAP_SEQUENCES.items())
 
     def hasCommonPrologue(self, addr):
         # reuses FunctionCandidate's longest-first COMMON_PROLOGUES lookup (and endbr64
@@ -143,7 +165,17 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
         # real argument, not "unset", so a truthiness check would wrongly drop it.
         if start_gap_pointer is not None:
+            # A retained hotpatch pad that produced no function really was padding after all.
+            # Resume just past it rather than following getNextGap() to the next gap, which
+            # would abandon the remainder of this one over a wrong guess.
+            if (
+                self._retained_pad is not None
+                and start_gap_pointer > self._retained_pad
+                and self._retained_pad not in self.disassembly.code_map
+            ):
+                start_gap_pointer = self._retained_pad + 2
             self.gap_pointer = start_gap_pointer
+        self._retained_pad = None
         if self.gap_pointer is None:
             return None
         LOGGER.debug(
@@ -163,6 +195,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return window_bytes[:length]
 
         while True:
+            unskipped_pad = False
             if self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size < self.gap_pointer:
                 LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)
                 return None
@@ -206,11 +239,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # try to find effective NOPs and skip them.
             found_multi_byte_nop = False
             for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
-                if get_window_slice(gap_offset, gap_length) in GAP_SEQUENCES[gap_length]:
+                sequence = get_window_slice(gap_offset, gap_length)
+                if sequence in GAP_SEQUENCES[gap_length]:
                     # Do not skip a `mov edi, edi` effective NOP when it is the landing pad of
                     # a hotpatch stub: that byte pair is the function's true start, and skipping
                     # it would mislocate the function two bytes late (at the `push ebp`).
                     if self.isHotpatchPrologue(get_window_slice(gap_offset, 5)):
+                        break
+                    if self.isUnalignedHotpatchPad(
+                        sequence,
+                        self.gap_pointer + gap_length,
+                        get_window_slice(gap_offset + gap_length, max(GAP_SEQUENCES.keys())),
+                    ):
+                        unskipped_pad = True
                         break
                     LOGGER.debug(
                         "nextGapCandidate() found %d byte effective nop - gap_ptr += %d: 0x%08x",
@@ -257,6 +298,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.gap_pointer = self.getNextGap(dont_skip=True)
             else:
                 self.previously_analyzed_gap = self.gap_pointer
+                if unskipped_pad:
+                    self._retained_pad = self.gap_pointer
                 self.addGapCandidate(self.gap_pointer)
                 return self.gap_pointer
         return None
