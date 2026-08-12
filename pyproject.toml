@@ -48,7 +48,7 @@ dev = [
     # floating version reddens unrelated PRs on someone else's release schedule
     # (0.0.69/0.0.70 added unsound-return-statement and unsound-yield, 35 errors
     # against an unchanged tree). Bump deliberately, with the new rules addressed.
-    "ty==0.0.68",
+    "ty==0.0.69",
     "tqdm",
     "twine",
 ]
