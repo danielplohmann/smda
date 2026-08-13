@@ -50,8 +50,10 @@ class PdbSymbolProvider(AbstractLabelProvider):
             self._warnAboutUnusedPdb(binary_info.file_path)
             return
         try:
-            self._parseSymbols(purepdb.PDB.from_bytes(binary_data))
+            pdb = purepdb.PDB.from_bytes(binary_data)
+            self._parseSymbols(pdb)
             self._loaded_pdb_path = binary_info.file_path
+            self._warnAboutThinPdb(binary_info.file_path, pdb)
         except Exception as exc:
             reraise_non_operational_exception(exc)
             LOGGER.warning('Failed parsing PDB "%s" with exception: %r', binary_info.file_path, exc)
@@ -69,6 +71,16 @@ class PdbSymbolProvider(AbstractLabelProvider):
                 candidate,
                 file_path,
             )
+
+    def _warnAboutThinPdb(self, file_path, pdb):
+        if self._func_symbols and self._procedure_starts:
+            return
+        if self._func_symbols:
+            subject = "no procedure records, so no code sizes and no fragment attribution"
+        else:
+            subject = "no usable symbols"
+        reasons = "; ".join(pdb.diagnose().warnings)
+        LOGGER.warning('"%s" yielded %s%s', file_path, subject, f": {reasons}" if reasons else "")
 
     def _parseSymbols(self, pdb):
         procedures = []
