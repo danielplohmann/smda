@@ -128,7 +128,7 @@ class BinaryInfo:
                 with open(self.file_path, "rb") as fin:
                     data = fin.read()
             except OSError as e:
-                LOGGER.debug("Failed to read binary from path %s: %s", self.file_path, e)
+                LOGGER.warning("Failed to read binary from path %s: %s", self.file_path, e)
                 return None
         return data
 

@@ -1,3 +1,4 @@
+import logging
 import pathlib
 import random
 import struct
@@ -503,6 +504,24 @@ class TestPcLntabParseIsSharedAcrossProviders(unittest.TestCase):
             GoSymbolProvider._parse_pclntab = original
 
         self.assertEqual(parses, [1])
+
+
+class TestPcLntabParseFailureLogging(unittest.TestCase):
+    def test_a_parse_failure_after_a_validated_header_warns(self):
+        # the offset is only accepted once the header structure checks out, so recovering no
+        # symbols from it is a real failure - it used to leave no record at any level
+        provider = GoSymbolProvider(None)
+        binary_info = BinaryInfo(b"\xfb\xff\xff\xff\x00\x00\x01\x08")
+        # another test module's import-time logging.disable() would hide these records
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+        with self.assertLogs("smda.common.labelprovider.GoLabelProvider", level="WARNING") as logged:
+            provider.update(binary_info)
+
+        self.assertEqual({}, provider.getFunctionSymbols())
+        self.assertIn("pclntab", logged.output[0])
 
 
 if __name__ == "__main__":

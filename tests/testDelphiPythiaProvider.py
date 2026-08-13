@@ -1,3 +1,4 @@
+import logging
 import struct
 import unittest
 from types import SimpleNamespace
@@ -139,6 +140,43 @@ class TestDelphiPythiaProvider(unittest.TestCase):
 
         self.assertIn(DelphiPythiaProvider, provider_types)
         self.assertNotIn(DelphiPythiaProvider, {type(provider) for provider in engine.api_providers})
+
+
+class TestDelphiReSymDeadEndLogging(unittest.TestCase):
+    """Both paths run after the MZ + TObject signature match, so they are real dead ends."""
+
+    def setUp(self):
+        # another test module's import-time logging.disable() would hide these records
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+    @staticmethod
+    def _delphi_binary_info(code_areas):
+        binary = bytearray(0x2000)
+        binary[:2] = b"MZ"
+        binary[0x100:0x107] = b"TObject"
+        binary_info = BinaryInfo(bytes(binary))
+        binary_info.base_addr = 0x400000
+        binary_info.bitness = 32
+        binary_info.code_areas = code_areas
+        return binary_info
+
+    def test_a_binary_without_code_areas_is_reported_at_warning(self):
+        provider = DelphiReSymProvider(None)
+
+        with self.assertLogs("smda.common.labelprovider.DelphiReSymProvider", level="WARNING") as logged:
+            provider.update(self._delphi_binary_info([]))
+
+        self.assertIn("No code areas found", logged.output[0])
+
+    def test_out_of_bounds_code_area_offsets_are_reported_at_warning(self):
+        provider = DelphiReSymProvider(None)
+
+        with self.assertLogs("smda.common.labelprovider.DelphiReSymProvider", level="WARNING") as logged:
+            provider.update(self._delphi_binary_info([(0x400000, 0x409000)]))
+
+        self.assertIn("out of bounds", logged.output[0])
 
 
 class TestDelphiReSymNegativeOffsets(unittest.TestCase):

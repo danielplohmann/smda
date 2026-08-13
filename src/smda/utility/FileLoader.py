@@ -1,3 +1,4 @@
+import logging
 import os
 
 from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
@@ -5,6 +6,8 @@ from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.MachoFileLoader import MachoFileLoader
 from smda.utility.PeFileLoader import PeFileLoader
+
+LOGGER = logging.getLogger(__name__)
 
 
 class FileLoader:
@@ -63,6 +66,10 @@ class FileLoader:
                     # distinguishes "caller did not supply" from
                     # "caller already tried and got None".
                     kw = {"parsed": loader.parseBinary(self._raw_data)} if hasattr(loader, "parseBinary") else {}
+                    # isCompatible() has confirmed the format, so a failed shared parse means
+                    # every accessor below silently yields nothing for a real PE/ELF/Mach-O
+                    if "parsed" in kw and not kw["parsed"]:
+                        LOGGER.warning("%s: failed to parse the binary, no data will be mapped", loader.__name__)
                     self._data = loader.mapBinary(self._raw_data, **kw)
                     self._base_addr = loader.getBaseAddress(self._raw_data, **kw)
                     self._bitness = loader.getBitness(self._raw_data, **kw)

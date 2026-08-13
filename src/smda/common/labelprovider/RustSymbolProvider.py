@@ -44,7 +44,7 @@ class RustSymbolProvider(AbstractLabelProvider):
             lief_binary = binary_info.getLiefBinary()
         except Exception as exc:
             reraise_non_operational_exception(exc)
-            LOGGER.debug("Failed to parse binary with LIEF: %s", type(exc).__name__)
+            LOGGER.warning("Failed to parse binary with LIEF: %s", type(exc).__name__)
             return
 
         if not lief_binary or not self.is_rust_binary(binary_info):
@@ -121,7 +121,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                 with open(binary_info.file_path, "rb") as fin:
                     data = fin.read()
             except OSError as e:
-                LOGGER.debug("Failed to read binary from path %s: %s", binary_info.file_path, e)
+                LOGGER.warning("Failed to read binary from path %s: %s", binary_info.file_path, e)
                 return None
         return data
 
