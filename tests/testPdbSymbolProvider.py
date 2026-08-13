@@ -23,12 +23,21 @@ def decode_fixture(path):
         return bytes(byte ^ (index % 256) for index, byte in enumerate(fin.read()))
 
 
+class FakeDiagnostics:
+    def __init__(self, warnings):
+        self.warnings = warnings
+
+
 class FakePdb:
-    def __init__(self, functions):
+    def __init__(self, functions, warnings=()):
         self._functions = functions
+        self._warnings = list(warnings)
 
     def functions(self):
         return self._functions
+
+    def diagnose(self):
+        return FakeDiagnostics(self._warnings)
 
 
 def make_function(name, rva, code_size=None, source="proc", module=None):
@@ -52,6 +61,13 @@ def make_binary_info(file_path, raw_data=b""):
 
 
 class PdbFragmentAttributionTestSuite(unittest.TestCase):
+    def setUp(self):
+        # several test modules call logging.disable() at import, which would make assertLogs
+        # see no records depending on collection order; lift it for this class only
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
     def _providerWith(self, functions):
         provider = PdbSymbolProvider(None)
         provider._base_addr = BASE_ADDR
@@ -121,6 +137,31 @@ class PdbFragmentAttributionTestSuite(unittest.TestCase):
         provider = self._providerWith([make_function("stub", 0x1000, None, source="public")])
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "stub")
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1004), "")
+
+    def _warnFor(self, functions, warnings=()):
+        provider = PdbSymbolProvider(None)
+        provider._base_addr = BASE_ADDR
+        pdb = FakePdb(functions, warnings)
+        provider._parseSymbols(pdb)
+        with self.assertLogs("smda.common.labelprovider.PdbSymbolProvider", level=logging.WARNING) as logs:
+            provider._warnAboutThinPdb("sample.pdb", pdb)
+        return logs.output[0]
+
+    def test_a_pdb_that_parses_but_resolves_no_address_warns(self):
+        unresolved = make_function("unresolved", 0x1000, 0x100)
+        unresolved.rva = None
+        message = self._warnFor([unresolved], ["no section-header stream, every rva is None"])
+        self.assertIn("no usable symbols", message)
+        self.assertIn("no section-header stream", message)
+
+    def test_a_pdb_without_procedure_records_warns_that_fragments_are_unavailable(self):
+        message = self._warnFor([make_function("stub", 0x1000, None, source="public")])
+        self.assertIn("no procedure records", message)
+
+    def test_a_pdb_with_procedures_and_symbols_stays_quiet(self):
+        provider = self._providerWith([make_function("parent", 0x1000, 0x100)])
+        with self.assertNoLogs("smda.common.labelprovider.PdbSymbolProvider", level=logging.WARNING):
+            provider._warnAboutThinPdb("sample.pdb", FakePdb([]))
 
     def test_the_provider_answers_symbols_but_not_apis(self):
         provider = PdbSymbolProvider(None)
