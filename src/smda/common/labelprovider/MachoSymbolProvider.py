@@ -115,8 +115,8 @@ class MachoSymbolProvider(AbstractLabelProvider):
                     and adjusted_stub_addr not in self._func_symbols
                 ):
                     self._func_symbols[adjusted_stub_addr] = f"stub_{adjusted_stub_addr:x}"
-        except Exception:
-            pass
+        except Exception as e:
+            LOGGER.warning("Failed to collect Mach-O symbol stubs: %s", e)
 
         self._api_map = self.parseImports(lief_binary)
 
@@ -133,7 +133,7 @@ class MachoSymbolProvider(AbstractLabelProvider):
                     adjusted_val = symbol.value + adjustment
                     exported[adjusted_val] = demangle_macho_symbol(symbol_name)
         except Exception as e:
-            LOGGER.debug("Failed to parse Mach-O exports: %s", e)
+            LOGGER.warning("Failed to parse Mach-O exports: %s", e)
         return exported
 
     def parseSymbols(self, lief_binary):
@@ -149,7 +149,7 @@ class MachoSymbolProvider(AbstractLabelProvider):
                     adjusted_val = symbol.value + adjustment
                     symbols[adjusted_val] = symbol_name
         except Exception as e:
-            LOGGER.debug("Failed to parse Mach-O symbols: %s", e)
+            LOGGER.warning("Failed to parse Mach-O symbols: %s", e)
         return symbols
 
     def parseImports(self, lief_binary):

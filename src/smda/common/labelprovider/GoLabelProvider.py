@@ -191,6 +191,7 @@ class GoSymbolProvider(AbstractLabelProvider):
                     self._func_symbols = result
             except Exception as exc:
                 reraise_non_operational_exception(exc)
+                LOGGER.warning("Failed to parse Go pclntab at offset 0x%x: %s", pclntab_offset, exc)
                 return
 
     def isSymbolProvider(self):

@@ -40,6 +40,20 @@ class _MockMachoBinary:
         self.sections = []
 
 
+class _UnreadableValueSymbol:
+    name = "_main"
+
+    @property
+    def value(self):
+        raise RuntimeError("symbol table unreadable")
+
+
+class _UnreadableAddressStub:
+    @property
+    def address(self):
+        raise RuntimeError("stub table unreadable")
+
+
 def _xor_fixture(data):
     return bytes(byte ^ (index % 256) for index, byte in enumerate(data))
 
@@ -165,6 +179,56 @@ class TestMachoSymbolProviderBehavior(unittest.TestCase):
         binary_info = BinaryInfo(b"not a container")
 
         self.assertIsNone(GoSymbolProvider(None).getTextStart(binary_info))
+
+
+class TestMachoSymbolProviderFailureLogging(unittest.TestCase):
+    """Every path here runs only after the isinstance(lief.MachO.Binary) gate has matched."""
+
+    def setUp(self):
+        # this module's import-time logging.disable() would hide these records
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+    def test_a_failing_export_table_is_reported_at_warning(self):
+        macho = _MockMachoBinary([_UnreadableValueSymbol()])
+        provider = MachoSymbolProvider(None)
+
+        with (
+            mock.patch("lief.MachO.Binary", _MockMachoBinary),
+            self.assertLogs("smda.common.labelprovider.MachoSymbolProvider", level="WARNING") as logged,
+        ):
+            self.assertEqual({}, provider.parseExports(macho))
+
+        self.assertIn("exports", logged.output[0])
+
+    def test_a_failing_symbol_table_is_reported_at_warning(self):
+        macho = _MockMachoBinary([_UnreadableValueSymbol()])
+        provider = MachoSymbolProvider(None)
+
+        with (
+            mock.patch("lief.MachO.Binary", _MockMachoBinary),
+            self.assertLogs("smda.common.labelprovider.MachoSymbolProvider", level="WARNING") as logged,
+        ):
+            self.assertEqual({}, provider.parseSymbols(macho))
+
+        self.assertIn("symbols", logged.output[0])
+
+    def test_a_failing_stub_table_is_reported_at_warning(self):
+        macho = _MockMachoBinary([])
+        macho.symbol_stubs = [_UnreadableAddressStub()]
+        binary_info = BinaryInfo(b"not a container")
+        provider = MachoSymbolProvider(None)
+
+        with (
+            mock.patch("lief.MachO.Binary", _MockMachoBinary),
+            mock.patch.object(binary_info, "getLiefBinary", return_value=macho),
+            self.assertLogs("smda.common.labelprovider.MachoSymbolProvider", level="WARNING") as logged,
+        ):
+            provider.update(binary_info)
+
+        self.assertEqual({}, provider.getFunctionSymbols())
+        self.assertIn("stubs", logged.output[0])
 
 
 class TestMachoCorpusIntegration(unittest.TestCase):

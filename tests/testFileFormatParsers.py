@@ -46,6 +46,24 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             decrypted_binary.append(byte ^ (index % 256))
         return bytes(decrypted_binary)
 
+    def test_a_confirmed_format_that_fails_to_parse_is_reported_at_warning(self):
+        # isCompatible() matched the magic, but the shared parse came back empty - every
+        # accessor below it then yields nothing for what really is a PE/ELF
+        # another test module's import-time logging.disable() would hide these records
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+        for name, binary in (("ELF", b"\x7fELF"), ("PE", b"MZ" + b"\x00" * 64)):
+            with self.subTest(format=name):
+                loader = FileLoader("/", map_file=True)
+
+                with self.assertLogs("smda.utility.FileLoader", level="WARNING") as logged:
+                    loader._loadFile(binary)
+
+                self.assertEqual(b"", loader.getData())
+                self.assertIn("failed to parse the binary", logged.output[0])
+
     def _create_binary_info(self, binary):
         loader = FileLoader("/", map_file=True)
         loader._loadFile(binary)

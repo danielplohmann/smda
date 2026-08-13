@@ -1,5 +1,7 @@
+import logging
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -569,6 +571,36 @@ class TestRustV0ConstBackrefs(unittest.TestCase):
     def test_a_const_backref_reproduces_the_referenced_value(self):
         self.assertEqual(demangle("_RIC1aKh4_KB4_E"), demangle("_RIC1aKh4_Kh4_E"))
         self.assertEqual(demangle("_RIC1aKh4_KB4_E"), "a::<4, 4>")
+
+
+class TestRustProviderFailureLogging(unittest.TestCase):
+    def setUp(self):
+        # another test module's import-time logging.disable() would hide these records
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+    def test_a_lief_parse_failure_is_reported_at_warning(self):
+        provider = RustSymbolProvider(None)
+        binary_info = BinaryInfo(b"/rustc/")
+
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", side_effect=RuntimeError("boom")),
+            self.assertLogs("smda.common.labelprovider.RustSymbolProvider", level="WARNING") as logged,
+        ):
+            provider.update(binary_info)
+
+        self.assertEqual({}, provider.getFunctionSymbols())
+        self.assertIn("RuntimeError", logged.output[0])
+
+    def test_an_unreadable_binary_path_is_reported_at_warning(self):
+        provider = RustSymbolProvider(None)
+        missing = SimpleNamespace(raw_data=b"", file_path=str(Path(__file__).resolve().parent / "does_not_exist.bin"))
+
+        with self.assertLogs("smda.common.labelprovider.RustSymbolProvider", level="WARNING") as logged:
+            self.assertIsNone(provider._get_binary_data(missing))
+
+        self.assertIn("Failed to read binary", logged.output[0])
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ class PeFileLoader:
             # Mach-O loaders report the same condition, by returning no mapped data, instead
             # of raising a ValueError that claims the opposite of what happened.
             if not max_virt_section_offset:
-                LOGGER.debug("PE: no section data")
+                LOGGER.warning("PE: no section data")
                 return b""
             # support up to 100MB for now.
             if max_virt_section_offset > SmdaConfig.MAX_IMAGE_SIZE:
