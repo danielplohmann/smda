@@ -1,37 +1,31 @@
 #!/usr/bin/python
 
 import logging
+import os
+from bisect import bisect_right
+
+import purepdb
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
-from smda.utility.PeFileLoader import PeFileLoader
 
 from .AbstractLabelProvider import AbstractLabelProvider
 
 LOGGER = logging.getLogger(__name__)
 
-try:
-    import pdbparse
-    from pdbparse.undname import undname
-except ImportError:
-    pdbparse = None
-    LOGGER.debug(
-        "3rd party library pdbparse (use fork @ https://github.com/VPaulV/pdbparse) not installed - won't be able to extract symbols from PDB files where available."
-    )
-
-
-class DummyOmap:
-    def remap(self, addr):
-        return addr
+PDB_MAGIC = b"Microsoft C/C++"
+IMPORT_MODULE_PREFIX = "Import:"
 
 
 class PdbSymbolProvider(AbstractLabelProvider):
-    """Minimal resolver for PDB symbols"""
+    """Resolver for PDB symbols. Names are reported as the PDB stores them, i.e. mangled."""
 
     def __init__(self, config):
         self._config = config
         self._base_addr = 0
-        # addr:func_name
         self._func_symbols = {}
+        self._procedure_starts = []
+        self._procedure_extents = []
+        self._loaded_pdb_path = ""
 
     def isSymbolProvider(self):
         return True
@@ -42,66 +36,69 @@ class PdbSymbolProvider(AbstractLabelProvider):
     def getApi(self, to_addr, absolute_addr=None):
         return ("", "")
 
-    def _parseOep(self, data):
-        oep_rva = PeFileLoader.getOEP(data)
-        if oep_rva:
-            self._func_symbols[self._base_addr + oep_rva] = "original_entry_point"
-
     def update(self, binary_info):
         self._func_symbols = {}
+        self._procedure_starts = []
+        self._procedure_extents = []
         self._base_addr = binary_info.base_addr
         if not binary_info.file_path:
             return
-        # Use getBinaryData to check magic without opening the file if it's already in memory
         binary_data = binary_info.getBinaryData()
-        if binary_data:
-            data = binary_data[:16]
-        else:
-            try:
-                with open(binary_info.file_path, "rb") as fin:
-                    data = fin.read(16)
-            except OSError:
-                return
-        self._parseOep(data)
-        if data[:15] != b"Microsoft C/C++" or pdbparse is None:
+        if not binary_data:
+            return
+        if binary_data[: len(PDB_MAGIC)] != PDB_MAGIC:
+            self._warnAboutUnusedPdb(binary_info.file_path)
             return
         try:
-            pdb = pdbparse.parse(binary_info.file_path)
-            self._parseSymbols(pdb)
+            self._parseSymbols(purepdb.PDB.from_bytes(binary_data))
+            self._loaded_pdb_path = binary_info.file_path
         except Exception as exc:
             reraise_non_operational_exception(exc)
-            LOGGER.error(
-                'Failed parsing "%s" with exception type: %s',
-                binary_info.file_path,
-                type(exc),
+            LOGGER.warning('Failed parsing PDB "%s" with exception: %r', binary_info.file_path, exc)
+
+    def _warnAboutUnusedPdb(self, file_path):
+        if self._loaded_pdb_path:
+            return
+        if file_path.lower().endswith(".pdb"):
+            LOGGER.warning('"%s" is not a PDB file - no symbols were loaded from it.', file_path)
+            return
+        candidate = os.path.splitext(file_path)[0] + ".pdb"
+        if os.path.isfile(candidate):
+            LOGGER.warning(
+                'Ignoring "%s" next to "%s" - pass it explicitly to use its symbols.',
+                candidate,
+                file_path,
             )
 
     def _parseSymbols(self, pdb):
-        try:
-            sects = pdb.STREAM_SECT_HDR_ORIG.sections
-            omap = pdb.STREAM_OMAP_FROM_SRC
-        except AttributeError:
-            sects = pdb.STREAM_SECT_HDR.sections
-            omap = DummyOmap()
-        gsyms = pdb.STREAM_GSYM
-        for sym in gsyms.globals:
-            try:
-                off = sym.offset
-                # segment is 1-based and PDB uses segment 0 for absolute symbols; guarding
-                # only the upper bound let sects[0 - 1] wrap to the last section
-                if not 1 <= sym.segment <= len(sects):
-                    continue
-                virt_base = sects[sym.segment - 1].VirtualAddress
-                function_address = self._base_addr + omap.remap(off + virt_base)
-                demangled_name = undname(sym.name)
-                if sym.symtype == 2:
-                    # print("0x%x + 0x%x + 0x%x = 0x%x: %s || %s (type: %d)" % (self._base_addr, off, virt_base, function_address, sym.name, demangled_name, sym.symtype))
-                    self._func_symbols[function_address] = demangled_name
-            except AttributeError:
-                pass
+        procedures = []
+        for function in pdb.functions():
+            if function.rva is None:
+                continue
+            address = self._base_addr + function.rva
+            self._func_symbols[address] = function.name
+            module = function.module or ""
+            if function.code_size and not module.startswith(IMPORT_MODULE_PREFIX):
+                procedures.append((address, address + function.code_size, function.name))
+        procedures.sort()
+        self._procedure_starts = [start for start, _, _ in procedures]
+        self._procedure_extents = [(end, name) for _, end, name in procedures]
+
+    def _getFragmentLabel(self, address):
+        index = bisect_right(self._procedure_starts, address) - 1
+        if index < 0:
+            return ""
+        start = self._procedure_starts[index]
+        end, name = self._procedure_extents[index]
+        if address >= end:
+            return ""
+        return f"{name}$+0x{address - start:x}"
 
     def getSymbol(self, address):
-        return self._func_symbols.get(address, "")
+        symbol = self._func_symbols.get(address, "")
+        if symbol:
+            return symbol
+        return self._getFragmentLabel(address)
 
     def getFunctionSymbols(self):
         return self._func_symbols
