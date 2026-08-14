@@ -30,8 +30,7 @@ dependencies = [
     "dnfile",
     "lief>=0.16.0",
     "pycxxfilt>=0.1.0",
-    # TODO: pin to the first release that ships PDB.functions()/Function.module before merging
-    "purepdb",
+    "purepdb>=0.3.0",
 ]
 
 [project.urls]
