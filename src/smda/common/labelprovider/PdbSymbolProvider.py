@@ -9,6 +9,8 @@ import purepdb
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .rust_demangler import demangle
+from .RustSymbolEvidence import is_rust_language_evidence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -16,8 +18,22 @@ PDB_MAGIC = b"Microsoft C/C++"
 IMPORT_MODULE_PREFIX = "Import:"
 
 
+def _demangleSymbolName(name):
+    """Return the readable form of a Rust symbol, or the name as the PDB spells it."""
+    try:
+        if is_rust_language_evidence(name):
+            demangled = demangle(name)
+            if demangled:
+                return demangled
+    except Exception as exc:
+        reraise_non_operational_exception(exc)
+        LOGGER.debug("Failed to demangle Rust symbol %s: %s", name, exc)
+    return name
+
+
 class PdbSymbolProvider(AbstractLabelProvider):
-    """Resolver for PDB symbols. Names are reported as the PDB stores them, i.e. mangled."""
+    """Resolver for PDB symbols. Rust names are demangled; every other name is
+    reported as the PDB stores it."""
 
     def __init__(self, config):
         self._config = config
@@ -88,10 +104,11 @@ class PdbSymbolProvider(AbstractLabelProvider):
             if function.rva is None:
                 continue
             address = self._base_addr + function.rva
-            self._func_symbols[address] = function.name
+            name = _demangleSymbolName(function.name)
+            self._func_symbols[address] = name
             module = function.module or ""
             if function.code_size and not module.startswith(IMPORT_MODULE_PREFIX):
-                procedures.append((address, address + function.code_size, function.name))
+                procedures.append((address, address + function.code_size, name))
         procedures.sort()
         self._procedure_starts = [start for start, _, _ in procedures]
         self._procedure_extents = [(end, name) for _, end, name in procedures]
