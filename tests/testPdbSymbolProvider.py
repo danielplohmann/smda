@@ -2,11 +2,14 @@ import logging
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from purepdb import Function
 
 from smda.common.BinaryInfo import BinaryInfo
-from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
+from smda.common.labelprovider import PdbSymbolProvider as pdb_module
+from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider, _demangleSymbolName
+from smda.common.labelprovider.rust_demangler import demangle
 from smda.Disassembler import Disassembler
 
 BASE_ADDR = 0x400000
@@ -16,6 +19,14 @@ PDB_FIXTURE = os.path.join(FIXTURE_DIR, "rust_pe_msvc_i686_pdb_xored")
 # entry point and code size of "main::digest" in the i686 fixture
 DIGEST_RVA = 0x1000
 DIGEST_CODE_SIZE = 299
+# read out of real PDBs: the Rust names from a rust-lld/MSVC x64 image, the
+# rest from sqlite3 x86/x64. The non-Rust names all begin with "_R", which is
+# why the dispatch parses a name before it rewrites it
+RUST_MAIN = "_RNvCs8JfRDQSkzJ8_15rust_pe_symbols4main"
+RUST_MAIN_DEMANGLED = "rust_pe_symbols::main"
+RUST_TRAIT_IMPL = "_RNvXs5_NtNtCslFVcyoAu48q_3std2io5errorNtB5_5ErrorNtNtCs55qC6OcLGgs_4core3fmt7Display3fmt"
+RUST_TRAIT_IMPL_DEMANGLED = "<std::io::error::Error as core::fmt::Display>::fmt"
+NOT_RUST = ("_RTC_Initialize", "_ReadFile@20", "_RoInitialize@4")
 
 
 def decode_fixture(path):
@@ -74,11 +85,19 @@ class PdbFragmentAttributionTestSuite(unittest.TestCase):
         provider._parseSymbols(FakePdb(functions))
         return provider
 
-    def test_entry_points_are_reported_as_the_pdb_spells_them(self):
+    def test_a_non_rust_entry_point_is_reported_as_the_pdb_spells_it(self):
         provider = self._providerWith([make_function("?mangled@@YAXXZ", 0x1000, 0x40)])
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "?mangled@@YAXXZ")
         self.assertEqual(provider.getFunctionSymbols(), {BASE_ADDR + 0x1000: "?mangled@@YAXXZ"})
         self.assertTrue(provider.is_active())
+
+    def test_a_rust_entry_point_is_reported_demangled(self):
+        provider = self._providerWith([make_function(RUST_MAIN, 0x1000, 0x40)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), RUST_MAIN_DEMANGLED)
+
+    def test_a_fragment_of_a_rust_procedure_is_labelled_with_the_readable_name(self):
+        provider = self._providerWith([make_function(RUST_MAIN, 0x1000, 0x100)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1060), f"{RUST_MAIN_DEMANGLED}$+0x60")
 
     def test_a_fragment_is_labelled_relative_to_its_containing_procedure(self):
         provider = self._providerWith([make_function("parent", 0x1000, 0x100)])
@@ -278,6 +297,44 @@ class PdbReportIntegrationTestSuite(unittest.TestCase):
         os.remove(self.pdb_path)
         named = {name for name in self._analyze("").values() if name}
         self.assertNotIn("main::digest", named)
+
+
+class PdbSymbolDemanglingTestSuite(unittest.TestCase):
+    def test_rust_v0_names_are_demangled(self):
+        self.assertEqual(_demangleSymbolName(RUST_MAIN), RUST_MAIN_DEMANGLED)
+        self.assertEqual(_demangleSymbolName(RUST_TRAIT_IMPL), RUST_TRAIT_IMPL_DEMANGLED)
+
+    def test_names_that_only_look_rust_are_left_alone(self):
+        for name in NOT_RUST:
+            self.assertEqual(_demangleSymbolName(name), name)
+
+    def test_a_cxx_itanium_name_without_a_rust_hash_is_not_claimed(self):
+        self.assertEqual(_demangleSymbolName("_ZN4test4funcEv"), "_ZN4test4funcEv")
+
+    def test_a_legacy_name_that_is_only_a_hash_keeps_its_original_spelling(self):
+        name = "_ZN17h0000000000000000E"
+        self.assertEqual(demangle(name), "")
+        self.assertEqual(_demangleSymbolName(name), name)
+
+    def test_an_msvc_decorated_name_is_left_to_the_reader(self):
+        self.assertEqual(_demangleSymbolName("?mangled@@YAXXZ"), "?mangled@@YAXXZ")
+
+    def test_an_unexpected_demangler_failure_keeps_the_original_name(self):
+        with mock.patch.object(pdb_module, "is_rust_language_evidence", side_effect=RecursionError):
+            self.assertEqual(_demangleSymbolName(RUST_MAIN), RUST_MAIN)
+
+    def test_an_operational_exception_still_propagates(self):
+        with mock.patch.object(pdb_module, "is_rust_language_evidence", side_effect=MemoryError):
+            self.assertRaises(MemoryError, _demangleSymbolName, RUST_MAIN)
+
+    def test_one_undemanglable_name_does_not_cost_the_other_symbols(self):
+        provider = PdbSymbolProvider(None)
+        provider._base_addr = BASE_ADDR
+        functions = [make_function(RUST_MAIN, 0x1000, 0x40), make_function(RUST_MAIN, 0x2000, 0x40)]
+        with mock.patch.object(pdb_module, "is_rust_language_evidence", side_effect=RecursionError):
+            provider._parseSymbols(FakePdb(functions))
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), RUST_MAIN)
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x2000), RUST_MAIN)
 
 
 if __name__ == "__main__":
