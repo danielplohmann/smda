@@ -559,7 +559,7 @@ class Printer:
             if abi:
                 self.out += 'extern "'
                 self.out += "-".join(abi.split("_"))
-                self.out += '"'
+                self.out += '" '
 
             self.out += "fn("
             self.print_sep_list("print_type", ", ")
