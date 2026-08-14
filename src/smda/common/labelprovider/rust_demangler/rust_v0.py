@@ -490,7 +490,7 @@ class Parser:
 
 
 class Printer:
-    # Based on Ghidra's rust-demangle.c, we limit recursion to prevent stack overflows
+    # Following Ghidra's RustDemanglerV0, we limit recursion to prevent stack overflows
     # or excessive resource usage on malformed inputs.
     # Must fire well below CPython's own recursion limit (default 1000), or a
     # self-referential backref chain raises RecursionError before this guard.

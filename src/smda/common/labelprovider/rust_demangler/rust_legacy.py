@@ -146,7 +146,7 @@ class LegacyDemangler:
         return c in string.punctuation
 
     def is_rust_hash(self, s):
-        # Improved robustness based on Ghidra's rust-demangle.c
+        # Improved robustness based on Ghidra's RustDemanglerLegacy
         # Legacy Rust symbols end with a path segment that encodes a 16 hex digit hash,
         # prefixed with "17h", i.e. '17h[a-f0-9]{16}'.
         if len(s) == 19 and s.startswith("17h"):
