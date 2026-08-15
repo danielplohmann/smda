@@ -588,4 +588,7 @@ class SmdaReport:
             return f"{duration} -> {self.message}"
         arch_str = f"{self.architecture}.{self.bitness}bit" if self.bitness else self.architecture
         base_addr = f"0x{self.base_addr:08x}" if self.base_addr is not None else "0x????????"
-        return f"{duration} -> (architecture: {arch_str}, base_addr: {base_addr}): {len(self.xcfg)} functions"
+        incomplete = " -- INCOMPLETE, analysis hit the timeout" if self.status == "timeout" else ""
+        return (
+            f"{duration} -> (architecture: {arch_str}, base_addr: {base_addr}): {len(self.xcfg)} functions{incomplete}"
+        )
