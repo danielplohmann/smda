@@ -101,7 +101,7 @@ class Ident:
         self.out[i] = c
         return True
 
-    def punycode_decode(self) -> Optional[None]:
+    def punycode_decode(self) -> Optional[bool]:
         count = 0
         punycode_bytes = self.punycode
         try:
@@ -151,10 +151,9 @@ class Ident:
             n += i // lent
             i %= lent
 
-            try:
-                c = chr(n)
-            except (ValueError, OverflowError):
+            if not 0 <= n <= 0x10FFFF or 0xD800 <= n <= 0xDFFF:
                 return None
+            c = chr(n)
 
             if not self.insert(i, c):
                 return None
@@ -163,7 +162,7 @@ class Ident:
             try:
                 punycode_bytes[count]
             except IndexError:
-                return
+                return True
 
             delta = delta // damp
             damp = 2

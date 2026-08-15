@@ -26,6 +26,9 @@ def test_rust_demangler_never_hangs(s):
     """
     try:
         result = demangle(s)
+        # a demangled name is handed to consumers as text; a lone surrogate would make it
+        # unencodable, so the demangler must never produce one
+        result.encode("utf-8")
     except (TypeNotFoundError, UnableTov0Demangle, UnableToLegacyDemangle):
         return
     except RecursionError:
