@@ -21,13 +21,16 @@ from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
 
 class MockSymbol:
-    def __init__(self, name, value, is_function=True, demangled_name=None, section=None):
+    # section_idx is what a PE symbol actually carries: lief leaves Symbol.section None for
+    # every PE symbol, so a mock that only sets `section` does not model the real contract.
+    def __init__(self, name, value, is_function=True, demangled_name=None, section_idx=0):
         self.name = name
         self.value = value
         self.is_function = is_function
         self._demangled_name = demangled_name
         self.complex_type = type("obj", (object,), {"name": "FUNCTION"})
-        self.section = section
+        self.section = None
+        self.section_idx = section_idx
 
     @property
     def demangled_name(self):
@@ -288,7 +291,7 @@ class TestRustSymbolProvider(unittest.TestCase):
 
     def test_rust_elf_symbols_skip_malformed_names(self):
         provider = RustSymbolProvider(None)
-        symbols = [MalformedNameSymbol(), MockSymbol("_ZN3foo3barE", 0x4000)]
+        symbols = [MalformedNameSymbol(), MockSymbol("_ZN3foo3bar17h0123456789abcdefE", 0x4000)]
 
         self.assertEqual(provider._parse_lief_symbols(symbols), {0x4000: "foo::bar"})
 
@@ -296,10 +299,12 @@ class TestRustSymbolProvider(unittest.TestCase):
         """Test _is_rust_symbol correctly identifies Rust mangled symbols."""
         provider = RustSymbolProvider(None)
 
-        # Valid Rust prefixes
-        self.assertTrue(provider._is_rust_symbol("_ZN3foo3barE"))
+        # a legacy Rust name carries the 17h<hash> suffix; without it the name is C++ and
+        # belongs to the Itanium demangler in the format providers
+        self.assertFalse(provider._is_rust_symbol("_ZN3foo3barE"))
+        self.assertTrue(provider._is_rust_symbol("_ZN3foo3bar17h0123456789abcdefE"))
         self.assertTrue(provider._is_rust_symbol("_RNvC6_123foo3bar"))
-        self.assertTrue(provider._is_rust_symbol("__ZN3foo3barE"))
+        self.assertTrue(provider._is_rust_symbol("__ZN3foo3bar17h0123456789abcdefE"))
         self.assertTrue(provider._is_rust_symbol("__RNvC6_123foo3bar"))
 
         # Invalid/too broad prefixes (bare R and ZN) should NOT be detected
@@ -349,7 +354,7 @@ class TestRustSymbolProvider(unittest.TestCase):
     def test_pe_rust_symbols_use_base_addr_not_imagebase(self):
         provider = RustSymbolProvider(None)
         mock_binary = MockLiefBinary(
-            [MockSymbol("_ZN3foo3barE", 0x200, section=MockSection(0x20000000, 0x1000))],
+            [MockSymbol("_ZN3foo3bar17h0123456789abcdefE", 0x200, section_idx=1)],
             exported_functions=[MockExport("_RNvC6_123foo3bar", 0x1000)],
         )
         mock_binary.imagebase = 0x140000000
@@ -366,7 +371,7 @@ class TestRustSymbolProvider(unittest.TestCase):
     def test_macho_rust_path_demangles_and_adjusts_addresses(self):
         class FakeMacho:
             symbols = [
-                MockSymbol("__ZN3foo3barE", 0x100001000),
+                MockSymbol("__ZN3foo3bar17h0123456789abcdefE", 0x100001000),
                 MockSymbol("_main", 0x100002000),
             ]
             exported_symbols = [MockSymbol("__RNvC6_123foo3bar", 0x100003000)]
@@ -464,12 +469,30 @@ class TestRustSymbolProvider(unittest.TestCase):
         provider.update(binary_info)
         self.assertFalse(provider.is_active())
 
+    def test_a_coff_symbol_that_fails_to_demangle_does_not_stop_the_scan(self):
+        provider = RustSymbolProvider(None)
+        mock_binary = MockLiefBinary(
+            [
+                MockSymbol("_RNvC6_123foo3bar", 0x200, section_idx=1),
+                MockSymbol("_RNvC6_123foo3baz", 0x300, section_idx=1),
+            ]
+        )
+        mock_binary.sections = [MockSection(0x20000000, 0x1000)]
+
+        with mock.patch(
+            "smda.common.labelprovider.RustSymbolProvider.demangle",
+            side_effect=TypeNotFoundError("boom"),
+        ):
+            provider._update_pe(mock_binary, base_addr=0x400000)
+
+        self.assertEqual(provider.getFunctionSymbols(), {})
+
     def test_pe_rust_symbols_skip_forwarded_exports_and_sectionless_symbols(self):
         provider = RustSymbolProvider(None)
         mock_binary = MockLiefBinary(
             [
-                MockSymbol("_ZN3foo3barE", 0x200, section=MockSection(0x20000000, 0x1000)),
-                MockSymbol("_ZN3foo3bazE", 0, section=None),
+                MockSymbol("_ZN3foo3bar17h0123456789abcdefE", 0x200, section_idx=1),
+                MockSymbol("_ZN3foo3baz17h0123456789abcdefE", 0, section_idx=0),
             ],
             exported_functions=[
                 MockExport("_RNvC6_123foo3bar", 0x1000),
@@ -530,27 +553,35 @@ class TestElfSymbolProviderWithoutRustDemangling(unittest.TestCase):
         self.assertEqual(results[0x3000], "main")
 
 
-class TestPeSymbolProviderWithoutRustDemangling(unittest.TestCase):
-    """Tests to verify PeSymbolProvider no longer performs Rust demangling."""
+class TestPeSymbolProviderNameDemangling(unittest.TestCase):
+    """PeSymbolProvider expands C++ names and leaves Rust ones to RustSymbolProvider."""
 
-    def test_pe_symbol_provider_returns_raw_rust_names(self):
-        """Test that PeSymbolProvider returns raw names (no Rust demangling)."""
+    def test_pe_symbol_provider_expands_cxx_and_leaves_rust_alone(self):
+        """PeSymbolProvider leaves Rust names alone; C++ names are its own to demangle."""
         provider = PeSymbolProvider(None)
 
-        # Test exports - should return raw names
-        exp_legacy = MockExport("_ZN3foo3barE", 0x1000)
+        # _ZN3foo3barE carries no 17h<hash> suffix, so it is an Itanium C++ name rather
+        # than a legacy Rust one, and the C++ demangler is right to expand it
+        exp_cxx = MockExport("_ZN3foo3barE", 0x1000)
         exp_v0 = MockExport("_RNvC6_123foo3bar", 0x2000)
         exp_normal = MockExport("ExportedFunc", 0x3000)
 
-        mock_binary = MockLiefBinary([], exported_functions=[exp_legacy, exp_v0, exp_normal])
+        mock_binary = MockLiefBinary([], exported_functions=[exp_cxx, exp_v0, exp_normal])
 
         results = provider.parseExports(mock_binary)
 
         # PeSymbolProvider adds imagebase (0x400000) + address
-        # Raw Rust names should be preserved (no demangling)
-        self.assertEqual(results[0x401000], "_ZN3foo3barE")
+        self.assertEqual(results[0x401000], "foo::bar")
         self.assertEqual(results[0x402000], "_RNvC6_123foo3bar")
         self.assertEqual(results[0x403000], "ExportedFunc")
+
+    def test_pe_symbol_provider_leaves_a_legacy_rust_name_to_the_rust_provider(self):
+        provider = PeSymbolProvider(None)
+        hashed = MockExport("_ZN3foo3bar17h0123456789abcdefE", 0x1000)
+
+        results = provider.parseExports(MockLiefBinary([], exported_functions=[hashed]))
+
+        self.assertEqual(results[0x401000], "_ZN3foo3bar17h0123456789abcdefE")
 
 
 class TestDemangledSpacing(unittest.TestCase):

@@ -11,6 +11,7 @@ import pytest
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 from smda.common.labelprovider.WinApiResolver import WinApiResolver
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
@@ -435,6 +436,60 @@ class TestPeCoffSymbolFixture(unittest.TestCase):
 
         self.assertIn("mainCRTStartup", names)
         self.assertIn("__tmainCRTStartup", names)
+
+    def test_rust_names_reach_the_report_demangled(self):
+        names = {f.function_name for f in self.report.getFunctions() if f.function_name}
+
+        # RustSymbolProvider resolved PE COFF symbols through Symbol.section, which lief
+        # never populates, so it contributed nothing and these arrived spelled "_RNv..."
+        self.assertEqual([name for name in names if name.startswith(("_R", "__R"))], [])
+        self.assertIn("std::rt::lang_start::<()>::{closure#0}", names)
+
+
+class TestPeCxxSymbolFixture(unittest.TestCase):
+    """A PE whose COFF symbol table carries Itanium C++ names.
+
+    None of the other bundled PEs has any: the Rust fixture's names are all Rust-mangled,
+    and the rest carry no symbol table at all. Built here rather than sampled - a small C++
+    translation unit compiled for x86_64-w64-mingw32 by g++ 16.2.0 at -O1 -g.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cxx_pe_gnu_xored")
+        raw = Path(fixture).read_bytes()
+        binary = bytes(byte ^ (index % 256) for index, byte in enumerate(raw))
+        binary_info = BinaryInfo(binary)
+        binary_info.file_path = ""
+        binary_info.base_addr = 0x140000000
+        provider = PeSymbolProvider(None)
+        provider.update(binary_info)
+        cls.symbols = provider.getFunctionSymbols()
+
+    def _symbols(self):
+        return self.symbols
+
+    def test_itanium_cxx_names_are_demangled(self):
+        names = set(self._symbols().values())
+
+        self.assertEqual([name for name in names if name.startswith(("_Z", "__Z"))], [])
+        self.assertIn("demo::Widget::Widget()", names)
+        self.assertIn("demo::Widget::~Widget()", names)
+
+    def test_a_rust_name_would_be_left_to_the_rust_provider(self):
+        # the two providers partition the namespace: this one expands Itanium C++, and a
+        # name the Rust evidence gate claims is not its to rewrite
+        provider = RustSymbolProvider(None)
+
+        self.assertFalse(provider._is_rust_symbol("_ZN12FileExplorerC2Ev"))
+        self.assertTrue(provider._is_rust_symbol("_RNvC6_123foo3bar"))
+
+    def test_a_signature_with_arguments_is_expanded(self):
+        measure = [name for name in self._symbols().values() if "measure" in name]
+
+        self.assertEqual(len(measure), 1)
+        self.assertIn("demo::Widget::measure(", measure[0])
+        self.assertIn("double) const", measure[0])
 
 
 if __name__ == "__main__":

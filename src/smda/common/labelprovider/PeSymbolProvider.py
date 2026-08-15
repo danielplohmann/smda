@@ -8,6 +8,7 @@ from smda.utility.lief_helper import lief_name
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import parse_pe_delay_imports, parse_pe_imports, resolve_pe_base_addr
+from .ItaniumDemangler import demangle_itanium_symbol
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                 continue
             function_name = lief_name(function)
             if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
-                function_symbols[active_base + function.address] = function_name
+                function_symbols[active_base + function.address] = demangle_itanium_symbol(function_name)
         return function_symbols
 
     def parseSymbols(self, lief_binary, base_addr=None):
@@ -87,7 +88,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                 if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
                     function_offset = active_base + sections[section_idx - 1].virtual_address + symbol.value
                     if function_offset not in function_symbols:
-                        function_symbols[function_offset] = function_name
+                        function_symbols[function_offset] = demangle_itanium_symbol(function_name)
         if num_candidates and not function_symbols:
             # the previous failure mode was silent: a whole corpus could be built unnamed
             # without anything complaining, so say so rather than contributing nothing
