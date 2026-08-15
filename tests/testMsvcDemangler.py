@@ -41,6 +41,10 @@ DEMANGLED = [
     ("?f@@YAXY01H@Z", "void __cdecl f(int[2])"),
     ("?b11@@YAPAPBDXZ", "char const ** __cdecl b11(void)"),
     ("?foo_abc@@YAXV?$A@DV?$B@D@@V?$C@D@@@@@Z", "void __cdecl foo_abc(class A<char, class B<char>, class C<char>>)"),
+    # clang's Microsoft mangler emits _L/_M for __int128, but llvm-undname cannot read them
+    # back, so these two are spelled from the mangler's table rather than the reference's
+    ("?f@@YAX_L@Z", "void __cdecl f(__int128)"),
+    ("?f@@YAX_M@Z", "void __cdecl f(unsigned __int128)"),
     # read out of real PDBs rather than the LLVM corpus
     ("??_7type_info@@6B@", "const type_info::`vftable'"),
     (
@@ -78,6 +82,22 @@ DECLINED = [
     "?f@@YAXPAHPB0@Z",  # a qualifier in front of a back-reference, which MSVC does not form
     "?f@@YAXZZ",  # variadic marker with no parameter before it
     "?f@@YAX_",  # truncated extended type
+    # a parameter list is closed by the throw specification, so a name that stops before it
+    # is truncated however plausible the prefix looks
+    "?f@@YAXHZ",  # variadic marker, then nothing where the throw specification belongs
+    "?a2@@YAHX",  # void parameter list with no terminator at all
+    "?b7@@YANAAMXZ",  # parameters, then a variadic marker standing in for the terminator
+    # __int8/__int16/__int32 are spelled with the plain char/short/int codes, so no mangler
+    # emits these and a name carrying one is not MSVC-decorated
+    "?f@@YAX_H@Z",
+    "?f@@YAX_D@Z",
+    "??0?$5Class@QAH@@QAE@XZ",  # template name starting with a digit
+    "??$?HH@S@@QEAAAEAU0@H@Z",  # operator template, whose name is not modelled
+    "?e@FTypeWithQuals@@3U?K@A",  # tag type named by an operator rather than an identifier
+    # a special name takes a signature or a storage class by which code it is, never both
+    "??_7A@B@ad@@YAXPEBQEAD@Z",  # vftable given a function signature
+    "??7Base@@6B@",  # operator! given the vftable storage class
+    "?foo_pbqbd@@YAXPEBBBD@Z",  # reference under an enclosing qualifier, which C++ has no form for
     "??_?@@YAXXZ",  # unknown extended operator
     # the declarator placeholder is a NUL; an identifier carrying one would otherwise be
     # mistaken for the slot a pointer writes itself into, yielding "class a(*)b"

@@ -19,12 +19,6 @@ _BASIC_TYPES = {
     "O": "long double",
 }
 _EXTENDED_TYPES = {
-    "D": "__int8",
-    "E": "unsigned __int8",
-    "F": "__int16",
-    "G": "unsigned __int16",
-    "H": "__int32",
-    "I": "unsigned __int32",
     "J": "__int64",
     "K": "unsigned __int64",
     "L": "__int128",
@@ -108,6 +102,7 @@ _OPERATORS = {
     "Y": "operator+=",
     "Z": "operator-=",
 }
+_DATA_SPECIAL_OPERATORS = frozenset("789ABS")
 _EXTENDED_OPERATORS = {
     "0": "operator/=",
     "1": "operator%=",
@@ -299,6 +294,12 @@ class _Demangler:
         return args
 
     def nameFragment(self, is_leading):
+        """One fragment, paired with which spelling its special-name code takes, if any.
+
+        The caller needs that apart from the spelling: a tag type is always named by an
+        identifier, and a special name takes either a signature or a storage class by
+        which code it is, never both.
+        """
         char = self.peek()
         if char in string.digits:
             if self.template_depth or self.templated_table:
@@ -306,10 +307,12 @@ class _Demangler:
             index = int(self.take())
             if index >= len(self.name_backrefs):
                 raise _Bail
-            return self.name_backrefs[index]
+            return self.name_backrefs[index], None
         if char == "?":
             self.take()
             if self.eat("$"):
+                if self.peek() in string.digits + "?":
+                    raise _Bail
                 base = self.identifier()
                 if self.eof() or self.peek() == "@":
                     raise _Bail
@@ -317,28 +320,29 @@ class _Demangler:
                 rendered = f"{base}<{', '.join(args)}>"
                 self.name_backrefs.append(rendered)
                 self.templated_table = True
-                return rendered
+                return rendered, None
             if is_leading:
                 return self.operatorName()
             raise _Bail
         name = self.identifier()
         self.name_backrefs.append(name)
-        return name
+        return name, None
 
     def operatorName(self):
+        """The operator or special name, paired with which spelling it takes."""
         if self.eat("_"):
             code = self.take()
             name = _EXTENDED_OPERATORS.get(code)
             if name is None:
                 raise _Bail
-            return name
+            return name, "data" if code in _DATA_SPECIAL_OPERATORS else "func"
         code = self.take()
         if code in ("0", "1"):
-            return _Structor(code == "1")
+            return _Structor(code == "1"), "func"
         name = _OPERATORS.get(code)
         if name is None:
             raise _Bail
-        return name
+        return name, "func"
 
     def qualifiedName(self):
         """Count a name level against the depth bound; type() is what enforces it."""
@@ -349,22 +353,22 @@ class _Demangler:
             self.depth -= 1
 
     def qualifiedNameBody(self):
-        first = self.nameFragment(True)
+        first, special_form = self.nameFragment(True)
         scopes = []
         while True:
             if self.eat("@"):
                 break
             if self.eof():
                 raise _Bail
-            scopes.append(self.nameFragment(False))
+            scopes.append(self.nameFragment(False)[0])
         scopes.reverse()
         if isinstance(first, _Structor):
             if not scopes:
                 raise _Bail
             klass = scopes[-1]
             first = "~" + klass if first.is_destructor else klass
-            return "::".join(scopes + [first]), True
-        return "::".join(scopes + [first]), False
+            return "::".join(scopes + [first]), True, special_form
+        return "::".join(scopes + [first]), False, special_form
 
     def type(self, quals=()):
         self.depth += 1
@@ -395,7 +399,9 @@ class _Demangler:
             kind = _TAGGED_TYPES[char]
             if kind == "enum":
                 self.expect("4")
-            name, _ = self.qualifiedName()
+            name, _, special_form = self.qualifiedName()
+            if special_form is not None:
+                raise _Bail
             self.simple = False
             return _apply_quals(_base(f"{kind} {name}"), quals)
         if char == "Y":
@@ -403,8 +409,10 @@ class _Demangler:
         if char in _POINTER_KINDS:
             return self.indirection(_merge(_POINTER_KINDS[char], quals), "*")
         if char in ("A", "B"):
+            if quals:
+                raise _Bail
             own = ("volatile",) if char == "B" else ()
-            return self.indirection(_merge(own, quals), "&")
+            return self.indirection(own, "&")
         if char == "$":
             return self.dollarType(quals)
         if char in string.digits:
@@ -519,10 +527,12 @@ class _Demangler:
 
     def parse(self):
         self.expect("?")
-        name, has_no_return_type = self.qualifiedName()
+        name, has_no_return_type, special_form = self.qualifiedName()
         if self.eof():
             raise _Bail
         char = self.peek()
+        if (special_form == "data") != (char == "6"):
+            raise _Bail
         if char == "6":
             self.take()
             qualifier = _CV.get(self.take())
@@ -569,8 +579,7 @@ class _Demangler:
         else:
             returns = self.type()
         params = self.parameters()
-        if not self.eof():
-            self.expect("Z")
+        self.expect("Z")
         if not self.eof():
             raise _Bail
         pieces = []
