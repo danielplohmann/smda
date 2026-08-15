@@ -461,6 +461,19 @@ class _Demangler:
             return self.functionTypeArgument()
         raise _Bail
 
+    def returnType(self):
+        """A return type, which unlike any other position may carry a qualifier of its own.
+
+        Every function returning a class by value is spelled this way, so the prefix is
+        ordinary rather than exotic: `?A` is the unqualified case, not an absent one.
+        """
+        quals = ()
+        if self.eat("?"):
+            quals = _CV_QUALS.get(self.take())
+            if quals is None:
+                raise _Bail
+        return self.type(quals)
+
     def indirection(self, own_quals, token):
         """A pointer or reference: `token` plus its own quals, over a qualified pointee."""
         self.eat("E")
@@ -470,7 +483,7 @@ class _Demangler:
             convention = _CALLING_CONVENTIONS.get(self.take())
             if convention is None:
                 raise _Bail
-            returns = self.type()
+            returns = self.returnType()
             params = self.parameters()
             self.expect("Z")
             self.simple = False
@@ -488,7 +501,7 @@ class _Demangler:
         convention = _CALLING_CONVENTIONS.get(self.take())
         if convention is None:
             raise _Bail
-        returns = self.type()
+        returns = self.returnType()
         params = self.parameters()
         self.expect("Z")
         return _function(convention, params, returns)
@@ -577,7 +590,7 @@ class _Demangler:
             self.expect("@")
             returns = None
         else:
-            returns = self.type()
+            returns = self.returnType()
         params = self.parameters()
         self.expect("Z")
         if not self.eof():

@@ -41,6 +41,14 @@ DEMANGLED = [
     ("?f@@YAXY01H@Z", "void __cdecl f(int[2])"),
     ("?b11@@YAPAPBDXZ", "char const ** __cdecl b11(void)"),
     ("?foo_abc@@YAXV?$A@DV?$B@D@@V?$C@D@@@@@Z", "void __cdecl foo_abc(class A<char, class B<char>, class C<char>>)"),
+    # a return type, alone among positions, carries a qualifier of its own, so every
+    # function returning a class by value is spelled with one - at all three sites a
+    # return type is parsed
+    ("?f@@YA?AUMatrix@@XZ", "struct Matrix __cdecl f(void)"),
+    ("?f@@YA?BUMatrix@@XZ", "struct Matrix const __cdecl f(void)"),
+    ("?f@@YAXP6A?AUMatrix@@XZ@Z", "void __cdecl f(struct Matrix (__cdecl *)(void))"),
+    ("?f@@YAX$$A6A?AUMatrix@@XZ@Z", "void __cdecl f(struct Matrix __cdecl(void))"),
+    ("?g@@3P6A?AUMatrix@@XZA", "struct Matrix (__cdecl *g)(void)"),
     # clang's Microsoft mangler emits _L/_M for __int128, but llvm-undname cannot read them
     # back, so these two are spelled from the mangler's table rather than the reference's
     ("?f@@YAX_L@Z", "void __cdecl f(__int128)"),
@@ -56,7 +64,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 363
+CORPUS_NAMES_UNDERSTOOD = 383
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -91,6 +99,7 @@ DECLINED = [
     # emits these and a name carrying one is not MSVC-decorated
     "?f@@YAX_H@Z",
     "?f@@YAX_D@Z",
+    "?f@@YA?ZUMatrix@@XZ",  # return type carrying a qualifier that is not one
     "??0?$5Class@QAH@@QAE@XZ",  # template name starting with a digit
     "??$?HH@S@@QEAAAEAU0@H@Z",  # operator template, whose name is not modelled
     "?e@FTypeWithQuals@@3U?K@A",  # tag type named by an operator rather than an identifier
