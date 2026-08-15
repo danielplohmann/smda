@@ -8,9 +8,25 @@ import lief
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import parse_pe_delay_imports, parse_pe_imports, resolve_pe_base_addr
 from .ItaniumDemangler import demangle_itanium_symbol
+from .MsvcDemangler import demangle_msvc_symbol
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
+
+
+def _readable_name(name):
+    """Expand a decorated PE symbol name, whichever compiler decorated it.
+
+    The MSVC arm keys on the leading "?" rather than on ItaniumDemangler's
+    is_msvc_cpp_symbol, whose job is language detection rather than dispatch: it wants a
+    class-qualified shape, so it turns away the global operator forms ("??2@YAPAXI@Z" and
+    friends) that this demangler reads perfectly well - 9 of the 355 names it expands in the
+    reference corpus. Letting the demangler itself decide costs nothing, because a name it
+    cannot read comes back unchanged.
+    """
+    if name.startswith("?"):
+        return demangle_msvc_symbol(name)
+    return demangle_itanium_symbol(name)
 
 
 class PeSymbolProvider(AbstractLabelProvider):
@@ -68,7 +84,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                 # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
                 function_name = function.name
             if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
-                function_symbols[active_base + function.address] = demangle_itanium_symbol(function_name)
+                function_symbols[active_base + function.address] = _readable_name(function_name)
         return function_symbols
 
     def parseSymbols(self, lief_binary, base_addr=None):
@@ -95,7 +111,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                 if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
                     function_offset = active_base + sections[section_idx - 1].virtual_address + symbol.value
                     if function_offset not in function_symbols:
-                        function_symbols[function_offset] = demangle_itanium_symbol(function_name)
+                        function_symbols[function_offset] = _readable_name(function_name)
         if num_candidates and not function_symbols:
             # the previous failure mode was silent: a whole corpus could be built unnamed
             # without anything complaining, so say so rather than contributing nothing

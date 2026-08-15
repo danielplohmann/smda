@@ -51,6 +51,19 @@ Ghidra's own V0 demangler is a port of the rustc-demangle crate
 (https://github.com/rust-lang/rustc-demangle), dual-licensed Apache-2.0 OR MIT.
 
 ================================================================================
+LLVM demangler test corpus
+--------------------------------------------------------------------------------
+tests/msvc_reference_corpus.txt lists MSVC mangled symbol names taken from the
+LLVM Project's demangler tests (llvm/test/Demangle/ms-*.test), together with the
+spelling llvm-undname produces for each. It is used to measure this project's
+MSVC demangler against a reference implementation.
+
+The LLVM Project is licensed under the Apache License, Version 2.0, with the
+LLVM exception. The license is available at
+
+    https://llvm.org/LICENSE.txt
+
+================================================================================
 Tarjan's algorithm
 --------------------------------------------------------------------------------
 src/smda/common/Tarjan.py is based on the implementation by Bas Westerbaan

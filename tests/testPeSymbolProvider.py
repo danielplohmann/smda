@@ -492,5 +492,33 @@ class TestPeCxxSymbolFixture(unittest.TestCase):
         self.assertIn("double) const", measure[0])
 
 
+class PeNameDispatchTestSuite(unittest.TestCase):
+    """The PE provider picks a demangler from the decoration each name carries."""
+
+    def _exportedNames(self, *names):
+        entries = [
+            SimpleNamespace(name=name, address=0x1000 + index * 0x10, is_extern=False, is_forwarded=False)
+            for index, name in enumerate(names)
+        ]
+        binary = SimpleNamespace(
+            imagebase=0x400000,
+            get_export=lambda: SimpleNamespace(entries=entries),
+        )
+        return sorted(PeSymbolProvider(None).parseExports(binary, base_addr=0x400000).items())
+
+    def test_each_decoration_reaches_its_own_demangler(self):
+        recovered = self._exportedNames("?foo@@YAXI@Z", "_ZN4test4funcEv", "plain_name")
+
+        self.assertEqual(
+            [name for _, name in recovered],
+            ["void __cdecl foo(unsigned int)", "test::func()", "plain_name"],
+        )
+
+    def test_a_rust_name_is_left_for_the_rust_provider(self):
+        recovered = self._exportedNames("_RNvC6_123foo3bar")
+
+        self.assertEqual([name for _, name in recovered], ["_RNvC6_123foo3bar"])
+
+
 if __name__ == "__main__":
     unittest.main()
