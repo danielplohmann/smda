@@ -11,6 +11,7 @@ from smda.common.labelprovider.rust_demangler import demangle
 from smda.common.labelprovider.rust_demangler.rust import TypeNotFoundError
 from smda.common.labelprovider.rust_demangler.rust_legacy import LegacyDemangler, UnableToLegacyDemangle
 from smda.common.labelprovider.rust_demangler.rust_v0 import (
+    Ident,
     Parser,
     Printer,
     UnableTov0Demangle,
@@ -112,6 +113,28 @@ class TestRustDemangler(unittest.TestCase):
     def test_v0_unnamed_closure_has_no_stray_colon(self):
         # unnamed closures/shims must render as {closure#N}, not {closure:#N}
         self.assertEqual(demangle("_RNCNvC8rustc_v01fs_0"), "rustc_v0::f::{closure#1}")
+
+    def test_v0_non_ascii_identifier_is_decoded(self):
+        # the decode itself always worked; its success was reported as None,
+        # which is what every failure path returns, so the caller fell back
+        name = "_RNqCs4fqI2P2rA04_11utf8_identsu30____7hkackfecea1cbdathfdh9hlq6y"
+        self.assertEqual(demangle(name), "utf8_idents::საჭმელად_გემრიელი_სადილი")
+        self.assertNotIn("punycode{", demangle(name))
+
+    def test_v0_punycode_never_decodes_to_a_surrogate(self):
+        # chr() accepts 0xD800-0xDFFF where Rust's char::from_u32 refuses; a name carrying
+        # one cannot be encoded as UTF-8 by whoever consumes the report
+        name = "_RNvCu4_ib9b4main"
+
+        demangled = demangle(name)
+
+        self.assertNotIn("\ud800", demangled)
+        demangled.encode("utf-8")
+
+    def test_v0_undecodable_punycode_still_falls_back_to_the_raw_form(self):
+        ident = Ident("", "!not-punycode!")
+        ident.display()
+        self.assertEqual(ident.disp, "punycode{!not-punycode!}")
 
     def test_v0_empty_const_hex_nibbles_raise_demangler_error(self):
         # `Kh_` (u8 const with zero hex nibbles) previously escaped as a bare
