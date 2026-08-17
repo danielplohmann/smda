@@ -13,6 +13,66 @@ _CXX_PREFIXES = ("__Z", "_Z")
 _SWIFT_PREFIXES = ("_$s", "$s", "_$S", "$S")
 
 
+_SWIFT_CACHE = {}
+
+
+def primeSwiftSymbols(names):
+    """Resolve every Swift name in one call, before the per-symbol lookups begin.
+
+    The Swift demangler is a subprocess, and a Mach-O carrying Swift carries it by the
+    hundred: 104 distinct names in the jokerspy corpus sample, at 26 ms of process spawn
+    each. Fed the whole set through stdin it answers in 20 ms, and a host with no Swift
+    toolchain costs one failed lookup instead of one per symbol.
+
+    stdin rather than argv, because a symbol table can hold more names than a command
+    line can carry.
+    """
+    pending = sorted(
+        {
+            name
+            for name in names
+            if name and name.startswith(_SWIFT_PREFIXES) and name not in _SWIFT_CACHE and "\n" not in name
+        }
+    )
+    if not pending:
+        return
+    demangled = _demangleSwiftBatch(pending)
+    if demangled is None:
+        return
+    for name, result in zip(pending, demangled, strict=True):
+        _SWIFT_CACHE[name] = _finalize_demangled(name, result)
+
+
+def _demangleSwiftBatch(names):
+    if "swift" in _UNUSABLE_DEMANGLERS:
+        return None
+    executable = _find_demangler("swift")
+    if not executable:
+        return None
+    try:
+        completed = subprocess.run(
+            [executable, "demangle"],
+            input="\n".join(names),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        LOGGER.debug("Batched Swift demangling failed: %s", exc)
+        _UNUSABLE_DEMANGLERS.add("swift")
+        return None
+    if completed.returncode != 0:
+        return None
+    lines = (completed.stdout or "").splitlines()
+    if len(lines) != len(names):
+        # the answers are positional, so a short or padded reply cannot be realigned -
+        # taking it would label symbols with each other's names
+        LOGGER.debug("Swift demangler answered %d names with %d lines; discarding", len(names), len(lines))
+        return None
+    return lines
+
+
 @lru_cache(maxsize=4096)
 def demangle_macho_symbol(name):
     """Best-effort demangling for Mach-O symbol names (C++ Itanium, Swift).
@@ -27,6 +87,8 @@ def demangle_macho_symbol(name):
         if demangled:
             return demangled
     if name.startswith(_SWIFT_PREFIXES):
+        if name in _SWIFT_CACHE:
+            return _SWIFT_CACHE[name] or name
         demangled = _finalize_demangled(name, _demangle_with_tools(name, ("swift",), ["demangle"]))
         if demangled:
             return demangled
