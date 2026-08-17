@@ -235,7 +235,8 @@ class _Demangler:
         self.arg_backrefs = []
         self.simple = True
         self.template_depth = 0
-        self.templated_table = False
+        self.at_symbol_name = True
+        self.pointee_depth = 0
         self.member_cv = ""
         self.depth = 0
         self.max_render = 8 * len(mangled) + 256
@@ -273,25 +274,42 @@ class _Demangler:
         self.pos = end + 1
         return name
 
-    def templateArguments(self):
-        """Template arguments, in their own back-reference scopes.
+    def rememberName(self, name):
+        """Record a name for later back-references, the way the mangler recorded it.
 
-        How those scopes interact with the enclosing name table is not modelled, so a name
-        back-reference inside them declines instead of risking a wrong name.
+        A name is added only when it is not already held and while the table is under ten
+        entries. Both rules move the indices every later back-reference resolves against, so
+        appending unconditionally does not merely miss a compression - it reads "?3" as the
+        fourth name where the mangler counted three, and answers a name the grammar refuses.
         """
-        args = []
+        if name not in self.name_backrefs and len(self.name_backrefs) < 10:
+            self.name_backrefs.append(name)
+
+    def templateInstantiation(self):
+        """A "?$" template name, read in its own back-reference scope.
+
+        The scope opens before the template's own name does, so that name takes index 0
+        inside it and the arguments are numbered from 1 - which is what a back-reference
+        written inside the argument list resolves against. The rendered result belongs to
+        the enclosing scope instead, and the caller records it there.
+        """
         saved_names, saved_args = self.name_backrefs, self.arg_backrefs
         self.name_backrefs, self.arg_backrefs = [], []
         self.template_depth += 1
         try:
+            base = self.identifier()
+            self.rememberName(base)
+            if self.eof() or self.peek() == "@":
+                raise _Bail
+            args = []
             while not self.eat("@"):
                 if self.eof():
                     raise _Bail
                 args.append(self.rendered(self.type()))
+            return f"{base}<{', '.join(args)}>"
         finally:
             self.template_depth -= 1
             self.name_backrefs, self.arg_backrefs = saved_names, saved_args
-        return args
 
     def nameFragment(self, is_leading):
         """One fragment, paired with which spelling its special-name code takes, if any.
@@ -300,10 +318,13 @@ class _Demangler:
         identifier, and a special name takes either a signature or a storage class by
         which code it is, never both.
         """
+        # every later qualified name belongs to a type, and the exception below is only for
+        # the symbol's own name, so the very first leading fragment is the one that counts
+        is_symbol_name = is_leading and self.at_symbol_name
+        if is_leading:
+            self.at_symbol_name = False
         char = self.peek()
         if char in string.digits:
-            if self.template_depth or self.templated_table:
-                raise _Bail
             index = int(self.take())
             if index >= len(self.name_backrefs):
                 raise _Bail
@@ -313,19 +334,18 @@ class _Demangler:
             if self.eat("$"):
                 if self.peek() in string.digits + "?":
                     raise _Bail
-                base = self.identifier()
-                if self.eof() or self.peek() == "@":
-                    raise _Bail
-                args = self.templateArguments()
-                rendered = f"{base}<{', '.join(args)}>"
-                self.name_backrefs.append(rendered)
-                self.templated_table = True
+                rendered = self.templateInstantiation()
+                if not is_symbol_name:
+                    # the symbol's own template name is the one exception the mangler makes:
+                    # it is not recorded, so "??$f@H@N@@YAXV0@@Z" resolves 0 to N, not to
+                    # f<int>. A template met anywhere else is recorded like any other name.
+                    self.rememberName(rendered)
                 return rendered, None
             if is_leading:
                 return self.operatorName()
             raise _Bail
         name = self.identifier()
-        self.name_backrefs.append(name)
+        self.rememberName(name)
         return name, None
 
     def operatorName(self):
@@ -382,9 +402,10 @@ class _Demangler:
     def typeBody(self, quals):
         """One type, qualified by `quals`.
 
-        A digit is a back-reference standing for a whole argument type. The reference
-        implementation rejects a qualifier in front of one, so a qualified back-reference
-        declines rather than inventing a spelling.
+        A digit is a back-reference standing for a whole argument type, so it is only a type
+        where a whole argument is one. A qualifier in front of it, or a pointer or reference
+        around it - "?h@@YAXPAHPA0@Z" - is a name the mangler cannot have produced, and
+        reading one invented a spelling for it.
         """
         char = self.take()
         if char in _BASIC_TYPES:
@@ -408,20 +429,21 @@ class _Demangler:
             return self.arrayType(quals)
         if char in _POINTER_KINDS:
             return self.indirection(_merge(_POINTER_KINDS[char], quals), "*")
-        if char in ("A", "B"):
+        if char == "A":
             if quals:
                 raise _Bail
-            own = ("volatile",) if char == "B" else ()
-            return self.indirection(own, "&")
+            # only "A" introduces a reference. "B" would be a volatile-qualified one, which
+            # C++ has no way to write and no Microsoft-compatible mangler emits, so reading
+            # it produced answers for names that cannot exist: "?f2@@YAXBDPAD@Z".
+            return self.indirection((), "&")
         if char == "$":
             return self.dollarType(quals)
         if char in string.digits:
-            if quals:
-                raise _Bail
-            index = int(char)
-            if index >= len(self.arg_backrefs):
-                raise _Bail
-            return self.arg_backrefs[index]
+            # a digit is an argument back-reference, which stands for a whole argument and is
+            # read as one in parameters(). Reaching it here means it was written where only a
+            # type belongs - a pointee, a template argument, a return type - and the mangler
+            # writes none of those; reading them invented spellings for impossible names.
+            raise _Bail
         raise _Bail
 
     def rendered(self, node, declarator=""):
@@ -484,14 +506,25 @@ class _Demangler:
             if convention is None:
                 raise _Bail
             returns = self.returnType()
-            params = self.parameters()
+            # a parameter of this function type is a whole-argument position again, so a
+            # back-reference is legal there even when the function type is itself a pointee
+            saved_pointee_depth = self.pointee_depth
+            self.pointee_depth = 0
+            try:
+                params = self.parameters()
+            finally:
+                self.pointee_depth = saved_pointee_depth
             self.expect("Z")
             self.simple = False
             return _indirection(token, own_quals, _function(convention, params, returns))
         pointee_quals = _CV_QUALS.get(self.take())
         if pointee_quals is None:
             raise _Bail
-        pointee = self.type(pointee_quals)
+        self.pointee_depth += 1
+        try:
+            pointee = self.type(pointee_quals)
+        finally:
+            self.pointee_depth -= 1
         self.simple = False
         return _indirection(token, own_quals, pointee)
 

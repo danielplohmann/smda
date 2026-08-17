@@ -30,7 +30,6 @@ DEMANGLED = [
     ("?h2@@3QBHB", "int const *const h2"),
     ("?mbb@S@@QAEX_N0@Z", "public: void __thiscall S::mbb(bool, bool)"),
     ("?f@@YAXHZZ", "void __cdecl f(int, ...)"),
-    ("?g@@YAXUS@@PA0@Z", "void __cdecl g(struct S, struct S *)"),
     # the declarator cases: a name or a further pointer belongs inside its own type
     ("?j@@3P6GHCE@ZA", "int (__stdcall *j)(signed char, unsigned char)"),
     ("?g@@3PAP6AHXZA", "int (__cdecl **g)(void)"),
@@ -64,12 +63,11 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 383
+CORPUS_NAMES_UNDERSTOOD = 418
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
 DECLINED = [
-    "??$f@T<unnamed-type-$S1>@PR18204@@@PR18204@@YAHPAT<unnamed-type-$S1>@0@@Z",
     "?x@@3PAY02Hz",  # truncated
     "?",
     "??",
@@ -113,6 +111,68 @@ DECLINED = [
     "?f@@YAXPAVa\x00b@@@Z",
     "?a\x00b@@YAXPAY01D@Z",
 ]
+
+
+# Back-reference behaviour, each pair checked against llvm-undname. A name is recorded for
+# later reference only when it is not already held and while the table is under ten entries,
+# and a template instantiation is read in its own scope.
+BACKREFS = [
+    # the table holds the function's own name first, so "1" is the first type named after it
+    ("?f@@YAXVA@@V1@@Z", "void __cdecl f(class A, class A)"),
+    # a repeat is not recorded again: the table is f, A, B, so "1" is still A
+    ("?f@@YAXVA@@VB@@VA@@V1@@Z", "void __cdecl f(class A, class B, class A, class A)"),
+    # the tenth entry is the last one recorded, so "9" is I and J never enters the table
+    (
+        "?f@@YAXVA@@VB@@VC@@VD@@VE@@VF@@VG@@VH@@VI@@VJ@@V9@@Z",
+        "void __cdecl f(class A, class B, class C, class D, class E, class F, class G, "
+        "class H, class I, class J, class I)",
+    ),
+    # a template opens its own scope, taking index 0 itself, so its first argument is 1
+    (
+        "?foo_abbb@@YAXV?$A@V?$B@D@@V1@V1@@@@Z",
+        "void __cdecl foo_abbb(class A<class B<char>, class B<char>, class B<char>>)",
+    ),
+    # the rendered template belongs to the enclosing scope: 1 is B<char> and 2 is N
+    ("?b_foo@@YA?AV?$B@D@N@@V12@@Z", "class N::B<char> __cdecl b_foo(class N::B<char>)"),
+    (
+        "?abc_foo@@YA?AV?$A@DV?$B@D@N@@V?$C@D@2@@N@@XZ",
+        "class N::A<char, class N::B<char>, class N::C<char>> __cdecl abc_foo(void)",
+    ),
+    # the symbol's own template name is the exception: it is not recorded, so 0 is N
+    ("??$f@H@N@@YAXV0@@Z", "void __cdecl N::f<int>(class N)"),
+]
+
+# Shapes the grammar does not allow, each confirmed refused by llvm-undname. Every one of
+# these was answered before the back-reference table learned how the mangler fills it.
+BACKREF_DECLINED = [
+    "?f@@YAXVA@@VB@@VA@@V3@@Z",  # A is recorded once, so there is no fourth name
+    "??$f@H@N@@YAXV1@@Z",  # only N is recorded, and the symbol's own template name is not
+    "?f2@@YAXBDPAD@Z",  # "B" would introduce a volatile reference, which C++ cannot write
+    "?foo_qay04h@@YAXBEAY04H@Z",
+    "?h@@YAXPAHPA0@Z",  # an argument back-reference is a whole argument, never a pointee
+    "?h@@YAXPAHAA0@Z",
+    "?g@@YAXUS@@PA0@Z",  # the reference refuses this too, whatever the back-reference names
+    # declined rather than refused: the reference spells this "int &const *", a qualifier on
+    # a reference that C++ has no form for, so the decorated name stays the better answer
+    "?f@@YAXPBAAH@Z",
+]
+
+
+class MsvcBackReferenceTestSuite(unittest.TestCase):
+    def test_back_references_resolve_the_way_the_mangler_numbered_them(self):
+        for mangled, expected in BACKREFS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_names_the_back_reference_rules_forbid_are_refused(self):
+        for mangled in BACKREF_DECLINED:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+    def test_a_reference_and_a_back_referenced_argument_still_read(self):
+        # the two refusals above are positional, not a retreat from these forms
+        self.assertEqual(demangle_msvc_symbol("?f@@YAXADPAD@Z"), "void __cdecl f(char *const volatile &)")
+        self.assertEqual(demangle_msvc_symbol("?h@@YAXPAH0@Z"), "void __cdecl h(int *, int *)")
 
 
 class MsvcDemanglerTestSuite(unittest.TestCase):
