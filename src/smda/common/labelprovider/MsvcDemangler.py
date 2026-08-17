@@ -1,5 +1,6 @@
 """Demangling for MSVC decorated symbol names."""
 
+import re
 import string
 from functools import lru_cache
 
@@ -149,6 +150,7 @@ _DATA_ACCESS = {
 _POINTER_KINDS = {"P": (), "Q": ("const",), "R": ("volatile",), "S": ("const", "volatile")}
 _CV_QUALS = {"A": (), "B": ("const",), "C": ("volatile",), "D": ("const", "volatile")}
 _CV = {"A": "", "B": " const", "C": " volatile", "D": " const volatile"}
+_MEMBER_POINTER_RE = re.compile(r"^[^()]*::\*")
 
 
 def _base(text):
@@ -163,8 +165,8 @@ def _array(dims, inner):
     return ("array", dims, inner)
 
 
-def _function(convention, params, returns):
-    return ("func", convention, params, returns)
+def _function(convention, params, returns, member_cv=""):
+    return ("func", convention, params, returns, member_cv)
 
 
 def _render(node, declarator=""):
@@ -195,12 +197,14 @@ def _render(node, declarator=""):
         if declarator.startswith(("*", "&")):
             declarator = f"({declarator})"
         return _render(node[2], declarator + node[1])
-    convention, params, returns = node[1], node[2], node[3]
-    if declarator.startswith(("*", "&")):
+    convention, params, returns, member_cv = node[1], node[2], node[3], node[4]
+    # a member-pointer declarator is "Owner::*", possibly qualified; the test is anchored so
+    # that a nested type's own "::*" - which a rendered parameter may hold - does not count
+    if declarator.startswith(("*", "&")) or _MEMBER_POINTER_RE.match(declarator):
         declarator = f"({convention} {declarator})"
     else:
         declarator = f"{convention} {declarator}" if declarator else convention
-    return _render(returns, f"{declarator}({params})")
+    return _render(returns, f"{declarator}({params}){member_cv}")
 
 
 def _merge(left, right):
@@ -528,7 +532,40 @@ class _Demangler:
         self.simple = False
         return _array(dims, element)
 
+    def templateInteger(self):
+        """The integer a "$0" template argument carries.
+
+        A single digit stands for itself plus one, so "$00" is 1. Anything larger is spelled
+        as nibbles from "A" to "P" terminated by "@", most significant first, and a leading
+        "?" negates it: "$0M@" is 12 and "$0?0" is -1.
+
+        The accumulator is 64 bits wide and wraps, which is visible in the corpus: the
+        eighteen nibbles of "$0HPPPPPPPPPPPPPPPPPP@" are 18446744073709551615, and a
+        magnitude that wraps to zero under a minus sign is spelled "-0".
+        """
+        negative = self.eat("?")
+        char = self.peek()
+        if char in string.digits:
+            value = int(self.take()) + 1
+        else:
+            value = 0
+            digits = 0
+            while not self.eof() and "A" <= self.peek() <= "P":
+                value = (value * 16 + (ord(self.take()) - ord("A"))) & 0xFFFFFFFFFFFFFFFF
+                digits += 1
+            if not digits:
+                raise _Bail
+            self.expect("@")
+        return f"-{value}" if negative else str(value)
+
     def dollarType(self, quals):
+        if self.peek() == "0":
+            if not self.template_depth:
+                # an integer is an argument, not a type: it appears only in a template list
+                raise _Bail
+            self.take()
+            self.simple = False
+            return _base(self.templateInteger())
         if not self.eat("$"):
             raise _Bail
         kind = self.take()
@@ -569,6 +606,8 @@ class _Demangler:
         has_ptr64 = self.eat("E")
         if self.eat("I"):
             own_quals = own_quals + ("__restrict",)
+        if self.eat("8"):
+            return self.memberFunctionPointer(own_quals, token, has_ptr64)
         if self.eat("6"):
             if has_ptr64:
                 # no mangler writes __ptr64 in front of a function type: "P6A" and "R6A"
@@ -599,6 +638,33 @@ class _Demangler:
             self.pointee_depth -= 1
         self.simple = False
         return _indirection(token, own_quals, pointee)
+
+    def memberFunctionPointer(self, own_quals, token, has_ptr64):
+        """A pointer to member function: "P8" and the class it points into.
+
+        The class qualifies the declarator rather than the type - "void (__thiscall S::*)()"
+        - and the member's own cv follows the parameter list, where a member function keeps
+        it. The __ptr64 modifier is no more written here than in front of a plain function.
+        """
+        if has_ptr64:
+            raise _Bail
+        owner = self.qualifiedName()[0]
+        member_cv = _CV.get(self.take())
+        if member_cv is None:
+            raise _Bail
+        convention = _CALLING_CONVENTIONS.get(self.take())
+        if convention is None:
+            raise _Bail
+        returns = self.returnType()
+        saved_pointee_depth = self.pointee_depth
+        self.pointee_depth = 0
+        try:
+            params = self.parameters()
+        finally:
+            self.pointee_depth = saved_pointee_depth
+        self.expect("Z")
+        self.simple = False
+        return _indirection(f"{owner}::{token}", own_quals, _function(convention, params, returns, member_cv))
 
     def functionTypeArgument(self):
         self.simple = False
