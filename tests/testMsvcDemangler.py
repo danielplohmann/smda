@@ -279,6 +279,30 @@ UNALIGNED_AND_LITERALS = [
 ]
 
 
+TRAILING_QUALIFIERS = [
+    # a plain type takes it directly
+    ("?s@@3HB", "int const s"),
+    # a class, struct or enum does too - "const MyClass instance" is spelled this way
+    ("?inst@@3Urecord@@B", "struct record const inst"),
+    ("?inst@@3VMyClass@@B", "class MyClass const inst"),
+    ("?inst@@3W4E@@B", "enum E const inst"),
+    # a pointer passes it to what it points at, not to itself
+    ("?s@@3PADB", "char const *s"),
+    ("?a@@3PAUS@@B", "struct S const *a"),
+    ("?s@@3PAPADB", "char *const *s"),
+    ("?s@@3QBDD", "char const volatile *const s"),
+    # and an array passes it on to its element, the way C spells one
+    ("?arr@@3QAY01HB", "int const (*const arr)[2]"),
+]
+
+
+class MsvcTrailingQualifierTestSuite(unittest.TestCase):
+    def test_a_data_symbols_trailing_qualifier_lands_where_it_is_declared(self):
+        for mangled, expected in TRAILING_QUALIFIERS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+
 class MsvcUnalignedAndLiteralTestSuite(unittest.TestCase):
     def test_the_forms_are_spelled_the_way_the_reference_spells_them(self):
         for mangled, expected in UNALIGNED_AND_LITERALS:

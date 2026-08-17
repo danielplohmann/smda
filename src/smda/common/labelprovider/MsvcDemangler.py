@@ -223,14 +223,33 @@ def _apply_quals(node, quals):
     return _base(f"{node[1]} {' '.join(quals)}") if quals else node
 
 
+def _qualifyDeclared(node, quals):
+    """Place a data symbol's trailing qualifier on what the symbol declares.
+
+    It belongs one level inside an outermost pointer rather than on the pointer -
+    "?s@@3PADB" is "char const *s" and "?s@@3PAPADB" is "char *const *s" - and an array
+    passes it on to its element, the way C spells one: "?arr@@3QAY01HB" is
+    "int const (*const arr)[2]".
+    """
+    if not quals:
+        return node
+    if node[0] == "ind":
+        return _indirection(node[1], node[2], _qualifyElement(node[3], quals))
+    return _qualifyElement(node, quals)
+
+
+def _qualifyElement(node, quals):
+    if node[0] == "array":
+        return _array(node[1], _qualifyElement(node[2], quals))
+    return _qualify(node, quals)
+
+
 def _qualify(node, quals):
     """Add qualifiers to a parsed type, wherever that type keeps them.
 
     A named type spells them in its text; a pointer or reference carries its own, so they
     join those instead of being appended to a rendering that already placed the sigil.
     """
-    if not quals:
-        return node
     if node[0] == "ind":
         return _indirection(node[1], _merge(node[2], quals), node[3])
     # a named type spells its qualifiers in its own text, so one it already carries must not
@@ -774,13 +793,7 @@ class _Demangler:
             trailing = self.take()
             if trailing not in _CV_QUALS or (not self.nested and not self.eof()):
                 raise _Bail
-            if self.simple:
-                declared = _apply_quals(declared, _CV_QUALS[trailing])
-            elif declared[0] == "ind":
-                # a data symbol's trailing qualifier belongs to what its outermost pointer
-                # points at, not to the pointer: "?s@@3PADB" is "char const *s", and
-                # "?s@@3PAPADB" is "char *const *s"
-                declared = _indirection(declared[1], declared[2], _qualify(declared[3], _CV_QUALS[trailing]))
+            declared = _qualifyDeclared(declared, _CV_QUALS[trailing])
             return f"{_DATA_ACCESS[char]}{self.rendered(declared, name)}"
         return self.function(name, has_no_return_type)
 
