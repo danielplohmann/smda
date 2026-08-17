@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 487
+CORPUS_NAMES_UNDERSTOOD = 494
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -259,6 +259,36 @@ LOCAL_SCOPES = [
     ("?N@?1??SN@?$NS@H@0@QEAAHXZ@4HA", "int `public: int __cdecl N::NS<int>::SN(void)'::`2'::N"),
     ("?M@?0??L@@YAHXZ@YA?AURetVal@1@H@Z", "struct L::RetVal __cdecl `int __cdecl L(void)'::`1'::M(int)"),
 ]
+
+
+UNALIGNED_AND_LITERALS = [
+    # "__unaligned" qualifies the pointee, after its own const and volatile
+    ("?f@@YAPFAHXZ", "int __unaligned * __cdecl f(void)"),
+    ("?f@@YAXPFBH@Z", "void __cdecl f(int const __unaligned *)"),
+    ("?f@@YAXAFAH@Z", "void __cdecl f(int __unaligned &)"),
+    ("?f@@YAXQFAH@Z", "void __cdecl f(int __unaligned *const)"),
+    # ... and travels with them, so a pointer to an unaligned pointer keeps it
+    ("?f@@YAXPFAPFAH@Z", "void __cdecl f(int __unaligned *__unaligned *)"),
+    ("?f@@YAXPFAPAH@Z", "void __cdecl f(int *__unaligned *)"),
+    ("?f@@YAXPIFAH@Z", "void __cdecl f(int __unaligned *__restrict)"),
+    # a user-defined literal takes its suffix from the identifier after the code
+    ("??__K_deg@@YAHO@Z", 'int __cdecl operator ""_deg(long double)'),
+    ("??__Kmm@@YAHO@Z", 'int __cdecl operator ""mm(long double)'),
+    # "@" is the scope spelled zero
+    ("?M@?@??L@@YAHXZ@4HA", "int `int __cdecl L(void)'::`0'::M"),
+]
+
+
+class MsvcUnalignedAndLiteralTestSuite(unittest.TestCase):
+    def test_the_forms_are_spelled_the_way_the_reference_spells_them(self):
+        for mangled, expected in UNALIGNED_AND_LITERALS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_an_unknown_double_underscore_operator_is_refused(self):
+        for mangled in ("??__L_deg@@YAHO@Z", "??__@@YAHO@Z"):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcLocalScopeTestSuite(unittest.TestCase):
