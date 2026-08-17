@@ -402,7 +402,9 @@ class _Demangler:
                 return self.operatorName()
             if self.peek() == "A":
                 return self.anonymousNamespace(), None
-            if self.peek() in string.digits or self.peek() == "@":
+            # a scope number is written the way a template argument's is, so it may be
+            # nibbles too; "A" is not among them because "?A" is the namespace above
+            if self.peek() in string.digits or self.peek() in "@BCDEFGHIJKLMNOP":
                 return self.localScope(), None
             raise _Bail
         name = self.identifier()
@@ -412,13 +414,14 @@ class _Demangler:
     def localScope(self):
         """A scope inside a function: the function's own name, and which scope of it.
 
-        "?1??f@@YAXXZ@" is the second scope of "void __cdecl f(void)", so the number is one
-        less than the one spelled. The enclosing name is a complete decorated name in its
+        "?1??f@@YAXXZ@" is the second scope of "void __cdecl f(void)". The enclosing name is a complete decorated name in its
         own right and is read as one, in its own back-reference scopes - which is why it is
         parsed by a separate cursor over the same text rather than inline.
         """
-        # "@" is the scope spelled zero, and a digit is spelled one higher than it is written
-        index = -1 if self.eat("@") else int(self.take())
+        # the scope carries the number a template argument does - a digit standing for itself
+        # plus one, nibbles ended by "@" standing for themselves - except that a bare "@" is
+        # the scope spelled zero
+        spelled = "0" if self.eat("@") else self.templateInteger()
         self.expect("?")
         inner = _Demangler(self.text)
         inner.pos = self.pos
@@ -433,7 +436,7 @@ class _Demangler:
         inner.depth = self.depth
         enclosing = inner.parse()
         self.pos = inner.pos
-        return f"`{enclosing}'::`{index + 1}'"
+        return f"`{enclosing}'::`{spelled}'"
 
     def anonymousNamespace(self):
         """The unnamed namespace of one translation unit: "?A" and an optional discriminator.
@@ -727,15 +730,51 @@ class _Demangler:
         return _indirection(f"{owner}::{token}", own_quals, _function(convention, params, returns, member_cv))
 
     def functionTypeArgument(self):
+        """A function type written as a template argument: "$$A6", or "$$A8" with a qualifier.
+
+        The "8" form is the one a member function's type takes, but it names no class - the
+        reference refuses "$$A8S@@AEHXZ" - so it reads as an ordinary function type carrying
+        the qualifier that only a member function can have: "int __cdecl(void) const".
+        """
         self.simple = False
-        self.expect("6")
+        member_cv = ""
+        if self.eat("8"):
+            self.expect("@")
+            self.expect("@")
+            member_cv = self.memberQualifiers()
+        else:
+            self.expect("6")
         convention = _CALLING_CONVENTIONS.get(self.take())
         if convention is None:
             raise _Bail
         returns = self.returnType()
         params = self.parameters()
         self.expect("Z")
-        return _function(convention, params, returns)
+        return _function(convention, params, returns, member_cv)
+
+    def memberQualifiers(self):
+        """What a member function may carry after its parameters: cv, __restrict, a ref.
+
+        They are written modifier-first and spelled the other way round, so "GB" is
+        " const &" and "IA" is " __restrict".
+        """
+        restrict = ""
+        reference = ""
+        seen = set()
+        while self.peek() in "EIGH":
+            char = self.take()
+            # each of them is written at most once: "HH" is not a name
+            if char in seen or (char in "GH" and seen & {"G", "H"}):
+                raise _Bail
+            seen.add(char)
+            if char == "I":
+                restrict = " __restrict"
+            elif char in ("G", "H"):
+                reference = " &" if char == "G" else " &&"
+        qualifier = _CV.get(self.take())
+        if qualifier is None:
+            raise _Bail
+        return f"{qualifier}{restrict}{reference}"
 
     def parameters(self):
         """A parameter list, recording each composite parameter for later back-references.

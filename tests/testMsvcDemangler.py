@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 494
+CORPUS_NAMES_UNDERSTOOD = 512
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -294,6 +294,42 @@ TRAILING_QUALIFIERS = [
     # and an array passes it on to its element, the way C spells one
     ("?arr@@3QAY01HB", "int const (*const arr)[2]"),
 ]
+
+
+MEMBER_QUALIFIERS_AND_SCOPES = [
+    # "$$A8" is a function type carrying what only a member function may carry
+    ("??$f@$$A8@@BAHXZ@@YAXXZ", "void __cdecl f<int __cdecl(void) const>(void)"),
+    ("??$f@$$A8@@IAAHXZ@@YAXXZ", "void __cdecl f<int __cdecl(void) __restrict>(void)"),
+    ("??$f@$$A8@@GBAHXZ@@YAXXZ", "void __cdecl f<int __cdecl(void) const &>(void)"),
+    ("??$f@$$A8@@HBAHXZ@@YAXXZ", "void __cdecl f<int __cdecl(void) const &&>(void)"),
+    # a scope number is written the way a template argument's is, nibbles included
+    ("?M@?L@??L@@YAHXZ@4HA", "int `int __cdecl L(void)'::`11'::M"),
+    ("?x@?1??f@@YAXXZ@4HA", "int `void __cdecl f(void)'::`2'::x"),
+    ("?M@?@??L@@YAHXZ@4HA", "int `int __cdecl L(void)'::`0'::M"),
+]
+
+
+class MsvcMemberQualifierTestSuite(unittest.TestCase):
+    def test_member_qualifiers_and_scope_numbers_match_the_reference(self):
+        for mangled, expected in MEMBER_QUALIFIERS_AND_SCOPES:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_a_qualifier_written_twice_is_refused(self):
+        # each of them is written at most once, so "HH" is not a name
+        for mangled in ("??$f@$$A8@@HHBAHXZ@@YAXXZ", "??$f@$$A8@@IIAAHXZ@@YAXXZ"):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+    def test_a_named_class_is_not_written_in_this_position(self):
+        self.assertEqual(demangle_msvc_symbol("??$f@$$A8S@@AEHXZ@@YAXXZ"), "??$f@$$A8S@@AEHXZ@@YAXXZ")
+
+    def test_a_qualifier_the_table_does_not_hold_is_refused(self):
+        self.assertEqual(demangle_msvc_symbol("??$f@$$A8@@GZAHXZ@@YAXXZ"), "??$f@$$A8@@GZAHXZ@@YAXXZ")
+
+    def test_a_qualified_fragment_that_is_neither_a_namespace_nor_a_scope_is_refused(self):
+        # "?Q" names no scope: the numbers stop at P and "?A" is the unnamed namespace
+        self.assertEqual(demangle_msvc_symbol("?x@?Q@@3HA"), "?x@?Q@@3HA")
 
 
 class MsvcTrailingQualifierTestSuite(unittest.TestCase):
