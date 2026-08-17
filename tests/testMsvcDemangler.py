@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 420
+CORPUS_NAMES_UNDERSTOOD = 460
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -220,6 +220,50 @@ class MsvcAnonymousNamespaceTestSuite(unittest.TestCase):
 
     def test_a_discriminator_that_is_not_hexadecimal_is_refused(self):
         for mangled in ("?x@?A0@@3HA", "?x@?A0x@@3HA", "?x@?A0xZZ@@3HA"):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+
+MEMBER_POINTERS_AND_INTEGERS = [
+    ("?f@@YAXP8S@@AEXXZ@Z", "void __cdecl f(void (__thiscall S::*)(void))"),
+    ("?f@@YAXP8S@@BEXXZ@Z", "void __cdecl f(void (__thiscall S::*)(void) const)"),
+    ("?f@@YAXP8S@@DEXXZ@Z", "void __cdecl f(void (__thiscall S::*)(void) const volatile)"),
+    ("?f@@YAXP8N@S@@AEXXZ@Z", "void __cdecl f(void (__thiscall S::N::*)(void))"),
+    ("?f@@YAXQ8S@@AEXXZ@Z", "void __cdecl f(void (__thiscall S::*const)(void))"),
+    ("?f@@YAXP8S@@AAHH@Z@Z", "void __cdecl f(int (__cdecl S::*)(int))"),
+    ("?f@@YAXP8?$T@$01@@AEXXZ@Z", "void __cdecl f(void (__thiscall T<2>::*)(void))"),
+    # a single digit is itself plus one; anything larger is nibbles "A" to "P" ended by "@"
+    ("??$f@$00@@YAXXZ", "void __cdecl f<1>(void)"),
+    ("??$f@$0A@@@YAXXZ", "void __cdecl f<0>(void)"),
+    ("??$f@$0M@@@YAXXZ", "void __cdecl f<12>(void)"),
+    ("??$f@$0BAA@@@YAXXZ", "void __cdecl f<256>(void)"),
+    ("??$f@$0?0@@YAXXZ", "void __cdecl f<-1>(void)"),
+    # the accumulator is 64 bits and wraps, and a magnitude that wraps to zero keeps its sign
+    (
+        "??0?$LongLongTemplate@$0HPPPPPPPPPPPPPPPPPP@@@QAE@XZ",
+        "public: __thiscall LongLongTemplate<18446744073709551615>::LongLongTemplate<18446744073709551615>(void)",
+    ),
+    (
+        "??0?$LongLongTemplate@$0?IAAAAAAAAAAAAAAAAAA@@@QEAA@XZ",
+        "public: __cdecl LongLongTemplate<-0>::LongLongTemplate<-0>(void)",
+    ),
+]
+
+
+class MsvcMemberPointerTestSuite(unittest.TestCase):
+    def test_member_pointers_and_template_integers_match_the_reference(self):
+        for mangled, expected in MEMBER_POINTERS_AND_INTEGERS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_shapes_neither_form_allows_are_refused(self):
+        for mangled in (
+            "?f@@YAXPE8S@@AEAXXZ@Z",  # __ptr64 is not written in front of a member function
+            "?f@@YAX$0A@@Z",  # an integer is a template argument, never a parameter
+            "??$f@$0@@YAXXZ",  # ... and needs digits
+            "?f@@YAXP8S@@AZXXZ@Z",  # "Z" is not a calling convention
+            "?f@@YAXP8?0S@@@AEXXZ@Z",  # nor is a constructor a class to point into
+        ):
             with self.subTest(mangled=mangled):
                 self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
