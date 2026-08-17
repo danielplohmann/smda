@@ -137,6 +137,19 @@ class TestMachoSymbolProviderBehavior(unittest.TestCase):
         provider.update(binary_info)
         self.assertEqual(provider.getSymbol(0x100096320), "_runtime.etext")
 
+    def test_frostyferret_cxx_imports_stay_decorated_in_both_views(self):
+        _, raw, loader = _load_fixture("malpedia/osx.frostyferret")
+        binary_info = _binary_info(raw, loader)
+        provider = MachoSymbolProvider(None)
+        provider.update(binary_info)
+
+        imported = provider.parseImports(binary_info.getLiefBinary())
+
+        self.assertEqual(imported[0x1000101E0][1], "__Znwm")
+        self.assertEqual(imported[0x1000101D8][1], "__ZdlPv")
+        self.assertEqual(provider.getApi(0x1000101E0), imported[0x1000101E0])
+        self.assertEqual(binary_info.getImportedFunctions()[0x1000101E0][1], "__Znwm")
+
     def test_go_provider_parses_macho_pclntab(self):
         _, raw, loader = _load_fixture("objective-see/turtle")
         binary_info = _binary_info(raw, loader)
