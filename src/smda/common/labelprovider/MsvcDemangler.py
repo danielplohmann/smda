@@ -102,7 +102,11 @@ _OPERATORS = {
     "Y": "operator+=",
     "Z": "operator-=",
 }
-_DATA_SPECIAL_OPERATORS = frozenset("789ABS")
+# the special names spelled with the "6" storage form. The vcall, typeof and local static
+# guard codes are data too, but take a storage class this parser does not model, so they
+# decline instead of being read as one of these
+_DATA_SPECIAL_OPERATORS = frozenset("78S")
+_UNMODELLED_DATA_SPECIAL_OPERATORS = frozenset("9AB")
 _EXTENDED_OPERATORS = {
     "0": "operator/=",
     "1": "operator%=",
@@ -173,7 +177,15 @@ def _render(node, declarator=""):
     if kind == "base":
         if not declarator:
             return node[1]
-        return node[1] + ("" if declarator.startswith("[") else " ") + declarator
+        if declarator.startswith("["):
+            return node[1] + declarator
+        # the reference spaces a declarator off a type ending in an alphanumeric character
+        # or a template's ">", and abuts it to anything else: "struct S *" but "struct S_*"
+        # and "enum <unnamed-type-*"
+        tail = node[1][-1:]
+        sigil = declarator.startswith(("*", "&"))
+        abuts = sigil and not (tail == ">" or (tail.isascii() and tail.isalnum()))
+        return node[1] + ("" if abuts else " ") + declarator
     if kind == "ind":
         token = node[1] + " ".join(node[2])
         nested_function = "(" in declarator and not declarator.startswith(("*", "&"))
@@ -203,6 +215,22 @@ def _apply_quals(node, quals):
     and a back-reference declines rather than accept one.
     """
     return _base(f"{node[1]} {' '.join(quals)}") if quals else node
+
+
+def _qualify(node, quals):
+    """Add qualifiers to a parsed type, wherever that type keeps them.
+
+    A named type spells them in its text; a pointer or reference carries its own, so they
+    join those instead of being appended to a rendering that already placed the sigil.
+    """
+    if not quals:
+        return node
+    if node[0] == "ind":
+        return _indirection(node[1], _merge(node[2], quals), node[3])
+    # a named type spells its qualifiers in its own text, so one it already carries must not
+    # be spelled twice: "?s@@3QBDD" is "char const volatile *const", not "char const const .."
+    spelled = node[1].split()
+    return _apply_quals(node, tuple(qual for qual in quals if qual not in spelled))
 
 
 class _Structor:
@@ -237,6 +265,7 @@ class _Demangler:
         self.template_depth = 0
         self.at_symbol_name = True
         self.pointee_depth = 0
+        self.array_element_depth = 0
         self.member_cv = ""
         self.depth = 0
         self.max_render = 8 * len(mangled) + 256
@@ -355,6 +384,8 @@ class _Demangler:
             name = _EXTENDED_OPERATORS.get(code)
             if name is None:
                 raise _Bail
+            if code in _UNMODELLED_DATA_SPECIAL_OPERATORS:
+                raise _Bail
             return name, "data" if code in _DATA_SPECIAL_OPERATORS else "func"
         code = self.take()
         if code in ("0", "1"):
@@ -461,7 +492,11 @@ class _Demangler:
     def arrayType(self, quals):
         count = self.dimension()
         dims = "".join(f"[{self.dimension()}]" for _ in range(count))
-        element = self.type(quals)
+        self.array_element_depth += 1
+        try:
+            element = self.type(quals)
+        finally:
+            self.array_element_depth -= 1
         self.simple = False
         return _array(dims, element)
 
@@ -472,6 +507,11 @@ class _Demangler:
         if kind == "Q":
             return self.indirection(quals, "&&")
         if kind == "C":
+            if not (self.template_depth or self.array_element_depth):
+                # "$$C" qualifies an array element or a template argument. As a parameter of
+                # its own, or as the pointee of a pointer or reference, it is not a type:
+                # "?f@@YAX$$CBH@Z" and "?f@@YAXPA$$CBH@Z" are not names
+                raise _Bail
             extra = _CV_QUALS.get(self.take())
             if extra is None:
                 raise _Bail
@@ -498,10 +538,14 @@ class _Demangler:
 
     def indirection(self, own_quals, token):
         """A pointer or reference: `token` plus its own quals, over a qualified pointee."""
-        self.eat("E")
+        has_ptr64 = self.eat("E")
         if self.eat("I"):
             own_quals = own_quals + ("__restrict",)
         if self.eat("6"):
+            if has_ptr64:
+                # no mangler writes __ptr64 in front of a function type: "P6A" and "R6A"
+                # are names, "PE6A" and "RE6A" are not
+                raise _Bail
             convention = _CALLING_CONVENTIONS.get(self.take())
             if convention is None:
                 raise _Bail
@@ -597,6 +641,11 @@ class _Demangler:
                 raise _Bail
             if self.simple:
                 declared = _apply_quals(declared, _CV_QUALS[trailing])
+            elif declared[0] == "ind":
+                # a data symbol's trailing qualifier belongs to what its outermost pointer
+                # points at, not to the pointer: "?s@@3PADB" is "char const *s", and
+                # "?s@@3PAPADB" is "char *const *s"
+                declared = _indirection(declared[1], declared[2], _qualify(declared[3], _CV_QUALS[trailing]))
             return f"{_DATA_ACCESS[char]}{self.rendered(declared, name)}"
         return self.function(name, has_no_return_type)
 
