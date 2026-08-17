@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 519
+CORPUS_NAMES_UNDERSTOOD = 527
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -363,6 +363,31 @@ class MsvcMemberQualifierTestSuite(unittest.TestCase):
 
 
 class MsvcTrailingQualifierTestSuite(unittest.TestCase):
+    def test_the_storage_forms_a_data_symbol_may_take(self):
+        cases = [
+            # __ptr64 stands in front of the qualifier, where something is pointed at
+            ("?s@@3PEAHEA", "int *s"),
+            ("?$RT1@NeedsReferenceTemporary@@3AEBHEB", "int const &NeedsReferenceTemporary::$RT1"),
+            # a pointer into a class spells its storage the long way, "E" included
+            ("?m@@3PEFRfoo@@DER1@", "char const __unaligned foo::*m"),
+            # and a name with no signature at all is spelling its linkage
+            ("?extern_c_func@@9", 'extern "C" extern_c_func'),
+            ("?local@?1??extern_c_func@@9@4HA", "int `extern \"C\" extern_c_func'::`2'::local"),
+        ]
+        for mangled, expected in cases:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_storage_forms_the_grammar_does_not_pair_are_refused(self):
+        for mangled in (
+            "?s@@3HEA",  # nothing is pointed at, so no __ptr64 belongs here
+            "?s@@3HEB",
+            "?memptr1@@3RESB@@HEA",  # a pointer into a class takes the long form, not this
+            "?extern_c_func@@9X",  # the linkage marker ends the name, so nothing follows it
+        ):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
     def test_a_data_symbol_with_bytes_after_it_is_refused(self):
         self.assertEqual(demangle_msvc_symbol("?s@@3HBX"), "?s@@3HBX")
 
