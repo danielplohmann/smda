@@ -59,10 +59,10 @@ def parse_pe_delay_imports(lief_binary, base_addr=None):
 def parse_elf_relocation_imports(lief_binary):
     """Build import map keyed by relocation slot address: addr -> (lib, name).
 
-    Names stay exactly as the dynamic symbol table spells them. API resolution is
-    keyed by these names, so they must remain comparable with PE and Mach-O imports,
-    which are equally undecorated. Demangling happens one level up, where the result
-    is only used as a human-readable label.
+    Names stay exactly as the dynamic symbol table spells them, here and in every
+    caller: API resolution is keyed by them, so they must remain comparable with PE
+    and Mach-O imports, which are equally undecorated, and synthesis writes them back
+    into an import table.
     """
     if not isinstance(lief_binary, lief.ELF.Binary):
         return {}

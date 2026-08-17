@@ -279,6 +279,24 @@ class TestPeSymbolProviderMetadata(unittest.TestCase):
             imported = binary_info.getImportedFunctions()
         self.assertEqual(imported, {0x402000: ("kernel32.dll", "ExitProcess")})
 
+    def test_imported_functions_keep_msvc_decorated_names(self):
+        decorated = "?compute@Solver@@QEAAHH@Z"
+        pe_binary = _MockPeBinary(
+            imports=[_MockImportLibrary("solver.dll", [_MockImportEntry(decorated, 0x2000)])],
+            imagebase=0x140000000,
+        )
+        provider = PeSymbolProvider(None)
+        self.assertEqual(provider.parseImports(pe_binary, base_addr=0x400000), {0x402000: ("solver.dll", decorated)})
+
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x400000
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=pe_binary),
+            mock.patch("lief.PE.Binary", _MockPeBinary),
+        ):
+            imported = binary_info.getImportedFunctions()
+        self.assertEqual(imported, {0x402000: ("solver.dll", decorated)})
+
     def test_rebased_dump_xmetadata_and_api_parity(self):
         pe_binary = _MockPeBinary(
             imports=[_MockImportLibrary("KERNEL32.dll", [_MockImportEntry("CreateFileW", 0x3000)])],
