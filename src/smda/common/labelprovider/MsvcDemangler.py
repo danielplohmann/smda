@@ -371,11 +371,39 @@ class _Demangler:
                     self.rememberName(rendered)
                 return rendered, None
             if is_leading:
+                # "??A" here is operator[], not the namespace below: the leading fragment is
+                # the symbol's own name, and a namespace can only qualify it
                 return self.operatorName()
+            if self.peek() == "A":
+                return self.anonymousNamespace(), None
             raise _Bail
         name = self.identifier()
         self.rememberName(name)
         return name, None
+
+    def anonymousNamespace(self):
+        """The unnamed namespace of one translation unit: "?A" and an optional discriminator.
+
+        The discriminator tells two of them apart inside one binary, and the reference does
+        not spell it, so two anonymous namespaces render alike - which is what C++ source
+        looks like too.
+        """
+        self.expect("A")
+        start = self.pos
+        if self.eat("0"):
+            if not self.eat("x"):
+                raise _Bail
+            digits = 0
+            while not self.eof() and self.peek() in string.hexdigits:
+                self.take()
+                digits += 1
+            if not digits:
+                raise _Bail
+        # the discriminator, not the spelling, is what a later back-reference resolves to:
+        # "?f@?A0x1@@YAXV1@@Z" names its parameter "class 0x1"
+        self.rememberName(self.text[start : self.pos])
+        self.expect("@")
+        return "`anonymous namespace'"
 
     def operatorName(self):
         """The operator or special name, paired with which spelling it takes."""

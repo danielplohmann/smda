@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 418
+CORPUS_NAMES_UNDERSTOOD = 420
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -197,6 +197,31 @@ GRAMMAR_DECLINED = [
     "?f@@YAXAA$$CBH@Z",
     "?f@@YAXAAY144$$CZH@Z",  # ... and in those positions it still needs a real qualifier
 ]
+
+
+ANONYMOUS_NAMESPACE = [
+    ("?x@?A0x12345678@@3HA", "int `anonymous namespace'::x"),
+    ("?x@?A@@3HA", "int `anonymous namespace'::x"),
+    ("?x@?A0xABCDEF12@N@@3HA", "int N::`anonymous namespace'::x"),
+    ("?f@?A0x1@@YAXXZ", "void __cdecl `anonymous namespace'::f(void)"),
+    # the discriminator, not the spelling, is what a later back-reference resolves to
+    ("?f@?A0x1@@YAXV1@@Z", "void __cdecl `anonymous namespace'::f(class 0x1)"),
+    ("?f@?A0x1@N@@YAXV2@@Z", "void __cdecl N::`anonymous namespace'::f(class N)"),
+    # a leading "??A" is operator[], which a namespace fragment must not claim
+    ("??AFoo@@QAGXXZ", "public: void __stdcall Foo::operator[](void)"),
+]
+
+
+class MsvcAnonymousNamespaceTestSuite(unittest.TestCase):
+    def test_an_unnamed_namespace_is_spelled_and_recorded_the_way_it_is_mangled(self):
+        for mangled, expected in ANONYMOUS_NAMESPACE:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_a_discriminator_that_is_not_hexadecimal_is_refused(self):
+        for mangled in ("?x@?A0@@3HA", "?x@?A0x@@3HA", "?x@?A0xZZ@@3HA"):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcGrammarRuleTestSuite(unittest.TestCase):
