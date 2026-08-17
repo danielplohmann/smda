@@ -208,7 +208,9 @@ def _render(node, declarator=""):
 
 
 def _merge(left, right):
-    merged = [qual for qual in ("const", "volatile") if qual in left or qual in right]
+    # "__unaligned" travels with const and volatile: a pointer that points at an unaligned
+    # pointer keeps it - "int __unaligned *__unaligned *"
+    merged = [qual for qual in ("const", "volatile", "__unaligned") if qual in left or qual in right]
     return tuple(merged)
 
 
@@ -381,7 +383,7 @@ class _Demangler:
                 return self.operatorName()
             if self.peek() == "A":
                 return self.anonymousNamespace(), None
-            if self.peek() in string.digits:
+            if self.peek() in string.digits or self.peek() == "@":
                 return self.localScope(), None
             raise _Bail
         name = self.identifier()
@@ -396,7 +398,8 @@ class _Demangler:
         own right and is read as one, in its own back-reference scopes - which is why it is
         parsed by a separate cursor over the same text rather than inline.
         """
-        index = int(self.take())
+        # "@" is the scope spelled zero, and a digit is spelled one higher than it is written
+        index = -1 if self.eat("@") else int(self.take())
         self.expect("?")
         inner = _Demangler(self.text)
         inner.pos = self.pos
@@ -440,6 +443,12 @@ class _Demangler:
     def operatorName(self):
         """The operator or special name, paired with which spelling it takes."""
         if self.eat("_"):
+            if self.eat("_"):
+                if self.take() != "K":
+                    raise _Bail
+                # a user-defined literal: the identifier after the code is its suffix, and
+                # the reference spells the pair as operator ""suffix
+                return f'operator ""{self.identifier()}', "func"
             code = self.take()
             name = _EXTENDED_OPERATORS.get(code)
             if name is None:
@@ -634,6 +643,9 @@ class _Demangler:
         has_ptr64 = self.eat("E")
         if self.eat("I"):
             own_quals = own_quals + ("__restrict",)
+        # "__unaligned" qualifies what the pointer points at, and is spelled after the
+        # pointee's own const and volatile: "int const __unaligned *"
+        unaligned = ("__unaligned",) if self.eat("F") else ()
         if self.eat("8"):
             return self.memberFunctionPointer(own_quals, token, has_ptr64)
         if self.eat("6"):
@@ -659,6 +671,7 @@ class _Demangler:
         pointee_quals = _CV_QUALS.get(self.take())
         if pointee_quals is None:
             raise _Bail
+        pointee_quals = pointee_quals + unaligned
         self.pointee_depth += 1
         try:
             pointee = self.type(pointee_quals)
