@@ -158,6 +158,59 @@ BACKREF_DECLINED = [
 ]
 
 
+# Rules derived from llvm-undname probes, each pinned with the name that proved it.
+GRAMMAR_RULES = [
+    # the "6" storage form belongs to the vftable family only
+    ("??_7x@@6B@", "const x::`vftable'"),
+    ("??_8x@@6B@", "const x::`vbtable'"),
+    ("??_Sx@@6B@", "const x::`local vftable'"),
+    # a data symbol's trailing qualifier belongs to what its outermost pointer points at
+    ("?s@@3PADB", "char const *s"),
+    ("?s@@3PADD", "char const volatile *s"),
+    ("?s@@3QBDD", "char const volatile *const s"),
+    ("?s@@3PAPADB", "char *const *s"),
+    ("?s@@3HB", "int const s"),
+    # a sigil abuts a type that ends in neither an alphanumeric character nor ">"
+    ("?f@@YAXPAUS@@@Z", "void __cdecl f(struct S *)"),
+    ("?f@@YAXPAUS_@@@Z", "void __cdecl f(struct S_*)"),
+    ("?f@@YAXPAUS$@@@Z", "void __cdecl f(struct S$*)"),
+    ("?f@@YAXPAV?$B@VA@@@@@Z", "void __cdecl f(class B<class A> *)"),
+    # ... while a named declarator is spaced off whatever precedes it
+    ("?fooE@@YA?AW4E$@@XZ", "enum E$ __cdecl fooE(void)"),
+    # "$$C" qualifies an array element or a template argument
+    ("?f@@YAXAAY144$$CBH@Z", "void __cdecl f(int const (&)[5][5])"),
+    ("?f@@YAXV?$T@$$CBH@@@Z", "void __cdecl f(class T<int const>)"),
+    # a function pointer takes no __ptr64 modifier, but is otherwise read
+    ("?p@@3R6AHHH@ZA", "int (__cdecl *volatile p)(int, int)"),
+    ("?p@@3Q6AHHH@ZA", "int (__cdecl *const p)(int, int)"),
+]
+
+# ... and the shapes those same rules refuse, each confirmed refused by llvm-undname
+GRAMMAR_DECLINED = [
+    "??_9x@@6B@",  # vcall, typeof and the local static guard take a storage class this
+    "??_Ax@@6B@",  # parser does not model, never the vftable family's "6" form
+    "??_Bx@@6B@",
+    "?p@@3PE6AHHH@ZA",  # __ptr64 is not written in front of a function type
+    "?p@@3RE6AHHH@ZA",
+    "?f@@YAX$$CBH@Z",  # "$$C" is not a parameter of its own, nor a pointee
+    "?f@@YAXPA$$CBH@Z",
+    "?f@@YAXAA$$CBH@Z",
+    "?f@@YAXAAY144$$CZH@Z",  # ... and in those positions it still needs a real qualifier
+]
+
+
+class MsvcGrammarRuleTestSuite(unittest.TestCase):
+    def test_rules_spell_names_the_way_the_reference_does(self):
+        for mangled, expected in GRAMMAR_RULES:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_shapes_those_rules_forbid_are_refused(self):
+        for mangled in GRAMMAR_DECLINED:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+
 class MsvcBackReferenceTestSuite(unittest.TestCase):
     def test_back_references_resolve_the_way_the_mangler_numbered_them(self):
         for mangled, expected in BACKREFS:
