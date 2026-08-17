@@ -169,6 +169,23 @@ class PdbFragmentAttributionTestSuite(unittest.TestCase):
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "_FlushFileBuffers@4")
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1060), "")
 
+    def test_a_name_holding_a_control_character_is_skipped(self):
+        provider = self._providerWith(
+            [make_function("clean", 0x1000, 0x40), make_function("bell\x07name", 0x2000, 0x40)]
+        )
+        self.assertEqual(provider.getFunctionSymbols(), {BASE_ADDR + 0x1000: "clean"})
+        # nor may it become a fragment parent, which would carry the byte into every label
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x2010), "")
+
+    def test_a_non_ascii_name_is_kept(self):
+        # a demangled Rust identifier is legitimately non-ASCII; only control bytes are refused
+        provider = self._providerWith([make_function("hello::wörld", 0x1000, 0x40)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "hello::wörld")
+
+    def test_an_empty_name_is_skipped(self):
+        provider = self._providerWith([make_function("", 0x1000, 0x40)])
+        self.assertEqual(provider.getFunctionSymbols(), {})
+
     def test_a_procedure_without_a_resolvable_rva_is_skipped(self):
         unresolved = make_function("unresolved", 0x1000, 0x100)
         unresolved.rva = None
