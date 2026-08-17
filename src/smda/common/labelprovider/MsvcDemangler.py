@@ -675,7 +675,7 @@ class _Demangler:
         if token == "*" and self.peek() in _MEMBER_DATA_QUALS:
             # only a pointer points into a class; C++ has no reference to member, so "AT..."
             # is not a name however much it looks like one
-            return self.memberDataPointer(own_quals, token)
+            return self.memberDataPointer(own_quals, token, unaligned)
         if self.eat("6"):
             if has_ptr64:
                 # no mangler writes __ptr64 in front of a function type: "P6A" and "R6A"
@@ -708,14 +708,14 @@ class _Demangler:
         self.simple = False
         return _indirection(token, own_quals, pointee)
 
-    def memberDataPointer(self, own_quals, token):
+    def memberDataPointer(self, own_quals, token, unaligned=()):
         """A pointer to data member: the class qualifies the declarator, as it does a method.
 
         The code standing where a pointee's cv would be says both that this points into a
         class and what the member itself is qualified by, so "PRfoo@@D" is
         "char const foo::*".
         """
-        member_quals = _MEMBER_DATA_QUALS[self.take()]
+        member_quals = _MEMBER_DATA_QUALS[self.take()] + unaligned
         owner = self.qualifiedName()[0]
         if self.peek() in ("Q", "R", "S"):
             # the reference does not spell the qualifiers such a pointer would carry here -
@@ -838,6 +838,12 @@ class _Demangler:
         if self.eof():
             raise _Bail
         char = self.peek()
+        if char == "9":
+            # a name with no signature at all: the linkage is what is being spelled
+            self.take()
+            if not self.nested and not self.eof():
+                raise _Bail
+            return f'extern "C" {name}'
         if (special_form == "data") != (char == "6"):
             raise _Bail
         if char == "6":
@@ -853,14 +859,23 @@ class _Demangler:
             self.take()
             self.simple = True
             declared = self.type()
+            # a pointer into a class spells its own storage the long way, below; the short
+            # forms are for everything else
+            points_into_class = declared[0] == "ind" and declared[1].endswith("::*")
             trailing = self.take()
+            if trailing == "E":
+                # __ptr64 stands in front of the qualifier, and only where something is
+                # pointed at: "?s@@3PEAHEA" is a name and "?s@@3HEA" is not
+                if declared[0] != "ind":
+                    raise _Bail
+                trailing = self.take()
             if trailing in _MEMBER_DATA_QUALS:
                 # a pointer to data member repeats the member's qualifier here and names its
                 # class again by back-reference: "?m@@3PQfoo@@HR1@" is "int const foo::*m"
                 member_quals = _MEMBER_DATA_QUALS[trailing]
                 self.nameFragment(False)
                 self.expect("@")
-            elif trailing in _CV_QUALS:
+            elif trailing in _CV_QUALS and not points_into_class:
                 member_quals = _CV_QUALS[trailing]
             else:
                 raise _Bail
