@@ -615,13 +615,14 @@ class _Demangler:
 def demangle_msvc_symbol(name):
     """Return a readable C++ name, or the original when it is not fully understood.
 
-    A name carrying a NUL is refused outright: a decorated name is read from a NUL-terminated
-    string and cannot contain one, and an expansion holding a control character would travel
-    into the report as a symbol name.
+    A name carrying a control character is refused outright: a decorated name is read from a
+    NUL-terminated string of source-legal characters and cannot hold one, and an expansion
+    holding it would travel into the report as a symbol name. The identifier is copied into
+    the answer verbatim, so testing the input is what keeps the answer clean.
     """
     if not name or not name.startswith("?"):
         return name
-    if "\x00" in name:
+    if any(char < " " or char == "\x7f" for char in name):
         return name
     try:
         return _Demangler(name).parse()

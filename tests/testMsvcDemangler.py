@@ -133,6 +133,15 @@ class MsvcDemanglerTestSuite(unittest.TestCase):
 
         self.assertEqual(demangle_msvc_symbol(evil), evil)
 
+    def test_a_name_carrying_any_control_character_is_refused(self):
+        # an identifier is copied into the answer verbatim, so a control character in the
+        # input is one in a reported symbol name; the parser reads these as ordinary
+        # identifier bytes and would otherwise expand them
+        for code in (0x01, 0x07, 0x0A, 0x0D, 0x1B, 0x7F):
+            evil = f"?ctrl{chr(code)}@@YAXXZ"
+            with self.subTest(code=code):
+                self.assertEqual(demangle_msvc_symbol(evil), evil)
+
     def test_names_that_are_not_msvc_decorated_are_left_alone(self):
         for name in ("", "plain_name", "_ZN4test4funcEv", "_RNvC6_123foo3bar", "_ReadFile@20"):
             with self.subTest(name=name):
