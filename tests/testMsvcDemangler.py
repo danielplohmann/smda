@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 460
+CORPUS_NAMES_UNDERSTOOD = 487
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -248,6 +248,29 @@ MEMBER_POINTERS_AND_INTEGERS = [
         "public: __cdecl LongLongTemplate<-0>::LongLongTemplate<-0>(void)",
     ),
 ]
+
+
+LOCAL_SCOPES = [
+    ("?x@?0??f@@YAXXZ@4HA", "int `void __cdecl f(void)'::`1'::x"),
+    ("?x@?1??f@@YAXXZ@4HA", "int `void __cdecl f(void)'::`2'::x"),
+    ("?x@?2??f@@YAXXZ@4HA", "int `void __cdecl f(void)'::`3'::x"),
+    # the enclosing name continues this name's back-reference table rather than opening its
+    # own, so the "0" below is the outer N and not the enclosing symbol's own first fragment
+    ("?N@?1??SN@?$NS@H@0@QEAAHXZ@4HA", "int `public: int __cdecl N::NS<int>::SN(void)'::`2'::N"),
+    ("?M@?0??L@@YAHXZ@YA?AURetVal@1@H@Z", "struct L::RetVal __cdecl `int __cdecl L(void)'::`1'::M(int)"),
+]
+
+
+class MsvcLocalScopeTestSuite(unittest.TestCase):
+    def test_a_scope_inside_a_function_names_the_function_and_which_scope(self):
+        for mangled, expected in LOCAL_SCOPES:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_a_local_scope_without_an_enclosing_name_is_refused(self):
+        for mangled in ("?x@?1@4HA", "?x@?1?@4HA", "?x@?1??@4HA"):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcMemberPointerTestSuite(unittest.TestCase):
