@@ -268,6 +268,7 @@ class _Demangler:
         self.simple = True
         self.template_depth = 0
         self.at_symbol_name = True
+        self.nested = False
         self.pointee_depth = 0
         self.array_element_depth = 0
         self.member_cv = ""
@@ -380,10 +381,37 @@ class _Demangler:
                 return self.operatorName()
             if self.peek() == "A":
                 return self.anonymousNamespace(), None
+            if self.peek() in string.digits:
+                return self.localScope(), None
             raise _Bail
         name = self.identifier()
         self.rememberName(name)
         return name, None
+
+    def localScope(self):
+        """A scope inside a function: the function's own name, and which scope of it.
+
+        "?1??f@@YAXXZ@" is the second scope of "void __cdecl f(void)", so the number is one
+        less than the one spelled. The enclosing name is a complete decorated name in its
+        own right and is read as one, in its own back-reference scopes - which is why it is
+        parsed by a separate cursor over the same text rather than inline.
+        """
+        index = int(self.take())
+        self.expect("?")
+        inner = _Demangler(self.text)
+        inner.pos = self.pos
+        inner.nested = True
+        # the enclosing name continues this name's back-reference table rather than opening
+        # its own: "?N@?1??SN@?$NS@H@0@QEAAHXZ@4HA" resolves its 0 to the outer N
+        inner.name_backrefs = self.name_backrefs
+        inner.arg_backrefs = self.arg_backrefs
+        # the enclosing name is a symbol in its own right, so its own leading template is
+        # not recorded either - the same exception the outer name gets
+        inner.at_symbol_name = True
+        inner.depth = self.depth
+        enclosing = inner.parse()
+        self.pos = inner.pos
+        return f"`{enclosing}'::`{index + 1}'"
 
     def anonymousNamespace(self):
         """The unnamed namespace of one translation unit: "?A" and an optional discriminator.
@@ -723,7 +751,7 @@ class _Demangler:
             if qualifier is None:
                 raise _Bail
             self.expect("@")
-            if not self.eof():
+            if not self.nested and not self.eof():
                 raise _Bail
             return f"{qualifier.strip()} {name}".strip()
         if char in _DATA_ACCESS:
@@ -731,7 +759,7 @@ class _Demangler:
             self.simple = True
             declared = self.type()
             trailing = self.take()
-            if trailing not in _CV_QUALS or not self.eof():
+            if trailing not in _CV_QUALS or (not self.nested and not self.eof()):
                 raise _Bail
             if self.simple:
                 declared = _apply_quals(declared, _CV_QUALS[trailing])
@@ -769,7 +797,7 @@ class _Demangler:
             returns = self.returnType()
         params = self.parameters()
         self.expect("Z")
-        if not self.eof():
+        if not self.nested and not self.eof():
             raise _Bail
         pieces = []
         if access:
