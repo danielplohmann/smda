@@ -36,9 +36,12 @@ MSVC_PROC_RVA = 0x1000
 MSVC_PUBLIC = "?measure@text@@YAHPEBDI@Z"
 MSVC_PUBLIC_DEMANGLED = "int __cdecl text::measure(char const *, unsigned int)"
 MSVC_PUBLIC_RVA = 0x1064
-# shapes the demangler declines: a local-scope name, a lambda, an RTTI descriptor, and a
-# name truncated past its parameter list
-MSVC_DECLINED = ("?x@?1??f@@YAHXZ@4HA", "??R<lambda_1>@@QEBA@XZ", "??_R0?AVexception@std@@@8", "?a2@@YAHX")
+# shapes the demangler declines: a lambda, an RTTI descriptor, and a name truncated past
+# its parameter list
+MSVC_DECLINED = ("??R<lambda_1>@@QEBA@XZ", "??_R0?AVexception@std@@@8", "?a2@@YAHX")
+# a name scoped inside a function reads, which is what a PDB's statics and lambdas look like
+MSVC_LOCAL_SCOPE = "?x@?1??f@@YAHXZ@4HA"
+MSVC_LOCAL_SCOPE_DEMANGLED = "int `int __cdecl f(void)'::`2'::x"
 
 
 def decode_fixture(path):
@@ -364,6 +367,10 @@ class PdbSymbolDemanglingTestSuite(unittest.TestCase):
     def test_an_msvc_name_the_demangler_declines_keeps_its_decorated_spelling(self):
         for name in MSVC_DECLINED:
             self.assertEqual(_demangleSymbolName(name), name)
+
+    def test_a_name_scoped_inside_a_function_is_demangled(self):
+        # a PDB carries these by the hundred: every function-local static and lambda
+        self.assertEqual(_demangleSymbolName(MSVC_LOCAL_SCOPE), MSVC_LOCAL_SCOPE_DEMANGLED)
 
     def test_a_name_that_only_looks_msvc_is_left_alone(self):
         for name in ("?", "?????", "?not a symbol"):
