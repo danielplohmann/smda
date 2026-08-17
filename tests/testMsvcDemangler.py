@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 512
+CORPUS_NAMES_UNDERSTOOD = 519
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -309,6 +309,36 @@ MEMBER_QUALIFIERS_AND_SCOPES = [
 ]
 
 
+MEMBER_DATA_POINTERS = [
+    ("?f@@YAXPQfoo@@H@Z", "void __cdecl f(int foo::*)"),
+    ("?f@@YAXPRfoo@@D@Z", "void __cdecl f(char const foo::*)"),
+    ("?f@@YAXPSfoo@@H@Z", "void __cdecl f(int volatile foo::*)"),
+    ("?f@@YAXPTfoo@@H@Z", "void __cdecl f(int const volatile foo::*)"),
+    ("?f@@YAXQQfoo@@H@Z", "void __cdecl f(int foo::*const)"),
+    ("?f@@YAXPQ?$T@H@@H@Z", "void __cdecl f(int T<int>::*)"),
+    # as a data symbol it repeats the qualifier and names its class again by back-reference
+    ("?m@@3PQfoo@@HQ1@", "int foo::*m"),
+    ("?m@@3PRfoo@@DR1@", "char const foo::*m"),
+    ("?m@@3PQfoo@@HR1@", "int const foo::*m"),
+]
+
+
+class MsvcMemberDataPointerTestSuite(unittest.TestCase):
+    def test_a_pointer_into_a_class_is_spelled_around_the_class(self):
+        for mangled, expected in MEMBER_DATA_POINTERS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_a_reference_into_a_class_is_refused(self):
+        # C++ has no reference to member, however much "AT..." looks like one
+        self.assertEqual(demangle_msvc_symbol("?k@@3ATfoo@@DT1@"), "?k@@3ATfoo@@DT1@")
+
+    def test_a_member_type_the_reference_spells_differently_is_declined(self):
+        # "PQfoo@@SAPEAX" is "void **foo::*" there, dropping qualifiers this would keep, and
+        # nothing on the producer side settles which is right
+        self.assertEqual(demangle_msvc_symbol("?f@@YAXPQfoo@@SAPEAX@Z"), "?f@@YAXPQfoo@@SAPEAX@Z")
+
+
 class MsvcMemberQualifierTestSuite(unittest.TestCase):
     def test_member_qualifiers_and_scope_numbers_match_the_reference(self):
         for mangled, expected in MEMBER_QUALIFIERS_AND_SCOPES:
@@ -333,6 +363,9 @@ class MsvcMemberQualifierTestSuite(unittest.TestCase):
 
 
 class MsvcTrailingQualifierTestSuite(unittest.TestCase):
+    def test_a_data_symbol_with_bytes_after_it_is_refused(self):
+        self.assertEqual(demangle_msvc_symbol("?s@@3HBX"), "?s@@3HBX")
+
     def test_a_data_symbols_trailing_qualifier_lands_where_it_is_declared(self):
         for mangled, expected in TRAILING_QUALIFIERS:
             with self.subTest(mangled=mangled):

@@ -148,6 +148,8 @@ _DATA_ACCESS = {
     "4": "",
 }
 _POINTER_KINDS = {"P": (), "Q": ("const",), "R": ("volatile",), "S": ("const", "volatile")}
+# what stands where a pointee's cv would, when the pointer points into a class instead
+_MEMBER_DATA_QUALS = {"Q": (), "R": ("const",), "S": ("volatile",), "T": ("const", "volatile")}
 _CV_QUALS = {"A": (), "B": ("const",), "C": ("volatile",), "D": ("const", "volatile")}
 _CV = {"A": "", "B": " const", "C": " volatile", "D": " const volatile"}
 _MEMBER_POINTER_RE = re.compile(r"^[^()]*::\*")
@@ -670,6 +672,10 @@ class _Demangler:
         unaligned = ("__unaligned",) if self.eat("F") else ()
         if self.eat("8"):
             return self.memberFunctionPointer(own_quals, token, has_ptr64)
+        if token == "*" and self.peek() in _MEMBER_DATA_QUALS:
+            # only a pointer points into a class; C++ has no reference to member, so "AT..."
+            # is not a name however much it looks like one
+            return self.memberDataPointer(own_quals, token)
         if self.eat("6"):
             if has_ptr64:
                 # no mangler writes __ptr64 in front of a function type: "P6A" and "R6A"
@@ -701,6 +707,24 @@ class _Demangler:
             self.pointee_depth -= 1
         self.simple = False
         return _indirection(token, own_quals, pointee)
+
+    def memberDataPointer(self, own_quals, token):
+        """A pointer to data member: the class qualifies the declarator, as it does a method.
+
+        The code standing where a pointee's cv would be says both that this points into a
+        class and what the member itself is qualified by, so "PRfoo@@D" is
+        "char const foo::*".
+        """
+        member_quals = _MEMBER_DATA_QUALS[self.take()]
+        owner = self.qualifiedName()[0]
+        if self.peek() in ("Q", "R", "S"):
+            # the reference does not spell the qualifiers such a pointer would carry here -
+            # "PQfoo@@SAPEAX" is "void **foo::*", not "void *const volatile *foo::*" - and
+            # nothing on the producer side explains which is right, so this declines
+            raise _Bail
+        member = self.type(member_quals)
+        self.simple = False
+        return _indirection(f"{owner}::{token}", own_quals, member)
 
     def memberFunctionPointer(self, own_quals, token, has_ptr64):
         """A pointer to member function: "P8" and the class it points into.
@@ -830,9 +854,19 @@ class _Demangler:
             self.simple = True
             declared = self.type()
             trailing = self.take()
-            if trailing not in _CV_QUALS or (not self.nested and not self.eof()):
+            if trailing in _MEMBER_DATA_QUALS:
+                # a pointer to data member repeats the member's qualifier here and names its
+                # class again by back-reference: "?m@@3PQfoo@@HR1@" is "int const foo::*m"
+                member_quals = _MEMBER_DATA_QUALS[trailing]
+                self.nameFragment(False)
+                self.expect("@")
+            elif trailing in _CV_QUALS:
+                member_quals = _CV_QUALS[trailing]
+            else:
                 raise _Bail
-            declared = _qualifyDeclared(declared, _CV_QUALS[trailing])
+            if not self.nested and not self.eof():
+                raise _Bail
+            declared = _qualifyDeclared(declared, member_quals)
             return f"{_DATA_ACCESS[char]}{self.rendered(declared, name)}"
         return self.function(name, has_no_return_type)
 
