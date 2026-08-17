@@ -140,15 +140,15 @@ class ElfSymbolProvider(AbstractLabelProvider):
         return function_symbols
 
     def parseImports(self, lief_binary):
-        """Return relocation-backed imports with demangled, human-readable names.
+        """Return relocation-backed imports as the binary spells them.
 
-        Only this label view is demangled. ElfApiResolver consumes the undecorated
-        map so API references keep matching PE and Mach-O import names.
+        This is not a label view. It reaches xmetadata["imported_functions"], which
+        BinarySynthesizer writes back as the literal names of a reconstructed import table,
+        and which SmdaReport._mergeImportedFunctions fills from the undecorated API-resolver
+        view as well - so a demangled spelling here is both an unusable import name and a
+        second spelling of names already in the same dict.
         """
-        return {
-            address: (lib, demangle_itanium_symbol(name))
-            for address, (lib, name) in parse_elf_relocation_imports(lief_binary).items()
-        }
+        return parse_elf_relocation_imports(lief_binary)
 
     def collectSymbols(self, lief_binary):
         if not isinstance(lief_binary, lief.ELF.Binary):
