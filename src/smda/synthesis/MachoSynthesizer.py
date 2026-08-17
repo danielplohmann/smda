@@ -2,6 +2,7 @@ import struct
 from typing import Any, Dict, List
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 MH_MAGIC = 0xFEEDFACE
@@ -127,6 +128,11 @@ class MachoSynthesizer(BinarySynthesizer):
         sections = []
         for name, start, end in sorted(self.report.code_sections or [], key=lambda entry: entry[1]):
             if not start or not end or end <= start:
+                continue
+            if end - start > SmdaConfig.MAX_IMAGE_SIZE:
+                # the extents come from the report, and the span is what gets allocated: a
+                # section claiming 0x13DAF6E5B0 bytes asked for 10GB from a 611-byte report
+                self._warn("synthesis: dropping section spanning 0x%x bytes", end - start)
                 continue
             sections.append({"name": name or "", "va_start": start, "va_end": end})
         return sections

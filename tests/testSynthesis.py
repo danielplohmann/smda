@@ -302,6 +302,21 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
                 assert parsed is not None
                 assert parsed.sections
 
+    def testASectionSpanningMoreThanTheImageLimitIsDropped(self):
+        # the extents come from the report and the span is what gets allocated, so a section
+        # claiming tens of gigabytes has to be dropped rather than laid out: a 611-byte
+        # report reached 10GB through this before the bound
+        for output_format, report in ((FORMAT_ELF, self.elf_report), (FORMAT_MACHO, self.macho_report)):
+            with self.subTest(output_format=output_format):
+                rebuilt = SmdaReport.fromDict(report.toDict())
+                first = rebuilt.code_sections[0]
+                rebuilt.code_sections = [(first[0], first[1], first[1] + 0x13DAF6E5B0), *rebuilt.code_sections[1:]]
+
+                synthesized = rebuilt.synthesizeBinary(output_format=output_format)
+
+                assert len(synthesized) <= SmdaConfig.MAX_IMAGE_SIZE
+                assert lief.parse(synthesized) is not None
+
     def testElfSynthesisMinimal(self):
         report = SmdaReport.fromDict(self.elf_report.toDict())
         report.code_sections = []

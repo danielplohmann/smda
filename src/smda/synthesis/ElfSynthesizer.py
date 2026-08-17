@@ -2,6 +2,7 @@ import struct
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaReport import MAX_ADDRESS_VALUE
+from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 PT_LOAD = 1
@@ -119,6 +120,11 @@ class ElfSynthesizer(BinarySynthesizer):
         index = 0
         for name, start, end in sorted(self.report.code_sections or [], key=lambda entry: entry[1]):
             if not start or not end or end <= start:
+                continue
+            if end - start > SmdaConfig.MAX_IMAGE_SIZE:
+                # the extents come from the report, and the span is what gets allocated: a
+                # section claiming 0x13DAF6E5B0 bytes asked for 10GB from a 611-byte report
+                self._warn("synthesis: dropping section spanning 0x%x bytes", end - start)
                 continue
             if not name:
                 while f".smda{index}" in taken:
