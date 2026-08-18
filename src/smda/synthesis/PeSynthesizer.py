@@ -3,6 +3,7 @@ import struct
 import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 from smda.utility.lief_helper import lief_name, safe_lief_parse
 
@@ -99,10 +100,23 @@ class PeSynthesizer(BinarySynthesizer):
                     break
 
     @staticmethod
-    def _parseOrdinal(name):
-        if name.startswith("#") and name[1:].isdigit():
-            return int(name[1:])
-        return None
+    def _parseOrdinal(dll_name, name):
+        """The ordinal a name stands for, or None when the name is the import's own.
+
+        A PE imports by name or by ordinal, and the report keeps only the string, so
+        "#5" is ambiguous on its own. Two things settle it. An ordinal is a WORD, so a
+        larger number never came from an import table. And the import parsers write
+        "#N" only for an ordinal no table resolves, so a name that does resolve cannot
+        have come from them either. Both are real imports spelled that way, and writing
+        one as an ordinal would rename it on the way back - or, past a WORD, truncate it
+        into a different import entirely.
+        """
+        if not (name.startswith("#") and name[1:].isdigit()):
+            return None
+        ordinal = int(name[1:])
+        if ordinal > 0xFFFF or OrdinalHelper.resolveOrdinal(dll_name, ordinal):
+            return None
+        return ordinal
 
     def _buildImportTables(self, import_rvas, ptr_size):
         """Groups imports by DLL and builds descriptor/hint/dll-name blobs.
@@ -128,7 +142,7 @@ class PeSynthesizer(BinarySynthesizer):
             dll_str_offsets[dll_name] = len(dll_strs)
             dll_strs += dll_name.encode("ascii", errors="replace") + b"\x00"
             for _rva, func in funcs:
-                if self._parseOrdinal(func) is not None:
+                if self._parseOrdinal(dll_name, func) is not None:
                     continue
                 if (dll_name, func) in hint_offsets:
                     continue
@@ -151,11 +165,12 @@ class PeSynthesizer(BinarySynthesizer):
     def _writeThunks(self, regions, import_rvas, dll_funcs, sec_vaddr, hint_off, hint_offsets, ptr_size):
         ordinal_flag = 1 << (ptr_size * 8 - 1)
         for rva, (dll, func) in import_rvas.items():
-            ordinal = self._parseOrdinal(func)
+            dll_key = dll or "unknown.dll"
+            ordinal = self._parseOrdinal(dll_key, func)
             if ordinal is not None:
                 thunk_value = ordinal_flag | ordinal
             else:
-                thunk_value = sec_vaddr + hint_off + hint_offsets[(dll or "unknown.dll", func)]
+                thunk_value = sec_vaddr + hint_off + hint_offsets[(dll_key, func)]
             if not self._writeThunkAt(regions, rva, thunk_value, ptr_size):
                 self._warn("import thunk 0x%x (%s.%s) outside all sections", rva, dll, func)
 
