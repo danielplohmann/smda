@@ -251,6 +251,29 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         synthesized_names = {entry.name for imported in parsed.imports for entry in imported.entries if entry.name}
         assert {"AAASynthFuncA", "AAASynthFuncB"} <= synthesized_names
 
+    def testAnImportNamedLikeAnOrdinalIsNotRewrittenIntoOne(self):
+        """A PE imports by name or by ordinal; the report keeps only the string."""
+        report = SmdaReport.fromDict(self.pe_report.toDict())
+        imports = report.xmetadata["imported_functions"]
+        base_slot = next(int(k) for k in imports)
+        # "#1" cannot have come from the import parsers for this DLL: they write "#N"
+        # only when no table resolves it, and ws2_32.dll ordinal 1 resolves to accept.
+        # "#99999" is past a WORD, so it never came from an import table either. Only
+        # "#4000" is a real ordinal - in range, and resolving nowhere.
+        report.xmetadata["imported_functions"] = {
+            str(base_slot): ("ws2_32.dll", "#1"),
+            str(base_slot + 0x10): ("ws2_32.dll", "#4000"),
+            str(base_slot + 0x20): ("ws2_32.dll", "#99999"),
+        }
+        parsed = lief.parse(report.synthesizeBinary(output_format=FORMAT_PE))
+        entries = [entry for imported in parsed.imports for entry in imported.entries]
+        by_name = {entry.name for entry in entries if entry.name}
+        by_ordinal = {entry.ordinal for entry in entries if not entry.name}
+        self.assertIn("#1", by_name)
+        self.assertIn("#99999", by_name)
+        self.assertNotIn(1, by_ordinal)
+        self.assertIn(4000, by_ordinal)
+
     def testElfSynthesisFromSections(self):
         report = self.elf_report
         synthesized = report.synthesizeBinary()
@@ -387,7 +410,7 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
             return True
 
         synthesizer._writeThunkAt = _record
-        synthesizer._parseOrdinal = lambda func: 1
+        synthesizer._parseOrdinal = lambda dll, func: 1
         # two slots of one DLL a megabyte apart: only the real slots may be written
         far = 0x1000 + 0x100000
         synthesizer._writeThunks(
@@ -415,7 +438,7 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
             return True
 
         synthesizer._writeThunkAt = _record
-        synthesizer._parseOrdinal = lambda func: 1
+        synthesizer._parseOrdinal = lambda dll, func: 1
         synthesizer._writeThunks(
             [],
             {0x1000: ("kernel32.dll", "a"), 0x100C: ("kernel32.dll", "b")},
