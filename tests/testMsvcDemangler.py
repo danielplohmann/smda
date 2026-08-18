@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 577
+CORPUS_NAMES_UNDERSTOOD = 609
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -377,6 +377,112 @@ FINAL_FORMS = [
     ("?f@@YAXP6ZHXZ@Z", "void __cdecl f(int ( *)(void))"),
     ("?f@@YAXP8S@@AZXXZ@Z", "void __cdecl f(void ( S::*)(void))"),
 ]
+
+
+THUNKS_AND_ADDRESSES = [
+    # the address of a symbol, read in the template's own back-reference scope
+    ("??$f@$1?x@@3HA@@YAXXZ", "void __cdecl f<&int x>(void)"),
+    ("??$f@VBar@@$1?x@0@3HA@@YAXXZ", "void __cdecl f<class Bar, &int f::x>(void)"),
+    ("??$f@$E?x@@3HA@@YAXXZ", "void __cdecl f<int x>(void)"),
+    # a thunk that adjusts "this" on the way through
+    (
+        "??_EBase@@G3AEPAXI@Z",
+        "[thunk]: private: void * __thiscall Base::`vector deleting dtor'`adjustor{4}'(unsigned int)",
+    ),
+    (
+        "??_EDerived@@$4PPPPPPPM@A@EAAPEAXI@Z",
+        "[thunk]: public: virtual void * __cdecl Derived::`vector deleting dtor'`vtordisp{-4, 0}'(unsigned int)",
+    ),
+    # a vcall names no access and carries no parameters
+    ("??_9Base@@$B7AA", "[thunk]: __cdecl Base::`vcall'{8, {flat}}"),
+]
+
+
+COMPLETING_FORMS = [
+    # a literal is spelled by its contents, which the length counts with the terminator
+    ("??_C@_02PCEFGMJL@hi?$AA@", '"hi"'),
+    ("??_C@_00CNPNBAHC@?$AA@", '""'),
+    ("??_C@_0M@LACCLLLM@Hello?5world?$AA@", '"Hello world"'),
+    # the rest of the RTTI family names a class, and the descriptor says where the base sits
+    ("??_R1A@?0A@EA@Base@@8", "Base::`RTTI Base Class Descriptor at (0, -1, 0, 64)'"),
+    ("??_R2Base@@8", "Base::`RTTI Base Class Array'"),
+    ("??_R3Base@@8", "Base::`RTTI Class Hierarchy Descriptor'"),
+    ("??_R4Base@@6B@", "const Base::`RTTI Complete Object Locator'"),
+    # a conversion operator is named by the type it converts to, which it writes as its return
+    ("??BBase@@QEAAHXZ", "public: int __cdecl Base::operator int(void)"),
+    ("??BFoo@@QBEPAHXZ", "public: int * __thiscall Foo::operator int *(void) const"),
+    # a placeholder the compiler writes where a type would go
+    ("?f@@YA?A?<decltype-auto>@@XZ", "<decltype-auto> __cdecl f(void)"),
+    # a name replaced by a hash of itself, and what may follow it
+    ("??@a6a285da2eea70dba6b578022be61d81@", "??@a6a285da2eea70dba6b578022be61d81@"),
+    ("??@a6a285da2eea70dba6b578022be61d81@asdf", "??@a6a285da2eea70dba6b578022be61d81@"),
+    # a guard, and what runs for a static with a lifetime
+    ("??_Bx@@51", "x::`local static guard'{2}"),
+    ("??__Jx@@51", "x::`local static thread guard'{2}"),
+    ("??__E?i@C@@0HA@@YAXXZ", "void __cdecl `dynamic initializer for `private: static int C::i''(void)"),
+]
+
+
+COMPLETING_DECLINED = [
+    "??_R0?AUBase@@@8X",  # a type descriptor ends where it ends
+    "??$f@$X@@YAXXZ",  # "$" introduces one of a fixed set, and "X" is not among them
+    "??_R2Base@@8X",  # nor does the rest of the RTTI family carry anything after its storage
+    "??_Bx@@51X",  # nor a guard
+    "??__EFoo@@3HA",  # what runs code takes a signature, never a storage class
+    "??_C@_12ABCDEFGH@hi?$AA@",  # a wide literal spells its bytes differently
+    "??_C@_02ABCDEFGH@h?$Qi?$AA@",  # a byte is written as two nibbles from "A" to "P"
+    "??_C@_02ABCDEFGH@h?zi?$AA@",  # and an escape names one of ten characters
+    "??_C@_05ABCDEFGH@hi?$AA@",  # the length counts the bytes, terminator included
+    "??_C@_02ABCDEFGH@hi?$AA@X",  # and nothing follows the literal
+    "??_9Base@@$RB7AA",  # a thunk through a virtual base names an access this does not
+    # a conversion operator is named by its return, which a template argument list displaces
+    "??$?BH@S@@QEAAAEAU0@H@Z",
+    "??_7Base@@3HA",  # a vftable is written with its own storage class and no other
+    "??__EFoo@@51",  # and what runs code takes no storage class at all, guard or otherwise
+]
+
+
+class MsvcCompletingFormsTestSuite(unittest.TestCase):
+    def test_shapes_the_completing_forms_do_not_allow_are_refused(self):
+        for mangled in COMPLETING_DECLINED:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+    def test_the_completing_forms_match_the_reference(self):
+        for mangled, expected in COMPLETING_FORMS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_the_whole_reference_corpus_is_understood(self):
+        corpus = [
+            line.rstrip("\n").split("\t")
+            for line in (Path(__file__).parent / "msvc_reference_corpus.txt").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#") and "\t" in line
+        ]
+        self.assertEqual(len(corpus), UNIQUE_CORPUS_NAMES)
+        for mangled, expected in corpus:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+
+class MsvcThunkTestSuite(unittest.TestCase):
+    def test_thunks_and_addresses_match_the_reference(self):
+        for mangled, expected in THUNKS_AND_ADDRESSES:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_a_vcall_and_its_thunk_require_each_other(self):
+        for mangled in (
+            "??0f9Base@@$B7AA",
+            "??_9Base10@@YAADMXZ",
+            # the reference reads these; this declines them, as it does elsewhere, rather
+            # than take a digit for a convention or ignore bytes after the name
+            "??_9Base@@$B7A1",
+            "??_9Base@@$B7AAX??_EDerived@@$4A@A@EA1PEAXI@Z",
+            "??_EDerived@@$4A@A@EAAPEAXI@ZX",
+        ):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcFinalFormsTestSuite(unittest.TestCase):
