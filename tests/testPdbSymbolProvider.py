@@ -38,7 +38,7 @@ MSVC_PUBLIC_DEMANGLED = "int __cdecl text::measure(char const *, unsigned int)"
 MSVC_PUBLIC_RVA = 0x1064
 # shapes the demangler declines: a lambda, an RTTI descriptor, and a name truncated past
 # its parameter list
-MSVC_DECLINED = ("??R<lambda_1>@@QEBA@XZ", "??_R0?AVexception@std@@@8", "?a2@@YAHX")
+MSVC_DECLINED = ("?x@?1??f@@YAHXZ@51", "??_R0?AVexception@std@@@8", "?a2@@YAHX")
 # a name scoped inside a function reads, which is what a PDB's statics and lambdas look like
 MSVC_LOCAL_SCOPE = "?x@?1??f@@YAHXZ@4HA"
 MSVC_LOCAL_SCOPE_DEMANGLED = "int `int __cdecl f(void)'::`2'::x"
