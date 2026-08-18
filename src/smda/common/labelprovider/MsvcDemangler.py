@@ -132,8 +132,29 @@ _OPERATORS = {
 # decline instead of being read as one of these
 # what runs around a namespace-scope object with a non-trivial lifetime
 _DYNAMIC_INITIALISERS = {"E": "dynamic initializer for", "F": "dynamic atexit destructor for"}
+# what guards a function-local static, and the storage class both forms are written with
+_GUARDS = {"B": "`local static guard'", "__J": "`local static thread guard'"}
+# what a string literal's escapes stand for, and how the reference spells a byte back
+_LITERAL_ESCAPES = {
+    "0": ",",
+    "1": "/",
+    "2": "\\",
+    "3": ":",
+    "4": ".",
+    "5": " ",
+    "6": "\n",
+    "7": "\t",
+    "8": "'",
+    "9": "-",
+}
+_LITERAL_SPELLINGS = {"\\": "\\\\", "\n": "\\n", "\t": "\\t", "'": "\\'", "\0": "\\0", '"': '\\"'}
+_RTTI_NAMES = {
+    "2": "`RTTI Base Class Array'",
+    "3": "`RTTI Class Hierarchy Descriptor'",
+    "4": "`RTTI Complete Object Locator'",
+}
 _DATA_SPECIAL_OPERATORS = frozenset("78S")
-_UNMODELLED_DATA_SPECIAL_OPERATORS = frozenset("AB")
+_UNMODELLED_DATA_SPECIAL_OPERATORS = frozenset("A")
 _EXTENDED_OPERATORS = {
     "0": "operator/=",
     "1": "operator%=",
@@ -296,11 +317,24 @@ def _qualify(node, quals):
     return _apply_quals(node, tuple(qual for qual in quals if qual not in spelled))
 
 
-class _Structor:
-    """A constructor or destructor: its spelling comes from the class it belongs to."""
+class _Conversion:
+    """A conversion operator, whose name is the type it converts to.
 
-    def __init__(self, is_destructor):
+    That type is written in the return slot, which is read long after the name, so the
+    spelling is finished once the signature has been.
+    """
+
+
+class _Structor:
+    """A constructor or destructor: its spelling comes from the class it belongs to.
+
+    It may itself be a template, in which case the arguments follow the class name it
+    borrows: "??$?0N@?$Foo@H@@QEAA@N@Z" is Foo<int>::Foo<int><double>.
+    """
+
+    def __init__(self, is_destructor, arguments=""):
         self.is_destructor = is_destructor
+        self.arguments = arguments
 
 
 class _Bail(Exception):
@@ -406,6 +440,10 @@ class _Demangler:
             while not self.eat("@"):
                 if self.eof():
                     raise _Bail
+                if self.text.startswith("$S", self.pos):
+                    # a third spelling of the empty pack
+                    self.pos += 2
+                    continue
                 if self.text.startswith("$$V", self.pos) and not self.text.startswith("$$$V", self.pos):
                     # the other spelling of an empty pack
                     self.pos += 3
@@ -452,6 +490,11 @@ class _Demangler:
                     # a template whose name is an operator: "??$?HH@S@@" is operator+<int>
                     self.take()
                     operator, _ = self.operatorName()
+                    if isinstance(operator, _Structor):
+                        # a constructor may be a template too, and its arguments follow the
+                        # class name it borrows rather than replacing it
+                        arguments = self.templateInstantiation(operator="")
+                        return _Structor(operator.is_destructor, arguments), "func"
                     if not isinstance(operator, str):
                         raise _Bail
                 rendered = self.templateInstantiation(operator=operator)
@@ -490,7 +533,22 @@ class _Demangler:
         self.expect("?")
         return f"`{self.nestedSymbol()}'::`{spelled}'"
 
-    def nestedSymbol(self):
+    def namesADataSymbol(self):
+        """Whether what follows is a data symbol rather than a function, without reading it.
+
+        Only the storage class tells the two apart, and it comes after the whole name, so
+        this walks a throwaway cursor to it and reports what it found.
+        """
+        probe = _Demangler("?" + self.text[self.pos :])
+        probe.nested = True
+        try:
+            probe.expect("?")
+            probe.qualifiedName()
+        except (_Bail, RecursionError):
+            return False
+        return not probe.eof() and probe.peek() in _DATA_ACCESS
+
+    def nestedSymbol(self, leading_question=True):
         """A complete decorated name written inside another one.
 
         It continues this name's back-reference table rather than opening its own, so
@@ -499,15 +557,20 @@ class _Demangler:
         symbol, so its own leading template is not recorded either, and it ends where it
         ends rather than at the end of the text.
         """
-        inner = _Demangler(self.text)
-        inner.pos = self.pos
+        if leading_question:
+            inner = _Demangler(self.text)
+            inner.pos = self.pos
+        else:
+            # the "?" this name would open with was spent on the code that introduced it,
+            # so it is read over a copy that has one
+            inner = _Demangler("?" + self.text[self.pos :])
         inner.nested = True
         inner.name_backrefs = self.name_backrefs
         inner.arg_backrefs = self.arg_backrefs
         inner.at_symbol_name = True
         inner.depth = self.depth
         rendered = inner.parse()
-        self.pos = inner.pos
+        self.pos = inner.pos if leading_question else self.pos + inner.pos - 1
         return rendered
 
     def anonymousNamespace(self):
@@ -539,17 +602,31 @@ class _Demangler:
         if self.eat("_"):
             if self.eat("_"):
                 code = self.peek()
+                if code == "J":
+                    self.take()
+                    return _GUARDS["__J"], "guard"
                 if code in _DYNAMIC_INITIALISERS:
                     self.take()
+                    self.requires_signature = True
                     if self.peek() == "?":
-                        # the object it runs for is named plainly, not by another special name
-                        raise _Bail
+                        # it may run for a whole symbol of its own, scopes and storage and
+                        # all: "??__E?i@C@@0HA@@YAXXZ" runs for "private: static int C::i"
+                        target = self.nestedSymbol()
+                        # the symbol it runs for is followed by the terminator its own name
+                        # would have carried, and the enclosing name still needs one
+                        self.expect("@")
+                        return f"`{_DYNAMIC_INITIALISERS[code]} `{target}''", "func"
+                    if self.namesADataSymbol():
+                        # it may run for a data symbol written without its leading "?", the
+                        # rest reading as it does for one that has it
+                        whole = self.nestedSymbol(leading_question=False)
+                        # this one leaves the single terminator the enclosing name needs
+                        return f"`{_DYNAMIC_INITIALISERS[code]} `{whole}''", "func"
                     # what it runs for is recorded, unlike a literal operator's suffix:
                     # "??__EFoo@@YAXU0@@Z" resolves its 0 to Foo
-                    self.requires_signature = True
                     target = self.identifier()
                     if not self.eat("@"):
-                        # the object may be named with scopes, and the whole of that name
+                        # a plain name may still be qualified, and the whole of that name
                         # belongs inside the quotes rather than around them
                         raise _Bail
                     self.pos -= 1
@@ -561,6 +638,28 @@ class _Demangler:
                 # the reference spells the pair as operator ""suffix
                 return f'operator ""{self.identifier()}', "func"
             code = self.take()
+            if code == "C":
+                return self.stringLiteral(), "descriptor"
+            if code == "R" and self.peek() in "1234":
+                # the rest of the RTTI family names a class rather than a type, and each
+                # is written with its own storage: "8" for these three, the vftable form
+                # for the locator. The descriptor carries where the base sits.
+                which = self.take()
+                if which == "1":
+                    at = ", ".join(str(int(self.templateInteger())) for _ in range(4))
+                    return f"`RTTI Base Class Descriptor at ({at})'", "rtti"
+                return _RTTI_NAMES[which], "data" if which == "4" else "rtti"
+            if code == "R" and self.peek() == "0":
+                # a type descriptor names the type it describes rather than a function
+                self.take()
+                described = self.rendered(self.returnType())
+                self.expect("@")
+                self.expect("8")
+                if not self.nested and not self.eof():
+                    raise _Bail
+                # the marker abuts a type that already ends in a sigil, as a declarator does
+                separator = "" if described.endswith(("*", "&")) else " "
+                return f"{described}{separator}`RTTI Type Descriptor'", "descriptor"
             name = _EXTENDED_OPERATORS.get(code)
             if name is None:
                 raise _Bail
@@ -568,10 +667,24 @@ class _Demangler:
                 raise _Bail
             if code == "9":
                 return name, "vcall"
+            if code == "B":
+                return name, "guard"
             return name, "data" if code in _DATA_SPECIAL_OPERATORS else "func"
+        if self.eat("@"):
+            # a name the compiler replaced with a hash of itself; whatever follows the hash
+            # is not part of it
+            digest = []
+            while not self.eat("@"):
+                digest.append(self.take())
+            # a further decorated name after the hash belongs to it; anything else does not
+            suffix = self.text[self.pos :] if self.text.startswith("??", self.pos) else ""
+            self.pos = len(self.text)
+            return f"??@{''.join(digest)}@{suffix}", "descriptor"
         code = self.take()
         if code in ("0", "1"):
             return _Structor(code == "1"), "func"
+        if code == "B":
+            return _Conversion(), "func"
         name = _OPERATORS.get(code)
         if name is None:
             raise _Bail
@@ -587,6 +700,9 @@ class _Demangler:
 
     def qualifiedNameBody(self):
         first, special_form = self.nameFragment(True)
+        if special_form == "descriptor":
+            # a type descriptor has read the whole name, the type it describes included
+            return first, False, special_form
         scopes = []
         while True:
             if self.eat("@"):
@@ -595,11 +711,14 @@ class _Demangler:
                 raise _Bail
             scopes.append(self.nameFragment(False)[0])
         scopes.reverse()
+        if isinstance(first, _Conversion):
+            return "::".join(scopes + ["\0conversion\0"]), False, special_form
         if isinstance(first, _Structor):
             if not scopes:
                 raise _Bail
             klass = scopes[-1]
-            first = "~" + klass if first.is_destructor else klass
+            spelled = klass + first.arguments
+            first = "~" + spelled if first.is_destructor else spelled
             return "::".join(scopes + [first]), True, special_form
         return "::".join(scopes + [first]), False, special_form
 
@@ -657,6 +776,12 @@ class _Demangler:
             # type belongs - a pointee, a template argument, a return type - and the mangler
             # writes none of those; reading them invented spellings for impossible names.
             raise _Bail
+        if char == "?" and self.peek() == "<":
+            # a placeholder the compiler writes where a type would go, named in brackets:
+            # "?A?<decltype-auto>@@" is the deduced return of a function declared with it
+            placeholder = self.identifier()
+            self.expect("@")
+            return _apply_quals(_base(placeholder), quals)
         raise _Bail
 
     def rendered(self, node, declarator=""):
@@ -891,8 +1016,9 @@ class _Demangler:
         """
         restrict = ""
         reference = ""
+        unaligned = ""
         seen = set()
-        while self.peek() in "EIGH":
+        while self.peek() in "EIGHF":
             char = self.take()
             # each of them is written at most once: "HH" is not a name
             if char in seen or (char in "GH" and seen & {"G", "H"}):
@@ -900,12 +1026,14 @@ class _Demangler:
             seen.add(char)
             if char == "I":
                 restrict = " __restrict"
+            elif char == "F":
+                unaligned = " __unaligned"
             elif char in ("G", "H"):
                 reference = " &" if char == "G" else " &&"
         qualifier = _CV.get(self.take())
         if qualifier is None:
             raise _Bail
-        return f"{qualifier}{restrict}{reference}"
+        return f"{qualifier}{unaligned}{restrict}{reference}"
 
     def parameters(self):
         """A parameter list, recording each composite parameter for later back-references.
@@ -945,6 +1073,23 @@ class _Demangler:
         # counts how many characters of the original mangling it kept, which is not spelled
         extern_c = ""
         name, has_no_return_type, special_form = self.qualifiedName()
+        if special_form == "descriptor":
+            # it is the whole name: what it describes has already been read
+            return name
+        if special_form == "rtti":
+            # these three are written with one storage class and nothing else
+            self.expect("8")
+            if not self.nested and not self.eof():
+                raise _Bail
+            return name
+        if special_form == "guard":
+            # a guard is written with one storage class and a number, which counts the
+            # static it guards within its function and is left out when it is the first
+            self.expect("5")
+            counted = self.templateInteger()
+            if not self.nested and not self.eof():
+                raise _Bail
+            return name if counted == "0" else f"{name}{{{counted}}}"
         if self.eof():
             raise _Bail
         char = self.peek()
@@ -1031,9 +1176,48 @@ class _Demangler:
             return f"{_DATA_ACCESS[char]}{self.rendered(declared, name)}"
         return extern_c + self.function(name, has_no_return_type, special_form == "vcall")
 
+    def stringLiteral(self):
+        """The literal a "??_C" name stands for, spelled the way the reference spells it.
+
+        The length counts the terminator, the eight characters after it are a hash of the
+        bytes, and the bytes themselves are written plainly or as an escape - a digit for
+        one of ten punctuation characters, or "$" and two nibbles for any byte at all.
+        """
+        self.expect("@")
+        self.expect("_")
+        if self.take() != "0":
+            # "_0" is a narrow string; the wider encodings spell their bytes differently
+            raise _Bail
+        length = int(self.templateInteger())
+        while not self.eat("@"):
+            # the hash is not spelled, but it has to be walked past
+            self.take()
+        decoded = []
+        while not self.eat("@"):
+            char = self.take()
+            if char != "?":
+                decoded.append(char)
+                continue
+            marker = self.take()
+            if marker == "$":
+                high, low = self.take(), self.take()
+                if not ("A" <= high <= "P" and "A" <= low <= "P"):
+                    raise _Bail
+                decoded.append(chr((ord(high) - 65) * 16 + ord(low) - 65))
+            elif marker in _LITERAL_ESCAPES:
+                decoded.append(_LITERAL_ESCAPES[marker])
+            else:
+                raise _Bail
+        if len(decoded) != length or (decoded and decoded[-1] != "\0"):
+            raise _Bail
+        if not self.nested and not self.eof():
+            raise _Bail
+        spelled = "".join(_LITERAL_SPELLINGS.get(char, char) for char in decoded[:-1])
+        return f'"{spelled}"'
+
     def signedDisplacement(self):
         """One of a vtordisp thunk's two displacements, which are signed and 32 bits wide."""
-        value = int(self.templateInteger())
+        value = int(self.templateInteger()) & 0xFFFFFFFF
         return value - (1 << 32) if value >= (1 << 31) else value
 
     def thunkFunction(self, name, is_vcall):
@@ -1056,11 +1240,21 @@ class _Demangler:
             if not self.nested and not self.eof():
                 raise _Bail
             return f"[thunk]: {convention} {name}{{{slot}, {{flat}}}}".replace("  ", " ")
+        if code == "R":
+            access = _VTORDISP_ACCESS.get(self.take())
+            if access is None:
+                raise _Bail
+            displacements = [self.signedDisplacement() for _ in range(4)]
+            return self.thunkBody(name, access, "vtordispex", displacements)
         access = _VTORDISP_ACCESS.get(code)
         if access is None:
             raise _Bail
         first = self.signedDisplacement()
         second = self.signedDisplacement()
+        return self.thunkBody(name, access, "vtordisp", [first, second])
+
+    def thunkBody(self, name, access, kind, displacements):
+        """The signature a vtordisp or vtordispex thunk carries, once its numbers are read."""
         self.member_cv = self.memberQualifiers()
         convention = _CALLING_CONVENTIONS.get(self.take())
         if convention is None:
@@ -1070,7 +1264,8 @@ class _Demangler:
         self.expect("Z")
         if not self.nested and not self.eof():
             raise _Bail
-        spelled = f"{name}`vtordisp{{{first}, {second}}}'"
+        written = ", ".join(str(value) for value in displacements)
+        spelled = f"{name}`{kind}{{{written}}}'"
         body = (
             f"{convention} {spelled}({params})"
             if returns is None
@@ -1125,6 +1320,10 @@ class _Demangler:
                 pieces.append("static ")
             if is_virtual:
                 pieces.append("virtual ")
+        if "\0conversion\0" in name:
+            if returns is None:
+                raise _Bail
+            name = name.replace("\0conversion\0", f"operator {self.rendered(returns)}")
         if returns is None:
             pieces.append(f"{convention} {name}({params})")
         else:
