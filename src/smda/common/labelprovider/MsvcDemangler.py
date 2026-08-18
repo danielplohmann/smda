@@ -106,6 +106,8 @@ _OPERATORS = {
 # the special names spelled with the "6" storage form. The vcall, typeof and local static
 # guard codes are data too, but take a storage class this parser does not model, so they
 # decline instead of being read as one of these
+# what runs around a namespace-scope object with a non-trivial lifetime
+_DYNAMIC_INITIALISERS = {"E": "dynamic initializer for", "F": "dynamic atexit destructor for"}
 _DATA_SPECIAL_OPERATORS = frozenset("78S")
 _UNMODELLED_DATA_SPECIAL_OPERATORS = frozenset("9AB")
 _EXTENDED_OPERATORS = {
@@ -192,7 +194,9 @@ def _render(node, declarator=""):
         return node[1] + ("" if abuts else " ") + declarator
     if kind == "ind":
         token = node[1] + " ".join(node[2])
-        nested_function = "(" in declarator and not declarator.startswith(("*", "&"))
+        # a nested *function* declarator is separated from the sigil - "int * (__cdecl *)()"
+        # - while a parenthesised pointer declarator abuts it: "int (*(*a)[20])()"
+        nested_function = "(" in declarator and not declarator.startswith(("*", "&", "(*", "(&"))
         separator = " " if declarator and (node[2] or nested_function) else ""
         return _render(node[3], token + separator + declarator)
     if kind == "array":
@@ -223,6 +227,10 @@ def _apply_quals(node, quals):
     and a back-reference declines rather than accept one.
     """
     return _base(f"{node[1]} {' '.join(quals)}") if quals else node
+
+
+def _isMemberFunctionPointer(node):
+    return node[0] == "ind" and node[1].endswith("::*") and node[3][0] == "func"
 
 
 def _qualifyDeclared(node, quals):
@@ -291,6 +299,7 @@ class _Demangler:
         self.simple = True
         self.template_depth = 0
         self.at_symbol_name = True
+        self.requires_signature = False
         self.nested = False
         self.pointee_depth = 0
         self.array_element_depth = 0
@@ -362,6 +371,14 @@ class _Demangler:
             while not self.eat("@"):
                 if self.eof():
                     raise _Bail
+                if self.text.startswith("$$$V", self.pos):
+                    # an empty pack: "f<>" has an argument list and no arguments in it
+                    self.pos += 4
+                    continue
+                if self.text.startswith("$$Z", self.pos):
+                    # a pack separator, which stands between arguments and is not one
+                    self.pos += 3
+                    continue
                 args.append(self.rendered(self.type()))
             return f"{base}<{', '.join(args)}>"
         finally:
@@ -468,6 +485,18 @@ class _Demangler:
         """The operator or special name, paired with which spelling it takes."""
         if self.eat("_"):
             if self.eat("_"):
+                code = self.peek()
+                if code in _DYNAMIC_INITIALISERS:
+                    self.take()
+                    if self.peek() == "?":
+                        # the object it runs for is named plainly, not by another special name
+                        raise _Bail
+                    # what it runs for is recorded, unlike a literal operator's suffix:
+                    # "??__EFoo@@YAXU0@@Z" resolves its 0 to Foo
+                    self.requires_signature = True
+                    target = self.identifier()
+                    self.rememberName(target)
+                    return f"`{_DYNAMIC_INITIALISERS[code]} '{target}''", "func"
                 if self.take() != "K":
                     raise _Bail
                 # a user-defined literal: the identifier after the code is its suffix, and
@@ -577,10 +606,11 @@ class _Demangler:
         return text
 
     def dimension(self):
-        char = self.take()
-        if char in string.digits:
-            return int(char) + 1
-        raise _Bail
+        """A count or an extent, written the way a template argument's number is."""
+        spelled = self.templateInteger()
+        if spelled.startswith("-"):
+            raise _Bail
+        return int(spelled)
 
     def arrayType(self, quals):
         count = self.dimension()
@@ -736,9 +766,7 @@ class _Demangler:
         if has_ptr64:
             raise _Bail
         owner = self.qualifiedName()[0]
-        member_cv = _CV.get(self.take())
-        if member_cv is None:
-            raise _Bail
+        member_cv = self.memberQualifiers()
         convention = _CALLING_CONVENTIONS.get(self.take())
         if convention is None:
             raise _Bail
@@ -834,27 +862,51 @@ class _Demangler:
 
     def parse(self):
         self.expect("?")
+        # "$$J" marks a name that was mangled although it is extern "C"; the digit after it
+        # counts how many characters of the original mangling it kept, which is not spelled
+        extern_c = ""
         name, has_no_return_type, special_form = self.qualifiedName()
         if self.eof():
             raise _Bail
         char = self.peek()
+        if char == "$":
+            self.take()
+            if not self.eat("$") or self.take() != "J":
+                raise _Bail
+            digits = 0
+            while not self.eof() and self.peek() in string.digits:
+                self.take()
+                digits += 1
+            if not digits:
+                raise _Bail
+            extern_c = 'extern "C" '
+            char = self.peek()
         if char == "9":
             # a name with no signature at all: the linkage is what is being spelled
             self.take()
             if not self.nested and not self.eof():
                 raise _Bail
             return f'extern "C" {name}'
-        if (special_form == "data") != (char == "6"):
+        if (special_form == "data") != (char in "67"):
             raise _Bail
-        if char == "6":
+        if self.requires_signature and char != "Y" and char not in _FUNCTION_ACCESS:
+            # this one runs code, so it is spelled with a signature and never with storage
+            raise _Bail
+        if char in "67":
             self.take()
             qualifier = _CV.get(self.take())
             if qualifier is None:
                 raise _Bail
-            self.expect("@")
+            # a vftable may say which base it is the table for, as a qualified name of its
+            # own: "??_7A@B@@6BC@D@@@" is B::A's table for D::C
+            base = ""
+            if not self.eat("@"):
+                base = self.qualifiedName()[0]
+                self.expect("@")
             if not self.nested and not self.eof():
                 raise _Bail
-            return f"{qualifier.strip()} {name}".strip()
+            spelled = f"{qualifier.strip()} {name}".strip()
+            return f"{spelled}{{for `{base}'}}" if base else spelled
         if char in _DATA_ACCESS:
             self.take()
             self.simple = True
@@ -881,9 +933,20 @@ class _Demangler:
                 raise _Bail
             if not self.nested and not self.eof():
                 raise _Bail
-            declared = _qualifyDeclared(declared, member_quals)
+            if member_quals and _isMemberFunctionPointer(declared):
+                # a member function keeps its qualifier after the parameters, not on what
+                # the pointer points at, so this one joins the function rather than the type
+                function = declared[3]
+                trailing_cv = "".join(f" {qual}" for qual in member_quals)
+                declared = _indirection(
+                    declared[1],
+                    declared[2],
+                    _function(function[1], function[2], function[3], function[4] + trailing_cv),
+                )
+            else:
+                declared = _qualifyDeclared(declared, member_quals)
             return f"{_DATA_ACCESS[char]}{self.rendered(declared, name)}"
-        return self.function(name, has_no_return_type)
+        return extern_c + self.function(name, has_no_return_type)
 
     def function(self, name, has_no_return_type):
         access_char = self.take()

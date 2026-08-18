@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 527
+CORPUS_NAMES_UNDERSTOOD = 548
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -321,6 +321,48 @@ MEMBER_DATA_POINTERS = [
     ("?m@@3PRfoo@@DR1@", "char const foo::*m"),
     ("?m@@3PQfoo@@HR1@", "int const foo::*m"),
 ]
+
+
+LATER_FORMS = [
+    # a pack separator and an empty pack stand between arguments without being one
+    ("??$f@H$$ZH@@YAXXZ", "void __cdecl f<int, int>(void)"),
+    ("??$f@$$$V@@YAXXZ", "void __cdecl f<>(void)"),
+    # an extent is written the way a template argument's number is
+    ("?i@@3PAY0BE@HA", "int (*i)[20]"),
+    # what runs around an object with a non-trivial lifetime, whose name is recorded
+    ("??__EFoo@@YAXXZ", "void __cdecl `dynamic initializer for 'Foo''(void)"),
+    ("??__FFoo@@YAXXZ", "void __cdecl `dynamic atexit destructor for 'Foo''(void)"),
+    ("??__EFoo@@YAXU0@@Z", "void __cdecl `dynamic initializer for 'Foo''(struct Foo)"),
+    # a name mangled although it is extern "C"
+    ("?overloaded_fn@@$$J0YAXXZ", 'extern "C" void __cdecl overloaded_fn(void)'),
+    # a vftable may say which base it is the table for
+    ("??_7A@B@@6BC@D@@@", "const B::A::`vftable'{for `D::C'}"),
+    ("??_8A@B@@7BC@D@@@", "const B::A::`vbtable'{for `D::C'}"),
+    # a member function pointer keeps a data symbol's qualifier after its parameters
+    ("?p@@3P8B@@EAA?CHXZES1@", "int volatile (__cdecl B::*p)(void) volatile"),
+    # a parenthesised pointer declarator abuts the sigil; a function declarator does not
+    ("?FunArr@@3PAY0BE@P6AHHH@ZA", "int (__cdecl *(*FunArr)[20])(int, int)"),
+    ("?f@@YAP6AHXZXZ", "int (__cdecl * __cdecl f(void))(void)"),
+]
+
+
+class MsvcLaterFormsTestSuite(unittest.TestCase):
+    def test_the_later_forms_match_the_reference(self):
+        for mangled, expected in LATER_FORMS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_the_shapes_these_forms_do_not_allow_are_refused(self):
+        for mangled in (
+            "??__E?i@C@0HA@@YAXXZ",  # what it runs for is named plainly, not by a special name
+            "??__EFooTypeWithQuals@@3U?$S@$$A8@@GBAHXZ@1@A",  # it runs code, so it takes a signature
+            "?overloaded_fn@@$$JYAXXZ",  # the marker counts characters, so a digit belongs here
+            "??__K_deg@@YAXU0@@Z",  # a literal operator's suffix is not recorded, so 0 names nothing
+            "?i@@3PAY0?0HA",  # an array does not have a negative extent
+            "??_7A@@6B?0@@",  # nor is a base named by anything but a name
+        ):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcMemberDataPointerTestSuite(unittest.TestCase):
