@@ -371,6 +371,10 @@ class _Demangler:
             while not self.eat("@"):
                 if self.eof():
                     raise _Bail
+                if self.text.startswith("$$V", self.pos) and not self.text.startswith("$$$V", self.pos):
+                    # the other spelling of an empty pack
+                    self.pos += 3
+                    continue
                 if self.text.startswith("$$$V", self.pos):
                     # an empty pack: "f<>" has an argument list and no arguments in it
                     self.pos += 4
@@ -659,6 +663,10 @@ class _Demangler:
             return _base(self.templateInteger())
         if not self.eat("$"):
             raise _Bail
+        if self.eat("Y"):
+            # an alias template is named rather than described
+            self.simple = False
+            return _base(self.qualifiedName()[0])
         kind = self.take()
         if kind == "Q":
             return self.indirection(quals, "&&")
@@ -899,10 +907,10 @@ class _Demangler:
                 raise _Bail
             # a vftable may say which base it is the table for, as a qualified name of its
             # own: "??_7A@B@@6BC@D@@@" is B::A's table for D::C
-            base = ""
-            if not self.eat("@"):
-                base = self.qualifiedName()[0]
-                self.expect("@")
+            bases = []
+            while not self.eat("@"):
+                bases.append(self.qualifiedName()[0])
+            base = "'s `".join(bases)
             if not self.nested and not self.eof():
                 raise _Bail
             spelled = f"{qualifier.strip()} {name}".strip()
@@ -914,12 +922,15 @@ class _Demangler:
             # a pointer into a class spells its own storage the long way, below; the short
             # forms are for everything else
             points_into_class = declared[0] == "ind" and declared[1].endswith("::*")
+            # __ptr64 and __restrict stand in front of the qualifier, and only where
+            # something is pointed at: "?s@@3PEAHEA" is a name and "?s@@3HEA" is not
             trailing = self.take()
-            if trailing == "E":
-                # __ptr64 stands in front of the qualifier, and only where something is
-                # pointed at: "?s@@3PEAHEA" is a name and "?s@@3HEA" is not
+            restrict = ()
+            while trailing in ("E", "I"):
                 if declared[0] != "ind":
                     raise _Bail
+                if trailing == "I":
+                    restrict = ("__restrict",)
                 trailing = self.take()
             if trailing in _MEMBER_DATA_QUALS:
                 # a pointer to data member repeats the member's qualifier here and names its
@@ -933,6 +944,10 @@ class _Demangler:
                 raise _Bail
             if not self.nested and not self.eof():
                 raise _Bail
+            if restrict and "__restrict" not in declared[2]:
+                # it qualifies the pointer, not what is pointed at, and is written once
+                # however many times it is spelled: "?h3@@3QIAHIA" is "int *const __restrict"
+                declared = _indirection(declared[1], declared[2] + restrict, declared[3])
             if member_quals and _isMemberFunctionPointer(declared):
                 # a member function keeps its qualifier after the parameters, not on what
                 # the pointer points at, so this one joins the function rather than the type
@@ -958,10 +973,7 @@ class _Demangler:
                 raise _Bail
             access, is_static, is_virtual = entry
             if not is_static:
-                self.eat("E")
-                if _CV.get(self.peek()) is None:
-                    raise _Bail
-                self.member_cv = _CV[self.take()]
+                self.member_cv = self.memberQualifiers()
             else:
                 self.member_cv = ""
         convention = _CALLING_CONVENTIONS.get(self.take())

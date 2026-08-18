@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 548
+CORPUS_NAMES_UNDERSTOOD = 558
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -344,6 +344,29 @@ LATER_FORMS = [
     ("?FunArr@@3PAY0BE@P6AHHH@ZA", "int (__cdecl *(*FunArr)[20])(int, int)"),
     ("?f@@YAP6AHXZXZ", "int (__cdecl * __cdecl f(void))(void)"),
 ]
+
+
+LATEST_FORMS = [
+    # a second spelling of the empty pack, and an alias template named rather than described
+    ("??$templ_fun_with_ty_pack@$$V@@YAXXZ", "void __cdecl templ_fun_with_ty_pack<>(void)"),
+    ("??$f@$$YAliasA@PR20047@@@PR20047@@YAXXZ", "void __cdecl PR20047::f<PR20047::AliasA>(void)"),
+    # a vftable may name more than one base
+    ("??_7A@B@@6BC@D@@E@F@@@", "const B::A::`vftable'{for `D::C's `F::E'}"),
+    # __restrict qualifies a member function, next to its reference qualifier
+    ("?foo@A@PR19361@@QIGAEXXZ", "public: void __thiscall PR19361::A::foo(void) __restrict &"),
+    # and on a data symbol it qualifies the pointer, once however often it is spelled
+    ("?h3@@3QAHIA", "int *const __restrict h3"),
+    ("?h3@@3QIAHA", "int *const __restrict h3"),
+    ("?h3@@3QIAHIA", "int *const __restrict h3"),
+    ("?h3@@3PAHIA", "int *__restrict h3"),
+]
+
+
+class MsvcLatestFormsTestSuite(unittest.TestCase):
+    def test_the_latest_forms_match_the_reference(self):
+        for mangled, expected in LATEST_FORMS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
 
 
 class MsvcLaterFormsTestSuite(unittest.TestCase):
