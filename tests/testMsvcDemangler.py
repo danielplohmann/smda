@@ -78,6 +78,11 @@ DECLINED = [
     "??0@@QAE@XZ",  # constructor with no class to name it after
     "?f@@YAX_Y@Z",  # unknown extended basic type
     "?f@@YAX$$CZ@Z",  # $$C without a qualifier
+    # a byte the calling-convention table does not hold. The reference spells an unknown one
+    # with nothing at all rather than refusing it, so declining here is deliberate: a
+    # convention silently dropped from a thunk's signature is not a name worth reporting
+    "??_EDerived@@$4PPPPPPPM@A@EA$PEAXI@Z",
+    "?f@A@simple@@$R477PPPPPPPM@7A$XXZ",
     "?f@@YAX$$A6ZXZ@Z",  # function type argument with an unknown calling convention
     "??_7type_info@@6Z@",  # vftable with an unknown qualifier
     "??_7type_info@@6B@X",  # vftable with trailing bytes
@@ -676,6 +681,76 @@ class MsvcBackReferenceTestSuite(unittest.TestCase):
         # the two refusals above are positional, not a retreat from these forms
         self.assertEqual(demangle_msvc_symbol("?f@@YAXADPAD@Z"), "void __cdecl f(char *const volatile &)")
         self.assertEqual(demangle_msvc_symbol("?h@@YAXPAH0@Z"), "void __cdecl h(int *, int *)")
+
+
+# Each rule below was settled by probing llvm-undname directly, because the reference corpus
+# carries no name that exercises it.
+PROBED_RULES = [
+    # an attribute-spelled calling convention carries a space of its own in front of a
+    # declarator, where __cdecl and __vectorcall carry only the separator
+    ("?j@@3P6SHH@ZA", "int (__attribute__((__swiftcall__))  *j)(int)"),
+    ("?g@@YAP6SHH@ZXZ", "int (__attribute__((__swiftcall__))  * __cdecl g(void))(int)"),
+    ("?memptrtofun3@@3P8B@@EAWXXZEQ1@", "void (__attribute__((__swiftasynccall__))  B::*memptrtofun3)(void)"),
+    ("?swift_func@@YSXXZ", "void __attribute__((__swiftcall__)) swift_func(void)"),
+    # a convention spelled with nothing leaves no gap behind it either
+    ("??0foo@@QAV@XZ", "public: foo::foo(void)"),
+    ("??1foo@@QEAZ@XZ", "public: foo::~foo(void)"),
+    # a member function's modifiers are written __ptr64, __restrict, __unaligned, then a
+    # reference qualifier, and are spelled back in that same order
+    ("??0foo@@QEIFAA@XZ", "public: __cdecl foo::foo(void) __restrict __unaligned"),
+    ("??0foo@@QEGAA@XZ", "public: __cdecl foo::foo(void) &"),
+    ("??0foo@@QFGAA@XZ", "public: __cdecl foo::foo(void) __unaligned &"),
+    # a vcall is the slot it dispatches through, written with no qualifier and no convention
+    ("??_9Base@@$B7AA", "[thunk]: __cdecl Base::`vcall'{8, {flat}}"),
+    # an operator name ending in "()" is a name rather than a parameter list, so the sigil
+    # in front of it abuts as it does any other declarator
+    ("??RBasy@@3ABHB", "int const &Basy::operator()"),
+    ("??Rmemptrtofun6@@3P8B@@EAA?BHXZEQ1@", "int const (__cdecl B::*memptrtofun6::operator())(void)"),
+    # "$$B" says a type is written as it stands rather than as a parameter would decay it
+    ("??0?$C@$$BH@@QAE@XZ", "public: __thiscall C<int>::C<int>(void)"),
+    ("??0?$C@$$BY04H@@QAE@XZ", "public: __thiscall C<int[5]>::C<int[5]>(void)"),
+    # a "::*" deep inside a rendered parameter is not the declarator's own, so the enclosing
+    # signature a local scope carries does not change how that scope's name is spaced
+    ("?g@?1??f@@YAXP8Owner@@AEXXZ@Z@YVXXZ", "void `void __cdecl f(void (__thiscall Owner::*)(void))'::`2'::g(void)"),
+    ("?g@?1??f@@YAXH@Z@YVXXZ", "void `void __cdecl f(int)'::`2'::g(void)"),
+    ("??_R1BA@?0A@EA@Base@@8", "Base::`RTTI Base Class Descriptor at (16, -1, 0, 64)'"),
+    ("??__FFoo@@YAXXZ", "void __cdecl `dynamic atexit destructor for 'Foo''(void)"),
+]
+PROBED_DECLINED = [
+    "??0foo@@QIEAA@XZ",  # the modifiers are written in one order, and each at most once
+    "??0foo@@QEFIAA@XZ",
+    "??0foo@@QGFAA@XZ",
+    "??0foo@@QGIAA@XZ",
+    "??0foo@@QEGHAA@XZ",
+    "??_9Base@@$B7DA",  # a vcall carries neither a qualifier nor a convention of its own
+    "??_9Base@@$B7FAA",
+    "??_9Base?h1@@3QAHA",  # ... and it is never spelled with storage
+    "??BBa@@3HA",  # a conversion operator reads what it converts to from its return slot
+    "?f@@YAX$$BY01H@Z",  # "$$B" stands where an argument stands and nowhere else
+    "?f@@YAXQAY04$$BH@Z",
+    "??0?$C@$$B6AXXZ@@QAE@XZ",  # ... and never over a function type
+    "??0?$C@$$BY04$$BH@@QAE@XZ",  # ... nor nested inside another argument
+    "??0?$C@$$BY04$04$$CBH@@QAE@XZ",  # an integer is an argument, not an array's element
+    "??0?$C@$$BYA@H@@QAE@XZ",  # an array of no dimensions is not a type
+    "?f@@YAXQF6AXXZ@Z",  # no modifier stands in front of a function type
+    "?m@@3RF8B@@EAAHXZEQ1@",
+    "?m@@3PE8B@@EAAHXZEQ1@",
+    "??_R1A@4?0A@EA@Base@@8",  # how far the table reaches and its flags are not negative
+    "??_R1A@1A@?0A@EA@Base@@8",
+    "??__F1Foo@@YAXXZ",  # a digit there stands for an earlier name, and there is none
+]
+
+
+class MsvcProbedRuleTestSuite(unittest.TestCase):
+    def test_probed_rules_spell_names_the_way_the_reference_does(self):
+        for mangled, expected in PROBED_RULES:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_shapes_those_rules_forbid_are_refused(self):
+        for mangled in PROBED_DECLINED:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcDemanglerTestSuite(unittest.TestCase):

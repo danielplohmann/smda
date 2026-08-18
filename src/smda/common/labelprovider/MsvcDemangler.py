@@ -218,7 +218,7 @@ def _function(convention, params, returns, member_cv=""):
     return ("func", convention, params, returns, member_cv)
 
 
-def _render(node, declarator=""):
+def _render(node, declarator="", declarator_is_function=False):
     """Spell a type around a declarator, the way C nests one inside the other.
 
     A pointer or array binds to the declarator built so far, and a name therefore ends up
@@ -241,7 +241,7 @@ def _render(node, declarator=""):
         token = node[1] + " ".join(node[2])
         # a nested *function* declarator is separated from the sigil - "int * (__cdecl *)()"
         # - while a parenthesised pointer declarator abuts it: "int (*(*a)[20])()"
-        nested_function = "(" in declarator and not declarator.startswith(("*", "&", "(*", "(&"))
+        nested_function = declarator_is_function and not declarator.startswith(("*", "&", "(*", "(&"))
         separator = " " if declarator and not declarator.startswith("[") and (node[2] or nested_function) else ""
         return _render(node[3], token + separator + declarator)
     if kind == "array":
@@ -249,17 +249,25 @@ def _render(node, declarator=""):
             declarator = f"({declarator})"
         return _render(node[2], declarator + node[1])
     convention, params, returns, member_cv = node[1], node[2], node[3], node[4]
-    if not convention and not declarator.startswith(("*", "&")) and "::*" not in declarator:
+    if not convention and not declarator.startswith(("*", "&")) and not _MEMBER_POINTER_RE.match(declarator):
         # a convention spelled with nothing leaves a named declarator alone, while a pointer
         # keeps its parentheses and the space the convention would have filled: "int ( *)()"
-        return _render(returns, f"{declarator}({params}){member_cv}")
+        return _render(returns, f"{declarator}({params}){member_cv}", True)
     # a member-pointer declarator is "Owner::*", possibly qualified; the test is anchored so
     # that a nested type's own "::*" - which a rendered parameter may hold - does not count
     if declarator.startswith(("*", "&")) or _MEMBER_POINTER_RE.match(declarator):
-        declarator = f"({convention} {declarator})"
+        # an attribute-spelled convention carries a space of its own here, so a pointer to a
+        # __swiftcall function reads "int (__attribute__((__swiftcall__))  *j)(int)"
+        gap = "  " if convention.startswith("__attribute__") else " "
+        declarator = f"({convention}{gap}{declarator})"
     else:
         declarator = f"{convention} {declarator}" if declarator else convention
-    return _render(returns, f"{declarator}({params}){member_cv}")
+    return _render(returns, f"{declarator}({params}){member_cv}", True)
+
+
+def _spelled_after(convention, text):
+    """Join a calling convention to what follows it, skipping the ones spelled with nothing."""
+    return f"{convention} {text}" if convention else text
 
 
 def _merge(left, right):
@@ -365,6 +373,8 @@ class _Demangler:
         self.nested = False
         self.pointee_depth = 0
         self.array_element_depth = 0
+        # set only while the next type read stands directly as a template argument
+        self.at_argument = False
         self.member_cv = ""
         self.depth = 0
         self.max_render = 8 * len(mangled) + 256
@@ -456,6 +466,7 @@ class _Demangler:
                     # a pack separator, which stands between arguments and is not one
                     self.pos += 3
                     continue
+                self.at_argument = True
                 args.append(self.rendered(self.type()))
             return f"{base}<{', '.join(args)}>"
         finally:
@@ -624,6 +635,9 @@ class _Demangler:
                         return f"`{_DYNAMIC_INITIALISERS[code]} `{whole}''", "func"
                     # what it runs for is recorded, unlike a literal operator's suffix:
                     # "??__EFoo@@YAXU0@@Z" resolves its 0 to Foo
+                    if self.peek().isdigit():
+                        # a digit there stands for an earlier name, and there is none
+                        raise _Bail
                     target = self.identifier()
                     if not self.eat("@"):
                         # a plain name may still be qualified, and the whole of that name
@@ -646,7 +660,12 @@ class _Demangler:
                 # for the locator. The descriptor carries where the base sits.
                 which = self.take()
                 if which == "1":
-                    at = ", ".join(str(int(self.templateInteger())) for _ in range(4))
+                    written = [self.templateInteger() for _ in range(4)]
+                    # where the base sits may be negative, but how far the table reaches and
+                    # what it is flagged with may not
+                    if any(value.startswith("-") for value in written[2:]):
+                        raise _Bail
+                    at = ", ".join(str(int(value)) for value in written)
                     return f"`RTTI Base Class Descriptor at ({at})'", "rtti"
                 return _RTTI_NAMES[which], "data" if which == "4" else "rtti"
             if code == "R" and self.peek() == "0":
@@ -666,6 +685,9 @@ class _Demangler:
             if code in _UNMODELLED_DATA_SPECIAL_OPERATORS:
                 raise _Bail
             if code == "9":
+                # it dispatches through a slot, so it is spelled with that and never with
+                # storage: "??_9Base@@3QAHA" is not a name
+                self.requires_signature = True
                 return name, "vcall"
             if code == "B":
                 return name, "guard"
@@ -684,6 +706,9 @@ class _Demangler:
         if code in ("0", "1"):
             return _Structor(code == "1"), "func"
         if code == "B":
+            # what it converts to is read from the return slot, so it is spelled with a
+            # signature and never with storage
+            self.requires_signature = True
             return _Conversion(), "func"
         name = _OPERATORS.get(code)
         if name is None:
@@ -726,12 +751,13 @@ class _Demangler:
         self.depth += 1
         if self.depth > self.MAX_DEPTH:
             raise _Bail
+        at_argument, self.at_argument = self.at_argument, False
         try:
-            return self.typeBody(quals)
+            return self.typeBody(quals, at_argument)
         finally:
             self.depth -= 1
 
-    def typeBody(self, quals):
+    def typeBody(self, quals, at_argument=False):
         """One type, qualified by `quals`.
 
         A digit is a back-reference standing for a whole argument type, so it is only a type
@@ -769,7 +795,7 @@ class _Demangler:
             # it produced answers for names that cannot exist: "?f2@@YAXBDPAD@Z".
             return self.indirection((), "&")
         if char == "$":
-            return self.dollarType(quals)
+            return self.dollarType(quals, at_argument)
         if char in string.digits:
             # a digit is an argument back-reference, which stands for a whole argument and is
             # read as one in parameters(). Reaching it here means it was written where only a
@@ -799,6 +825,8 @@ class _Demangler:
 
     def arrayType(self, quals):
         count = self.dimension()
+        if count == 0:
+            raise _Bail
         # an extent of nothing is spelled with nothing: "$$BY0A@H" is "int[]"
         dims = "".join(f"[{extent or ''}]" for extent in (self.dimension() for _ in range(count)))
         self.array_element_depth += 1
@@ -835,7 +863,7 @@ class _Demangler:
             self.expect("@")
         return f"-{value}" if negative else str(value)
 
-    def dollarType(self, quals):
+    def dollarType(self, quals, at_argument=False):
         if self.peek() in ("1", "E") and self.template_depth:
             # the address of a symbol, or the symbol itself: what follows is a complete
             # decorated name, read in this template's back-reference scope - which is why
@@ -844,8 +872,9 @@ class _Demangler:
             self.simple = False
             return _base(prefix + self.nestedSymbol())
         if self.peek() == "0":
-            if not self.template_depth:
-                # an integer is an argument, not a type: it appears only in a template list
+            if not at_argument:
+                # an integer is an argument, not a type: it stands where an argument stands
+                # and nowhere a type may nest, so it is not an array's element either
                 raise _Bail
             self.take()
             self.simple = False
@@ -853,9 +882,11 @@ class _Demangler:
         if not self.eat("$"):
             raise _Bail
         if self.eat("B"):
-            # the type as written rather than as a parameter would decay it; an integer is
-            # an argument rather than a type, so it is not what this introduces
-            if self.peek() == "$":
+            # the type as written rather than as a parameter would decay it, which is a thing
+            # to say only where a parameter stands: "?f@@YAX$$BY01H@Z" is not a name. An
+            # integer is an argument rather than a type, and a function type is never written
+            # this way either
+            if self.peek() in "$6" or not at_argument:
                 raise _Bail
             return self.type(quals)
         if self.eat("Y"):
@@ -903,16 +934,19 @@ class _Demangler:
         # "__unaligned" qualifies what the pointer points at, and is spelled after the
         # pointee's own const and volatile: "int const __unaligned *"
         unaligned = ("__unaligned",) if self.eat("F") else ()
+        modified = has_ptr64 or unaligned or "__restrict" in own_quals
         if self.eat("8"):
-            return self.memberFunctionPointer(own_quals, token, has_ptr64)
+            if modified:
+                # nothing is pointed at in front of a function type, so no modifier stands
+                # there: "P8B@@" and "R8B@@" are names, "PE8B@@" and "RF8B@@" are not
+                raise _Bail
+            return self.memberFunctionPointer(own_quals, token)
         if token == "*" and self.peek() in _MEMBER_DATA_QUALS:
             # only a pointer points into a class; C++ has no reference to member, so "AT..."
             # is not a name however much it looks like one
             return self.memberDataPointer(own_quals, token, unaligned)
         if self.eat("6"):
-            if has_ptr64:
-                # no mangler writes __ptr64 in front of a function type: "P6A" and "R6A"
-                # are names, "PE6A" and "RE6A" are not
+            if modified:
                 raise _Bail
             convention = _CALLING_CONVENTIONS.get(self.take())
             if convention is None:
@@ -960,15 +994,13 @@ class _Demangler:
         self.simple = False
         return _indirection(f"{owner}::{token}", own_quals, member)
 
-    def memberFunctionPointer(self, own_quals, token, has_ptr64):
+    def memberFunctionPointer(self, own_quals, token):
         """A pointer to member function: "P8" and the class it points into.
 
         The class qualifies the declarator rather than the type - "void (__thiscall S::*)()"
         - and the member's own cv follows the parameter list, where a member function keeps
-        it. The __ptr64 modifier is no more written here than in front of a plain function.
+        it.
         """
-        if has_ptr64:
-            raise _Bail
         owner = self.qualifiedName()[0]
         member_cv = self.memberQualifiers()
         convention = _CALLING_CONVENTIONS.get(self.take())
@@ -1017,13 +1049,15 @@ class _Demangler:
         restrict = ""
         reference = ""
         unaligned = ""
-        seen = set()
+        # they are written in this order and each at most once, so "HH" and "IE" are not
+        # names however much they parse like one
+        rank = {"E": 0, "I": 1, "F": 2, "G": 3, "H": 3}
+        written = -1
         while self.peek() in "EIGHF":
             char = self.take()
-            # each of them is written at most once: "HH" is not a name
-            if char in seen or (char in "GH" and seen & {"G", "H"}):
+            if rank[char] <= written:
                 raise _Bail
-            seen.add(char)
+            written = rank[char]
             if char == "I":
                 restrict = " __restrict"
             elif char == "F":
@@ -1033,7 +1067,7 @@ class _Demangler:
         qualifier = _CV.get(self.take())
         if qualifier is None:
             raise _Bail
-        return f"{qualifier}{unaligned}{restrict}{reference}"
+        return f"{qualifier}{restrict}{unaligned}{reference}"
 
     def parameters(self):
         """A parameter list, recording each composite parameter for later back-references.
@@ -1108,7 +1142,7 @@ class _Demangler:
             return f'extern "C" {name}'
         if (special_form == "data") != (char in "67"):
             raise _Bail
-        if self.requires_signature and char != "Y" and char not in _FUNCTION_ACCESS:
+        if self.requires_signature and char not in "Y$" and char not in _FUNCTION_ACCESS:
             # this one runs code, so it is spelled with a signature and never with storage
             raise _Bail
         if char in "67":
@@ -1233,13 +1267,13 @@ class _Demangler:
             if not is_vcall:
                 raise _Bail
             slot = self.templateInteger()
-            self.memberQualifiers()
-            convention = _CALLING_CONVENTIONS.get(self.take())
-            if convention is None:
-                raise _Bail
+            # the slot is the whole of it: neither the qualifier nor the convention may be
+            # anything else, so "$B7DA" and "$B7FAA" are not names
+            self.expect("A")
+            self.expect("A")
             if not self.nested and not self.eof():
                 raise _Bail
-            return f"[thunk]: {convention} {name}{{{slot}, {{flat}}}}".replace("  ", " ")
+            return f"[thunk]: __cdecl {name}{{{slot}, {{flat}}}}"
         if code == "R":
             access = _VTORDISP_ACCESS.get(self.take())
             if access is None:
@@ -1267,7 +1301,7 @@ class _Demangler:
         written = ", ".join(str(value) for value in displacements)
         spelled = f"{name}`{kind}{{{written}}}'"
         body = (
-            f"{convention} {spelled}({params})"
+            _spelled_after(convention, f"{spelled}({params})")
             if returns is None
             else self.rendered(_function(convention, params, returns), spelled)
         )
@@ -1325,7 +1359,7 @@ class _Demangler:
                 raise _Bail
             name = name.replace("\0conversion\0", f"operator {self.rendered(returns)}")
         if returns is None:
-            pieces.append(f"{convention} {name}({params})")
+            pieces.append(_spelled_after(convention, f"{name}({params})"))
         else:
             pieces.append(self.rendered(_function(convention, params, returns), name))
         if access and not is_static:
