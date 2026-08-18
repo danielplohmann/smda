@@ -36,9 +36,12 @@ MSVC_PROC_RVA = 0x1000
 MSVC_PUBLIC = "?measure@text@@YAHPEBDI@Z"
 MSVC_PUBLIC_DEMANGLED = "int __cdecl text::measure(char const *, unsigned int)"
 MSVC_PUBLIC_RVA = 0x1064
-# shapes the demangler declines: a lambda, an RTTI descriptor, and a name truncated past
-# its parameter list
-MSVC_DECLINED = ("?x@?1??f@@YAHXZ@51", "??_R0?AVexception@std@@@8", "?a2@@YAHX")
+# shapes the demangler declines: a function-local name with no type, and a name truncated
+# past its parameter list
+MSVC_DECLINED = ("?x@?1??f@@YAHXZ@51", "?a2@@YAHX")
+# a PDB carries one RTTI type descriptor per polymorphic class
+MSVC_RTTI = "??_R0?AVexception@std@@@8"
+MSVC_RTTI_DEMANGLED = "class std::exception `RTTI Type Descriptor'"
 # a name scoped inside a function reads, which is what a PDB's statics and lambdas look like
 MSVC_LOCAL_SCOPE = "?x@?1??f@@YAHXZ@4HA"
 MSVC_LOCAL_SCOPE_DEMANGLED = "int `int __cdecl f(void)'::`2'::x"
@@ -367,6 +370,9 @@ class PdbSymbolDemanglingTestSuite(unittest.TestCase):
     def test_an_msvc_name_the_demangler_declines_keeps_its_decorated_spelling(self):
         for name in MSVC_DECLINED:
             self.assertEqual(_demangleSymbolName(name), name)
+
+    def test_an_rtti_type_descriptor_is_demangled(self):
+        self.assertEqual(_demangleSymbolName(MSVC_RTTI), MSVC_RTTI_DEMANGLED)
 
     def test_a_name_scoped_inside_a_function_is_demangled(self):
         # a PDB carries these by the hundred: every function-local static and lambda
