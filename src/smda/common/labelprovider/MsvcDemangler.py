@@ -47,6 +47,18 @@ _CALLING_CONVENTIONS = {
     "O": "__eabi",
     "P": "__eabi",
     "Q": "__vectorcall",
+    "S": "__attribute__((__swiftcall__))",
+    "W": "__attribute__((__swiftasynccall__))",
+    # the remaining letters are conventions the reference spells with nothing at all
+    "K": "",
+    "L": "",
+    "R": "",
+    "T": "",
+    "U": "",
+    "V": "",
+    "X": "",
+    "Y": "",
+    "Z": "",
 }
 _FUNCTION_ACCESS = {
     "A": ("private", False, False),
@@ -197,13 +209,17 @@ def _render(node, declarator=""):
         # a nested *function* declarator is separated from the sigil - "int * (__cdecl *)()"
         # - while a parenthesised pointer declarator abuts it: "int (*(*a)[20])()"
         nested_function = "(" in declarator and not declarator.startswith(("*", "&", "(*", "(&"))
-        separator = " " if declarator and (node[2] or nested_function) else ""
+        separator = " " if declarator and not declarator.startswith("[") and (node[2] or nested_function) else ""
         return _render(node[3], token + separator + declarator)
     if kind == "array":
         if declarator.startswith(("*", "&")):
             declarator = f"({declarator})"
         return _render(node[2], declarator + node[1])
     convention, params, returns, member_cv = node[1], node[2], node[3], node[4]
+    if not convention and not declarator.startswith(("*", "&")) and "::*" not in declarator:
+        # a convention spelled with nothing leaves a named declarator alone, while a pointer
+        # keeps its parentheses and the space the convention would have filled: "int ( *)()"
+        return _render(returns, f"{declarator}({params}){member_cv}")
     # a member-pointer declarator is "Owner::*", possibly qualified; the test is anchored so
     # that a nested type's own "::*" - which a rendered parameter may hold - does not count
     if declarator.startswith(("*", "&")) or _MEMBER_POINTER_RE.match(declarator):
@@ -351,8 +367,12 @@ class _Demangler:
         if name not in self.name_backrefs and len(self.name_backrefs) < 10:
             self.name_backrefs.append(name)
 
-    def templateInstantiation(self):
+    def templateInstantiation(self, operator=None):
         """A "?$" template name, read in its own back-reference scope.
+
+        The name is usually an identifier, and is recorded inside the fresh scope; when it
+        is an operator instead the caller has already read it, and there is nothing to
+        record - "??$?HH@S@@QEAAAEAU0@H@Z" is S::operator+<int>.
 
         The scope opens before the template's own name does, so that name takes index 0
         inside it and the arguments are numbered from 1 - which is what a back-reference
@@ -363,10 +383,13 @@ class _Demangler:
         self.name_backrefs, self.arg_backrefs = [], []
         self.template_depth += 1
         try:
-            base = self.identifier()
-            self.rememberName(base)
-            if self.eof() or self.peek() == "@":
-                raise _Bail
+            if operator is None:
+                base = self.identifier()
+                self.rememberName(base)
+                if self.eof() or self.peek() == "@":
+                    raise _Bail
+            else:
+                base = operator
             args = []
             while not self.eat("@"):
                 if self.eof():
@@ -410,15 +433,22 @@ class _Demangler:
         if char == "?":
             self.take()
             if self.eat("$"):
-                if self.peek() in string.digits + "?":
+                if self.peek() in string.digits:
                     raise _Bail
-                rendered = self.templateInstantiation()
+                operator = None
+                if self.peek() == "?":
+                    # a template whose name is an operator: "??$?HH@S@@" is operator+<int>
+                    self.take()
+                    operator, _ = self.operatorName()
+                    if not isinstance(operator, str):
+                        raise _Bail
+                rendered = self.templateInstantiation(operator=operator)
                 if not is_symbol_name:
                     # the symbol's own template name is the one exception the mangler makes:
                     # it is not recorded, so "??$f@H@N@@YAXV0@@Z" resolves 0 to N, not to
                     # f<int>. A template met anywhere else is recorded like any other name.
                     self.rememberName(rendered)
-                return rendered, None
+                return rendered, "func" if operator else None
             if is_leading:
                 # "??A" here is operator[], not the namespace below: the leading fragment is
                 # the symbol's own name, and a namespace can only qualify it
@@ -499,6 +529,11 @@ class _Demangler:
                     # "??__EFoo@@YAXU0@@Z" resolves its 0 to Foo
                     self.requires_signature = True
                     target = self.identifier()
+                    if not self.eat("@"):
+                        # the object may be named with scopes, and the whole of that name
+                        # belongs inside the quotes rather than around them
+                        raise _Bail
+                    self.pos -= 1
                     self.rememberName(target)
                     return f"`{_DYNAMIC_INITIALISERS[code]} '{target}''", "func"
                 if self.take() != "K":
@@ -618,7 +653,8 @@ class _Demangler:
 
     def arrayType(self, quals):
         count = self.dimension()
-        dims = "".join(f"[{self.dimension()}]" for _ in range(count))
+        # an extent of nothing is spelled with nothing: "$$BY0A@H" is "int[]"
+        dims = "".join(f"[{extent or ''}]" for extent in (self.dimension() for _ in range(count)))
         self.array_element_depth += 1
         try:
             element = self.type(quals)
@@ -663,6 +699,12 @@ class _Demangler:
             return _base(self.templateInteger())
         if not self.eat("$"):
             raise _Bail
+        if self.eat("B"):
+            # the type as written rather than as a parameter would decay it; an integer is
+            # an argument rather than a type, so it is not what this introduces
+            if self.peek() == "$":
+                raise _Bail
+            return self.type(quals)
         if self.eat("Y"):
             # an alias template is named rather than described
             self.simple = False
@@ -881,12 +923,9 @@ class _Demangler:
             self.take()
             if not self.eat("$") or self.take() != "J":
                 raise _Bail
-            digits = 0
-            while not self.eof() and self.peek() in string.digits:
-                self.take()
-                digits += 1
-            if not digits:
+            if self.eof() or self.peek() not in string.digits:
                 raise _Bail
+            self.take()
             extern_c = 'extern "C" '
             char = self.peek()
         if char == "9":
@@ -979,7 +1018,9 @@ class _Demangler:
         convention = _CALLING_CONVENTIONS.get(self.take())
         if convention is None:
             raise _Bail
-        if has_no_return_type:
+        if has_no_return_type or self.peek() == "@":
+            # an operator may leave the return slot empty, the way a constructor does; a
+            # conversion operator may not, since its return is the type it converts to
             self.expect("@")
             returns = None
         else:
