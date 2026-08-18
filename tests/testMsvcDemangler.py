@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 548
+CORPUS_NAMES_UNDERSTOOD = 577
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -78,7 +78,6 @@ DECLINED = [
     "??0@@QAE@XZ",  # constructor with no class to name it after
     "?f@@YAX_Y@Z",  # unknown extended basic type
     "?f@@YAX$$CZ@Z",  # $$C without a qualifier
-    "?f@@YAXP6ZHXZ@Z",  # function pointer with an unknown calling convention
     "?f@@YAX$$A6ZXZ@Z",  # function type argument with an unknown calling convention
     "??_7type_info@@6Z@",  # vftable with an unknown qualifier
     "??_7type_info@@6B@X",  # vftable with trailing bytes
@@ -99,7 +98,6 @@ DECLINED = [
     "?f@@YAX_D@Z",
     "?f@@YA?ZUMatrix@@XZ",  # return type carrying a qualifier that is not one
     "??0?$5Class@QAH@@QAE@XZ",  # template name starting with a digit
-    "??$?HH@S@@QEAAAEAU0@H@Z",  # operator template, whose name is not modelled
     "?e@FTypeWithQuals@@3U?K@A",  # tag type named by an operator rather than an identifier
     # a special name takes a signature or a storage class by which code it is, never both
     "??_7A@B@ad@@YAXPEBQEAD@Z",  # vftable given a function signature
@@ -346,6 +344,71 @@ LATER_FORMS = [
 ]
 
 
+LATEST_FORMS = [
+    # a second spelling of the empty pack, and an alias template named rather than described
+    ("??$templ_fun_with_ty_pack@$$V@@YAXXZ", "void __cdecl templ_fun_with_ty_pack<>(void)"),
+    ("??$f@$$YAliasA@PR20047@@@PR20047@@YAXXZ", "void __cdecl PR20047::f<PR20047::AliasA>(void)"),
+    # a vftable may name more than one base
+    ("??_7A@B@@6BC@D@@E@F@@@", "const B::A::`vftable'{for `D::C's `F::E'}"),
+    # __restrict qualifies a member function, next to its reference qualifier
+    ("?foo@A@PR19361@@QIGAEXXZ", "public: void __thiscall PR19361::A::foo(void) __restrict &"),
+    # and on a data symbol it qualifies the pointer, once however often it is spelled
+    ("?h3@@3QAHIA", "int *const __restrict h3"),
+    ("?h3@@3QIAHA", "int *const __restrict h3"),
+    ("?h3@@3QIAHIA", "int *const __restrict h3"),
+    ("?h3@@3PAHIA", "int *__restrict h3"),
+]
+
+
+FINAL_FORMS = [
+    # a template whose name is an operator, and an operator that leaves its return empty
+    ("??$?HH@S@@QEAAAEAU0@H@Z", "public: struct S & __cdecl S::operator+<int>(int)"),
+    ("??RFoo@@QBE@XZ", "public: __thiscall Foo::operator()(void) const"),
+    ("??RFoo@@QBEHXZ", "public: int __thiscall Foo::operator()(void) const"),
+    # the type as written rather than as a parameter would decay it, extent and all
+    ("??$f@$$BY01H@@YAXXZ", "void __cdecl f<int[2]>(void)"),
+    ("??0?$Class@$$BY0A@H@@QAE@XZ", "public: __thiscall Class<int[]>::Class<int[]>(void)"),
+    ("??0?$Class@$$BY04QAH@@QAE@XZ", "public: __thiscall Class<int *const[5]>::Class<int *const[5]>(void)"),
+    # two conventions spelled with an attribute, and two spelled with nothing
+    ("?swift_func@@YSXXZ", "void __attribute__((__swiftcall__)) swift_func(void)"),
+    ("?f@@YWXXZ", "void __attribute__((__swiftasynccall__)) f(void)"),
+    ("?f@@YTXXZ", "void f(void)"),
+    # a convention spelled with nothing keeps the parentheses a pointer needs
+    ("?f@@YAXP6ZHXZ@Z", "void __cdecl f(int ( *)(void))"),
+    ("?f@@YAXP8S@@AZXXZ@Z", "void __cdecl f(void ( S::*)(void))"),
+]
+
+
+class MsvcFinalFormsTestSuite(unittest.TestCase):
+    def test_the_final_forms_match_the_reference(self):
+        for mangled, expected in FINAL_FORMS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_shapes_these_forms_do_not_allow_are_refused(self):
+        for mangled in (
+            "?overloaded_fn@@$$J00YAXXZ",  # the marker counts with one digit, not two
+            "??0?$Class@$$B$0?9@@QAE@XZ",  # "$$B" introduces a type, and an integer is not one
+            "??BFoo@@QBE@XZ",  # a conversion operator's return names what it converts to
+            # every letter names a convention, most of them spelled with nothing. The
+            # reference takes any byte at all there; this requires a letter, so that a
+            # name mangled with something else declines rather than reads as a function
+            "?f@@Y1XXZ",
+            "?f@@YAXP61HXZ@Z",
+            "?f@@YAXP8S@@A1XXZ@Z",
+            "??$f@$$A61HXZ@@YAXXZ",
+        ):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+
+class MsvcLatestFormsTestSuite(unittest.TestCase):
+    def test_the_latest_forms_match_the_reference(self):
+        for mangled, expected in LATEST_FORMS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+
 class MsvcLaterFormsTestSuite(unittest.TestCase):
     def test_the_later_forms_match_the_reference(self):
         for mangled, expected in LATER_FORMS:
@@ -474,7 +537,6 @@ class MsvcMemberPointerTestSuite(unittest.TestCase):
             "?f@@YAXPE8S@@AEAXXZ@Z",  # __ptr64 is not written in front of a member function
             "?f@@YAX$0A@@Z",  # an integer is a template argument, never a parameter
             "??$f@$0@@YAXXZ",  # ... and needs digits
-            "?f@@YAXP8S@@AZXXZ@Z",  # "Z" is not a calling convention
             "?f@@YAXP8?0S@@@AEXXZ@Z",  # nor is a constructor a class to point into
         ):
             with self.subTest(mangled=mangled):
