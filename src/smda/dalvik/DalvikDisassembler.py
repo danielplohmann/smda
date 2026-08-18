@@ -230,9 +230,13 @@ class DexReferenceResolver:
             if name:
                 return self._normalizeTypeString(name)
             with contextlib.suppress(Exception):
-                normalized = self._normalizeTypeString(str(value))
-                if normalized and not normalized.startswith("<lief."):
-                    return normalized
+                # guard before normalizing, as the outer fallback does: normalization
+                # rewrites dots to slashes, so it strips the very prefix this tests for
+                raw_value_string = str(value)
+                if not raw_value_string.startswith("<"):
+                    normalized = self._normalizeTypeString(raw_value_string)
+                    if normalized:
+                        return normalized
         name = self._safeAttr(type_obj, "name", None)
         if name:
             return self._normalizeTypeString(name)
@@ -1333,9 +1337,10 @@ class DalvikDisassembler:
                 metadata["heuristics"].append("unreachable-code-surface")
 
         # Prefer a clean orphan label over formatMethod's fallback for synthetic methods.
-        orphan_name = getattr(method, "name", None)
-        if orphan_name and str(orphan_name).startswith("orphan_code_item@"):
-            state.label = orphan_name
+        # A DEX method name is arbitrary UTF-8, so ask what the object is rather than
+        # matching the name this class writes.
+        if isinstance(method, _OrphanCodeItemMethod):
+            state.label = method.name
         else:
             state.label = resolver.formatMethod(method)
         # Drop internal dedupe set before finalizing (not part of public metadata).
