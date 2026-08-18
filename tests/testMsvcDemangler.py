@@ -63,7 +63,7 @@ DEMANGLED = [
 # Measured against llvm-undname 22.1.7 on the shipped corpus. Both are exact so that a
 # change in either direction has to be an explicit edit rather than passing silently.
 UNIQUE_CORPUS_NAMES = 609
-CORPUS_NAMES_UNDERSTOOD = 577
+CORPUS_NAMES_UNDERSTOOD = 592
 
 # Forms this demangler does not model. Each must come back exactly as it went in: a wrong
 # expansion is worse than a decorated name, because it matches neither spelling.
@@ -377,6 +377,45 @@ FINAL_FORMS = [
     ("?f@@YAXP6ZHXZ@Z", "void __cdecl f(int ( *)(void))"),
     ("?f@@YAXP8S@@AZXXZ@Z", "void __cdecl f(void ( S::*)(void))"),
 ]
+
+
+THUNKS_AND_ADDRESSES = [
+    # the address of a symbol, read in the template's own back-reference scope
+    ("??$f@$1?x@@3HA@@YAXXZ", "void __cdecl f<&int x>(void)"),
+    ("??$f@VBar@@$1?x@0@3HA@@YAXXZ", "void __cdecl f<class Bar, &int f::x>(void)"),
+    ("??$f@$E?x@@3HA@@YAXXZ", "void __cdecl f<int x>(void)"),
+    # a thunk that adjusts "this" on the way through
+    (
+        "??_EBase@@G3AEPAXI@Z",
+        "[thunk]: private: void * __thiscall Base::`vector deleting dtor'`adjustor{4}'(unsigned int)",
+    ),
+    (
+        "??_EDerived@@$4PPPPPPPM@A@EAAPEAXI@Z",
+        "[thunk]: public: virtual void * __cdecl Derived::`vector deleting dtor'`vtordisp{-4, 0}'(unsigned int)",
+    ),
+    # a vcall names no access and carries no parameters
+    ("??_9Base@@$B7AA", "[thunk]: __cdecl Base::`vcall'{8, {flat}}"),
+]
+
+
+class MsvcThunkTestSuite(unittest.TestCase):
+    def test_thunks_and_addresses_match_the_reference(self):
+        for mangled, expected in THUNKS_AND_ADDRESSES:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_a_vcall_and_its_thunk_require_each_other(self):
+        for mangled in (
+            "??0f9Base@@$B7AA",
+            "??_9Base10@@YAADMXZ",
+            # the reference reads these; this declines them, as it does elsewhere, rather
+            # than take a digit for a convention or ignore bytes after the name
+            "??_9Base@@$B7A1",
+            "??_9Base@@$B7AAX??_EDerived@@$4A@A@EA1PEAXI@Z",
+            "??_EDerived@@$4A@A@EAAPEAXI@ZX",
+        ):
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 class MsvcFinalFormsTestSuite(unittest.TestCase):

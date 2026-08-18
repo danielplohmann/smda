@@ -60,6 +60,18 @@ _CALLING_CONVENTIONS = {
     "Y": "",
     "Z": "",
 }
+# a thunk stands in for a member function and adjusts "this" on the way through; the
+# reference prefixes the whole spelling and marks the name with the adjustment
+_ADJUSTOR_ACCESS = {
+    "G": ("private", False, False),
+    "H": ("private", False, False),
+    "O": ("protected", False, True),
+    "P": ("protected", False, True),
+    "W": ("public", False, True),
+    "X": ("public", False, True),
+}
+# a thunk that adjusts through a virtual base writes two displacements after its access
+_VTORDISP_ACCESS = {"0": "private", "2": "protected", "4": "public"}
 _FUNCTION_ACCESS = {
     "A": ("private", False, False),
     "B": ("private", False, False),
@@ -121,7 +133,7 @@ _OPERATORS = {
 # what runs around a namespace-scope object with a non-trivial lifetime
 _DYNAMIC_INITIALISERS = {"E": "dynamic initializer for", "F": "dynamic atexit destructor for"}
 _DATA_SPECIAL_OPERATORS = frozenset("78S")
-_UNMODELLED_DATA_SPECIAL_OPERATORS = frozenset("9AB")
+_UNMODELLED_DATA_SPECIAL_OPERATORS = frozenset("AB")
 _EXTENDED_OPERATORS = {
     "0": "operator/=",
     "1": "operator%=",
@@ -476,20 +488,27 @@ class _Demangler:
         # the scope spelled zero
         spelled = "0" if self.eat("@") else self.templateInteger()
         self.expect("?")
+        return f"`{self.nestedSymbol()}'::`{spelled}'"
+
+    def nestedSymbol(self):
+        """A complete decorated name written inside another one.
+
+        It continues this name's back-reference table rather than opening its own, so
+        "?N@?1??SN@?$NS@H@0@QEAAHXZ@4HA" resolves its 0 to the outer N and
+        "??$f@VBar@@$1?x@0@3HA@@YAXXZ" resolves its 0 to the template's own f. It is still a
+        symbol, so its own leading template is not recorded either, and it ends where it
+        ends rather than at the end of the text.
+        """
         inner = _Demangler(self.text)
         inner.pos = self.pos
         inner.nested = True
-        # the enclosing name continues this name's back-reference table rather than opening
-        # its own: "?N@?1??SN@?$NS@H@0@QEAAHXZ@4HA" resolves its 0 to the outer N
         inner.name_backrefs = self.name_backrefs
         inner.arg_backrefs = self.arg_backrefs
-        # the enclosing name is a symbol in its own right, so its own leading template is
-        # not recorded either - the same exception the outer name gets
         inner.at_symbol_name = True
         inner.depth = self.depth
-        enclosing = inner.parse()
+        rendered = inner.parse()
         self.pos = inner.pos
-        return f"`{enclosing}'::`{spelled}'"
+        return rendered
 
     def anonymousNamespace(self):
         """The unnamed namespace of one translation unit: "?A" and an optional discriminator.
@@ -547,6 +566,8 @@ class _Demangler:
                 raise _Bail
             if code in _UNMODELLED_DATA_SPECIAL_OPERATORS:
                 raise _Bail
+            if code == "9":
+                return name, "vcall"
             return name, "data" if code in _DATA_SPECIAL_OPERATORS else "func"
         code = self.take()
         if code in ("0", "1"):
@@ -690,6 +711,13 @@ class _Demangler:
         return f"-{value}" if negative else str(value)
 
     def dollarType(self, quals):
+        if self.peek() in ("1", "E") and self.template_depth:
+            # the address of a symbol, or the symbol itself: what follows is a complete
+            # decorated name, read in this template's back-reference scope - which is why
+            # "??$f@VBar@@$1?x@0@3HA@@YAXXZ" resolves its 0 to f rather than to Bar
+            prefix = "&" if self.take() == "1" else ""
+            self.simple = False
+            return _base(prefix + self.nestedSymbol())
         if self.peek() == "0":
             if not self.template_depth:
                 # an integer is an argument, not a type: it appears only in a template list
@@ -797,10 +825,11 @@ class _Demangler:
         """
         member_quals = _MEMBER_DATA_QUALS[self.take()] + unaligned
         owner = self.qualifiedName()[0]
-        if self.peek() in ("Q", "R", "S"):
-            # the reference does not spell the qualifiers such a pointer would carry here -
-            # "PQfoo@@SAPEAX" is "void **foo::*", not "void *const volatile *foo::*" - and
-            # nothing on the producer side explains which is right, so this declines
+        if self.peek() in ("Q", "R", "S") and self.text[self.pos + 1 : self.pos + 2] not in ("6", "8"):
+            # a qualified pointer as the member type is the one shape to avoid: the reference
+            # does not spell the qualifiers it would carry - "PQfoo@@SAPEAX" is
+            # "void **foo::*" - and nothing on the producer side says which is right. A
+            # function type after the same letter is not that shape and reads normally.
             raise _Bail
         member = self.type(member_quals)
         self.simple = False
@@ -919,10 +948,8 @@ class _Demangler:
         if self.eof():
             raise _Bail
         char = self.peek()
-        if char == "$":
-            self.take()
-            if not self.eat("$") or self.take() != "J":
-                raise _Bail
+        if char == "$" and self.text.startswith("$$J", self.pos):
+            self.pos += 3
             if self.eof() or self.peek() not in string.digits:
                 raise _Bail
             self.take()
@@ -965,9 +992,11 @@ class _Demangler:
             # something is pointed at: "?s@@3PEAHEA" is a name and "?s@@3HEA" is not
             trailing = self.take()
             restrict = ()
+            seen = set()
             while trailing in ("E", "I"):
-                if declared[0] != "ind":
+                if declared[0] != "ind" or trailing in seen:
                     raise _Bail
+                seen.add(trailing)
                 if trailing == "I":
                     restrict = ("__restrict",)
                 trailing = self.take()
@@ -1000,12 +1029,69 @@ class _Demangler:
             else:
                 declared = _qualifyDeclared(declared, member_quals)
             return f"{_DATA_ACCESS[char]}{self.rendered(declared, name)}"
-        return extern_c + self.function(name, has_no_return_type)
+        return extern_c + self.function(name, has_no_return_type, special_form == "vcall")
 
-    def function(self, name, has_no_return_type):
+    def signedDisplacement(self):
+        """One of a vtordisp thunk's two displacements, which are signed and 32 bits wide."""
+        value = int(self.templateInteger())
+        return value - (1 << 32) if value >= (1 << 31) else value
+
+    def thunkFunction(self, name, is_vcall):
+        """A thunk whose access slot begins with "$": a vcall, or an adjustment through a
+        virtual base.
+
+        A vcall names no access and carries no parameters - the whole of it is the slot it
+        dispatches through - while the vtordisp forms are ordinary virtual member functions
+        with two displacements written in front of the signature.
+        """
+        code = self.take()
+        if code == "B":
+            if not is_vcall:
+                raise _Bail
+            slot = self.templateInteger()
+            self.memberQualifiers()
+            convention = _CALLING_CONVENTIONS.get(self.take())
+            if convention is None:
+                raise _Bail
+            if not self.nested and not self.eof():
+                raise _Bail
+            return f"[thunk]: {convention} {name}{{{slot}, {{flat}}}}".replace("  ", " ")
+        access = _VTORDISP_ACCESS.get(code)
+        if access is None:
+            raise _Bail
+        first = self.signedDisplacement()
+        second = self.signedDisplacement()
+        self.member_cv = self.memberQualifiers()
+        convention = _CALLING_CONVENTIONS.get(self.take())
+        if convention is None:
+            raise _Bail
+        returns = None if self.peek() == "@" and self.take() else self.returnType()
+        params = self.parameters()
+        self.expect("Z")
+        if not self.nested and not self.eof():
+            raise _Bail
+        spelled = f"{name}`vtordisp{{{first}, {second}}}'"
+        body = (
+            f"{convention} {spelled}({params})"
+            if returns is None
+            else self.rendered(_function(convention, params, returns), spelled)
+        )
+        return f"[thunk]: {access}: virtual {body}{self.member_cv}"
+
+    def function(self, name, has_no_return_type, is_vcall=False):
         access_char = self.take()
+        thunk = ""
+        if access_char == "$":
+            return self.thunkFunction(name, is_vcall)
+        if is_vcall:
+            # the slot dispatched through is the whole of a vcall, so it is spelled one way
+            raise _Bail
         if access_char == "Y":
             access, is_static, is_virtual = None, False, False
+        elif access_char in _ADJUSTOR_ACCESS:
+            access, is_static, is_virtual = _ADJUSTOR_ACCESS[access_char]
+            thunk = f"`adjustor{{{self.templateInteger()}}}'"
+            self.member_cv = self.memberQualifiers()
         else:
             entry = _FUNCTION_ACCESS.get(access_char)
             if entry is None:
@@ -1030,6 +1116,9 @@ class _Demangler:
         if not self.nested and not self.eof():
             raise _Bail
         pieces = []
+        if thunk:
+            pieces.append("[thunk]: ")
+            name = f"{name}{thunk}"
         if access:
             pieces.append(f"{access}: ")
             if is_static:
