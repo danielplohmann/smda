@@ -493,6 +493,86 @@ class EhFrameHdrRejectionTestSuite(unittest.TestCase):
         self.assertEqual(self._starts(_image_with_hdr(0x2000 - 12, _hdr_bytes())), set())
 
 
+def _image_with_sections_and_hdr(eh_frame, hdr, eh_vaddr=0x1000, hdr_vaddr=0x1200, size=0x2000):
+    """Mapped-image bytes carrying both a parseable .eh_frame section and a search table."""
+    image = bytearray(size)
+    image[0:16] = b"\x7fELF\x02\x01\x01" + b"\x00" * 9
+    struct.pack_into("<HHI", image, 0x10, 2, 0x3E, 1)
+    struct.pack_into("<Q", image, 0x20, 0x40)
+    struct.pack_into("<Q", image, 0x28, 0x1800)
+    struct.pack_into("<HHHHHH", image, 0x34, 64, 56, 1, 64, 3, 2)
+    struct.pack_into("<I", image, 0x40, PT_GNU_EH_FRAME)
+    struct.pack_into("<Q", image, 0x50, hdr_vaddr)
+    names = b"\x00.eh_frame\x00.shstrtab\x00"
+    image[0x1700 : 0x1700 + len(names)] = names
+    struct.pack_into("<IIQQQQIIQQ", image, 0x1840, 1, 1, 2, eh_vaddr, eh_vaddr, len(eh_frame), 0, 0, 8, 0)
+    struct.pack_into("<IIQQQQIIQQ", image, 0x1880, 11, 3, 0, 0, 0x1700, len(names), 0, 0, 1, 0)
+    image[eh_vaddr : eh_vaddr + len(eh_frame)] = eh_frame
+    image[hdr_vaddr : hdr_vaddr + len(hdr)] = hdr
+    return bytes(image)
+
+
+class EhFrameSourceUnionTestSuite(unittest.TestCase):
+    """The section decoder skips records whose CIE it cannot read, so a non-empty
+    section result is not necessarily a complete one and cannot stand in for the
+    search table."""
+
+    DECODABLE_START = 0x1400
+    SKIPPED_START = 0x1500
+    HDR_VADDR = 0x1200
+
+    def _ehFrame(self):
+        # two CIE/FDE pairs; the second CIE declares version 4, which the decoder
+        # refuses, so its FDE is skipped while the first pair still decodes
+        readable_cie = _cie()
+        readable_fde = _fde(0, len(readable_cie), self.DECODABLE_START, 0x10, "<Q")
+        unreadable_offset = len(readable_cie) + len(readable_fde)
+        unreadable_cie = _cie(version=4)
+        unreadable_fde = _fde(
+            unreadable_offset, unreadable_offset + len(unreadable_cie), self.SKIPPED_START, 0x10, "<Q"
+        )
+        return readable_cie + readable_fde + unreadable_cie + unreadable_fde
+
+    def _hdr(self):
+        table = b""
+        for start in (self.DECODABLE_START, self.SKIPPED_START):
+            table += struct.pack("<ii", start - self.HDR_VADDR, 0)
+        return _hdr_bytes(fde_count=2) + table
+
+    def _manager(self, image):
+        binary_info = BinaryInfo(image)
+        binary_info.base_addr = 0
+        binary_info.bitness = 64
+        disassembly = DisassemblyResult()
+        disassembly.setBinaryInfo(binary_info)
+        manager = IntelFunctionCandidateManager(SmdaConfig())
+        manager.disassembly = disassembly
+        return manager
+
+    def testSectionAloneMissesTheRecordItCannotDecode(self):
+        # positive control for the test below: the section really is a partial answer
+        starts = {fde_range[0] for fde_range in decodeEhFrameFdeRanges(self._ehFrame(), 0x1000, pointer_size=8)}
+        self.assertEqual(starts, {self.DECODABLE_START})
+
+    def testSearchTableAloneNamesBoth(self):
+        manager = self._manager(_image_with_sections_and_hdr(self._ehFrame(), self._hdr()))
+        self.assertEqual(
+            decodeEhFrameHdrStarts(manager.disassembly, pointer_size=8),
+            {self.DECODABLE_START, self.SKIPPED_START},
+        )
+
+    def testPartialSectionResultIsUnionedWithTheSearchTable(self):
+        manager = self._manager(_image_with_sections_and_hdr(self._ehFrame(), self._hdr()))
+        self.assertEqual(
+            manager._ehFrameFunctionStarts(),
+            {self.DECODABLE_START, self.SKIPPED_START},
+        )
+
+    def testSectionStartsSurviveAnUnusableSearchTable(self):
+        manager = self._manager(_image_with_sections_and_hdr(self._ehFrame(), _hdr_bytes(version=2)))
+        self.assertEqual(manager._ehFrameFunctionStarts(), {self.DECODABLE_START})
+
+
 class _TimeoutAfter:
     """analysis_timeout that flips to True after a fixed number of reads."""
 

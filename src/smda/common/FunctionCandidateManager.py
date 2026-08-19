@@ -511,21 +511,24 @@ class FunctionCandidateManager:
     def _ehFrameFunctionStarts(self):
         binary_info = self.disassembly.binary_info
         pointer_size = 8 if binary_info.bitness == 64 else 4
+        section_starts = set()
         lief_binary = binary_info.getLiefBinary()
         if isinstance(lief_binary, lief.ELF.Binary):
             eh_frame = next((section for section in lief_binary.sections if section.name == ".eh_frame"), None)
             if eh_frame is not None and eh_frame.virtual_address and eh_frame.size:
                 section_bytes = self.disassembly.getBytes(eh_frame.virtual_address, eh_frame.size)
                 if section_bytes:
-                    ranges = decodeEhFrameFdeRanges(
-                        bytes(section_bytes), eh_frame.virtual_address, pointer_size=pointer_size
-                    )
-                    if ranges:
-                        return {fde_range[0] for fde_range in ranges}
-        # A memory image keeps its program headers but not its section table, so fall
-        # back to the search table .eh_frame_hdr carries: PT_GNU_EH_FRAME points at it
-        # and every entry names one FDE's initial location.
-        return decodeEhFrameHdrStarts(self.disassembly, pointer_size=pointer_size)
+                    section_starts = {
+                        fde_range[0]
+                        for fde_range in decodeEhFrameFdeRanges(
+                            bytes(section_bytes), eh_frame.virtual_address, pointer_size=pointer_size
+                        )
+                    }
+        # The two sources are unioned rather than tried in order. A memory image keeps its
+        # program headers but not its section table, so .eh_frame_hdr is the only route
+        # there; and the section decoder skips records whose CIE it cannot read, so a
+        # partial section result would otherwise hide the starts the search table still names.
+        return section_starts | decodeEhFrameHdrStarts(self.disassembly, pointer_size=pointer_size)
 
     def _buildQueue(self):
         LOGGER.debug("Located %d function candidates", len(self.candidates))
