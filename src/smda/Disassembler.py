@@ -160,6 +160,7 @@ class Disassembler:
         binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.has_backend = loader.getHasBackend()
+        binary_info.format_recognized = loader.getFormatRecognized()
         return binary_info
 
     def _ensureHashes(self, binary_info):
@@ -274,6 +275,11 @@ class Disassembler:
             return SmdaReport(self.disassembly, config=self.config)
         if not binary_info.has_backend:
             if not binary_info.architecture:
+                if binary_info.format_recognized:
+                    raise RuntimeError(
+                        "The container was recognized but names an instruction set SMDA has no "
+                        "backend for, so there is nothing to disassemble it with."
+                    )
                 raise RuntimeError(
                     "Input is not a PE, ELF, Mach-O, DEX or Delphi knowledge base, so neither its "
                     "instruction set nor its load address can be read from it. A memory dump has to "
