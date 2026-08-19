@@ -4,6 +4,7 @@ import logging
 
 import lief
 
+from smda.utility.lief_helper import lief_name
 from smda.utility.MachoBinary import (
     get_active_macho_binary,
     get_macho_address_adjustment,
@@ -56,23 +57,14 @@ class MachoSymbolProvider(AbstractLabelProvider):
             architecture=getattr(binary_info, "architecture", "") if binary_info else "",
         )
 
-    @staticmethod
-    def _get_symbol_name(symbol):
-        try:
-            raw_name = symbol.name
-        except (AttributeError, UnicodeDecodeError):
-            return ""
-        return raw_name if isinstance(raw_name, str) else ""
+    _get_symbol_name = staticmethod(lief_name)
 
     @classmethod
     def _format_symbol_name(cls, symbol):
         raw_name = cls._get_symbol_name(symbol)
         if not raw_name:
             return ""
-        try:
-            demangled = getattr(symbol, "demangled_name", None)
-        except (AttributeError, UnicodeDecodeError):
-            demangled = None
+        demangled = lief_name(symbol, "demangled_name")
         if demangled and demangled != raw_name:
             return demangled
         return demangle_macho_symbol(raw_name)
