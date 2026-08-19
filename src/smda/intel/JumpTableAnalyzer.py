@@ -120,10 +120,8 @@ class JumpTableAnalyzer:
         return bonus_offset
 
     def _extractDirectTableOffsets(self, jumptable_size, off_jumptable, state=None, jump_instruction_address=None):
-        # an unrecovered bound arrives as 0, which read as "zero entries" and abandoned the
-        # table; the per-entry image bound below is what actually ends the scan, exactly as
-        # in _resolveExplicitTable and _extractRelativeTableOffsets
-        jumptable_size = jumptable_size if jumptable_size else 0xFF
+        bound_was_recovered = bool(jumptable_size)
+        jumptable_size = jumptable_size if bound_was_recovered else 0xFF
         jump_targets = set()
         if off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
@@ -132,11 +130,11 @@ class JumpTableAnalyzer:
                     break
                 entry = struct.unpack("<I", raw_entry_bytes)[0]
                 if not self.disassembly.isAddrWithinMemoryImage(entry):
+                    if bound_was_recovered:
+                        continue
                     break
                 jump_targets.add(entry)
                 if state is not None:
-                    # claim the entry as data, or the gap scan seeds function candidates
-                    # inside the table bytes
                     state.addDataRef(jump_instruction_address, off_jumptable + index * 4, size=4)
         return sorted(jump_targets)
 

@@ -355,6 +355,19 @@ class DirectTableScanTest(unittest.TestCase):
         analyzer = self._analyzer()
         self.assertEqual(analyzer._extractDirectTableOffsets(2, 0x1090), self.ENTRIES[:2])
 
+    def test_a_recovered_size_scans_past_an_entry_outside_the_image(self):
+        # one case dispatching outside the mapped image - a partially mapped dump, or a
+        # tailcall into another module - must not truncate the rest of a declared table
+        analyzer = self._analyzer()
+        table = struct.pack("<I", self.ENTRIES[0]) + self.OUT_OF_IMAGE + struct.pack("<I", self.ENTRIES[2])
+        analyzer.disassembly.getBytes = MagicMock(
+            side_effect=lambda addr, size: table[addr - 0x1090 : addr - 0x1090 + size]
+        )
+        self.assertEqual(
+            analyzer._extractDirectTableOffsets(3, 0x1090),
+            [self.ENTRIES[0], self.ENTRIES[2]],
+        )
+
     def test_stops_at_a_short_read(self):
         analyzer = self._analyzer(trailing=b"\x01\x02")
         self.assertEqual(analyzer._extractDirectTableOffsets(0xFF, 0x1090), self.ENTRIES)
