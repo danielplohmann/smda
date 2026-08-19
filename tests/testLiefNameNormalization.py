@@ -18,6 +18,8 @@ from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 from smda.common.LanguageAnalyzer import LanguageAnalyzer
+from smda.Disassembler import Disassembler
+from smda.SmdaConfig import SmdaConfig
 from smda.utility.lief_helper import lief_name
 from smda.utility.PeFileLoader import PeFileLoader
 
@@ -103,6 +105,19 @@ class MappedPeSymbolNameTest(unittest.TestCase):
         symbols = PeSymbolProvider(None).parseSymbols(self.parsed, 0x140000000)
         self.assertIsInstance(symbols, dict)
         self.assertTrue(all(isinstance(name, str) for name in symbols.values()))
+
+    def testMapped64BitImageIsDisassembledEndToEnd(self):
+        # the whole run, not just the providers: an undecodable name reached string
+        # operations deep in analysis and ended it with status "error"
+        config = SmdaConfig()
+        config.TIMEOUT = 300
+        config.WITH_STRINGS = False
+
+        report = Disassembler(config).disassembleBuffer(self.mapped, 0x140000000, bitness=64)
+
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.bitness, 64)
+        self.assertGreater(report.num_functions, 100)
 
 
 class ProviderNameNormalizationTest(unittest.TestCase):
