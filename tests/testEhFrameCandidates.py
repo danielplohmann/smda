@@ -632,6 +632,21 @@ class EhFrameCandidateFilterTestSuite(unittest.TestCase):
         manager._cachedExecutableSectionRanges = list
         self.assertEqual(list(manager.locateEhFrameCandidates()), [self.BASE + 0x200])
 
+    def testAArch64KeepsStartsWhenNoExecutableSectionIsNamed(self):
+        # an image with no section table names no executable ranges, which is exactly
+        # the memory-dump case .eh_frame_hdr exists to serve; the filter has nothing to
+        # judge against there, so it defers to alignment, the code areas and code_map
+        manager = self._manager(
+            [self.BASE + 0x100, self.BASE + 0x200],
+            manager_class=AArch64FunctionCandidateManager,
+        )
+        manager._cachedExecutableSectionRanges = list
+        self.assertEqual(manager._executableRanges(), [])
+        self.assertEqual(
+            list(manager.locateEhFrameCandidates()),
+            [self.BASE + 0x100, self.BASE + 0x200],
+        )
+
     def testStartsOutsideTheCodeAreasAreDropped(self):
         # AArch64 filters on executable SECTIONS while the code filter uses the loader's
         # code areas, so a start can clear one and fail the other
