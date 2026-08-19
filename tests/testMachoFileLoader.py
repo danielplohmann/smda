@@ -203,7 +203,7 @@ class TestMachoFileLoader(unittest.TestCase):
 
         loader._loadFile(b"not a recognized binary")
 
-        self.assertEqual(loader.getData(), b"")
+        self.assertEqual(loader.getData(), b"not a recognized binary")
         self.assertEqual(loader.getBaseAddress(), 0)
         self.assertEqual(loader.getBitness(), 0)
         self.assertEqual(loader.getAbi(), "")

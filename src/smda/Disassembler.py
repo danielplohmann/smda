@@ -273,6 +273,12 @@ class Disassembler:
             self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
             return SmdaReport(self.disassembly, config=self.config)
         if not binary_info.has_backend:
+            if not binary_info.architecture:
+                raise RuntimeError(
+                    "Input is not a PE, ELF, Mach-O, DEX or Delphi knowledge base, so neither its "
+                    "instruction set nor its load address can be read from it. A memory dump has to "
+                    "be passed to disassembleBuffer() with its base address."
+                )
             raise RuntimeError(f"No disassembly backend available for architecture '{binary_info.architecture}'.")
         raise RuntimeError("Disassembler backend not initialized.")
 

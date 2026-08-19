@@ -72,6 +72,12 @@ class FileLoader:
                     else:
                         self._has_backend = bool(self._architecture)
                     break
+            else:
+                # No format loader claimed the input, so there is no mapping to apply and
+                # the bytes are already whatever they are. Returning them keeps getData()
+                # honest; every format-derived field stays unset, which is what tells the
+                # caller the instruction set and load address are unknown.
+                self._data = self._raw_data
         else:
             self._data = self._raw_data
 
