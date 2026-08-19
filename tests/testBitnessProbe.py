@@ -1,7 +1,9 @@
 import logging
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
+from smda.common.BinaryInfo import BinaryInfo
 from smda.Disassembler import Disassembler
 from smda.intel.BitnessAnalyzer import (
     REX_W_MAX_SAMPLES,
@@ -52,6 +54,48 @@ class RexWShareTest(unittest.TestCase):
     def testMixedShareBelowThresholdReadsAs32Bit(self):
         binary = (b"\x48\x89" + b"\x48\x50" * 3) * REX_W_MIN_SAMPLES
         self.assertEqual(BitnessAnalyzer().determineBitness(binary), 32)
+
+
+class CodeAreaSamplingTest(unittest.TestCase):
+    """Data dilutes the whole-image share toward the uniform one, so the loader's code
+    areas are sampled when it named any."""
+
+    CODE = b"\x48\x89" * REX_W_MIN_SAMPLES
+    # 0x48 followed by a byte no REX.W form uses: what data contributes to the count
+    DATA = b"\x48\x50" * (REX_W_MIN_SAMPLES * 4)
+
+    def _binary_info(self, buffer, code_areas):
+        binary_info = BinaryInfo(buffer)
+        binary_info.base_addr = 0x400000
+        binary_info.code_areas = code_areas
+        return binary_info
+
+    def testDilutedImageIsStillReadAs64BitThroughItsCodeAreas(self):
+        buffer = self.CODE + self.DATA
+        self.assertEqual(BitnessAnalyzer().determineBitness(buffer), 32)  # whole image: diluted
+        binary_info = self._binary_info(buffer, [[0x400000, 0x400000 + len(self.CODE)]])
+        disassembly = SimpleNamespace(binary_info=binary_info)
+        self.assertEqual(BitnessAnalyzer().determineBitnessFromDisassembly(disassembly), 64)
+
+    def testCodeAreasAreClampedToTheBuffer(self):
+        binary_info = self._binary_info(self.CODE, [[0x300000, 0x500000]])
+        self.assertEqual(BitnessAnalyzer()._codeRegions(binary_info), [(0, len(self.CODE))])
+
+    def testEmptyAreasAreDropped(self):
+        binary_info = self._binary_info(self.CODE, [[0x400010, 0x400010]])
+        self.assertEqual(BitnessAnalyzer()._codeRegions(binary_info), [])
+
+    def testTooLittleCodeFallsBackToTheWholeImage(self):
+        # the named area holds one sample; the image holds enough
+        buffer = self.CODE + self.DATA
+        binary_info = self._binary_info(buffer, [[0x400000, 0x400002]])
+        disassembly = SimpleNamespace(binary_info=binary_info)
+        self.assertEqual(BitnessAnalyzer().determineBitnessFromDisassembly(disassembly), 32)
+
+    def testAnImageWithoutCodeAreasIsJudgedWhole(self):
+        binary_info = self._binary_info(self.CODE, [])
+        disassembly = SimpleNamespace(binary_info=binary_info)
+        self.assertEqual(BitnessAnalyzer().determineBitnessFromDisassembly(disassembly), 64)
 
 
 class MappedFixtureBitnessTest(unittest.TestCase):

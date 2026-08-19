@@ -20,7 +20,10 @@ REX_W_PREFIX = 0x48
 # every 0x48 introduces one of the opcodes above; in 32-bit code the byte that follows
 # is unrelated, so the share lands near the 29/256 a uniform byte would give. Measured
 # across PE/ELF/Mach-O images from Go, gcc, clang, mingw-Rust and 32-bit malware:
-# 32-bit stays at or below 0.36, 64-bit at or above 0.74.
+# over the loader's code areas, 32-bit stays at or below 0.36 and 64-bit at or above
+# 0.93; over a whole image, where data dilutes the count toward the uniform share, the
+# floor for 64-bit drops to 0.74. The threshold sits inside both gaps because a raw
+# memory dump names no code areas and has to be judged whole.
 REX_W_SHARE_THRESHOLD = 0.5
 # Below this many observations the share is noise; fall back to the first-byte tables.
 REX_W_MIN_SAMPLES = 64
@@ -39,19 +42,31 @@ class BitnessAnalyzer:
 
     def determineBitnessFromDisassembly(self, disassembly):
         LOGGER.debug("Running Bitness test on binary data of DisassemblyResult")
-        return self.determineBitness(binary=disassembly.binary_info.binary)
+        binary_info = disassembly.binary_info
+        return self.determineBitness(binary_info.binary, regions=self._codeRegions(binary_info))
 
-    def _rexWShare(self, binary):
+    @staticmethod
+    def _codeRegions(binary_info):
+        """Offsets of the loader's code areas within the mapped buffer, if it named any."""
+        regions = []
+        for area in binary_info.code_areas or []:
+            start = max(0, area[0] - binary_info.base_addr)
+            end = min(len(binary_info.binary), area[1] - binary_info.base_addr)
+            if end > start:
+                regions.append((start, end))
+        return regions
+
+    def _rexWShare(self, binary, regions=None):
         """Share of 0x48 bytes that introduce a REX.W-compatible opcode."""
         observed = 0
         introducing = 0
-        index = binary.find(REX_W_PREFIX)
-        limit = len(binary) - 1
-        while 0 <= index < limit and observed < REX_W_MAX_SAMPLES:
-            observed += 1
-            if binary[index + 1] in REX_W_OPCODES:
-                introducing += 1
-            index = binary.find(REX_W_PREFIX, index + 1)
+        for start, end in regions or [(0, len(binary))]:
+            index = binary.find(REX_W_PREFIX, start, end)
+            while 0 <= index < end - 1 and observed < REX_W_MAX_SAMPLES:
+                observed += 1
+                if binary[index + 1] in REX_W_OPCODES:
+                    introducing += 1
+                index = binary.find(REX_W_PREFIX, index + 1, end)
         if observed < REX_W_MIN_SAMPLES:
             return None, observed
         return introducing / observed, observed
@@ -79,8 +94,12 @@ class BitnessAnalyzer:
         LOGGER.debug("Bitness scores: %5.2f (32bit), %5.2f (64bit)", score["32"], score["64"])
         return 64 if score["32"] < score["64"] else 32
 
-    def determineBitness(self, binary):
-        share, observed = self._rexWShare(binary)
+    def determineBitness(self, binary, regions=None):
+        share, observed = self._rexWShare(binary, regions)
+        if share is None and regions:
+            # too little code named to decide on; the whole image is still better
+            # evidence than the byte tables
+            share, observed = self._rexWShare(binary)
         if share is None:
             LOGGER.debug(
                 "Only %d REX.W-candidate bytes, falling back to function-start bytes",
