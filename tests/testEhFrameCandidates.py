@@ -1,22 +1,37 @@
 #!/usr/bin/python
-"""ELF .eh_frame FDE decoding and the deferred AArch64 candidate pass (opt-in).
+"""ELF .eh_frame FDE decoding and the deferred candidate pass it feeds (opt-in).
 
-Decoder unit tests craft raw .eh_frame byte streams; the integration tests run
-the real aarch64_static_xored fixture, where the conservative opt-in pass must
+Decoder unit tests craft raw .eh_frame byte streams. The integration tests run
+real fixtures: aarch64_static_xored, where the conservative opt-in pass must
 recover exactly the one wrapper the primary pass leaves unclaimed (278 -> 279)
-without disturbing any existing function.
+without disturbing any existing function, and the x86-64 fixture below, which is
+the only bundled image whose .eh_frame_hdr search table can be decoded at all -
+the route a memory image has to take, since it keeps its program headers but not
+its section table.
 """
 
 import struct
 import unittest
+from pathlib import Path
 
-from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
+import lief
+
+from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
+from smda.common.BinaryInfo import BinaryInfo
+from smda.common.EhFrameDecoder import PT_GNU_EH_FRAME, decodeEhFrameFdeRanges, decodeEhFrameHdrStarts
 from smda.Disassembler import Disassembler
+from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as IntelFunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
+from smda.utility.MemoryFileLoader import MemoryFileLoader
 from tests.testAArch64Disassembler import AARCH64_STATIC_FIXTURE, _load_xored_fixture
 
 SECTION_VA = 0x10000
+# x86-64 ELF carrying a real .eh_frame_hdr search table, built with
+#   gcc -O1 -static -nostdlib -fasynchronous-unwind-tables -Wl,--eh-frame-hdr
+# from five small functions, then stripped (gcc 13.3.0); no bundled malware fixture
+# has the segment, and -nostdlib alone does not link the search table in
+EH_FRAME_HDR_FIXTURE = "elf_ehframe_hdr_x64_xored"
 
 
 def _uleb(value):
@@ -155,7 +170,7 @@ class EhFrameDecoderTestSuite(unittest.TestCase):
         self.assertEqual(len(capped), 2)  # cap includes the CIE record
         self.assertEqual(len(decodeEhFrameFdeRanges(stream, SECTION_VA)), 8)
 
-    def test_intel_manager_has_no_deferred_sources(self):
+    def test_intel_manager_yields_nothing_while_the_sources_are_off(self):
         self.assertEqual(tuple(IntelFunctionCandidateManager(SmdaConfig()).locateDeferredCandidates()), ())
 
 
@@ -302,6 +317,275 @@ class EhFrameDwarf64TestSuite(unittest.TestCase):
         stream += _fde64(0, len(stream), 0x401000, 0x40, "<Q")
 
         self.assertEqual(decodeEhFrameFdeRanges(stream, SECTION_VA), [(0x401000, 0x40)])
+
+
+class IntelEhFrameCandidateTestSuite(unittest.TestCase):
+    """The decoder has always been in the tree; until now only AArch64 read it."""
+
+    # the only bundled intel ELF with a populated .eh_frame; every malware fixture
+    # is either built without unwind tables or keeps a 4-byte terminator section
+    ELF_FIXTURE = EH_FRAME_HDR_FIXTURE
+    FDE_STARTS = {0x401000, 0x401006, 0x40101F, 0x40103B, 0x401048}
+
+    def _report(self, opt_in, mapped=False):
+        config = SmdaConfig()
+        config.TIMEOUT = 300
+        config.USE_ELF_EH_FRAME_CANDIDATES = opt_in
+        buffer = _load_xored_fixture(Path(__file__).resolve().parent / self.ELF_FIXTURE)
+        if mapped:
+            loader = MemoryFileLoader(buffer, map_file=True)
+            return Disassembler(config).disassembleBuffer(loader.getData(), loader.getBaseAddress(), bitness=64)
+        return Disassembler(config).disassembleUnmappedBuffer(buffer)
+
+    def testTheIntelManagerReadsTheSectionItNeverUsedToRead(self):
+        buffer = _load_xored_fixture(Path(__file__).resolve().parent / self.ELF_FIXTURE)
+        config = SmdaConfig()
+        config.USE_ELF_EH_FRAME_CANDIDATES = True
+        loader = MemoryFileLoader(buffer, map_file=True)
+        binary_info = BinaryInfo(loader.getData())
+        binary_info.base_addr = loader.getBaseAddress()
+        binary_info.bitness = 64
+        manager = IntelFunctionCandidateManager(config)
+        manager.disassembly = DisassemblyResult()
+        manager.disassembly.setBinaryInfo(binary_info)
+        self.assertEqual(set(manager.locateEhFrameCandidates()), self.FDE_STARTS)
+
+    def testOptInIsAnIntelCandidateSourceToo(self):
+        off = self._report(False)
+        on = self._report(True)
+        self.assertEqual(off.architecture, "intel")
+        self.assertEqual(on.architecture, "intel")
+        self.assertGreaterEqual(on.num_functions, off.num_functions)
+        self.assertEqual(
+            {function.offset for function in off.getFunctions()} - {function.offset for function in on.getFunctions()},
+            set(),
+        )
+        # positive control: an .eh_frame the decoder cannot read would make the
+        # comparison above true no matter what the candidate source does
+        self.assertTrue(self.FDE_STARTS.issubset({function.offset for function in on.getFunctions()}))
+
+    def testIntelAcceptsUnalignedStarts(self):
+        self.assertEqual(IntelFunctionCandidateManager.CANDIDATE_ALIGNMENT, 1)
+
+
+class EhFrameHdrTestSuite(unittest.TestCase):
+    """A memory image keeps its program headers but not its section table, so the
+    FDE starts have to come from the search table PT_GNU_EH_FRAME points at."""
+
+    def _disassembly(self, buffer, base_addr):
+        binary_info = BinaryInfo(buffer)
+        binary_info.base_addr = base_addr
+        binary_info.bitness = 64
+        disassembly = DisassemblyResult()
+        disassembly.setBinaryInfo(binary_info)
+        return disassembly
+
+    def testMappedImageYieldsTheSameStartsAsTheSectionTable(self):
+        buffer = _load_xored_fixture(Path(__file__).resolve().parent / EH_FRAME_HDR_FIXTURE)
+        loader = MemoryFileLoader(buffer, map_file=True)
+        disassembly = self._disassembly(loader.getData(), loader.getBaseAddress())
+        starts = decodeEhFrameHdrStarts(disassembly, pointer_size=8)
+        parsed = lief.ELF.parse(list(buffer))
+        section = next((s for s in parsed.sections if s.name == ".eh_frame"), None)
+        self.assertIsNotNone(section)
+        expected = {
+            fde_range[0]
+            for fde_range in decodeEhFrameFdeRanges(bytes(section.content), section.virtual_address, pointer_size=8)
+        }
+        # positive control: an empty search table would make the comparison vacuous
+        self.assertEqual(len(expected), 5)
+        self.assertEqual(starts, expected)
+
+    def testMappedImageReachesTheFallbackThroughTheCandidateManager(self):
+        # the section table is not covered by any PT_LOAD, so a mapped image has to
+        # reach the same starts through .eh_frame_hdr
+        buffer = _load_xored_fixture(Path(__file__).resolve().parent / EH_FRAME_HDR_FIXTURE)
+        loader = MemoryFileLoader(buffer, map_file=True)
+        manager = IntelFunctionCandidateManager(SmdaConfig())
+        manager.disassembly = self._disassembly(loader.getData(), loader.getBaseAddress())
+        self.assertEqual(manager._ehFrameFunctionStarts(), IntelEhFrameCandidateTestSuite.FDE_STARTS)
+
+    def testBigEndianImageIsRejected(self):
+        # every header word is read little-endian, so a big-endian image would produce
+        # byte-swapped offsets rather than no answer
+        buffer = _load_xored_fixture(Path(__file__).resolve().parent / "mirai_openrisc_xored")
+        loader = MemoryFileLoader(buffer, map_file=True)
+        disassembly = self._disassembly(loader.getData(), loader.getBaseAddress())
+        self.assertEqual(buffer[5], 2)  # EI_DATA == ELFDATA2MSB
+        self.assertEqual(decodeEhFrameHdrStarts(disassembly, pointer_size=4), set())
+
+    def testNonElfBufferYieldsNothing(self):
+        disassembly = self._disassembly(b"MZ" + b"\x00" * 0x200, 0x400000)
+        self.assertEqual(decodeEhFrameHdrStarts(disassembly, pointer_size=8), set())
+
+    def testEmptyBufferYieldsNothing(self):
+        disassembly = self._disassembly(b"", 0)
+        self.assertEqual(decodeEhFrameHdrStarts(disassembly, pointer_size=8), set())
+
+    def testElfWithoutTheSegmentYieldsNothing(self):
+        header = bytearray(b"\x7fELF\x02\x01\x01" + b"\x00" * 57)
+        struct.pack_into("<Q", header, 0x20, 64)
+        struct.pack_into("<HH", header, 0x36, 56, 1)
+        program_header = bytearray(56)
+        struct.pack_into("<I", program_header, 0, 1)
+        disassembly = self._disassembly(bytes(header + program_header), 0)
+        self.assertEqual(decodeEhFrameHdrStarts(disassembly, pointer_size=8), set())
+
+    def test32BitElfHeaderIsRead(self):
+        header = bytearray(b"\x7fELF\x01\x01\x01" + b"\x00" * 45)
+        struct.pack_into("<I", header, 0x1C, 52)
+        struct.pack_into("<HH", header, 0x2A, 32, 1)
+        program_header = bytearray(32)
+        struct.pack_into("<I", program_header, 0, 1)
+        disassembly = self._disassembly(bytes(header + program_header), 0)
+        self.assertEqual(decodeEhFrameHdrStarts(disassembly, pointer_size=4), set())
+
+
+def _image_with_hdr(hdr_vaddr, hdr_bytes, phnum=1, phoff=0x40, size=0x2000, entry_type=PT_GNU_EH_FRAME):
+    """Mapped-image bytes whose PT_GNU_EH_FRAME points at hdr_bytes."""
+    image = bytearray(size)
+    image[0:16] = b"\x7fELF\x02\x01\x01" + b"\x00" * 9
+    struct.pack_into("<Q", image, 0x20, phoff)
+    struct.pack_into("<HH", image, 0x36, 56, phnum)
+    if phnum and phoff + 56 <= size:
+        struct.pack_into("<I", image, phoff, entry_type)
+        struct.pack_into("<Q", image, phoff + 0x10, hdr_vaddr)
+    if hdr_bytes and hdr_vaddr + len(hdr_bytes) <= size:
+        image[hdr_vaddr : hdr_vaddr + len(hdr_bytes)] = hdr_bytes
+    return bytes(image)
+
+
+def _hdr_bytes(version=1, count_enc=0x03, table_enc=0x3B, fde_count=1):
+    return bytes([version, 0x1B, count_enc, table_enc]) + struct.pack("<i", 0) + struct.pack("<I", fde_count)
+
+
+class EhFrameHdrRejectionTestSuite(unittest.TestCase):
+    """Every way a search table can be unusable; base_addr 0 makes both candidate
+    addresses the decoder tries identical, so each case ends the scan."""
+
+    def _starts(self, image):
+        binary_info = BinaryInfo(image)
+        binary_info.base_addr = 0
+        binary_info.bitness = 64
+        disassembly = DisassemblyResult()
+        disassembly.setBinaryInfo(binary_info)
+        return decodeEhFrameHdrStarts(disassembly, pointer_size=8)
+
+    def testProgramHeaderTableOutsideTheReadWindowIsIgnored(self):
+        # the header walk only reads the first page, so entries past it are unreadable
+        image = _image_with_hdr(0x1000, _hdr_bytes(), phnum=8, phoff=0xF00, entry_type=1)
+        self.assertEqual(self._starts(image), set())
+
+    def testHeaderWithoutProgramHeadersIsIgnored(self):
+        self.assertEqual(self._starts(_image_with_hdr(0x1000, _hdr_bytes(), phnum=0)), set())
+
+    def testUnreadableSearchTableAddressEndsTheScan(self):
+        self.assertEqual(self._starts(_image_with_hdr(0x9000, b"")), set())
+
+    def testUnknownVersionEndsTheScan(self):
+        self.assertEqual(self._starts(_image_with_hdr(0x1000, _hdr_bytes(version=2))), set())
+
+    def testUnsupportedTableEncodingEndsTheScan(self):
+        self.assertEqual(self._starts(_image_with_hdr(0x1000, _hdr_bytes(table_enc=0x1B))), set())
+
+    def testTruncatedTableEndsTheScan(self):
+        # the header sits at the very end of the image, so its table cannot be read
+        self.assertEqual(self._starts(_image_with_hdr(0x2000 - 12, _hdr_bytes())), set())
+
+
+class _TimeoutAfter:
+    """analysis_timeout that flips to True after a fixed number of reads."""
+
+    def __init__(self, reads):
+        self.remaining = reads
+
+    def __bool__(self):
+        if self.remaining <= 0:
+            return True
+        self.remaining -= 1
+        return False
+
+
+class EhFrameCandidateFilterTestSuite(unittest.TestCase):
+    """The filters an FDE start has to clear, driven through a stub unwind table."""
+
+    IMAGE_SIZE = 0x1000
+    BASE = 0x400000
+
+    def _manager(self, starts, manager_class=IntelFunctionCandidateManager, code_areas=None):
+        config = SmdaConfig()
+        config.USE_ELF_EH_FRAME_CANDIDATES = True
+        binary_info = BinaryInfo(b"\x90" * self.IMAGE_SIZE)
+        binary_info.base_addr = self.BASE
+        binary_info.bitness = 64
+        binary_info.binary_size = self.IMAGE_SIZE
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = binary_info
+        manager = manager_class(config)
+        manager.disassembly = disassembly
+        manager.bitness = 64
+        manager._code_areas = code_areas or []
+        manager._ehFrameFunctionStarts = lambda: set(starts)
+        return manager
+
+    def testStartsInsideTheCodeAreasAreYielded(self):
+        manager = self._manager([self.BASE + 0x100, self.BASE + 0x200])
+        self.assertEqual(
+            list(manager.locateEhFrameCandidates()),
+            [self.BASE + 0x100, self.BASE + 0x200],
+        )
+        self.assertEqual(manager._executableRanges(), [])
+
+    def testAnEmptyTableEndsThePass(self):
+        self.assertEqual(list(self._manager([]).locateEhFrameCandidates()), [])
+
+    def testStartsOutsideTheExecutableRangesAreDropped(self):
+        areas = [(self.BASE + 0x180, self.BASE + 0x280)]
+        manager = self._manager([self.BASE + 0x100, self.BASE + 0x200], code_areas=areas)
+        self.assertEqual(list(manager.locateEhFrameCandidates()), [self.BASE + 0x200])
+
+    def testMisalignedStartsAreDroppedOnAArch64(self):
+        manager = self._manager(
+            [self.BASE + 0x102, self.BASE + 0x200],
+            manager_class=AArch64FunctionCandidateManager,
+        )
+        manager._cachedExecutableSectionRanges = list
+        self.assertEqual(list(manager.locateEhFrameCandidates()), [self.BASE + 0x200])
+
+    def testStartsOutsideTheCodeAreasAreDropped(self):
+        # AArch64 filters on executable SECTIONS while the code filter uses the loader's
+        # code areas, so a start can clear one and fail the other
+        manager = self._manager(
+            [self.BASE + 0x100, self.BASE + 0x200],
+            manager_class=AArch64FunctionCandidateManager,
+            code_areas=[(self.BASE + 0x180, self.BASE + 0x280)],
+        )
+        manager._cachedExecutableSectionRanges = lambda: [(self.BASE, self.BASE + self.IMAGE_SIZE)]
+        self.assertEqual(list(manager.locateEhFrameCandidates()), [self.BASE + 0x200])
+
+    def testStartsTheAnalysisAlreadyClaimedAreLeftAlone(self):
+        manager = self._manager([self.BASE + 0x100, self.BASE + 0x200])
+        manager.disassembly.code_map[self.BASE + 0x100] = None
+        self.assertEqual(list(manager.locateEhFrameCandidates()), [self.BASE + 0x200])
+
+    def testAStartClaimedByAnEarlierDeferredFunctionIsNotYielded(self):
+        manager = self._manager([self.BASE + 0x100, self.BASE + 0x200])
+        candidates = manager.locateEhFrameCandidates()
+        self.assertEqual(next(candidates), self.BASE + 0x100)
+        manager.disassembly.code_map[self.BASE + 0x200] = None
+        self.assertEqual(list(candidates), [])
+
+    def testTimeoutStopsTheCollectionPass(self):
+        manager = self._manager([self.BASE + 0x100, self.BASE + 0x200])
+        manager.disassembly.analysis_timeout = True
+        self.assertEqual(list(manager.locateEhFrameCandidates()), [])
+        self.assertEqual(manager.candidates, {})
+
+    def testTimeoutStopsTheYieldPass(self):
+        manager = self._manager([self.BASE + 0x100, self.BASE + 0x200])
+        manager.disassembly.analysis_timeout = _TimeoutAfter(2)
+        self.assertEqual(list(manager.locateEhFrameCandidates()), [])
+        self.assertEqual(sorted(manager.candidates), [self.BASE + 0x100, self.BASE + 0x200])
 
 
 if __name__ == "__main__":

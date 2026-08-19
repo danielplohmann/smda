@@ -32,9 +32,8 @@ import sys
 
 import lief
 
-from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
-from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment, get_macho_stub_ranges
+from smda.utility.MachoBinary import get_macho_stub_ranges
 
 from .definitions import (
     ADD_IMM64_MASK,
@@ -72,6 +71,7 @@ LOGGER = logging.getLogger(__name__)
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
+    CANDIDATE_ALIGNMENT = INSTRUCTION_SIZE
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         # Reset the memoized executable-section ranges and Mach-O fixup state
@@ -223,78 +223,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             self.addExceptionCandidate(addr)
 
+    def _executableRanges(self):
+        return self._cachedExecutableSectionRanges()
+
     def locateDeferredCandidates(self):
-        # ELF .eh_frame FDE starts (opt-in): every FDE names a code range that
-        # unwinding treats as one routine, so an FDE start the primary pass left
-        # unclaimed is strong evidence of a missed function (e.g. a wrapper only
-        # reached through data). Runs after the primary pass so code_map claims
-        # can veto entries: an already-claimed start would split existing
-        # functions, which this pass must never do. Accepted starts get ordinary
-        # candidate bookkeeping - deliberately NOT the PE exception-candidate
-        # priority, since .eh_frame commonly also covers non-function ranges.
-        if not self.config.USE_ELF_EH_FRAME_CANDIDATES:
-            return
-        binary_info = self.disassembly.binary_info
-        lief_binary = binary_info.getLiefBinary()
-        if not isinstance(lief_binary, lief.ELF.Binary):
-            return
-        eh_frame = next((section for section in lief_binary.sections if section.name == ".eh_frame"), None)
-        if eh_frame is None or not eh_frame.virtual_address or not eh_frame.size:
-            return
-        section_bytes = self.disassembly.getBytes(eh_frame.virtual_address, eh_frame.size)
-        if not section_bytes:
-            return
-        pointer_size = 8 if binary_info.bitness == 64 else 4
-        fde_ranges = decodeEhFrameFdeRanges(bytes(section_bytes), eh_frame.virtual_address, pointer_size=pointer_size)
-        exec_ranges = self._cachedExecutableSectionRanges()
-
-        def in_exec(addr):
-            return any(start <= addr < end for start, end in exec_ranges)
-
-        accepted = []
-        for fde_start in sorted({fde_range[0] for fde_range in fde_ranges}):
-            if self._candidateTimeoutTripped():
-                return
-            if fde_start % INSTRUCTION_SIZE != 0 or not in_exec(fde_start):
-                continue
-            if not self._passesCodeFilter(fde_start):
-                continue
-            if self.disassembly.isCode(fde_start):
-                continue
-            self.ensureCandidate(fde_start)
-            # MAX_FUNCTION_CANDIDATES can reject the registration; never analyze
-            # a start that was not actually recorded
-            if fde_start in self.candidates:
-                accepted.append(fde_start)
-        # register ALL accepted starts as known function starts before analyzing
-        # any of them: the branch classifier consults getFunctionStartCandidates()
-        # during analysis, so an earlier deferred function could otherwise absorb
-        # a later FDE start it branches or tailcalls into
-        self._candidate_offsets.update(accepted)
-        for fde_start in accepted:
-            if self._candidateTimeoutTripped():
-                return
-            # re-checked per yield: an earlier deferred candidate's analysis may
-            # still have claimed this start in the meantime (e.g. as a callee)
-            if self.disassembly.isCode(fde_start):
-                continue
-            yield fde_start
-
-    def _machoActiveBinaryAndAdjustment(self):
-        binary_info = self.disassembly.binary_info
-        lief_binary = binary_info.getLiefBinary()
-        if not isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
-            return None, 0
-        macho = get_active_macho_binary(lief_binary, bitness=binary_info.bitness, architecture=binary_info.architecture)
-        if macho is None or not isinstance(macho, lief.MachO.Binary):
-            return None, 0
-        adjustment = get_macho_address_adjustment(
-            macho,
-            base_addr=binary_info.base_addr,
-            bitness=binary_info.bitness,
-            architecture=binary_info.architecture,
-        )
-        return macho, adjustment
+        yield from self.locateEhFrameCandidates()
+        yield from self.locateMachoFunctionStartCandidates()
 
     @staticmethod
     def _machoInstructionSectionRanges(macho, adjustment, pure_only=False):

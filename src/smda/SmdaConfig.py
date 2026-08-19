@@ -42,13 +42,24 @@ class SmdaConfig:
     # are only performed where the interior .pdata start has a non-fall-through inbound
     # jmp/call from another recovered function, never from candidate membership alone.
     USE_PE_X64_PDATA_ENDS = False
-    # promote unclaimed ELF .eh_frame FDE starts as late AArch64 candidates (after the primary
-    # pass, before gap analysis); off until validated against ground-truth function boundaries
+    # promote unclaimed ELF .eh_frame FDE starts as late candidates on both instruction sets
+    # (after the primary pass, before gap analysis); off until validated against ground-truth
+    # function boundaries. Unwind ranges are not function starts by definition - .eh_frame also
+    # covers ranges that are not independent functions - which is why this stays opt-in while
+    # the Mach-O function-start table below does not
     USE_ELF_EH_FRAME_CANDIDATES = False
     # extend the AArch64 adr/adrp address-materialization scan to Mach-O instruction sections,
     # recording targets as weak address evidence; off until validated with exact-address ground
     # truth for the Mach-O corpus
     USE_MACHO_ADDRESS_REF_CANDIDATES = False
+    # promote unclaimed Mach-O LC_FUNCTION_STARTS entries as late candidates (after the primary
+    # pass, before gap analysis). The linker writes the table and stripping keeps it, and segment
+    # file offsets and VM offsets coincide in Mach-O, so it also reads correctly out of a mapped
+    # image - unlike a PE COFF symbol table. Across the bundled Mach-O fixtures it lifts the share
+    # of linker-declared starts recovered from 87.4% to 96.7% (1884 -> 2083 of 2155) with no sample
+    # losing a function; off until that is confirmed against ground-truth boundaries rather than
+    # against the same table the pass consumes
+    USE_MACHO_FUNCTION_STARTS = False
     RESOLVE_REGISTER_CALLS = True
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
     # record the API plus the slot it lives in; annotation only, it books no code refs
