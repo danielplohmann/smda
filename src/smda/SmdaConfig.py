@@ -72,6 +72,13 @@ class SmdaConfig:
     LARGE_INPUT_RSS_FACTOR = 500
     MEMORY_BUDGET_FRACTION = 0.5
     HIGH_ACCURACY = True
+    # promote the targets of jumps that leave a function into functions of their own, in a
+    # pass after gap analysis. Off by default: what it buys depends entirely on how much a
+    # binary tail-calls, and it is never free. On libstdc++.so.6 it adds 337 functions
+    # (8473 -> 8810) for 40-130% more analysis time depending on the machine; on Go ELF and
+    # Mach-O memory images, 8 functions each for 20-26%. A jump into an already-recovered
+    # function is still treated as a tailcall with the pass off - only the promotion of
+    # not-yet-known targets needs it.
     RESOLVE_TAILCALLS = False
     # optional metadata generation options; the largest built-in performance lever.
     # Measured on the cutwail fixture, as a share of all Python calls per run: hashing 10.0%,
