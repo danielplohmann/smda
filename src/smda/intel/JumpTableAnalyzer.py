@@ -119,15 +119,25 @@ class JumpTableAnalyzer:
                 break
         return bonus_offset
 
-    def _extractDirectTableOffsets(self, jumptable_size, off_jumptable):
+    def _extractDirectTableOffsets(self, jumptable_size, off_jumptable, state=None, jump_instruction_address=None):
+        # an unrecovered bound arrives as 0, which read as "zero entries" and abandoned the
+        # table; the per-entry image bound below is what actually ends the scan, exactly as
+        # in _resolveExplicitTable and _extractRelativeTableOffsets
+        jumptable_size = jumptable_size if jumptable_size else 0xFF
         jump_targets = set()
-        if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
+        if off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
             for index in range(jumptable_size):
                 raw_entry_bytes = self.disassembly.getBytes(off_jumptable + index * 4, 4)
                 if raw_entry_bytes is None or len(raw_entry_bytes) < 4:
-                    continue
+                    break
                 entry = struct.unpack("<I", raw_entry_bytes)[0]
+                if not self.disassembly.isAddrWithinMemoryImage(entry):
+                    break
                 jump_targets.add(entry)
+                if state is not None:
+                    # claim the entry as data, or the gap scan seeds function candidates
+                    # inside the table bytes
+                    state.addDataRef(jump_instruction_address, off_jumptable + index * 4, size=4)
         return sorted(jump_targets)
 
     def _extractRelativeTableOffsets(
@@ -230,7 +240,12 @@ class JumpTableAnalyzer:
             # 32bit cases typically load into target register directly
             if backtracked_sequence.startswith("mov"):
                 off_jumptable = self._directHandler(jump_instruction_op_str, state, backtracked)
-                table_offsets = self._extractDirectTableOffsets(jumptable_size, off_jumptable)
+                table_offsets = self._extractDirectTableOffsets(
+                    jumptable_size,
+                    off_jumptable,
+                    state=state,
+                    jump_instruction_address=jump_instruction_address,
+                )
             elif backtracked_sequence.startswith("add-movsxd"):
                 jumptable_size = self._findJumpTableSize(backtracked)
                 off_jumptable = self._x64Handler(state, backtracked)

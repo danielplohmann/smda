@@ -3,7 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from smda.Disassembler import Disassembler
 from smda.intel.JumpTableAnalyzer import JumpTableAnalyzer
+from smda.SmdaConfig import SmdaConfig
 
 
 def _makeAnalyzer(binary=b"", base_addr=0x1000, binary_size=0x100, bitness=32):
@@ -316,3 +318,103 @@ class RelativeTableDataClaimTest(unittest.TestCase):
         analyzer.getJumpTargets((0x2000, 2, "jmp", "rax"), state)
 
         self.assertEqual([ref[1] for ref in state.refs], [0x1110, 0x1114])
+
+
+class DirectTableScanTest(unittest.TestCase):
+    """The 32-bit `mov <reg>, dword ptr [<reg>*4 + table]` / `jmp <reg>` shape, whose
+    extractor lacked both the unrecovered-bound fallback and the per-entry image bound
+    its two siblings already had."""
+
+    ENTRIES = [0x1100, 0x1200, 0x1300]
+    OUT_OF_IMAGE = struct.pack("<I", 0xDEADBEEF)
+
+    def _analyzer(self, trailing=OUT_OF_IMAGE):
+        analyzer = _makeAnalyzer(bitness=32)
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(
+            side_effect=lambda addr: addr in (0x1090, *self.ENTRIES)
+        )
+        table = b"".join(struct.pack("<I", entry) for entry in self.ENTRIES) + trailing
+        analyzer.disassembly.getBytes = MagicMock(
+            side_effect=lambda addr, size: table[addr - 0x1090 : addr - 0x1090 + size]
+        )
+        return analyzer
+
+    def test_scans_when_the_size_was_not_recovered(self):
+        # an unrecovered bound arrives as 0 and abandoned the table outright; the
+        # per-entry image check is what ends the scan
+        analyzer = self._analyzer()
+        self.assertEqual(analyzer._extractDirectTableOffsets(0, 0x1090), self.ENTRIES)
+
+    def test_stops_at_the_first_out_of_image_entry(self):
+        # without the bound, a too-large size walked past the table and turned
+        # whatever followed it into jump targets
+        analyzer = self._analyzer()
+        self.assertEqual(analyzer._extractDirectTableOffsets(0xFF, 0x1090), self.ENTRIES)
+
+    def test_honours_a_recovered_size(self):
+        analyzer = self._analyzer()
+        self.assertEqual(analyzer._extractDirectTableOffsets(2, 0x1090), self.ENTRIES[:2])
+
+    def test_stops_at_a_short_read(self):
+        analyzer = self._analyzer(trailing=b"\x01\x02")
+        self.assertEqual(analyzer._extractDirectTableOffsets(0xFF, 0x1090), self.ENTRIES)
+
+    def test_each_consumed_entry_is_claimed_as_data(self):
+        analyzer = self._analyzer()
+        state = SimpleNamespace(refs=[])
+        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        analyzer._extractDirectTableOffsets(0, 0x1090, state=state, jump_instruction_address=0x2000)
+        self.assertEqual(state.refs, [(0x2000, 0x1090, 4), (0x2000, 0x1094, 4), (0x2000, 0x1098, 4)])
+
+    def test_getJumpTargets_forwards_the_state_for_the_direct_shape(self):
+        analyzer = self._analyzer()
+        analyzer._directHandler = MagicMock(return_value=0x1090)
+        state = SimpleNamespace(refs=[])
+        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.backtrackInstructions = MagicMock(
+            return_value=[(0x1FF0, 5, "mov", "eax, dword ptr [eax*4 + 0x1090]")],
+        )
+
+        targets = analyzer.getJumpTargets((0x2000, 2, "jmp", "eax"), state)
+
+        self.assertEqual(targets, self.ENTRIES)
+        self.assertEqual([ref[1] for ref in state.refs], [0x1090, 0x1094, 0x1098])
+
+
+class DirectTableRecoveryTest(unittest.TestCase):
+    """End to end: an abandoned table leaves the switch bodies unreferenced, so the gap
+    scan recovers each of them as a function of its own instead of as blocks."""
+
+    BASE = 0x400000
+    TABLE = 0x401000
+
+    def _buffer(self):
+        buffer = bytearray(0x2000)
+        code = bytes.fromhex("55")  # push ebp
+        code += bytes.fromhex("89e5")  # mov ebp, esp
+        code += bytes.fromhex("8b048500104000")  # mov eax, dword ptr [eax*4 + 0x401000]
+        code += bytes.fromhex("ffe0")  # jmp eax
+        buffer[0 : len(code)] = code
+        offset = self.TABLE - self.BASE
+        for index, target in enumerate((0x400010, 0x400020, 0x400030)):
+            struct.pack_into("<I", buffer, offset + index * 4, target)
+        struct.pack_into("<I", buffer, offset + 12, 0xDEADBEEF)  # out of image: ends the scan
+        for case in (0x10, 0x20, 0x30):
+            buffer[case : case + 3] = bytes.fromhex("31c0c3")  # xor eax, eax; ret
+        return bytes(buffer)
+
+    def test_switch_bodies_become_blocks_of_the_dispatching_function(self):
+        config = SmdaConfig()
+        config.TIMEOUT = 30
+        config.WITH_STRINGS = False
+        report = Disassembler(config).disassembleBuffer(self._buffer(), self.BASE, bitness=32)
+
+        self.assertEqual([function.offset for function in report.getFunctions()], [self.BASE])
+        function = next(iter(report.getFunctions()))
+        self.assertEqual(
+            sorted(block.offset for block in function.getBlocks()),
+            [self.BASE, 0x400010, 0x400020, 0x400030],
+        )
+        # the three consumed entries are claimed as data, so the gap scan cannot seed
+        # candidates inside the table
+        self.assertEqual(sorted(report.data_refs_from[0x40000A]), [0x401000, 0x401004, 0x401008])
