@@ -166,31 +166,6 @@ class RecursiveDisassembler:
             return -value if referenced_addr.group("sign") == "-" else value
         return 0
 
-    def resolveIndirectSwitch(self, addr_switch_array, size):
-        indirect_switch_bytes = []
-        current_offset = addr_switch_array + size * 4
-        if self.disassembly.isAddrWithinMemoryImage(current_offset):
-            LOGGER.debug(
-                "0x%08x analyzing potentially indirect switch table (size: 0x%08x).",
-                current_offset,
-                size,
-            )
-            current_byte = self.disassembly.getByte(current_offset)
-            if isinstance(current_byte, str):
-                current_byte = ord(current_byte)
-            while (
-                current_byte is not None
-                and current_byte < size
-                and current_offset not in self.fc_manager.getFunctionStartCandidates()
-            ):
-                indirect_switch_bytes.append(current_offset)
-                current_offset += 1
-                current_byte = self.disassembly.getByte(current_offset)
-                if isinstance(current_byte, str):
-                    current_byte = ord(current_byte)
-            LOGGER.debug("0x%08x found %d bytes.", current_offset, len(indirect_switch_bytes))
-        return indirect_switch_bytes
-
     def _handleCallTarget(self, state, from_addr, to_addr):
         # explicit None check: address 0 is valid in base-0 buffers
         if to_addr is not None and self.disassembly.isAddrWithinMemoryImage(to_addr):

@@ -389,20 +389,6 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(result.ins2fn.get(0x100E), 0x1000)
 
-    def test_resolve_indirect_switch_stops_at_image_end(self):
-        disassembler = IntelDisassembler.__new__(IntelDisassembler)
-        disassembler.disassembly = SimpleNamespace(
-            isAddrWithinMemoryImage=lambda addr: 0x1000 <= addr < 0x1008,
-            getByte=lambda addr: 0 if 0x1000 <= addr < 0x1008 else None,
-        )
-        disassembler.fc_manager = SimpleNamespace(getFunctionStartCandidates=lambda: set())
-
-        # walks from 0x1004 past the image end without raising on the None byte
-        self.assertEqual(
-            disassembler.resolveIndirectSwitch(0x1000, 1),
-            list(range(0x1004, 0x1008)),
-        )
-
     def test_push_ret_obfuscation_detected_at_address_zero(self):
         # a push at address 0 (base-0 buffer) must not disable push-ret detection;
         # the stub at 0x0 becomes a candidate through the call in the second function
