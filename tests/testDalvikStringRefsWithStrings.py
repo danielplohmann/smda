@@ -39,8 +39,6 @@ class DalvikStringRefsWithStringsTestSuite(unittest.TestCase):
 
     def testStringRefsSurviveWithStringsEnabled(self):
         without = self._refs(self.without)
-        # positive control: the comparison is only meaningful if the disabled run
-        # recovered references in the first place
         self.assertGreater(len(without), 2000)
         self.assertEqual(self._refs(self.with_strings), without)
 

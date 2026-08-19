@@ -128,11 +128,8 @@ class Disassembler:
                     for referencing_addr, string_value in sorted(smda_function.stringrefs.items())
                 ]
             if architecture == "dalvik":
-                # DEX strings are part of the parsed file structure, not the raw buffer
-                # bytes: the generic StringExtractor cannot see them either. SmdaFunction
-                # has already normalized them into the shape built above - this pass runs
-                # only when WITH_STRINGS is set, which is also what makes it normalize -
-                # so there is nothing left to convert and assigning here would discard it.
+                # DEX strings are part of the parsed file structure, not the raw
+                # buffer bytes: the generic StringExtractor cannot see them either.
                 continue
             function_strings = analyzer_provided
             for string_result in extract_strings(smda_function, mode=mode):
