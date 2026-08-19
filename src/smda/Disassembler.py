@@ -5,6 +5,7 @@ import traceback
 from typing import Any, List, Optional
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
+from smda.aarch64.definitions import looksLikeAArch64
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -239,6 +240,13 @@ class Disassembler:
             architecture = "dalvik"
             if bitness is None:
                 bitness = DexFileLoader.getBitness(file_content)
+        elif not self._explicit_backend and architecture == "intel" and looksLikeAArch64(file_content):
+            # A dump carries no container header to read the instruction set from, and
+            # decoding AArch64 as x86 produces a full report whose every block is wrong.
+            LOGGER.warning("Buffer contains AArch64 machine code; disassembling as aarch64 rather than intel.")
+            architecture = "aarch64"
+            if bitness is None:
+                bitness = 64
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness
