@@ -78,6 +78,15 @@ class RawBufferArchitectureSelectionTest(unittest.TestCase):
         report = Disassembler(config, backend="intel").disassembleBuffer(buffer, 0x400000)
         self.assertEqual(report.architecture, "intel")
 
+    def testExplicitArchitectureIsNotOverridden(self):
+        # naming the architecture is a decision, not a default: the fuzz harness feeds
+        # foreign bytes to a pinned backend on purpose
+        buffer = _mapped("aarch64_static_xored")
+        config = SmdaConfig()
+        config.TIMEOUT = 30
+        report = Disassembler(config).disassembleBuffer(buffer, 0x400000, architecture="intel")
+        self.assertEqual(report.architecture, "intel")
+
     def testIntelBufferKeepsTheIntelBackend(self):
         buffer = _mapped("mirai_x64_xored")
         config = SmdaConfig()
