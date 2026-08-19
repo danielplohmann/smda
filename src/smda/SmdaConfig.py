@@ -17,7 +17,8 @@ class SmdaConfig:
     LOG_FORMAT = "%(asctime)-15s: %(name)-32s - %(message)s"
 
     ### SMDA disassembler config
-    # maximum time in seconds for disassembly to complete
+    # cooperative budget in seconds for disassembly, polled between candidates and between
+    # passes but never within one, so a run overshoots rather than being cut off; 0 disables it
     TIMEOUT = 300
     # maximum number of bytes to allocate while loading
     MAX_IMAGE_SIZE = 100 * 1024 * 1024
@@ -25,6 +26,9 @@ class SmdaConfig:
     STORE_BUFFER = False
     # extract strings during disassembly
     WITH_STRINGS = False
+    # the options named USE_*, RESOLVE_*, RECORD_*, CANDIDATE_QUEUE and HIGH_ACCURACY steer
+    # recursive candidate discovery and are read by the intel and aarch64 backends only; the
+    # cil and dalvik backends run their own analysis pipelines and ignore them
     # the queue to use for candidate management
     CANDIDATE_QUEUE = "PriorityQueue"  # choose from: ["BracketQueue", "PriorityQueue"]
     # improve disassembly by resolving references through data flows

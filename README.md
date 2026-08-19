@@ -107,16 +107,23 @@ nesting 4.6% and SCC 3.2% of all calls, and disabling all three removes 17.8%. T
 a downstream consumer does not read.
 
 `RESOLVE_TAILCALLS` runs the other way round: it is **off** by default and buys recovery for time.
-It promotes the target of a jump that leaves a function into a function of its own, in a pass after
-gap analysis, so what it is worth depends on how much a binary tail-calls. On `libstdc++.so.6` it
-adds 337 functions (8473 to 8810) for 40-130% more analysis time, the spread being how much the
+Only the x86/x64 and AArch64 recursive disassemblers read it — the CIL and Dalvik backends run their
+own analysis pipelines and ignore it, so enabling it costs and buys nothing there. Where it does
+apply, it promotes the target of a jump that leaves a function into a function of its own, in a pass
+after gap analysis, so what it is worth depends on how much a binary tail-calls. On `libstdc++.so.6`
+it adds 337 functions (8473 to 8810) for 40-130% more analysis time, the spread being how much the
 measuring machine had to spare; on Go ELF and Mach-O memory images it adds 8 functions each, for
 20-26%. A jump into an already-recovered function is treated as a tailcall either way — only
 promoting targets that are not yet known needs this pass.
 
-Analysis is also bounded by `TIMEOUT` (300s by default). A run that hits it comes back with
-`status == "timeout"`: the function set is a lower bound, not the whole binary. Check the status
-before comparing counts across samples, and pass `TIMEOUT = 0` to disable the bound entirely.
+Analysis is also bounded by `TIMEOUT` (300s by default), but cooperatively rather than as a
+wall-clock guarantee. The budget is polled between function candidates and between passes, never
+inside one: a single pathological function is analyzed to completion once started, and with
+`RESOLVE_TAILCALLS` enabled the whole tailcall pass runs without a poll. It bounds how much *new*
+work is begun, not how long a call takes to return, so a run can overshoot it. A run that exceeded
+the budget comes back with `status == "timeout"`: the function set is a lower bound, not the whole
+binary. Check the status before comparing counts across samples, and pass `TIMEOUT = 0` to disable
+the bound entirely. A caller that needs a hard wall-clock ceiling has to impose one itself.
 
 ### IDA Pro integration
 
