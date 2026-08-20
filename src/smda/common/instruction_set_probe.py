@@ -29,13 +29,20 @@ RETURN_SIGNATURES = {
 }
 
 
-def countAlignedOccurrences(buffer, pattern, alignment):
-    """How many times pattern occurs in buffer at a multiple of alignment."""
+def countAlignedOccurrences(buffer, pattern, alignment, limit=None):
+    """How many times pattern occurs in buffer at a multiple of alignment.
+
+    Counting stops once limit is reached, because the caller only ever asks whether a
+    count clears a threshold. Without it a buffer that is dense in one pattern costs an
+    iteration per occurrence, which is 25 million of them for a 100 MB image.
+    """
     found = 0
     index = buffer.find(pattern)
     while index >= 0:
         if index % alignment == 0:
             found += 1
+            if limit is not None and found >= limit:
+                break
         index = buffer.find(pattern, index + 1)
     return found
 
@@ -46,8 +53,11 @@ def detectUnsupportedInstructionSet(buffer):
     Returns None for x86, AArch64 and anything else the counts cannot separate; a caller
     that already knows the instruction set should never consult this.
     """
+    required = max(MIN_RETURN_SITES, -(-len(buffer) // MAX_BYTES_PER_RETURN_SITE))
     for name, (patterns, alignment) in RETURN_SIGNATURES.items():
-        found = sum(countAlignedOccurrences(buffer, pattern, alignment) for pattern in patterns)
-        if found >= MIN_RETURN_SITES and found * MAX_BYTES_PER_RETURN_SITE >= len(buffer):
-            return name
+        found = 0
+        for pattern in patterns:
+            found += countAlignedOccurrences(buffer, pattern, alignment, limit=required - found)
+            if found >= required:
+                return name
     return None

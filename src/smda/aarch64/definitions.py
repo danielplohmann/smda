@@ -34,6 +34,8 @@ do not "simplify" away):
   always-taken aliases, mirroring ``b.al``/``b.nv``.
 """
 
+from smda.common.instruction_set_probe import countAlignedOccurrences
+
 # fixed AArch64 instruction width (bytes); also the recursion stride
 INSTRUCTION_SIZE = 4
 NOP = 0xD503201F
@@ -301,10 +303,5 @@ def looksLikeAArch64(buffer):
     and both x86 modes: no non-AArch64 image held a single aligned occurrence, while
     the smallest AArch64 one held five in 48 KiB.
     """
-    found = 0
-    index = buffer.find(RET_X30_BYTES)
-    while index >= 0:
-        if index % INSTRUCTION_SIZE == 0:
-            found += 1
-        index = buffer.find(RET_X30_BYTES, index + 1)
-    return found >= MIN_RETURN_WORDS and found * MAX_BYTES_PER_RETURN_WORD >= len(buffer)
+    required = max(MIN_RETURN_WORDS, -(-len(buffer) // MAX_BYTES_PER_RETURN_WORD))
+    return countAlignedOccurrences(buffer, RET_X30_BYTES, INSTRUCTION_SIZE, limit=required) >= required
