@@ -4,7 +4,7 @@ import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
-from smda.utility.lief_helper import safe_lief_parse
+from smda.utility.lief_helper import lief_name, safe_lief_parse
 
 IMAGE_SCN_CNT_CODE = 0x00000020
 IMAGE_SCN_CNT_INITIALIZED_DATA = 0x00000040
@@ -330,7 +330,7 @@ class PeSynthesizer(BinarySynthesizer):
                 raw = bytearray(raw_size)
             regions.append(
                 {
-                    "name": section.name.rstrip("\x00"),
+                    "name": lief_name(section).rstrip("\x00"),
                     "vaddr": section.virtual_address,
                     "vsize": section.virtual_size,
                     "chars": int(section.characteristics),

@@ -5,6 +5,7 @@ import logging
 import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.utility.lief_helper import lief_name
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 
 from .AbstractLabelProvider import AbstractLabelProvider
@@ -89,10 +90,7 @@ class RustSymbolProvider(AbstractLabelProvider):
                     symbol_lists.append(symbol_binary.dynamic_symbols)
                 for symbols in symbol_lists:
                     for sym in symbols or []:
-                        try:
-                            sym_name = sym.name
-                        except (UnicodeDecodeError, AttributeError):
-                            continue
+                        sym_name = lief_name(sym)
                         if self._is_rust_language_evidence(sym_name):
                             binary_info._is_rust = True
                             return True
@@ -155,10 +153,7 @@ class RustSymbolProvider(AbstractLabelProvider):
             if not symbol_list:
                 continue
             for symbol in symbol_list:
-                try:
-                    raw_name = symbol.name
-                except (UnicodeDecodeError, AttributeError):
-                    continue
+                raw_name = lief_name(symbol)
                 if not raw_name or not getattr(symbol, "value", 0):
                     continue
                 if not self._is_rust_symbol(raw_name):
@@ -184,13 +179,8 @@ class RustSymbolProvider(AbstractLabelProvider):
                 # forwarder/extern entries redirect to another module's export and have no
                 # local address (LIEF sets .address to 0 for them) - not a local function.
                 continue
-            raw_name = ""
+            raw_name = lief_name(function)
             try:
-                try:
-                    raw_name = function.name
-                except (UnicodeDecodeError, AttributeError):
-                    continue
-
                 if self._is_rust_symbol(raw_name):
                     demangled = demangle(raw_name)
                     if demangled:
@@ -209,12 +199,8 @@ class RustSymbolProvider(AbstractLabelProvider):
                     # section_idx 0/-1/-2 (undefined-external/absolute/debug): not a locally
                     # defined function, its value is not a usable in-image offset.
                     continue
-                raw_name = ""
+                raw_name = lief_name(symbol)
                 try:
-                    try:
-                        raw_name = symbol.name
-                    except (UnicodeDecodeError, AttributeError):
-                        continue
                     if self._is_rust_symbol(raw_name):
                         demangled = demangle(raw_name)
                         if demangled:
@@ -230,11 +216,7 @@ class RustSymbolProvider(AbstractLabelProvider):
         function_symbols = {}
         for symbol in symbols:
             if symbol is not None and symbol.is_function and symbol.value != 0 and is_defined_elf_symbol(symbol):
-                # We want the raw name to check for Rust mangling
-                try:
-                    raw_name = symbol.name
-                except (UnicodeDecodeError, AttributeError):
-                    continue
+                raw_name = lief_name(symbol)
                 if self._is_rust_symbol(raw_name):
                     try:
                         demangled = demangle(raw_name)

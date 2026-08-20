@@ -21,6 +21,22 @@ from __future__ import annotations
 import lief
 
 
+def lief_name(obj, attribute="name"):
+    """Return a name lief exposes as text, or "" when it is not usable.
+
+    lief hands back the raw ``bytes`` when a name is not valid UTF-8 instead of
+    raising, so a ``UnicodeDecodeError`` guard alone leaves the caller holding a
+    value that every string operation on it rejects. Mapped images reach this
+    routinely: a PE's COFF symbol table is located by a file offset, so reading
+    one out of a memory image lands on unrelated bytes.
+    """
+    try:
+        value = getattr(obj, attribute)
+    except (AttributeError, UnicodeDecodeError):
+        return ""
+    return value if isinstance(value, str) else ""
+
+
 def safe_lief_parse(binary, parser=None):
     """Parse ``binary``, returning None when lief rejects it natively.
 

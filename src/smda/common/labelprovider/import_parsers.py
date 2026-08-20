@@ -3,6 +3,7 @@
 import lief
 
 from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
+from smda.utility.lief_helper import lief_name
 
 
 def resolve_pe_base_addr(lief_binary, base_addr=None):
@@ -17,12 +18,13 @@ def parse_pe_imports(lief_binary, base_addr=None):
     active_base = resolve_pe_base_addr(lief_binary, base_addr)
     import_symbols = {}
     for imported_library in lief_binary.imports:
-        lib_name_lower = (getattr(imported_library, "name", "") or "").lower()
+        lib_name_lower = lief_name(imported_library).lower()
         for func in imported_library.entries:
-            if func.name:
+            func_name = lief_name(func)
+            if func_name:
                 import_symbols[func.iat_address + active_base] = (
                     lib_name_lower,
-                    func.name,
+                    func_name,
                 )
             elif func.is_ordinal:
                 resolved_ordinal = OrdinalHelper.resolveOrdinal(lib_name_lower, func.ordinal)
@@ -44,11 +46,12 @@ def parse_pe_delay_imports(lief_binary, base_addr=None):
     ptr_size = 8 if magic is not None and magic == lief.PE.PE_TYPE.PE32_PLUS else 4
     import_symbols = {}
     for delay_import in lief_binary.delay_imports:
-        lib_name_lower = (getattr(delay_import, "name", "") or "").lower()
+        lib_name_lower = lief_name(delay_import).lower()
         for index, func in enumerate(delay_import.entries):
             slot_addr = active_base + delay_import.iat + index * ptr_size
-            if func.name:
-                import_symbols[slot_addr] = (lib_name_lower, func.name)
+            func_name = lief_name(func)
+            if func_name:
+                import_symbols[slot_addr] = (lib_name_lower, func_name)
             elif func.is_ordinal:
                 resolved_ordinal = OrdinalHelper.resolveOrdinal(lib_name_lower, func.ordinal)
                 ordinal_name = resolved_ordinal if resolved_ordinal else f"#{func.ordinal}"
@@ -75,10 +78,7 @@ def parse_elf_relocation_imports(lief_binary):
             continue
         if not symbol.imported or not symbol.is_function:
             continue
-        try:
-            symbol_name = symbol.name
-        except (AttributeError, UnicodeDecodeError):
-            continue
+        symbol_name = lief_name(symbol)
         if not symbol_name:
             continue
 
@@ -86,7 +86,7 @@ def parse_elf_relocation_imports(lief_binary):
         symbol_version = getattr(symbol, "symbol_version", None)
         if symbol.has_version and symbol_version and symbol_version.has_auxiliary_version:
             aux = symbol_version.symbol_version_auxiliary
-            lib = aux.name if aux else None
+            lib = lief_name(aux) or None
 
         import_symbols[relocation.address] = (lib, symbol_name)
     return import_symbols
@@ -98,17 +98,13 @@ def parse_macho_bindings(lief_binary, adjustment=0):
     imports = {}
     for binding in getattr(lief_binary, "bindings", []):
         try:
-            if (
-                binding.address != 0
-                and getattr(binding, "has_symbol", False)
-                and binding.symbol
-                and binding.symbol.name
-            ):
+            symbol_name = lief_name(binding.symbol) if getattr(binding, "has_symbol", False) else ""
+            if binding.address != 0 and symbol_name:
                 lib_name = ""
                 if getattr(binding, "has_library", False) and binding.library:
-                    lib_name = (getattr(binding.library, "name", "") or "").lower()
+                    lib_name = lief_name(binding.library).lower()
                 adjusted_addr = binding.address + adjustment
-                imports[adjusted_addr] = (lib_name, binding.symbol.name)
+                imports[adjusted_addr] = (lib_name, symbol_name)
         except Exception:
             continue
     return imports

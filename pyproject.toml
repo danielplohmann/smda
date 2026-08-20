@@ -88,14 +88,16 @@ markers = [
 # A DeprecationWarning from LIEF or capstone on a new interpreter is exactly the signal
 # the 3.14 matrix leg exists to surface, and it passed silently before this.
 #
-# The one exception: LIEF warns rather than raising when a Mach-O header carries a
-# cpu_type outside its enum, which is precisely the malformed input the Mach-O readers
-# are expected to survive. Suppressing it belongs here and not in src/ - warnings.
-# catch_warnings() mutates the process-wide filter list, so a library doing it is not
-# thread-safe for consumers.
+# The exceptions: LIEF warns rather than raising when a header field falls outside the
+# enum it maps to - a Mach-O cpu_type, or a PE COFF symbol's complex_type read out of a
+# mapped image, where the symbol table's file offset lands on unrelated bytes. Both are
+# precisely the malformed input the readers are expected to survive. Suppressing them
+# belongs here and not in src/ - warnings.catch_warnings() mutates the process-wide
+# filter list, so a library doing it is not thread-safe for consumers.
 filterwarnings = [
     "error",
     "ignore:[0-9]+ is not a valid CPU_TYPE:RuntimeWarning",
+    "ignore:[0-9]+ is not a valid COMPLEX_TYPE:RuntimeWarning",
 ]
 
 [tool.coverage.run]
