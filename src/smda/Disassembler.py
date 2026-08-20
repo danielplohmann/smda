@@ -131,7 +131,6 @@ class Disassembler:
             if architecture == "dalvik":
                 # DEX strings are part of the parsed file structure, not the raw
                 # buffer bytes: the generic StringExtractor cannot see them either.
-                smda_function.stringrefs = analyzer_provided
                 continue
             function_strings = analyzer_provided
             for string_result in extract_strings(smda_function, mode=mode):
