@@ -116,7 +116,7 @@ if __name__ == "__main__":
         "--architecture",
         type=str,
         default="",
-        help="Use the disassembler for the following architecture if available (default:auto, options: [intel, cil, dalvik]).",
+        help="Use the disassembler for the following architecture if available (default:auto, options: [intel, aarch64, cil, dalvik]).",
     )
     PARSER.add_argument(
         "-a",
