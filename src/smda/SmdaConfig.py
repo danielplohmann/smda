@@ -17,8 +17,9 @@ class SmdaConfig:
     LOG_FORMAT = "%(asctime)-15s: %(name)-32s - %(message)s"
 
     ### SMDA disassembler config
-    # cooperative budget in seconds for disassembly, polled between candidates and between
-    # passes but never within one, so a run overshoots rather than being cut off; 0 disables it
+    # cooperative budget in seconds for disassembly, polled between candidates, between passes,
+    # every 256 basic blocks within a function and between tailcall resolutions; work already in
+    # flight still finishes, so a run overshoots rather than being cut off; 0 disables it
     TIMEOUT = 300
     # maximum number of bytes to allocate while loading
     MAX_IMAGE_SIZE = 100 * 1024 * 1024
@@ -47,10 +48,13 @@ class SmdaConfig:
     # jmp/call from another recovered function, never from candidate membership alone.
     USE_PE_X64_PDATA_ENDS = False
     # promote unclaimed ELF .eh_frame FDE starts as late candidates on both instruction sets
-    # (after the primary pass, before gap analysis); off until validated against ground-truth
-    # function boundaries. Unwind ranges are not function starts by definition - .eh_frame also
-    # covers ranges that are not independent functions - which is why this stays opt-in while
-    # the Mach-O function-start table below does not
+    # (after the primary pass, before gap analysis). Unwind ranges are not function starts by
+    # definition - .eh_frame also covers ranges that are not independent functions. Measured
+    # against symbol-table boundaries over 50 locally built gcc/clang ELF binaries (11384
+    # labelled functions, analysed stripped): recall 93.79% -> 94.68%, so 101 more real starts,
+    # against 56 more addresses landing strictly inside a labelled function body. Off by
+    # default because that is a deliberate baseline move rather than a free win - one bundled
+    # fixture changes - so enabling it belongs with a corpus run, not with a config edit
     USE_ELF_EH_FRAME_CANDIDATES = False
     # extend the AArch64 adr/adrp address-materialization scan to Mach-O instruction sections,
     # recording targets as weak address evidence; off until validated with exact-address ground
@@ -59,10 +63,11 @@ class SmdaConfig:
     # promote unclaimed Mach-O LC_FUNCTION_STARTS entries as late candidates (after the primary
     # pass, before gap analysis). The linker writes the table and stripping keeps it, and segment
     # file offsets and VM offsets coincide in Mach-O, so it also reads correctly out of a mapped
-    # image - unlike a PE COFF symbol table. Across the bundled Mach-O fixtures it lifts the share
-    # of linker-declared starts recovered from 87.4% to 96.7% (1884 -> 2083 of 2155) with no sample
-    # losing a function; off until that is confirmed against ground-truth boundaries rather than
-    # against the same table the pass consumes
+    # image - unlike a PE COFF symbol table. Scored against the corpus samples' own symbol tables
+    # instead of the table this pass consumes, with symbols-as-candidates forced off so the metric
+    # is independent: recall 97.99% -> 98.74% of 1985 symbol-declared starts, 15 more recovered
+    # and 5 fewer functions that no symbol names. Off by default because it moves 5 of the 12
+    # Mach-O corpus samples, all upwards - a deliberate baseline update, not a config edit
     USE_MACHO_FUNCTION_STARTS = False
     RESOLVE_REGISTER_CALLS = True
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
@@ -88,12 +93,14 @@ class SmdaConfig:
     MEMORY_BUDGET_FRACTION = 0.5
     HIGH_ACCURACY = True
     # promote the targets of jumps that leave a function into functions of their own, in a
-    # pass after gap analysis. Off by default: what it buys depends entirely on how much a
-    # binary tail-calls, and it is never free. On libstdc++.so.6 it adds 337 functions
-    # (8473 -> 8810) for 40-130% more analysis time depending on the machine; on Go ELF and
-    # Mach-O memory images, 8 functions each for 20-26%. A jump into an already-recovered
-    # function is still treated as a tailcall with the pass off - only the promotion of
-    # not-yet-known targets needs it.
+    # pass after gap analysis. Off by default, and measurement says keep it that way: against
+    # symbol-table boundaries over 50 locally built gcc/clang ELF binaries it recovers 70 more
+    # real starts but adds 235 addresses strictly inside a labelled function body, so it breaks
+    # real functions apart faster than it finds new ones. It is also never free - on
+    # libstdc++.so.6 it adds 337 functions (8473 -> 8810) for 40-130% more analysis time
+    # depending on the machine; on Go ELF and Mach-O memory images, 8 functions each for 20-26%.
+    # A jump into an already-recovered function is still treated as a tailcall with the pass
+    # off - only the promotion of not-yet-known targets needs it.
     RESOLVE_TAILCALLS = False
     # optional metadata generation options; the largest built-in performance lever.
     # Measured on the cutwail fixture, as a share of all Python calls per run: hashing 10.0%,
