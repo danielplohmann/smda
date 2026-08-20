@@ -367,6 +367,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return self.disassembly.binary_info.base_addr + function_pointer
         raise Exception("resolvePointerReference: undefined bitness")
 
+    def locateDeferredCandidates(self):
+        yield from self.locateEhFrameCandidates()
+        yield from self.locateMachoFunctionStartCandidates()
+
     def locateCandidates(self):
         # add guaranteed / high-value starts first so that, if the candidate cap is hit, the most reliable
         # candidates are retained before the high-volume prologue and stub-chain scans can consume the budget.

@@ -210,3 +210,85 @@ def decodeEhFrameFdeRanges(data, section_va, pointer_size=8, max_records=MAX_REC
                         ranges.append((initial_location, address_range))
         pos = record_end
     return ranges
+
+
+PT_GNU_EH_FRAME = 0x6474E550
+EI_DATA = 5
+ELFDATA2LSB = 1
+_EH_FRAME_HDR_VERSION = 1
+_EH_FRAME_HDR_TABLE_ENC = 0x3B  # DW_EH_PE_datarel | DW_EH_PE_sdata4
+_EH_FRAME_HDR_COUNT_ENC = 0x03  # DW_EH_PE_udata4
+_EH_FRAME_HDR_HEADER_SIZE = 12
+_EH_FRAME_HDR_ENTRY_SIZE = 8
+MAX_HDR_ENTRIES = MAX_RECORDS
+
+
+def _readImageWord(image, offset, size):
+    if offset < 0 or offset + size > len(image):
+        return None
+    return int.from_bytes(image[offset : offset + size], "little")
+
+
+def _ehFrameHdrAddress(image, pointer_size):
+    """Virtual address .eh_frame_hdr is mapped at, read from the program headers.
+
+    Every field is read little-endian, so a big-endian image is rejected rather than
+    decoded into byte-swapped offsets that address unrelated bytes.
+    """
+    if len(image) < 64 or image[:4] != b"\x7fELF":
+        return None
+    if image[EI_DATA] != ELFDATA2LSB:
+        return None
+    if pointer_size == 8:
+        phoff = _readImageWord(image, 0x20, 8)
+        entsize_off, num_off, vaddr_off = 0x36, 0x38, 0x10
+    else:
+        phoff = _readImageWord(image, 0x1C, 4)
+        entsize_off, num_off, vaddr_off = 0x2A, 0x2C, 0x08
+    entry_size = _readImageWord(image, entsize_off, 2)
+    entry_count = _readImageWord(image, num_off, 2)
+    if not phoff or not entry_size or not entry_count:
+        return None
+    for index in range(entry_count):
+        header = phoff + index * entry_size
+        if _readImageWord(image, header, 4) == PT_GNU_EH_FRAME:
+            return _readImageWord(image, header + vaddr_off, pointer_size)
+    return None
+
+
+def decodeEhFrameHdrStarts(disassembly, pointer_size=8, max_entries=MAX_HDR_ENTRIES):
+    """FDE start addresses read from .eh_frame_hdr's binary search table.
+
+    PT_GNU_EH_FRAME points at that table, and program headers survive in a memory image
+    where the section table does not, so this is the only route to a dumped ELF's FDE
+    starts. The table is searched at both the recorded virtual address and that address
+    rebased on the image, since a dump can carry either.
+    """
+    binary_info = disassembly.binary_info
+    image = binary_info.binary
+    if not image:
+        return set()
+    hdr_vaddr = _ehFrameHdrAddress(bytes(image[:0x1000]), pointer_size)
+    if hdr_vaddr is None:
+        return set()
+    for hdr_address in (hdr_vaddr, binary_info.base_addr + hdr_vaddr):
+        header = disassembly.getBytes(hdr_address, _EH_FRAME_HDR_HEADER_SIZE)
+        if not header or len(header) < _EH_FRAME_HDR_HEADER_SIZE:
+            continue
+        header = bytes(header)
+        if header[0] != _EH_FRAME_HDR_VERSION:
+            continue
+        if header[2] != _EH_FRAME_HDR_COUNT_ENC or header[3] != _EH_FRAME_HDR_TABLE_ENC:
+            continue
+        count = min(int.from_bytes(header[8:12], "little"), max_entries)
+        table = disassembly.getBytes(hdr_address + _EH_FRAME_HDR_HEADER_SIZE, count * _EH_FRAME_HDR_ENTRY_SIZE)
+        if not table:
+            continue
+        table = bytes(table)
+        starts = set()
+        for index in range(min(count, len(table) // _EH_FRAME_HDR_ENTRY_SIZE)):
+            offset = index * _EH_FRAME_HDR_ENTRY_SIZE
+            location = int.from_bytes(table[offset : offset + 4], "little", signed=True)
+            starts.add(hdr_address + location)
+        return starts
+    return set()
