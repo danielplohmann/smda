@@ -106,6 +106,25 @@ run (a stable metric, unlike wall-clock on a loaded machine): hashing accounts f
 nesting 4.6% and SCC 3.2% of all calls, and disabling all three removes 17.8%. Turn off whatever
 a downstream consumer does not read.
 
+`RESOLVE_TAILCALLS` runs the other way round: it is **off** by default and buys recovery for time.
+Only the x86/x64 and AArch64 recursive disassemblers read it — the CIL and Dalvik backends run their
+own analysis pipelines and ignore it, so enabling it costs and buys nothing there. Where it does
+apply, it promotes the target of a jump that leaves a function into a function of its own, in a pass
+after gap analysis, so what it is worth depends on how much a binary tail-calls. On `libstdc++.so.6`
+it adds 337 functions (8473 to 8810) for 40-130% more analysis time, the spread being how much the
+measuring machine had to spare; on Go ELF and Mach-O memory images it adds 8 functions each, for
+20-26%. A jump into an already-recovered function is treated as a tailcall either way — only
+promoting targets that are not yet known needs this pass.
+
+Analysis is also bounded by `TIMEOUT` (300s by default), but cooperatively rather than as a
+wall-clock guarantee. The budget is polled between function candidates and between passes, never
+inside one: a single pathological function is analyzed to completion once started, and with
+`RESOLVE_TAILCALLS` enabled the whole tailcall pass runs without a poll. It bounds how much *new*
+work is begun, not how long a call takes to return, so a run can overshoot it. A run that exceeded
+the budget comes back with `status == "timeout"`: the function set is a lower bound, not the whole
+binary. Check the status before comparing counts across samples, and pass `TIMEOUT = 0` to disable
+the bound entirely. A caller that needs a hard wall-clock ceiling has to impose one itself.
+
 ### IDA Pro integration
 
 SMDA can also turn an IDA-analyzed database into a SMDA report instead of running its own disassembly. Inside the IDA GUI, SMDA supports IDA Pro 8.4 and newer via the existing IDAPython integrations; older SDK generations are rejected. On IDA 9.1 or newer, it prefers the higher-level [IDA Domain API](https://ida-domain.docs.hex-rays.com/) when the optional package is installed and otherwise falls back to IDAPython.
