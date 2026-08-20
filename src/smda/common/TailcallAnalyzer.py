@@ -98,6 +98,8 @@ class TailcallAnalyzer:
     def resolveTailcalls(self, disassembler, verbose=False):
         newly_created_functions = set()
         for tailcall in self.getTailcalls():
+            if disassembler._analysisTimeoutTripped():
+                break
             if verbose:
                 LOGGER.debug("Processing tailcall:\n%s", json.dumps(tailcall, indent=2, sort_keys=True))
             # remove the information from the function-analysis state of the disassembly

@@ -117,13 +117,14 @@ measuring machine had to spare; on Go ELF and Mach-O memory images it adds 8 fun
 promoting targets that are not yet known needs this pass.
 
 Analysis is also bounded by `TIMEOUT` (300s by default), but cooperatively rather than as a
-wall-clock guarantee. The budget is polled between function candidates and between passes, never
-inside one: a single pathological function is analyzed to completion once started, and with
-`RESOLVE_TAILCALLS` enabled the whole tailcall pass runs without a poll. It bounds how much *new*
-work is begun, not how long a call takes to return, so a run can overshoot it. A run that exceeded
-the budget comes back with `status == "timeout"`: the function set is a lower bound, not the whole
-binary. Check the status before comparing counts across samples, and pass `TIMEOUT = 0` to disable
-the bound entirely. A caller that needs a hard wall-clock ceiling has to impose one itself.
+wall-clock guarantee. The budget is polled between function candidates, between passes, every 256
+basic blocks within a single function, and between tailcall resolutions, so no one pass runs
+unbounded. It still bounds how much *new* work is begun rather than how long a call takes to
+return: whatever is already in flight — the block being decoded, the candidate being analyzed —
+finishes first, so a run overshoots by that much. A run that exceeded the budget comes back with
+`status == "timeout"`: the function set is a lower bound, not the whole binary. Check the status
+before comparing counts across samples, and pass `TIMEOUT = 0` to disable the bound entirely. A
+caller that needs a hard wall-clock ceiling has to impose one itself.
 
 ### IDA Pro integration
 

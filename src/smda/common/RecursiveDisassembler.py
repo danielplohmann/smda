@@ -26,6 +26,7 @@ LOGGER = logging.getLogger(__name__)
 
 # a leading sign is preserved so that negative displacements ("[rip - 0x20]") resolve correctly
 _REFERENCED_ADDR_RE = re.compile(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)")
+_TIMEOUT_POLL_BLOCKS = 256
 
 
 class RecursiveDisassembler:
@@ -61,6 +62,7 @@ class RecursiveDisassembler:
         self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
         self._symbol_cache = {}
         self._api_cache = {}
+        self._cb_analysis_timeout = None
 
     def _addLabelProviders(self):
         self._registerLabelProvider(WinApiResolver(self.config))
@@ -251,7 +253,11 @@ class RecursiveDisassembler:
             # state.getBlocks(); this collision path is unreachable from the gap pass today, so
             # the change is behavior-neutral (output stays byte-for-byte identical).
             return state
+        blocks_processed = 0
         while state.hasUnprocessedBlocks():
+            blocks_processed += 1
+            if blocks_processed % _TIMEOUT_POLL_BLOCKS == 0 and self._analysisTimeoutTripped():
+                break
             debug_logging = LOGGER.isEnabledFor(logging.DEBUG)
             if debug_logging:
                 LOGGER.debug(
@@ -399,6 +405,7 @@ class RecursiveDisassembler:
         )
         self._symbol_cache = {}
         self._api_cache = {}
+        self._cb_analysis_timeout = cbAnalysisTimeout
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
         # analyzeBuffer replaces the DisassemblyResult allocated in __init__; re-apply
@@ -526,11 +533,11 @@ class RecursiveDisassembler:
         pdata_ends = self.fc_manager.pdata_end_addresses
         if not pdata_ends:
             return 0
-        if self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+        if self._analysisTimeoutTripped(cbAnalysisTimeout):
             return 0
         split_points_by_owner = {}
         for index, end_addr in enumerate(sorted(pdata_ends)):
-            if index and index % 4096 == 0 and self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+            if index and index % 4096 == 0 and self._analysisTimeoutTripped(cbAnalysisTimeout):
                 return 0
             fn_start = self.disassembly.ins2fn.get(end_addr)
             if (
@@ -547,15 +554,21 @@ class RecursiveDisassembler:
                 split_points_by_owner.setdefault(fn_start, []).append(end_addr)
         splits_performed = 0
         for fn_start, genuine_splits in sorted(split_points_by_owner.items()):
-            if self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+            if self._analysisTimeoutTripped(cbAnalysisTimeout):
                 break
             splits_performed += self._partitionFunctionAtPdataEnds(fn_start, genuine_splits)
         return splits_performed
 
-    def _pdataSplitTimeoutTripped(self, cbAnalysisTimeout):
+    def _analysisTimeoutTripped(self, cbAnalysisTimeout=None):
+        """Whether the analysis budget is spent, latching the verdict onto the result.
+
+        Falls back to the callback analyzeBuffer was given, so a pass that is not handed one
+        is still bounded by the same budget as the passes around it.
+        """
         if self.disassembly.analysis_timeout:
             return True
-        if cbAnalysisTimeout is not None and cbAnalysisTimeout():
+        callback = cbAnalysisTimeout if cbAnalysisTimeout is not None else self._cb_analysis_timeout
+        if callback is not None and callback():
             self.disassembly.analysis_timeout = True
             return True
         return False
