@@ -19,6 +19,7 @@ from .definitions import (
     REGS_32BIT,
     REGS_64BIT,
     RET_INS,
+    stripFlatSegmentOverride,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -171,6 +172,7 @@ class X86Backend(ArchBackend):
                 continue
             if mnemonic != "jmp":
                 return None
+            op_str = stripFlatSegmentOverride(op_str)
             if op_str.startswith("qword ptr [rip"):
                 return address + size + d.getReferencedAddr(op_str)
             if op_str.startswith("dword ptr [0x"):
@@ -194,6 +196,7 @@ class X86Backend(ArchBackend):
         # segment selector. There is no in-image target to book, so drop it like _analyzeJmp.
         if i_mnemonic.split(" ")[-1] == "lcall":
             return
+        i_op_str = stripFlatSegmentOverride(i_op_str)
         call_destination = d.getReferencedAddr(i_op_str)
         if i_op_str.startswith("dword ptr ["):
             if i_op_str.startswith("dword ptr [0x"):
@@ -311,9 +314,11 @@ class X86Backend(ArchBackend):
 
     def _analyzeJmpInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
+        i_op_str = stripFlatSegmentOverride(i_op_str)
+        i = (i_address, i_size, i_mnemonic, i_op_str)
         # case = "FALLTHROUGH"
         if ":" in i_op_str:
-            # case = "LONG-JMP"
+            # case = "LONG-JMP", or an fs:/gs: operand whose base is not in the image
             pass
         elif i_op_str.startswith("dword ptr [0x"):
             # case = "DWORD-PTR"
