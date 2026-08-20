@@ -68,6 +68,11 @@ from .FunctionCandidate import FunctionCandidate
 
 LOGGER = logging.getLogger(__name__)
 
+_ARM64_PDATA_ENTRY_SIZE = 8
+_ARM64_PDATA_MIN_ENTRIES = 16
+_ARM64_PDATA_SEED_ENTRIES = 4
+_ARM64_PDATA_SAMPLE_STRIDE = 64
+
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
@@ -151,7 +156,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         header = self.disassembly.getRawBytes(xdata_rva, 4)
         if header is None or len(header) < 4:
             return False
-        header_word = int.from_bytes(header, "little")
+        return self._isValidArm64UnwindHeader(int.from_bytes(header, "little"))
+
+    @staticmethod
+    def _isValidArm64UnwindHeader(header_word):
         function_length = header_word & 0x3FFFF
         version = (header_word >> 18) & 0x3
         return version == 0 and function_length > 0
@@ -168,6 +176,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         binary_info = self.disassembly.binary_info
         lief_binary = binary_info.getLiefBinary()
         if not isinstance(lief_binary, lief.PE.Binary):
+            # A memory image keeps the mapped code but usually not a parseable header, so
+            # the exception directory has to be found in the bytes instead of read from a
+            # data directory. The table is self-describing enough to locate without one.
+            if next(binary_info.getSections(), None) is None:
+                self._carveArm64ExceptionRecords(binary_info.base_addr)
             return
         if lief_binary.header.machine != lief.PE.Header.MACHINE_TYPES.ARM64:
             return
@@ -222,6 +235,95 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not is_exception_record_entry(begin_word):
                 continue
             self.addExceptionCandidate(addr)
+
+    def _admitCarvedExceptionRecord(self, base_addr, begin_rva):
+        begin_word_bytes = self.disassembly.getRawBytes(begin_rva, INSTRUCTION_SIZE)
+        if begin_word_bytes is None or len(begin_word_bytes) < INSTRUCTION_SIZE:
+            return
+        if not is_exception_record_entry(int.from_bytes(begin_word_bytes, "little")):
+            return
+        self.addExceptionCandidate(base_addr + begin_rva)
+
+    def _readArm64ExceptionRecord(self, binary, size, offset, previous_begin):
+        """Return a validated ARM64 RUNTIME_FUNCTION pair at offset, or None.
+
+        The exception directory is sorted and its BeginAddresses do not repeat, which is
+        what separates a run of real records from data that merely holds plausible RVAs.
+        """
+        if offset + _ARM64_PDATA_ENTRY_SIZE > size:
+            return None
+        begin_rva, unwind_data = struct.unpack_from("<II", binary, offset)
+        if begin_rva == 0 or begin_rva % INSTRUCTION_SIZE or begin_rva >= size:
+            return None
+        if begin_rva <= previous_begin:
+            return None
+        flag = unwind_data & 0x3
+        if flag == 0:
+            if not unwind_data or unwind_data + INSTRUCTION_SIZE > size:
+                return None
+            if not self._isValidArm64UnwindHeader(struct.unpack_from("<I", binary, unwind_data)[0]):
+                return None
+        elif flag == 3:
+            return None
+        else:
+            function_words = (unwind_data >> 2) & 0x7FF
+            if not function_words or begin_rva + function_words * INSTRUCTION_SIZE > size:
+                return None
+        return begin_rva, unwind_data
+
+    def _countArm64ExceptionRecords(self, binary, size, offset, limit):
+        count = 0
+        previous_begin = 0
+        while count < limit:
+            record = self._readArm64ExceptionRecord(binary, size, offset, previous_begin)
+            if record is None:
+                break
+            previous_begin = record[0]
+            offset += _ARM64_PDATA_ENTRY_SIZE
+            count += 1
+        return count
+
+    def _locateArm64ExceptionRecordTable(self, binary):
+        """Return (offset, count) of the longest RUNTIME_FUNCTION run, or (0, 0) if none qualifies."""
+        size = len(binary)
+        best_offset = best_count = 0
+        offset = 0
+        samples = 0
+        while offset + _ARM64_PDATA_SEED_ENTRIES * _ARM64_PDATA_ENTRY_SIZE <= size:
+            if samples % 4096 == 0 and self._candidateTimeoutTripped():
+                break
+            samples += 1
+            for phase in (0, 4):
+                seed = offset + phase
+                if self._countArm64ExceptionRecords(binary, size, seed, _ARM64_PDATA_SEED_ENTRIES) < (
+                    _ARM64_PDATA_SEED_ENTRIES
+                ):
+                    continue
+                start = seed
+                while start >= _ARM64_PDATA_ENTRY_SIZE:
+                    previous = self._readArm64ExceptionRecord(binary, size, start - _ARM64_PDATA_ENTRY_SIZE, 0)
+                    if previous is None or previous[0] >= struct.unpack_from("<I", binary, start)[0]:
+                        break
+                    start -= _ARM64_PDATA_ENTRY_SIZE
+                count = self._countArm64ExceptionRecords(binary, size, start, size)
+                if count > best_count:
+                    best_offset, best_count = start, count
+                offset = max(offset, start + count * _ARM64_PDATA_ENTRY_SIZE)
+                break
+            offset += _ARM64_PDATA_SAMPLE_STRIDE
+        if best_count < _ARM64_PDATA_MIN_ENTRIES:
+            return 0, 0
+        return best_offset, best_count
+
+    def _carveArm64ExceptionRecords(self, base_addr):
+        binary = self.disassembly.binary_info.binary
+        table_offset, table_count = self._locateArm64ExceptionRecordTable(binary)
+        if not table_count:
+            return
+        LOGGER.debug("carved %d ARM64 RUNTIME_FUNCTION entries at 0x%08x", table_count, table_offset)
+        for index in range(table_count):
+            begin_rva = struct.unpack_from("<I", binary, table_offset + index * _ARM64_PDATA_ENTRY_SIZE)[0]
+            self._admitCarvedExceptionRecord(base_addr, begin_rva)
 
     def _executableRanges(self):
         return self._cachedExecutableSectionRanges()
