@@ -2,13 +2,17 @@ import logging
 import re
 import struct
 
-from smda.intel.definitions import RET_INS
+from smda.intel.definitions import RET_INS, canonicalRegister, stripFlatSegmentOverride
 
 LOGGER = logging.getLogger(__name__)
 
 _DIRECT_TABLE_RE = re.compile(r"[a-z0-9]{2,3}, dword ptr \[[^ ]+ \+ 0x[0-9a-f]+\]")
 _X64_LEA_TABLE_RE = re.compile(r"[a-z0-9]{2,3}, \[rip (\+|\-) 0x[0-9a-f]+\]")
 _X64_BONUS_OFFSET_RE = re.compile(r"[a-z0-9]{2,3},.*0x[0-9a-f]+\]")
+_SCALED_INDEX_RE = re.compile(r"\[(?:[a-z][a-z0-9]{1,3} \+ )?(?P<index>[a-z][a-z0-9]{1,3})\*[1248]")
+_SIZE_PREFIX_RE = re.compile(r"^(?:byte|word|dword|qword|xmmword) ptr ")
+_IMMEDIATE_RE = re.compile(r"^(?:0x[0-9a-f]+|[0-9]+)$")
+_INDEX_COPY_MNEMONICS = frozenset({"mov", "movzx", "movsx", "movsxd", "movabs"})
 
 
 class JumpTableAnalyzer:
@@ -66,16 +70,66 @@ class JumpTableAnalyzer:
                 jumptables.add(table_offset)
         return jumptables
 
-    def _findJumpTableSize(self, backtracked):
-        jumptable_size = 0
+    @staticmethod
+    def _operandKey(operand):
+        """A comparable name for whatever an operand reads: a register family or a memory cell."""
+        operand = stripFlatSegmentOverride(operand.strip())
+        register = canonicalRegister(operand)
+        if register:
+            return register
+        if operand.startswith("[") or "ptr [" in operand:
+            return _SIZE_PREFIX_RE.sub("", operand)
+        return None
+
+    @classmethod
+    def _dispatchIndexKeys(cls, operand):
+        """The operand a table read takes its index from, as a one-element set.
+
+        A scaled memory operand ("[r11 + rdx*4]") indexes with its scaled register, so that
+        register is what a bound check tests; anything else reads as a whole.
+        """
+        scaled = _SCALED_INDEX_RE.search(operand)
+        if scaled:
+            key = cls._operandKey(scaled.group("index"))
+            return {key} if key else set()
+        key = cls._operandKey(operand)
+        return {key} if key else set()
+
+    def _findJumpTableSize(self, backtracked, index_keys=None):
+        """Recover the switch bound, preferring a compare against the dispatch's own index.
+
+        Walking back to the first `cmp <reg>, <imm>` finds an unrelated compare whenever one
+        sits between the real bound check and the dispatch, and misses pattern B entirely,
+        where the bound is checked against the memory cell the index is loaded from. Following
+        the index backwards through its copies answers both: the compare that bounds the table
+        is the one testing whatever the dispatch ends up indexing with.
+        """
+        tracked = set(index_keys) if index_keys else set()
+        untied_size = 0
         for instr in backtracked[::-1]:
-            if instr[2].split(" ")[-1] in RET_INS:
+            mnemonic = instr[2].split(" ")[-1]
+            if mnemonic in RET_INS:
                 break
-            if instr[2] == "cmp" and self.RE_CMP_SIZE.match(instr[3]):
-                jumptable_size = int(instr[3].split(",")[-1].strip(), base=16) + 1
-                # print("  0x%x: found potential jump table size with backtracking: 0x%x (%s %s)" % (instr[0], jumptable_size, instr[2], instr[3]))
-                break
-        return jumptable_size
+            operands = instr[3]
+            if mnemonic == "cmp":
+                left, _, right = operands.partition(",")
+                right = right.strip()
+                if _IMMEDIATE_RE.match(right):
+                    bound = int(right, 16 if right.startswith("0x") else 10) + 1
+                    if tracked and self._operandKey(left) in tracked:
+                        return bound
+                    if not untied_size and self.RE_CMP_SIZE.match(operands):
+                        untied_size = bound
+                continue
+            if not tracked or mnemonic not in _INDEX_COPY_MNEMONICS:
+                continue
+            destination, _, source = operands.partition(",")
+            destination_key = self._operandKey(destination)
+            if destination_key is None or destination_key not in tracked:
+                continue
+            tracked.discard(destination_key)
+            tracked |= self._dispatchIndexKeys(source)
+        return untied_size
 
     def _directHandler(self, jump_instruction_op_str, state, backtracked):
         register = jump_instruction_op_str.lower()
@@ -228,7 +282,8 @@ class JumpTableAnalyzer:
         off_jumptable = None
         backtracked = state.backtrackInstructions(jump_instruction_address, 50)
         backtracked_sequence = "-".join([ins[2] for ins in backtracked[::-1]][:3])
-        jumptable_size = self._findJumpTableSize(backtracked)
+        index_keys = self._dispatchIndexKeys(stripFlatSegmentOverride(jump_instruction_op_str))
+        jumptable_size = self._findJumpTableSize(backtracked, index_keys)
         # if False and jump_instruction_address:
         #     print("0x%x %s %s -> %s" % (jump_instruction_address, jump_instruction_mnemonic, jump_instruction_op_str, backtracked_sequence))
         if jump_instruction_op_str.startswith(("dword ptr [", "qword ptr [")):
@@ -245,7 +300,6 @@ class JumpTableAnalyzer:
                     jump_instruction_address=jump_instruction_address,
                 )
             elif backtracked_sequence.startswith("add-movsxd"):
-                jumptable_size = self._findJumpTableSize(backtracked)
                 off_jumptable = self._x64Handler(state, backtracked)
                 alternative_base = 0
                 if "rsi" in backtracked[::-1][0][3]:
@@ -258,13 +312,11 @@ class JumpTableAnalyzer:
                     jump_instruction_address=jump_instruction_address,
                 )
             elif backtracked_sequence.startswith(("lea", "add-add", "add-shr")):
-                jumptable_size = self._findJumpTableSize(backtracked)
                 off_jumptable = self._x64Handler(state, backtracked)
                 table_offsets = self._extractRelativeTableOffsets(
                     jumptable_size, off_jumptable, state=state, jump_instruction_address=jump_instruction_address
                 )
             elif backtracked_sequence.startswith("add-mov"):
-                jumptable_size = self._findJumpTableSize(backtracked)
                 off_jumptable = self._x64Handler(state, backtracked)
                 bonus = self._getx64BonusOffset(backtracked)
                 table_offsets = self._extractRelativeTableOffsets(

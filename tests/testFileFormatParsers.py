@@ -623,7 +623,12 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
                 self.assertEqual(report.status, "ok")
                 self.assertEqual(report.architecture, architecture)
                 self.assertEqual(report.bitness, bitness)
-                self.assertEqual(report.num_functions, 151)
+                # 150, not 151: both binaries dispatch a switch whose bound is compared
+                # against the memory cell the index is read from, which the bound scan now
+                # follows. Reading all 11 table entries instead of one makes 0x408829 (x64)
+                # a basic block of the function that jumps to it, where it used to be
+                # unreachable and got promoted to a function of its own. Nothing calls it.
+                self.assertEqual(report.num_functions, 150)
 
 
 if __name__ == "__main__":
