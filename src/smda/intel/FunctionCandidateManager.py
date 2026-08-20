@@ -195,7 +195,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             window_bytes = self.disassembly.getRawBytes(offset, max(256, length))
             return window_bytes[:length]
 
+        scanned = 0
         while True:
+            scanned += 1
+            if scanned % 4096 == 0 and self._candidateTimeoutTripped():
+                return None
             unskipped_pad = False
             if self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size < self.gap_pointer:
                 LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)

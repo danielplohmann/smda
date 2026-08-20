@@ -764,7 +764,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         def in_exec(addr):
             return any(start <= addr < end for start, end in exec_ranges)
 
+        scanned = 0
         while True:
+            scanned += 1
+            if scanned % 4096 == 0 and self._candidateTimeoutTripped():
+                return None
             if base + size < self.gap_pointer:
                 return None
             # align to the instruction stride
