@@ -34,7 +34,7 @@ do not "simplify" away):
   always-taken aliases, mirroring ``b.al``/``b.nv``.
 """
 
-from smda.common.instruction_set_probe import countAlignedOccurrences
+from smda.common.instruction_set_probe import countCodeReturnSites
 
 # fixed AArch64 instruction width (bytes); also the recursion stride
 INSTRUCTION_SIZE = 4
@@ -298,10 +298,15 @@ def is_exception_record_entry(word):
 def looksLikeAArch64(buffer):
     """Whether a raw buffer's bytes are AArch64 machine code.
 
-    Counts aligned ``ret`` words, which every non-leaf function ends with. Measured
-    over 37 images spanning PE/ELF/Mach-O/DEX/CIL, nine non-AArch64 instruction sets
-    and both x86 modes: no non-AArch64 image held a single aligned occurrence, while
-    the smallest AArch64 one held five in 48 KiB.
+    Counts aligned ``ret`` words, which every non-leaf function ends with, skipping any
+    that sit inside text rather than code. Measured over 37 images spanning PE/ELF/Mach-O/
+    DEX/CIL, nine non-AArch64 instruction sets and both x86 modes, and again over 50
+    locally built x86 binaries: no non-AArch64 image held a single aligned occurrence,
+    while the smallest AArch64 one held five in 48 KiB.
+
+    A count is evidence, not proof. Whoever supplies the buffer chooses its bytes, so a
+    handful of planted words can steer this either way; a caller that knows the instruction
+    set should pass ``architecture`` rather than rely on the guess.
     """
     required = max(MIN_RETURN_WORDS, -(-len(buffer) // MAX_BYTES_PER_RETURN_WORD))
-    return countAlignedOccurrences(buffer, RET_X30_BYTES, INSTRUCTION_SIZE, limit=required) >= required
+    return countCodeReturnSites(buffer, RET_X30_BYTES, INSTRUCTION_SIZE, required) >= required

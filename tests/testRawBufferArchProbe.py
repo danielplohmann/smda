@@ -55,6 +55,17 @@ class LooksLikeAArch64Test(unittest.TestCase):
     def testDenseEnoughReturnWordsAreAccepted(self):
         self.assertTrue(looksLikeAArch64(RET_X30_BYTES * MIN_RETURN_WORDS))
 
+    def testABufferDenseInMisalignedReturnWordsIsNotRecognized(self):
+        """A buffer can offer an occurrence at every position while none of them is aligned.
+        The scan resumes at the next aligned offset rather than the next byte, so this costs a
+        step per aligned slot instead of one per occurrence; the verdict is what is asserted."""
+        self.assertFalse(looksLikeAArch64(b"\x00" + RET_X30_BYTES * 4096))
+
+    def testTheSameWordsAlignedAreRecognized(self):
+        """Positive control: the buffer above is rejected for where its words sit, not for
+        how many there are."""
+        self.assertTrue(looksLikeAArch64(RET_X30_BYTES * 4096))
+
 
 class RawBufferArchitectureSelectionTest(unittest.TestCase):
     def testAArch64BufferIsNotDisassembledAsIntel(self):
