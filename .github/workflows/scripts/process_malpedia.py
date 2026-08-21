@@ -52,6 +52,35 @@ def check_bitness(content):
     return bitness
 
 
+ELF_MAGIC = b"\x7fELF"
+# EM_386 and EM_X86_64 - the two ELF machine types SMDA's intel backend reads. The sample's own
+# header is asked rather than its path: a family folder only spells the architecture out when
+# malpedia happened to name it that way, so a path test silently drops every x86-64 ELF whose
+# folder does not (elf.akira, for one).
+SUPPORTED_ELF_MACHINES = frozenset({0x03, 0x3E})
+_ELF_MACHINE_OFFSET = 0x12
+_ELF_HEADER_PREFIX = _ELF_MACHINE_OFFSET + 2
+
+
+def isIntelElf(content):
+    """Whether `content` starts an ELF header naming an instruction set SMDA can disassemble."""
+    if len(content) < _ELF_HEADER_PREFIX or content[:4] != ELF_MAGIC:
+        return False
+    # EI_DATA: 1 is little-endian, 2 is big-endian. A big-endian ELF is never x86, but the field
+    # decides how e_machine reads, so it is honoured rather than assumed.
+    byte_order = "<" if content[5] == 1 else ">"
+    machine = struct.unpack_from(byte_order + "H", content, _ELF_MACHINE_OFFSET)[0]
+    return machine in SUPPORTED_ELF_MACHINES
+
+
+def isIntelElfFile(filepath):
+    try:
+        with open(filepath, "rb") as handle:
+            return isIntelElf(handle.read(_ELF_HEADER_PREFIX))
+    except OSError:
+        return False
+
+
 class NativeCodeIdentifier:
     family_override = []
 
@@ -168,8 +197,8 @@ def work(input_element):
         disassembler = Disassembler()
         if (
             "elf." in INPUT_FILEPATH
-            and ("x86" in INPUT_FILEPATH or "x64" in INPUT_FILEPATH)
             and re.search(unpacked_file_pattern, input_element["filename"])
+            and isIntelElfFile(INPUT_FILEPATH)
         ):
             print(f"Analyzing file: {INPUT_FILEPATH}")
             try:
