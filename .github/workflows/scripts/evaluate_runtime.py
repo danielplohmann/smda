@@ -40,7 +40,7 @@ BASE_PATH = Path(__file__).resolve().parent.parent.parent.parent
 RUNTIME_PATH = BASE_PATH / "runtime_measurements"
 CACHE_PATH = RUNTIME_PATH / "cache"
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def compute_file_hash(filepath):
@@ -249,6 +249,38 @@ def check_determinism(aggregated):
 # --------------------------------------------------------------------------- #
 
 _RETURN_MNEMONICS = frozenset({"ret", "retn", "retf", "retfq", "iret", "iretd", "iretq", "retaa", "retab"})
+_LANDING_PAD_MNEMONICS = frozenset({"endbr32", "endbr64"})
+_FRAME_SETUP = {"rbp": "rbp, rsp", "ebp": "ebp, esp"}
+
+
+def _is_register(operand):
+    """A bare register name, as opposed to an immediate or a memory operand.
+
+    Capstone prints an immediate below 10 without its `0x`, so a leading digit has to be
+    rejected explicitly rather than by looking for the prefix.
+    """
+    return bool(operand) and operand.isalnum() and not operand[0].isdigit()
+
+
+def _starts_like_a_function(instructions):
+    """Whether the first instructions read as a function entry rather than as padding.
+
+    Three shapes cover what compilers emit: a CET landing pad, the frame-pointer pair, and
+    the run of callee-saved pushes a register-convention entry opens with. Padding decoded
+    from the wrong offset reaches a branch or an immediate operand within an instruction or
+    two, which is what separates it from these.
+    """
+    head = [(m.split(" ")[-1], o.strip()) for _, m, o in instructions[:2]]
+    if not head:
+        return False
+    if head[0][0] in _LANDING_PAD_MNEMONICS:
+        return True
+    if len(head) < 2 or head[0][0] != "push" or not _is_register(head[0][1]):
+        return False
+    if head[1][0] == "push" and _is_register(head[1][1]):
+        return True
+    return head[1][0] == "mov" and head[1][1] == _FRAME_SETUP.get(head[0][1])
+
 
 CLASSIFICATION_NOTE = (
     "The corpus carries no labelled function boundaries, so this gate can only see THAT the "
@@ -297,10 +329,10 @@ def describe_changed_address(addr, xcfg, other_owner, other_sorted):
         func = next((f for k, f in xcfg.items() if _parse_address(k) == addr), None)
     if func is None:
         return None
-    instructions = sorted((i[0], i[2]) for block in func.get("blocks", {}).values() for i in block)
+    instructions = sorted((i[0], i[2], i[3]) for block in func.get("blocks", {}).values() for i in block)
     if not instructions:
         return None
-    own_addresses = {a for a, _ in instructions}
+    own_addresses = {a for a, _, _ in instructions}
     low, high = instructions[0][0], instructions[-1][0]
     targets = {t for ts in (func.get("outrefs") or {}).values() for t in ts}
     targets |= {t for ts in (func.get("blockrefs") or {}).values() for t in ts}
@@ -310,6 +342,7 @@ def describe_changed_address(addr, xcfg, other_owner, other_sorted):
         "inrefs": len(func.get("inrefs") or []),
         "instructions": len(instructions),
         "ends_in_return": instructions[-1][1].split(" ")[-1] in _RETURN_MNEMONICS,
+        "starts_like_a_function": _starts_like_a_function(instructions),
         "absorbed_by": other_owner.get(addr),
         "branches_into_survivor_interior": sum(1 for t in targets if t in other_owner and other_owner[t] != t),
         "misaligned_overlap": sum(1 for a in window if a not in own_addresses),
@@ -328,13 +361,18 @@ def label_changed_address(signals, dropped):
        than a `ret`;
     3. its body reads like a whole routine - it ends in a return, and the other side does not
        decode different instructions inside its extent;
-    4. otherwise it reads like padding decoded from the wrong offset.
+    4. it opens the way a compiler opens a function, which is the one reading that survives a
+       body the other side decodes at different offsets - an entry reached only indirectly can
+       have no inbound reference and can end in a tail-call, but it still starts like an entry;
+    5. otherwise it reads like padding decoded from the wrong offset.
     """
     if signals["absorbed_by"] is not None:
         return "absorbed" if dropped else "split_out"
     if signals["inrefs"] > 0:
         return "likely_loss" if dropped else "likely_recovery"
     if signals["ends_in_return"] and signals["misaligned_overlap"] == 0:
+        return "likely_loss" if dropped else "likely_recovery"
+    if signals["starts_like_a_function"]:
         return "likely_loss" if dropped else "likely_recovery"
     return "likely_false_positive" if dropped else "likely_new_false_positive"
 
