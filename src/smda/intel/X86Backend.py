@@ -208,10 +208,15 @@ class X86Backend(ArchBackend):
             if i_op_str.startswith("dword ptr [0x"):
                 # case = "DWORD-PTR"
                 dereferenced = d.disassembly.dereferenceDword(call_destination)
-                if dereferenced is not None:
+                if dereferenced and d.disassembly.isAddrWithinMemoryImage(dereferenced):
                     state.addCodeRef(i_address, dereferenced)
                     d._handleCallTarget(state, i_address, dereferenced)
                     d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
+                else:
+                    # import-like case: keep the reference on the slot itself
+                    state.addCodeRef(i_address, call_destination)
+                    if dereferenced is not None:
+                        d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
             else:
                 # case = "DWORD-PTR-REG"
                 self._collectMemRegSlot(state, i_address, i_op_str)
@@ -219,7 +224,7 @@ class X86Backend(ArchBackend):
             rip = i_address + i_size
             call_destination = rip + d.getReferencedAddr(i_op_str)
             dereferenced = d.disassembly.dereferenceQword(call_destination)
-            if dereferenced is not None and d.disassembly.isAddrWithinMemoryImage(dereferenced):
+            if dereferenced and d.disassembly.isAddrWithinMemoryImage(dereferenced):
                 # the slot holds an in-image target (thunk/local function): book the call
                 # against the real destination, like the 32-bit dword-ptr path does
                 state.addCodeRef(i_address, dereferenced)
