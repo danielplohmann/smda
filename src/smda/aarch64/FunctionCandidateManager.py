@@ -69,8 +69,14 @@ from .FunctionCandidate import FunctionCandidate
 LOGGER = logging.getLogger(__name__)
 
 _ARM64_PDATA_ENTRY_SIZE = 8
+# items (words, matches or exception records) a scan steps over between budget polls, mirroring
+# _TIMEOUT_POLL_BLOCKS in the engine. A whole exception table is walked inside one call, so
+# the poll in the pass around it never comes round again while that walk is running
+_TIMEOUT_POLL_INTERVAL = 4096
 _ARM64_PDATA_MIN_ENTRIES = 16
 _ARM64_PDATA_SEED_ENTRIES = 4
+# a sample must land inside the shortest table worth carving, whatever the table's offset:
+# _ARM64_PDATA_SAMPLE_STRIDE <= (MIN_ENTRIES - SEED_ENTRIES) * ENTRY_SIZE, pinned by a test
 _ARM64_PDATA_SAMPLE_STRIDE = 64
 
 
@@ -202,7 +208,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         for record_index, record_rva in enumerate(
             range(exception_dir.rva, exception_dir.rva + exception_dir.size - 7, 8)
         ):
-            if record_index % 4096 == 0 and self._candidateTimeoutTripped():
+            if record_index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
             packed_entry = self.disassembly.getRawBytes(record_rva, 8)
             if packed_entry is None or len(packed_entry) < 8:
@@ -275,6 +281,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         count = 0
         previous_begin = 0
         while count < limit:
+            if count and count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                break
             record = self._readArm64ExceptionRecord(binary, size, offset, previous_begin)
             if record is None:
                 break
@@ -322,6 +330,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return
         LOGGER.debug("carved %d ARM64 RUNTIME_FUNCTION entries at 0x%08x", table_count, table_offset)
         for index in range(table_count):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return
             begin_rva = struct.unpack_from("<I", binary, table_offset + index * _ARM64_PDATA_ENTRY_SIZE)[0]
             self._admitCarvedExceptionRecord(base_addr, begin_rva)
 
@@ -429,18 +439,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self.addReferenceCandidate(target, source_va)
             self.setInitialCandidate(target)
 
+        rebases = fixup_state[0]
         for section in macho.sections:
             if not section.virtual_address or not section.size:
                 continue
             section_type = section.type
             if section_type in pointer_types:
-                for slot_va in range(section.virtual_address, section.virtual_address + section.size - 7, 8):
+                for slot_va in self._machoMetadataSlots(section, 8, adjustment, rebases):
                     if self._candidateTimeoutTripped():
                         return
                     seed(self._resolveMachoStoredPointer(slot_va, adjustment, fixup_state), slot_va + adjustment)
             elif init_offsets_type is not None and section_type == init_offsets_type:
                 # __init_offsets: 32-bit offsets from the image base, no fixups involved
-                for slot_va in range(section.virtual_address, section.virtual_address + section.size - 3, 4):
+                for slot_va in self._machoMetadataSlots(section, 4, adjustment, ()):
                     if self._candidateTimeoutTripped():
                         return
                     raw = self.disassembly.getBytes(slot_va + adjustment, 4)
@@ -450,10 +461,38 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             elif section_type == interposing_type:
                 # interposing entries are <replacement, replacee> pointer pairs; only
                 # the replacement of a complete pair is a local function
-                for pair_va in range(section.virtual_address, section.virtual_address + section.size - 15, 16):
+                for pair_va in self._machoMetadataSlots(section, 16, adjustment, rebases):
                     if self._candidateTimeoutTripped():
                         return
                     seed(self._resolveMachoStoredPointer(pair_va, adjustment, fixup_state), pair_va + adjustment)
+
+    def _machoMetadataSlots(self, section, stride, adjustment, rebases):
+        """Slot VAs in `section`, `stride` apart, that could resolve to anything at all.
+
+        A section header declares an extent; the mapped image decides what can be read. A slot
+        outside the image reads back None, so striding over a damaged `section.size` only spends
+        the analysis budget - the same shape as the ELF scan next door. The one thing that can
+        still resolve out there is a slot a rebase names, so those are yielded too rather than
+        assumed away: the range is clamped for cost, the union keeps it output-equivalent.
+
+        Addresses here are LIEF VAs, which `adjustment` maps to SMDA's, so the image bounds have
+        to be brought back the other way before they can be compared.
+        """
+        binary_info = self.disassembly.binary_info
+        image_start = binary_info.base_addr - adjustment
+        image_end = image_start + binary_info.binary_size
+        start = section.virtual_address
+        end = start + section.size
+        first = max(start, image_start)
+        if first > start:
+            # keep the stride phase the declared extent set, so the same slots are visited
+            first = start + -(-(first - start) // stride) * stride
+        last = min(end, image_end)
+        if last > first:
+            yield from range(first, last - (stride - 1), stride)
+        for slot in sorted(rebases):
+            if start <= slot < end and not (first <= slot < last) and (slot - start) % stride == 0:
+                yield slot
 
     def locateDataPointerCandidates(self):
         # Seed candidates from stored function pointers. ELF .init_array/.fini_array
@@ -480,6 +519,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
         pointer_size = 8 if binary_info.bitness == 64 else 4
         bit_mask = self.getBitMask()
+        image_start = binary_info.base_addr
+        image_end = image_start + binary_info.binary_size
         exec_flag = lief.ELF.Section.FLAGS.EXECINSTR.value
         for section in lief_binary.sections:
             flags = 0
@@ -494,8 +535,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # naturally aligned, so an unaligned section start would otherwise
             # stride past every aligned pointer in the section.
             scan_start = (section_start + (pointer_size - 1)) & ~(pointer_size - 1)
-            for match_count, pointer_va in enumerate(range(scan_start, section_end - (pointer_size - 1), pointer_size)):
-                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+            # A section header can describe an extent the mapped image does not hold, and a
+            # damaged one routinely does. Every read outside the image comes back None, so
+            # those addresses cannot yield a candidate and only spend the analysis budget;
+            # the surviving range visits exactly the addresses that could have matched.
+            if scan_start < image_start:
+                scan_start += -(-(image_start - scan_start) // pointer_size) * pointer_size
+            scan_end = min(section_end, image_end)
+            for match_count, pointer_va in enumerate(range(scan_start, scan_end - (pointer_size - 1), pointer_size)):
+                if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                     return
                 raw = self.disassembly.getBytes(pointer_va, pointer_size)
                 if raw is None or len(raw) != pointer_size:
@@ -568,7 +616,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             addr = low
             match_count = 0
             while addr + INSTRUCTION_SIZE <= high:
-                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                     return
                 match_count += 1
                 offset = addr - base
@@ -628,7 +676,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # call-reference candidate — the AArch64 analogue of the base 0xE8 scan.
         base = self.disassembly.binary_info.base_addr
         for match_count, word in enumerate(self._wordsView()):
-            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+            if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
             if (word & BL_MASK) != BL_VALUE:
                 continue
@@ -650,7 +698,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # see definitions.is_function_prologue for the exact encodings.
         base = self.disassembly.binary_info.base_addr
         for match_count, word in enumerate(self._wordsView()):
-            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+            if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
             if not is_function_prologue(word):
                 continue
