@@ -263,7 +263,13 @@ def _write_cfg(folder: Path, name: str, functions):
 class TestChangedAddressLabels(unittest.TestCase):
     """The label rules are ordered, and the order is what makes them right."""
 
-    BASE = {"absorbed_by": None, "inrefs": 0, "ends_in_return": False, "misaligned_overlap": 0}
+    BASE = {
+        "absorbed_by": None,
+        "inrefs": 0,
+        "ends_in_return": False,
+        "misaligned_overlap": 0,
+        "starts_like_a_function": False,
+    }
 
     def _label(self, dropped=True, **overrides):
         return er.label_changed_address({**self.BASE, **overrides}, dropped=dropped)
@@ -285,6 +291,18 @@ class TestChangedAddressLabels(unittest.TestCase):
         side does not decode different instructions across the same bytes."""
         self.assertEqual(self._label(ends_in_return=True, misaligned_overlap=40), "likely_false_positive")
 
+    def test_an_entry_shaped_body_reads_as_a_loss_though_every_other_rule_declines(self):
+        """A function reached only indirectly has no inbound reference, can end in a call
+        rather than a return, and sits in an extent the other side decodes differently - the
+        first three rules all decline it, and it is still a function."""
+        self.assertEqual(
+            self._label(inrefs=0, ends_in_return=False, misaligned_overlap=1758, starts_like_a_function=True),
+            "likely_loss",
+        )
+
+    def test_an_entry_shaped_added_address_reads_as_a_recovery(self):
+        self.assertEqual(self._label(starts_like_a_function=True, dropped=False), "likely_recovery")
+
     def test_still_decoded_elsewhere_is_a_boundary_move_not_a_loss(self):
         self.assertEqual(self._label(absorbed_by=0x401000), "absorbed")
 
@@ -292,6 +310,55 @@ class TestChangedAddressLabels(unittest.TestCase):
         self.assertEqual(self._label(absorbed_by=0x401000, dropped=False), "split_out")
         self.assertEqual(self._label(inrefs=1, dropped=False), "likely_recovery")
         self.assertEqual(self._label(dropped=False), "likely_new_false_positive")
+
+
+class TestEntryShape(unittest.TestCase):
+    """The reading that separates a function entry from padding decoded at a wrong offset."""
+
+    def _shape(self, *head):
+        return er._starts_like_a_function([(0x1000 + i * 4, m, o) for i, (m, o) in enumerate(head)])
+
+    def test_a_landing_pad_opens_a_function(self):
+        self.assertTrue(self._shape(("endbr64", ""), ("push", "rbx")))
+        self.assertTrue(self._shape(("endbr32", ""), ("push", "ebx")))
+
+    def test_the_frame_pointer_pair_opens_a_function(self):
+        self.assertTrue(self._shape(("push", "rbp"), ("mov", "rbp, rsp")))
+        self.assertTrue(self._shape(("push", "ebp"), ("mov", "ebp, esp")))
+
+    def test_a_run_of_callee_saved_pushes_opens_a_function(self):
+        self.assertTrue(self._shape(("push", "ebx"), ("push", "esi")))
+
+    def test_a_prefixed_mnemonic_is_read_by_its_base_opcode(self):
+        self.assertTrue(self._shape(("bnd push", "rbp"), ("mov", "rbp, rsp")))
+
+    def test_a_push_reaching_a_branch_is_not_an_entry(self):
+        """Padding decoded at the wrong offset reaches a branch within an instruction or two,
+        which is what every false positive in the labelled corpus does."""
+        self.assertFalse(self._shape(("push", "esi"), ("jno", "0x45b0cc")))
+
+    def test_a_pushed_immediate_is_not_an_entry(self):
+        self.assertFalse(self._shape(("push", "0x7a6d3250"), ("push", "eax")))
+
+    def test_a_pushed_single_digit_immediate_is_not_an_entry(self):
+        """Capstone prints an immediate below 10 with no `0x`, so the prefix cannot be what
+        distinguishes an immediate from a register name."""
+        self.assertFalse(self._shape(("push", "8"), ("push", "eax")))
+
+    def test_a_frame_pointer_move_into_a_different_register_is_not_the_pair(self):
+        self.assertFalse(self._shape(("push", "rbp"), ("mov", "rax, rsp")))
+
+    def test_a_frame_pointer_loaded_from_anything_but_the_stack_is_not_the_pair(self):
+        self.assertFalse(self._shape(("push", "rbp"), ("mov", "rbp, rax")))
+
+    def test_the_frame_pointer_pair_must_match_its_own_width(self):
+        self.assertFalse(self._shape(("push", "rbp"), ("mov", "rbp, esp")))
+
+    def test_a_single_instruction_body_is_not_an_entry(self):
+        self.assertFalse(self._shape(("push", "rbp")))
+
+    def test_an_empty_body_is_not_an_entry(self):
+        self.assertFalse(self._shape())
 
 
 class TestChangedAddressSignals(unittest.TestCase):
