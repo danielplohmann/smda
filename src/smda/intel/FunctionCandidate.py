@@ -25,6 +25,9 @@ class FunctionCandidate(_CommonFunctionCandidate):
                 return prologue_score
         return None
 
+    def isLandingPadEntry(self):
+        return self.bitness == 64 and self.bytes[:_ENDBR64_LEN] == ENDBR64_BYTES
+
     def getFunctionStartScore(self):
         if self.function_start_score is None:
             # endbr64 is a CET landing pad prefixing the real prologue, not a prologue itself:
