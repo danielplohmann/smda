@@ -3,16 +3,14 @@ import logging
 import re
 import struct
 
-from .definitions import stripFlatSegmentOverride
+from .definitions import CJMP_INS, JMP_INS, stripFlatSegmentOverride
 
 LOGGER = logging.getLogger(__name__)
 
-# The walk below models `mov` and `lea` and reads every other mnemonic as harmless, which is
-# only true of instructions that write nothing. These do: the rest either overwrite their first
-# operand or write a register they never name - xchg and xadd write both, mul and div write
-# edx:eax, and a call clobbers whatever the ABI allows - so a value carried past one of them is
-# the value before it, and resolving with it names the wrong target rather than none.
-_VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"})
+# The walk models `mov` and `lea`; a value may only be carried past another mnemonic that is
+# known to write no general register. These write none - a branch touches rip and the flags, the
+# rest compare or read. LOOP_INS is absent deliberately: `loop` decrements rcx.
+_VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"}) | CJMP_INS | JMP_INS
 
 
 class IndirectCallAnalyzer:
