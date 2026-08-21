@@ -3,7 +3,7 @@ import logging
 import re
 import struct
 
-from .definitions import CJMP_INS, JMP_INS, stripFlatSegmentOverride
+from .definitions import CALL_INS, CJMP_INS, JMP_INS, stripFlatSegmentOverride
 
 LOGGER = logging.getLogger(__name__)
 
@@ -11,6 +11,17 @@ LOGGER = logging.getLogger(__name__)
 # known to write no general register. These write none - a branch touches rip and the flags, the
 # rest compare or read. LOOP_INS is absent deliberately: `loop` decrements rcx.
 _VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"}) | CJMP_INS | JMP_INS
+# Vector moves whose destination is a vector register or memory. `movd`/`movq` are absent because
+# they also spell a vector-to-general move, and `movsd` because capstone spells the string
+# instruction - which writes esi and edi - with the same mnemonic as the scalar-double move.
+_VECTOR_MOVE_MNEMONICS = frozenset({"movaps", "movapd", "movups", "movupd", "movdqa", "movdqu", "movntps", "movntdq"})
+# What a call leaves alone. Every x86 convention preserves ebx, esi, edi and ebp; on x86-64 only
+# the registers both the SysV and the Microsoft ABI make callee-saved are listed, so rsi and rdi
+# stay out.
+_CALLEE_SAVED_32 = frozenset({"ebx", "esi", "edi", "ebp", "bx", "si", "di", "bp", "bl", "bh"})
+_CALLEE_SAVED_64 = frozenset({"rbx", "rbp", "ebx", "ebp", "bx", "bp", "bl", "bh", "bpl"}) | {
+    f"r1{number}{suffix}" for number in "2345" for suffix in ("", "d", "w", "b")
+}
 
 
 class IndirectCallAnalyzer:
@@ -116,6 +127,13 @@ class IndirectCallAnalyzer:
             self.processBlock(analysis_state, start_block, {}, register_name, [], block_depth)
         self.current_slot = None
 
+    def _callPreserves(self, mnemonic, register_name):
+        """Whether a call leaves `register_name` as the caller left it."""
+        if mnemonic not in CALL_INS:
+            return False
+        bitness = getattr(self.disassembly.binary_info, "bitness", 32)
+        return register_name in (_CALLEE_SAVED_64 if bitness == 64 else _CALLEE_SAVED_32)
+
     def processBlock(self, analysis_state, block, registers, register_name, processed, depth):
         if not block:
             return False
@@ -142,6 +160,8 @@ class IndirectCallAnalyzer:
                 ins[0] != self.current_calling_addr
                 and mnemonic not in ("mov", "lea")
                 and mnemonic not in _VALUE_PRESERVING_MNEMONICS
+                and mnemonic not in _VECTOR_MOVE_MNEMONICS
+                and not self._callPreserves(mnemonic, register_name)
             ):
                 # the walk begins at the call being resolved, which is itself a clobber; every
                 # instruction before it is not

@@ -113,7 +113,7 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         # eax should have 0x402000
         self.assertEqual(registers.get("eax"), 0x402000, f"Expected eax to be 0x402000, but got {registers.get('eax')}")
 
-    def _resolveThrough(self, block, register_name="eax", calling_addr=0x401100):
+    def _resolveThrough(self, block, register_name="eax", calling_addr=0x401100, bitness=32):
         """Run the backward walk over `block` and return the register values it recovered.
 
         The walk renames what it is tracking as it follows a copy chain, so the value can land
@@ -124,6 +124,7 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         analyzer = IndirectCallAnalyzer(disassembler)
         analyzer.disassembly = MagicMock()
         analyzer.disassembly.isAddrWithinMemoryImage.return_value = True
+        analyzer.disassembly.binary_info.bitness = bitness
         analyzer.current_calling_addr = calling_addr
         analyzer.current_slot = None
         analyzer.state = MagicMock()
@@ -175,6 +176,59 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         block = [
             [0x401000, 5, "mov", "eax, 0x402000"],
             [0x401005, 2, "loop", "0x401100"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_a_call_preserves_a_callee_saved_register(self):
+        """A resolved target is booked as a function candidate, so a walk that stops early costs
+        a function rather than an API name. Every x86 convention preserves ebx, so the definition
+        is still the value the call receives."""
+        block = [
+            [0x401000, 5, "mov", "ebx, 0x402000"],
+            [0x401005, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "ebx"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block, register_name="ebx").get("ebx"), 0x402000)
+
+    def test_a_callee_saved_register_survives_a_call_in_64_bit_code(self):
+        block = [
+            [0x401000, 7, "mov", "rbx, 0x402000"],
+            [0x401007, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "rbx"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block, register_name="rbx", bitness=64).get("rbx"), 0x402000)
+
+    def test_rsi_does_not_survive_a_call_in_64_bit_code(self):
+        """Control: esi is callee-saved on x86 and rsi is not under the SysV ABI, so the set is
+        chosen by bitness rather than by register name alone."""
+        block = [
+            [0x401000, 7, "mov", "rsi, 0x402000"],
+            [0x401007, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "rsi"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block, register_name="rsi", bitness=64), {})
+
+    def test_a_vector_move_does_not_stop_the_walk(self):
+        """A move whose destination is a vector register writes no general register."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 4, "movaps", "xmm0, xmmword ptr [ecx]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block).get("eax"), 0x402000)
+
+    def test_a_string_move_still_stops_the_walk(self):
+        """Control on the mnemonic capstone overloads: `movsd` also spells the string
+        instruction, which writes esi and edi, so it is deliberately not preserved."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 1, "movsd", "dword ptr es:[edi], dword ptr [esi]"],
             [0x401100, 2, "call", "eax"],
         ]
 
