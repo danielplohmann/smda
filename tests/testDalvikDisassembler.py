@@ -93,6 +93,72 @@ def build_code_item(insns, tries=None, handlers_blob=b"", registers_size=1, ins_
     return header + insns + padding + try_items + handlers_blob
 
 
+class DalvikOrphanPassBudgetTestSuite(unittest.TestCase):
+    """The orphan pass runs last, so a spent budget usually lands in it. Its poll used to re-ask
+    the callback, and a caller scopes a budget by where it is called from - once the pass that
+    set it has returned, the same callback answers "not spent" and the drain carries on. The
+    verdict latches instead."""
+
+    class _Watched(list):
+        """A list that records what the loop actually pulled from it."""
+
+        def __init__(self, items):
+            super().__init__(items)
+            self.consumed = []
+
+        def __iter__(self):
+            for item in list.__iter__(self):
+                self.consumed.append(item)
+                yield item
+
+    def _drainOrphans(self, spend_on_entry):
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+
+        with open(os.path.join(config.PROJECT_ROOT, "tests", "blockblast_classes_xored"), "rb") as handle:
+            dex = bytes(byte ^ (index % 256) for index, byte in enumerate(handle.read()))
+        offsets = self._Watched([0x10, 0x20, 0x30])
+        entered = {"orphan_pass": False}
+
+        def fake_discover(_self, _raw, known_code_offsets):
+            entered["orphan_pass"] = True
+            return offsets
+
+        class _Budgeted(Disassembler):
+            def _callbackAnalysisTimeout(self):
+                return spend_on_entry and entered["orphan_pass"]
+
+        with mock.patch.object(DalvikDisassembler, "_discoverOrphanCodeItems", fake_discover):
+            _Budgeted(config, backend="dalvik").disassembleUnmappedBuffer(dex)
+        return offsets.consumed
+
+    def test_a_budget_spent_when_the_orphan_pass_starts_stops_the_drain(self):
+        self.assertEqual(self._drainOrphans(spend_on_entry=True), [0x10])
+
+    def test_a_verdict_that_tripped_once_still_reports_a_timeout(self):
+        """The latch itself: a budget scoped to one pass answers "spent" while that pass runs and
+        "not spent" afterwards. Re-asking it at the end reported ok for a run that was cut short."""
+        with open(os.path.join(config.PROJECT_ROOT, "tests", "blockblast_classes_xored"), "rb") as handle:
+            dex = bytes(byte ^ (index % 256) for index, byte in enumerate(handle.read()))
+        asked = {"count": 0}
+
+        class _Budgeted(Disassembler):
+            def _callbackAnalysisTimeout(self):
+                asked["count"] += 1
+                return asked["count"] == 1
+
+        report = _Budgeted(config, backend="dalvik").disassembleUnmappedBuffer(dex)
+
+        # re-asking answered "not spent" 66 more times and reported ok for 64 functions it had
+        # already stopped analysing; the latch answers once and stands
+        self.assertEqual(asked["count"], 1)
+        self.assertEqual(report.status, "timeout")
+
+    def test_the_same_drain_takes_every_orphan_within_budget(self):
+        """Positive control: with the budget intact the loop pulls all three, so the single
+        entry above is the poll stopping it rather than the list being short."""
+        self.assertEqual(self._drainOrphans(spend_on_entry=False), [0x10, 0x20, 0x30])
+
+
 class DalvikDisassemblerTestSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -12,6 +12,7 @@ import unittest
 from types import SimpleNamespace
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
+from smda.common.analysis_budget import analysisTimeoutTripped
 from smda.common.BinaryInfo import BinaryInfo
 from smda.Disassembler import Disassembler
 from smda.intel.IntelDisassembler import IntelDisassembler
@@ -63,6 +64,53 @@ class TimeoutCallbackReachesCandidateScansTestSuite(unittest.TestCase):
         result = disassembler.analyzeBuffer(_aarch64_binary_info(), cbAnalysisTimeout=lambda: True)
         self.assertNotIn(0x401010, disassembler.fc_manager.candidates)
         self.assertTrue(result.analysis_timeout)
+
+
+class BudgetVerdictLatchTestSuite(unittest.TestCase):
+    """A caller scopes a budget by where it is called from - "spent while the tailcall pass is
+    running" - so once that pass returns, the same callback answers "not spent". Every backend
+    used to re-ask it at each pass and at the end, so a run the budget had already cut short
+    reported ok. The verdict latches onto the result instead, and every later poll reads that
+    first. All three analyzeBuffer implementations - native, CIL and Dalvik - share this."""
+
+    def _spentOnceThenNot(self):
+        """The shape a call-site-scoped budget presents: True while its pass runs, then False."""
+        state = {"asked": 0}
+
+        def callback():
+            state["asked"] += 1
+            return state["asked"] == 1
+
+        return callback, state
+
+    def test_a_verdict_that_tripped_once_stays_tripped(self):
+        disassembly = SimpleNamespace(analysis_timeout=False)
+        callback, state = self._spentOnceThenNot()
+
+        self.assertTrue(analysisTimeoutTripped(disassembly, callback))
+        self.assertTrue(disassembly.analysis_timeout)
+        self.assertTrue(analysisTimeoutTripped(disassembly, callback))
+        self.assertEqual(state["asked"], 1, "the latch must answer without asking again")
+
+    def test_a_budget_that_never_trips_latches_nothing(self):
+        """Positive control: the latch only records a real trip, so an intact budget is not
+        turned into a timeout by having been polled."""
+        disassembly = SimpleNamespace(analysis_timeout=False)
+
+        self.assertFalse(analysisTimeoutTripped(disassembly, lambda: False))
+        self.assertFalse(disassembly.analysis_timeout)
+
+    def test_no_callback_at_all_never_trips(self):
+        disassembly = SimpleNamespace(analysis_timeout=False)
+
+        self.assertFalse(analysisTimeoutTripped(disassembly, None))
+        self.assertFalse(disassembly.analysis_timeout)
+
+    def test_a_missing_result_object_is_tolerated(self):
+        """Passes construct backends without a result in places; the helper must not require
+        one to answer."""
+        self.assertFalse(analysisTimeoutTripped(None, lambda: False))
+        self.assertTrue(analysisTimeoutTripped(None, lambda: True))
 
 
 class IdaExporterTimeoutTestSuite(unittest.TestCase):

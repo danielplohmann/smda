@@ -5,6 +5,7 @@ import struct
 
 import lief
 
+from smda.common.analysis_budget import analysisTimeoutTripped
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 from smda.dalvik.DalvikOpcodeDecoder import (
@@ -1611,7 +1612,7 @@ class DalvikDisassembler:
         analyzed_count = 0
         known_code_offsets = set()
         for method in methods:
-            if cbAnalysisTimeout and cbAnalysisTimeout():
+            if analysisTimeoutTripped(self.disassembly, cbAnalysisTimeout):
                 break
             if not getattr(method, "has_class", False):
                 method_counts["skipped_no_class"] += 1
@@ -1644,10 +1645,10 @@ class DalvikDisassembler:
 
         # Recover code_items hidden from the method table (orphans).
         method_counts["orphans_discovered"] = 0
-        if not (cbAnalysisTimeout and cbAnalysisTimeout()):
+        if not analysisTimeoutTripped(self.disassembly, cbAnalysisTimeout):
             orphan_offsets = self._discoverOrphanCodeItems(raw_for_resolver, known_code_offsets)
             for code_offset in orphan_offsets:
-                if cbAnalysisTimeout and cbAnalysisTimeout():
+                if analysisTimeoutTripped(self.disassembly, cbAnalysisTimeout):
                     break
                 if code_offset in self.disassembly.functions:
                     continue
@@ -1670,7 +1671,7 @@ class DalvikDisassembler:
                     LOGGER.debug("Orphan code_item @0x%x rejected: %s", code_offset, exc)
 
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
-        if cbAnalysisTimeout and cbAnalysisTimeout():
+        if analysisTimeoutTripped(self.disassembly, cbAnalysisTimeout):
             self.disassembly.analysis_timeout = True
         self._logAnalysisSummary(self.disassembly.binary_info.version, method_counts, analyzed_count)
         return self.disassembly
