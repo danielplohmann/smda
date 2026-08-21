@@ -208,6 +208,11 @@ class RecursiveDisassembler:
         before the tailcall candidate was known). Revert the gap function so the
         current analysis can absorb its bytes as ordinary blocks.
 
+        That premise does not hold for a gap function whose entry carries an indirect-branch
+        landing pad: the scan did not guess such a start, the image declared it as somewhere an
+        indirect branch may land, so reverting it for a candidate found inside its body would
+        demote a declared entry in favour of an address carrying no such marker.
+
         Returns True if a gap function was reverted.
         """
         owner_fn = self.disassembly.ins2fn.get(colliding_addr)
@@ -215,6 +220,8 @@ class RecursiveDisassembler:
             return False
         candidate = self.fc_manager.candidates.get(owner_fn)
         if candidate is None or not candidate.is_gap_candidate:
+            return False
+        if candidate.isLandingPadEntry():
             return False
         if owner_fn not in self.disassembly.functions:
             return False
