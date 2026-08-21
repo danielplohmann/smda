@@ -243,5 +243,216 @@ class TestEndToEnd(unittest.TestCase):
         _make_runtime(root, base_runs, pr_runs)
 
 
+def _function(addr, instructions, inrefs=(), outrefs=None):
+    """One xcfg entry: `instructions` is [(addr, mnemonic), ...] laid out in one block."""
+    return {
+        "blocks": {str(addr): [[a, "90", m, ""] for a, m in instructions]},
+        "inrefs": list(inrefs),
+        "outrefs": outrefs or {},
+        "blockrefs": {},
+    }
+
+
+def _write_cfg(folder: Path, name: str, functions):
+    folder.mkdir(parents=True, exist_ok=True)
+    data = {"execution_time": 1.0, "xcfg": {str(a): f for a, f in functions.items()}}
+    with open(folder / name, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+
+
+class TestChangedAddressLabels(unittest.TestCase):
+    """The label rules are ordered, and the order is what makes them right."""
+
+    BASE = {"absorbed_by": None, "inrefs": 0, "ends_in_return": False, "misaligned_overlap": 0}
+
+    def _label(self, dropped=True, **overrides):
+        return er.label_changed_address({**self.BASE, **overrides}, dropped=dropped)
+
+    def test_padding_read_at_the_wrong_offset_reads_as_a_false_positive(self):
+        self.assertEqual(self._label(), "likely_false_positive")
+
+    def test_a_whole_routine_reads_as_a_loss(self):
+        self.assertEqual(self._label(ends_in_return=True), "likely_loss")
+
+    def test_a_referenced_address_reads_as_a_loss_however_its_body_ends(self):
+        """A function ending in a tail-call `jmp`, inside a region the other side decodes
+        differently, is still a function when something calls it - the body rules alone would
+        call this padding."""
+        self.assertEqual(self._label(inrefs=5, ends_in_return=False, misaligned_overlap=21), "likely_loss")
+
+    def test_a_return_inside_a_differently_decoded_extent_is_not_a_loss(self):
+        """A `ret` byte falls out of almost any run of data, so it only counts when the other
+        side does not decode different instructions across the same bytes."""
+        self.assertEqual(self._label(ends_in_return=True, misaligned_overlap=40), "likely_false_positive")
+
+    def test_still_decoded_elsewhere_is_a_boundary_move_not_a_loss(self):
+        self.assertEqual(self._label(absorbed_by=0x401000), "absorbed")
+
+    def test_the_same_signals_read_the_other_way_for_an_added_address(self):
+        self.assertEqual(self._label(absorbed_by=0x401000, dropped=False), "split_out")
+        self.assertEqual(self._label(inrefs=1, dropped=False), "likely_recovery")
+        self.assertEqual(self._label(dropped=False), "likely_new_false_positive")
+
+
+class TestChangedAddressSignals(unittest.TestCase):
+    def test_signals_are_read_from_the_two_reports(self):
+        xcfg = {
+            "1000": _function(1000, [(1000, "push"), (1002, "ret")], inrefs=[900], outrefs={"1000": [2000]}),
+        }
+        other_owner = {2000: 1900, 1001: 1001}
+        signals = er.describe_changed_address(1000, xcfg, other_owner, sorted(other_owner))
+
+        self.assertEqual(signals["inrefs"], 1)
+        self.assertEqual(signals["instructions"], 2)
+        self.assertTrue(signals["ends_in_return"])
+        self.assertIsNone(signals["absorbed_by"])
+        self.assertEqual(signals["branches_into_survivor_interior"], 1)
+        self.assertEqual(signals["misaligned_overlap"], 1)
+
+    def test_a_prefixed_return_still_counts_as_a_return(self):
+        xcfg = {"1000": _function(1000, [(1000, "bnd ret")])}
+        signals = er.describe_changed_address(1000, xcfg, {}, [])
+
+        self.assertTrue(signals["ends_in_return"])
+
+    def test_an_address_the_report_does_not_carry_is_skipped(self):
+        self.assertIsNone(er.describe_changed_address(1000, {}, {}, []))
+
+
+class TestClassifyRegressions(unittest.TestCase):
+    def test_each_kind_of_change_is_labelled_end_to_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = {
+                0x1000: _function(0x1000, [(0x1000, "push"), (0x1002, "ret")]),
+                0x2000: _function(0x2000, [(0x2000, "add"), (0x2002, "add")]),
+                0x3000: _function(0x3000, [(0x3000, "push"), (0x3002, "ret")]),
+            }
+            # 0x1000 survives; 0x2000 is padding; 0x3000 is still decoded inside 0x1000.
+            pr = {
+                0x1000: _function(0x1000, [(0x1000, "push"), (0x1002, "ret"), (0x3000, "push")]),
+                0x4000: _function(0x4000, [(0x4000, "push"), (0x4002, "ret")], inrefs=[0x1000]),
+            }
+            _write_cfg(root / "base_0", "s.smda", base)
+            _write_cfg(root / "pr_0", "s.smda", pr)
+            regressions = [
+                {
+                    "file": "s.smda",
+                    "only_in_base": ["8192", "12288"],
+                    "only_in_pr": ["16384"],
+                }
+            ]
+
+            result = er.classify_regressions(regressions, root / "base_0", root / "pr_0")
+
+            self.assertEqual(
+                result["counts"],
+                {"likely_false_positive": 1, "absorbed": 1, "likely_recovery": 1},
+            )
+            labels = {row["addr"]: row["label"] for row in result["files"][0]["addresses"]}
+            self.assertEqual(labels[0x2000], "likely_false_positive")
+            self.assertEqual(labels[0x3000], "absorbed")
+            self.assertEqual(labels[0x4000], "likely_recovery")
+
+    def test_hex_spelled_addresses_are_read_the_same_as_decimal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_cfg(root / "base_0", "s.smda", {0x1000: _function(0x1000, [(0x1000, "add")])})
+            _write_cfg(root / "pr_0", "s.smda", {})
+
+            result = er.classify_regressions(
+                [{"file": "s.smda", "only_in_base": ["0x1000"], "only_in_pr": []}],
+                root / "base_0",
+                root / "pr_0",
+            )
+
+            self.assertEqual(result["counts"], {"likely_false_positive": 1})
+
+    def test_an_unreadable_report_costs_the_reading_and_not_the_run(self):
+        """The section is evidence, not a gate, so a corrupt report must not fail the job."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_cfg(root / "base_0", "s.smda", {0x1000: _function(0x1000, [(0x1000, "ret")])})
+            (root / "pr_0").mkdir(parents=True, exist_ok=True)
+            (root / "pr_0" / "s.smda").write_text("{not json", encoding="utf-8")
+
+            result = er.classify_regressions(
+                [{"file": "s.smda", "only_in_base": ["4096"], "only_in_pr": []}],
+                root / "base_0",
+                root / "pr_0",
+            )
+
+            self.assertEqual(result["counts"], {})
+
+    def test_a_file_missing_from_a_side_is_skipped_rather_than_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_cfg(root / "base_0", "s.smda", {0x1000: _function(0x1000, [(0x1000, "ret")])})
+            (root / "pr_0").mkdir(parents=True, exist_ok=True)
+
+            result = er.classify_regressions(
+                [{"file": "s.smda", "only_in_base": ["4096"], "only_in_pr": []}],
+                root / "base_0",
+                root / "pr_0",
+            )
+
+            self.assertEqual(result["counts"], {})
+            self.assertEqual(result["files"], [])
+
+
+class TestClassificationMarkdown(unittest.TestCase):
+    def test_nothing_is_rendered_without_a_classification(self):
+        self.assertEqual(er._classification_lines({}), [])
+        self.assertEqual(er._classification_lines({"counts": {}}), [])
+
+    def test_losses_are_listed_with_the_evidence_for_calling_them_losses(self):
+        classification = {
+            "counts": {"likely_loss": 1, "likely_false_positive": 2},
+            "note": "note",
+            "files": [
+                {
+                    "file": "s.smda",
+                    "addresses": [
+                        {
+                            "addr": 0xA65150,
+                            "label": "likely_loss",
+                            "inrefs": 0,
+                            "instructions": 16,
+                            "ends_in_return": True,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        rendered = "\n".join(er._classification_lines(classification))
+
+        self.assertIn("Likely false positives removed", rendered)
+        self.assertIn("| Likely real functions lost | **1** |", rendered)
+        self.assertIn("0xa65150", rendered)
+        self.assertIn("not gated", rendered)
+
+
+class TestClassificationReachesTheModel(unittest.TestCase):
+    def test_the_report_model_carries_the_classification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(2):
+                _write_cfg(
+                    root / f"base_{i}",
+                    "s.smda",
+                    {
+                        0x1000: _function(0x1000, [(0x1000, "ret")]),
+                        0x2000: _function(0x2000, [(0x2000, "add")]),
+                    },
+                )
+                _write_cfg(root / f"pr_{i}", "s.smda", {0x1000: _function(0x1000, [(0x1000, "ret")])})
+
+            model, status = er.evaluate(root)
+
+            self.assertEqual(status, "ok")
+            self.assertEqual(model["correctness"]["classification"]["counts"], {"likely_false_positive": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
