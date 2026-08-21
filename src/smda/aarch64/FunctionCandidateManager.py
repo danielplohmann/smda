@@ -332,7 +332,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         for index in range(table_count):
             if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
-            begin_rva = struct.unpack_from("<I", binary, table_offset + index * _ARM64_PDATA_ENTRY_SIZE)[0]
+            begin_rva, unwind_data = struct.unpack_from("<II", binary, table_offset + index * _ARM64_PDATA_ENTRY_SIZE)
+            if unwind_data & 0x3 == 2:
+                # a packed fragment continues another function's body, so its begin address is
+                # not a function start - the parsed directory path skips these for the same
+                # reason. The record still has to read as valid, or the run that found the
+                # table would end at the first fragment in it.
+                continue
             self._admitCarvedExceptionRecord(base_addr, begin_rva)
 
     def _executableRanges(self):

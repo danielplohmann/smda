@@ -29,6 +29,7 @@ MOVZ_X16 = 0xD2800010 | (0x1234 << 5)  # movz x16, #0x1234
 BR_X16 = 0xD61F0200
 UNDEFINED = 0x00000000
 PACKED_UNWIND = 0x01 | (2 << 2)  # flag 1, FunctionLength 2 words
+PACKED_FRAGMENT = 0x02 | (2 << 2)  # flag 2, FunctionLength 2 words
 
 
 def _config(**overrides):
@@ -111,6 +112,34 @@ class Arm64ExceptionRecordCarvingTestSuite(unittest.TestCase):
         image, _starts = _mappedImage((FRAME_PROLOGUE, RET), stride=8, records=8)
 
         self.assertEqual(_exceptionCandidates(_candidateManager(image)), set())
+
+
+class Arm64CarvedFragmentRecordTestSuite(unittest.TestCase):
+    """A packed fragment continues another function's body, so its begin address is a mid-body
+    word rather than a function start. The parsed exception-directory path skips flag 2 for
+    that reason; the carve read the begin address alone and admitted it whenever the word it
+    names happened to read as an entry."""
+
+    FRAGMENT_INDEX = 5
+
+    def _carved(self, unwind_data):
+        image, starts = _mappedImage((FRAME_PROLOGUE, RET), stride=8)
+        patched = bytearray(image)
+        struct.pack_into("<I", patched, PDATA_RVA + self.FRAGMENT_INDEX * _ARM64_PDATA_ENTRY_SIZE + 4, unwind_data)
+        return _exceptionCandidates(_candidateManager(bytes(patched))), starts
+
+    def test_a_packed_fragment_record_is_not_admitted(self):
+        carved, starts = self._carved(PACKED_FRAGMENT)
+
+        self.assertEqual(carved, set(starts) - {starts[self.FRAGMENT_INDEX]})
+
+    def test_the_same_record_is_admitted_when_it_names_a_whole_function(self):
+        """Positive control: only the two flag bits differ, so the address dropped above is
+        dropped for the flag and not because the record stopped validating or the word it
+        names stopped reading as an entry."""
+        carved, starts = self._carved(PACKED_UNWIND)
+
+        self.assertEqual(carved, set(starts))
 
 
 class Arm64SamplingStrideTestSuite(unittest.TestCase):
