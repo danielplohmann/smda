@@ -10,9 +10,11 @@ _DIRECT_TABLE_RE = re.compile(r"[a-z0-9]{2,3}, dword ptr \[[^ ]+ \+ 0x[0-9a-f]+\
 _X64_LEA_TABLE_RE = re.compile(r"[a-z0-9]{2,3}, \[rip (\+|\-) 0x[0-9a-f]+\]")
 _X64_BONUS_OFFSET_RE = re.compile(r"[a-z0-9]{2,3},.*0x[0-9a-f]+\]")
 _SCALED_INDEX_RE = re.compile(r"\[(?:[a-z][a-z0-9]{1,3} \+ )?(?P<index>[a-z][a-z0-9]{1,3})\*[1248]")
-_SIZE_PREFIX_RE = re.compile(r"^(?:byte|word|dword|qword|xmmword) ptr ")
 _IMMEDIATE_RE = re.compile(r"^(?:0x[0-9a-f]+|[0-9]+)$")
+_IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]{1,4}")
 _INDEX_COPY_MNEMONICS = frozenset({"mov", "movzx", "movsx", "movsxd", "movabs"})
+# first operand read but not written, so it redefines no index
+_INDEX_READ_ONLY_MNEMONICS = frozenset({"test", "push", "bt", "nop"})
 
 
 class JumpTableAnalyzer:
@@ -72,14 +74,37 @@ class JumpTableAnalyzer:
 
     @staticmethod
     def _operandKey(operand):
-        """A comparable name for whatever an operand reads: a register family or a memory cell."""
+        """A comparable name for whatever an operand reads: a register family or a memory cell.
+
+        A memory key keeps its size prefix. "dword ptr [rbp - 8]" and "byte ptr [rbp - 8]" name
+        overlapping storage but not the same value, so treating them as one key ties a bound to
+        an index that was never compared against it.
+        """
         operand = stripFlatSegmentOverride(operand.strip())
         register = canonicalRegister(operand)
         if register:
             return register
         if operand.startswith("[") or "ptr [" in operand:
-            return _SIZE_PREFIX_RE.sub("", operand)
+            return operand
         return None
+
+    @staticmethod
+    def _keyRegisters(key):
+        """The register families a memory key addresses through, empty for a register key."""
+        if "[" not in key:
+            return frozenset()
+        return frozenset(
+            register for register in (canonicalRegister(token) for token in _IDENTIFIER_RE.findall(key)) if register
+        )
+
+    @classmethod
+    def _invalidated(cls, tracked, destination_key):
+        """tracked with everything the write to destination_key just made stale.
+
+        A memory cell is only as stable as the registers that address it: once the base is
+        written, the same text names different storage.
+        """
+        return {key for key in tracked if key != destination_key and destination_key not in cls._keyRegisters(key)}
 
     @classmethod
     def _dispatchIndexKeys(cls, operand):
@@ -121,14 +146,22 @@ class JumpTableAnalyzer:
                     if not untied_size and self.RE_CMP_SIZE.match(operands):
                         untied_size = bound
                 continue
-            if not tracked or mnemonic not in _INDEX_COPY_MNEMONICS:
+            if not tracked or mnemonic in _INDEX_READ_ONLY_MNEMONICS:
                 continue
             destination, _, source = operands.partition(",")
             destination_key = self._operandKey(destination)
-            if destination_key is None or destination_key not in tracked:
+            if destination_key is None:
                 continue
-            tracked.discard(destination_key)
-            tracked |= self._dispatchIndexKeys(source)
+            if mnemonic in _INDEX_COPY_MNEMONICS:
+                carried = self._dispatchIndexKeys(source) if destination_key in tracked else set()
+                tracked = self._invalidated(tracked, destination_key) | carried
+                continue
+            # Anything else redefines whatever it writes, and several x86 instructions write a
+            # register they do not name first - xchg and xadd write both operands, mul and div
+            # write rdx:rax, cpuid writes four. Invalidating only the named one would leave a
+            # tie to a compare that bounds a value the dispatch never indexes with, so the tie
+            # is dropped whole and the untied scan answers instead.
+            tracked = set()
         return untied_size
 
     def _directHandler(self, jump_instruction_op_str, state, backtracked):
@@ -205,13 +238,20 @@ class JumpTableAnalyzer:
         jump_targets = set()
         jump_base = alternative_base if alternative_base else off_jumptable
         if jumptable_size and off_jumptable and self.disassembly.isAddrWithinMemoryImage(off_jumptable):
+            rebased = off_jumptable + bonus_offset - self.disassembly.binary_info.base_addr
+            # loop-invariant, so it decides the whole scan on the first entry rather than
+            # once per declared entry
+            if rebased < 0:
+                return sorted(jump_targets)
             for index in range(jumptable_size):
-                rebased = off_jumptable + bonus_offset - self.disassembly.binary_info.base_addr
-                if rebased < 0:
-                    continue
                 raw_entry_bytes = self.disassembly.getRawBytes(rebased + index * 4, 4)
+                # the read offset only grows, so a short one means the table has run off the
+                # end of the image and every later entry reads the same way. The bound is
+                # recovered from a compare against attacker-controlled bytes, so continuing
+                # here spends it as an iteration count: 0xffffffff is a four-billion-entry
+                # walk over an image that holds a few thousand.
                 if len(raw_entry_bytes) < 4:
-                    continue
+                    break
                 # relative entries are target - table_base as int32 and are negative
                 # whenever the switch bodies precede the table; unpack signed so the
                 # real offset is recovered, then mask before the bounds check (line 140
@@ -280,7 +320,15 @@ class JumpTableAnalyzer:
         ) = jump_instruction
         table_offsets = []
         off_jumptable = None
-        backtracked = state.backtrackInstructions(jump_instruction_address, 50)
+        # Every consumer of this window matches anchored operand patterns, and a segment
+        # override renders inside the operand, so the byte that makes a dispatch a notrack
+        # dispatch also hides its table base and its bound compare. Normalizing the window
+        # at its single source keeps the strip off the stored instruction, whose operand
+        # text and escaped form still describe the bytes that are there.
+        backtracked = [
+            (instr[0], instr[1], instr[2], stripFlatSegmentOverride(instr[3]), *instr[4:])
+            for instr in state.backtrackInstructions(jump_instruction_address, 50)
+        ]
         backtracked_sequence = "-".join([ins[2] for ins in backtracked[::-1]][:3])
         index_keys = self._dispatchIndexKeys(stripFlatSegmentOverride(jump_instruction_op_str))
         jumptable_size = self._findJumpTableSize(backtracked, index_keys)

@@ -197,6 +197,12 @@ class X86Backend(ArchBackend):
         if i_mnemonic.split(" ")[-1] == "lcall":
             return
         i_op_str = stripFlatSegmentOverride(i_op_str)
+        # case = "LONG-CALL-INDIRECT": FF /3 loads a seg:offset pair from memory. capstone
+        # renders it with a bare "ptr " where a near indirect call (FF /2) always names its
+        # width, and that is the only difference between them once a segment override is
+        # normalized away. No arm below claims it today; saying so keeps it that way.
+        if i_op_str.startswith("ptr "):
+            return
         call_destination = d.getReferencedAddr(i_op_str)
         if i_op_str.startswith("dword ptr ["):
             if i_op_str.startswith("dword ptr [0x"):
@@ -257,6 +263,7 @@ class X86Backend(ArchBackend):
         for i_address, i_size, i_mnemonic, i_op_str, _ in state.instructions:
             if i_mnemonic.split(" ")[-1] != "mov":
                 continue
+            i_op_str = stripFlatSegmentOverride(i_op_str)
             match = IMPORT_SLOT_LOAD_RE.match(i_op_str)
             if match is None:
                 continue
@@ -317,8 +324,12 @@ class X86Backend(ArchBackend):
         i_op_str = stripFlatSegmentOverride(i_op_str)
         i = (i_address, i_size, i_mnemonic, i_op_str)
         # case = "FALLTHROUGH"
-        if ":" in i_op_str:
-            # case = "LONG-JMP", or an fs:/gs: operand whose base is not in the image
+        if i_op_str.startswith("ptr ") or ":" in i_op_str:
+            # case = "LONG-JMP": a far branch names a segment and an offset, so it reaches no
+            # address in this image. The direct form (ljmp) holds a colon; the indirect form
+            # (FF /5) is told from a near indirect branch by the missing width - capstone
+            # renders "ptr [0x402000]" where a near one renders "dword ptr [0x402000]".
+            # Also the arm for an fs:/gs: operand whose base is not in the image.
             pass
         elif i_op_str.startswith("dword ptr [0x"):
             # case = "DWORD-PTR"

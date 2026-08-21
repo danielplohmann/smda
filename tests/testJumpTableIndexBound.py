@@ -64,7 +64,7 @@ class DispatchIndexKeyTestSuite(unittest.TestCase):
     def test_unscaled_memory_operand_is_read_whole(self):
         analyzer = _makeAnalyzer()
 
-        self.assertEqual(analyzer._dispatchIndexKeys("byte ptr [rdi + rcx]"), {"[rdi + rcx]"})
+        self.assertEqual(analyzer._dispatchIndexKeys("byte ptr [rdi + rcx]"), {"byte ptr [rdi + rcx]"})
 
     def test_operand_naming_nothing_trackable_yields_no_key(self):
         analyzer = _makeAnalyzer()
@@ -116,6 +116,84 @@ class IndexTiedBoundTestSuite(unittest.TestCase):
 
         self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 6)
 
+    def test_a_shift_of_the_index_drops_the_tie(self):
+        """`shr eax, 8` redefines the index, so the compare further back bounds the value
+        before the shift and not what the dispatch ends up indexing with. Reporting it tied
+        would size the table at 1001 entries where the truth is 4."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 2, "ja", "0x1100"),
+            (0x1007, 3, "shr", "eax, 8"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x3E9)
+
+    def test_any_non_copy_write_drops_the_tie(self):
+        """Several x86 instructions write a register they do not name first - xchg and xadd
+        write both operands, mul and div write rdx:rax, cpuid writes four - so a tie carried
+        across any non-copy write can bound a value the dispatch never indexes with. The tie
+        is dropped whole and the untied scan answers: here the nearer compare, not the tied
+        one further back."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 3, "add", "edx, 8"),
+            (0x1008, 5, "cmp", "esi, 0x3"),
+            (0x100D, 2, "mov", "ecx, eax"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 4)
+
+    def test_a_copy_between_the_index_and_its_bound_keeps_the_tie(self):
+        """Positive control: a copy is the one thing that carries the index forward, so the
+        same shape with a mov in place of the add still reaches the tied compare - without
+        this, the case above would pass even if the tie never worked at all."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 3, "mov", "edx, 8"),
+            (0x1008, 5, "cmp", "esi, 0x3"),
+            (0x100D, 2, "mov", "ecx, eax"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 0x3E9)
+
+    def test_a_write_to_a_tracked_cells_base_register_drops_the_tie(self):
+        """`add rax, 8` leaves the text "[rax]" naming a different cell, so the compare
+        against the old one is no longer a bound on what is loaded."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 6, "cmp", "dword ptr [rax], 0x3ff"),
+            (0x1006, 4, "add", "rax, 8"),
+            (0x100A, 2, "mov", "ecx, dword ptr [rax]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 0)
+
+    def test_the_same_cell_with_no_intervening_write_is_still_tied(self):
+        """Positive control for the rule above: without the `add` the cell is the same one
+        the compare bounds, so the tie must still be made."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 6, "cmp", "dword ptr [rax], 0x3ff"),
+            (0x1006, 2, "mov", "ecx, dword ptr [rax]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 0x400)
+
+    def test_a_compare_of_a_different_width_on_the_same_cell_is_not_the_bound(self):
+        """A dword compare does not bound a byte read of the same address - a byte index can
+        only reach 256 whatever the dword holds."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 7, "cmp", "dword ptr [rbp - 8], 0x3e8"),
+            (0x1007, 2, "ja", "0x1100"),
+            (0x1009, 4, "movzx", "eax, byte ptr [rbp - 8]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0)
+
     def test_untied_compare_is_still_used_when_the_index_is_unknown(self):
         """Without an index to tie to, the first register compare is the only evidence there
         is; dropping that fallback would abandon tables that the old scan sized correctly."""
@@ -162,11 +240,13 @@ class IndexTiedBoundTestSuite(unittest.TestCase):
 
 
 class OperandKeyTestSuite(unittest.TestCase):
-    def test_size_prefix_and_flat_segment_are_normalized_away(self):
+    def test_a_flat_segment_is_normalized_away_and_the_width_is_kept(self):
+        """The override names the same cell; the width does not. A dword compare and a byte
+        load of the same address read different values, so they must not share a key."""
         analyzer = _makeAnalyzer()
 
-        self.assertEqual(analyzer._operandKey("byte ptr ds:[rdi + rcx]"), "[rdi + rcx]")
-        self.assertEqual(analyzer._operandKey("qword ptr [rsp + 8]"), "[rsp + 8]")
+        self.assertEqual(analyzer._operandKey("byte ptr ds:[rdi + rcx]"), "byte ptr [rdi + rcx]")
+        self.assertNotEqual(analyzer._operandKey("dword ptr [rbp - 8]"), analyzer._operandKey("byte ptr [rbp - 8]"))
 
     def test_registers_normalize_to_their_family(self):
         analyzer = _makeAnalyzer()

@@ -113,6 +113,70 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         # eax should have 0x402000
         self.assertEqual(registers.get("eax"), 0x402000, f"Expected eax to be 0x402000, but got {registers.get('eax')}")
 
+    def _resolveThrough(self, block, register_name="eax", calling_addr=0x401100):
+        """Run the backward walk over `block` and return the register values it recovered.
+
+        The walk renames what it is tracking as it follows a copy chain, so the value can land
+        under a different key than the one it started from - the dict is what to assert on.
+        """
+        disassembler = MagicMock()
+        disassembler.resolveApi.return_value = (None, None)
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.disassembly = MagicMock()
+        analyzer.disassembly.isAddrWithinMemoryImage.return_value = True
+        analyzer.current_calling_addr = calling_addr
+        analyzer.current_slot = None
+        analyzer.state = MagicMock()
+        registers = {}
+        analyzer.processBlock(analyzer.state, block, registers, register_name, [], 0)
+        return registers
+
+    def test_a_write_between_the_definition_and_the_call_stops_the_walk(self):
+        """The walk models mov and lea and read every other mnemonic as harmless, so an
+        instruction that changes the register in between was skipped and the value from before
+        it resolved - a wrong call target, not a missing one."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 3, "add", "eax, 4"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_a_call_between_the_definition_and_the_call_stops_the_walk(self):
+        """Same class through the ABI rather than the operand: a call clobbers the register
+        without naming it at all."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_undisturbed_definition_still_resolves(self):
+        """Positive control: the walk still starts at the call being resolved - which is itself
+        a clobber - and still reads a definition that nothing in between touched. Without this,
+        a guard that gave up immediately would satisfy both cases above."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 1, "nop", ""],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block).get("eax"), 0x402000)
+
+    def test_a_copy_chain_still_resolves(self):
+        """Second control: the mnemonics the walk does model keep working, so the guard has not
+        simply disabled resolution."""
+        block = [
+            [0x401000, 5, "mov", "edx, 0x402000"],
+            [0x401005, 2, "mov", "eax, edx"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block).get("edx"), 0x402000)
+
     def test_processBlock_preserves_known_import_slot(self):
         import_slot = 0x403000
         memory_value = 0x500000
