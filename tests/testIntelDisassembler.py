@@ -1,4 +1,5 @@
 import logging
+import struct
 import unittest
 from types import SimpleNamespace
 
@@ -458,6 +459,41 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertIn(0x100, result.functions)
         self.assertEqual(result.ins2fn.get(0x220), 0x100)
+
+    def _indirect_call_image(self, slot_value):
+        # 0x100: push ebp; mov ebp, esp; call dword ptr [0x300]; pop ebp; ret
+        buf = bytearray(0x400)
+        code = b"\x55" + b"\x89\xe5" + b"\xff\x15" + struct.pack("<I", 0x300) + b"\x5d" + b"\xc3"
+        buf[0x100 : 0x100 + len(code)] = code
+        struct.pack_into("<I", buf, 0x300, slot_value)
+        buf[0x200:0x203] = b"\x31\xc0\xc3"  # xor eax, eax; ret -- a real local target
+        binary_info = BinaryInfo(bytes(buf))
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+        return IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+    def test_an_unrelocated_call_slot_books_the_slot_not_address_zero(self):
+        # a dumped import slot the loader never filled reads back 0, and a base-0 image
+        # accepts 0 as an address, so the call was booked against address 0
+        result = self._indirect_call_image(slot_value=0)
+
+        self.assertNotIn(0, result.code_refs_to)
+        self.assertIn(0x300, result.code_refs_from[0x103])
+
+    def test_a_slot_outside_the_image_books_the_slot(self):
+        result = self._indirect_call_image(slot_value=0x7FFFFFFF)
+
+        self.assertNotIn(0x7FFFFFFF, result.code_refs_to)
+        self.assertIn(0x300, result.code_refs_from[0x103])
+
+    def test_a_slot_holding_a_local_target_still_books_the_target(self):
+        """Positive control: an in-image slot value is the real destination and must keep
+        being booked as one, which is what the import-like arm must not swallow."""
+        result = self._indirect_call_image(slot_value=0x200)
+
+        self.assertIn(0x200, result.code_refs_from[0x103])
+        self.assertNotIn(0x300, result.code_refs_from[0x103])
 
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
