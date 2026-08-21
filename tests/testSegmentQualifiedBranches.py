@@ -117,6 +117,61 @@ class NotrackDispatchRecoveryTestSuite(unittest.TestCase):
             self.assertIn(case, blocks)
 
 
+def _tableLoadSwitchImage(segment_prefix=b"\x3e"):
+    """A 32-bit switch whose table base is loaded through a segment-qualified operand.
+
+    The dispatch here is a plain `jmp eax`; what carries the override is the load of the
+    table entry, which the jump-table analyzer finds by matching an anchored pattern against
+    the instructions it walks back over. Those instructions are stored as capstone rendered
+    them, so a prefix on the load hides the table just as one on the branch hid the dispatch.
+    """
+    image = bytearray(IMAGE_SIZE)
+    body = bytearray(b"\x55\x89\xe5")  # push ebp ; mov ebp, esp
+    body += b"\x80\x3f" + bytes([CASES - 1])  # cmp byte ptr [edi], CASES-1
+    ja_at = len(body)
+    body += b"\x0f\x87" + struct.pack("<i", 0)  # ja default (patched below)
+    body += b"\x0f\xb6\x07"  # movzx eax, byte ptr [edi]
+    body += segment_prefix + b"\x8b\x04\x85" + struct.pack("<I", BASE + TABLE_RVA)
+    body += b"\xff\xe0"  # jmp eax
+    case_offsets = []
+    for index in range(CASES):
+        case_offsets.append(len(body))
+        body += b"\xb8" + struct.pack("<I", index) + b"\x5d\xc3"  # mov eax, i ; pop ebp ; ret
+    default_offset = len(body)
+    body += b"\x31\xc0\x5d\xc3"  # xor eax, eax ; pop ebp ; ret
+    struct.pack_into("<i", body, ja_at + 2, default_offset - (ja_at + 6))
+
+    image[TEXT_RVA : TEXT_RVA + len(body)] = body
+    table = b"".join(struct.pack("<I", BASE + TEXT_RVA + offset) for offset in case_offsets)
+    image[TABLE_RVA : TABLE_RVA + len(table)] = table
+    return bytes(image), [BASE + TEXT_RVA + offset for offset in case_offsets]
+
+
+class SegmentQualifiedTableLoadTestSuite(unittest.TestCase):
+    """Seeing the dispatch is not enough on its own: the same override defeats every anchored
+    pattern the jump-table analyzer matches against the instructions it walks back over."""
+
+    def _functions(self, segment_prefix):
+        image, cases = _tableLoadSwitchImage(segment_prefix)
+        report = Disassembler(config=_config()).disassembleBuffer(image, BASE, bitness=32)
+        self.assertEqual(report.status, "ok")
+        return {function.offset for function in report.getFunctions()}, cases
+
+    def test_a_segment_qualified_table_load_still_finds_the_table(self):
+        functions, cases = self._functions(b"\x3e")
+
+        self.assertEqual(functions, {BASE + TEXT_RVA})
+        self.assertEqual(functions & set(cases), set())
+
+    def test_an_unprefixed_table_load_recovers_identically(self):
+        """Positive control: the same switch with no override, which always worked - without
+        it a fixture that recovered nothing would satisfy the assertion above."""
+        functions, cases = self._functions(b"")
+
+        self.assertEqual(functions, {BASE + TEXT_RVA})
+        self.assertEqual(functions & set(cases), set())
+
+
 class SegmentQualifiedBranchClassificationTestSuite(unittest.TestCase):
     def _analyze(self, code, bitness=64):
         image = bytearray(IMAGE_SIZE)
@@ -172,6 +227,52 @@ class SegmentQualifiedBranchClassificationTestSuite(unittest.TestCase):
         self.assertEqual(report.status, "ok")
         caller = next(f for f in report.getFunctions() if f.offset == BASE + TEXT_RVA)
         return {xref.to_instruction.offset for xref in caller.getCodeOutrefs()}, callee
+
+    def _outrefsOf(self, image):
+        """Raw outref targets, not getCodeOutrefs(): a near indirect jump books the pointer
+        slot, which is data and therefore has no instruction to resolve to."""
+        report = Disassembler(config=_config()).disassembleBuffer(image, BASE, bitness=32)
+        self.assertEqual(report.status, "ok")
+        function = next((f for f in report.getFunctions() if f.offset == BASE + TEXT_RVA), None)
+        self.assertIsNotNone(function, "the fixture must recover a function at the code start")
+        return {target for targets in (function.outrefs or {}).values() for target in targets}
+
+    def _farIndirectTargets(self, segment_prefix):
+        """<prefix> ff 2d <disp32> -- a far indirect jump, which loads a seg:offset pair.
+
+        capstone renders it "ptr [0x...]" against a near indirect jump's "dword ptr [0x...]",
+        and the width is the only thing telling them apart once a zero-base override is
+        normalized away: both spell a colon while the prefix is still there.
+        """
+        image = bytearray(IMAGE_SIZE)
+        slot_rva = TEXT_RVA + 0x40
+        code = bytearray(b"\x55\x89\xe5")  # push ebp ; mov ebp, esp
+        code += segment_prefix + b"\xff\x2d" + struct.pack("<I", BASE + slot_rva)
+        image[TEXT_RVA : TEXT_RVA + len(code)] = code
+        image[slot_rva : slot_rva + 4] = struct.pack("<I", BASE + TEXT_RVA + 0x20)
+        callee = b"\x55\x89\xe5\x5d\xc3"
+        image[TEXT_RVA + 0x20 : TEXT_RVA + 0x20 + len(callee)] = callee
+        return self._outrefsOf(bytes(image))
+
+    def test_a_far_indirect_jump_books_no_target(self):
+        for segment_prefix, label in ((b"", "none"), (b"\x2e", "cs"), (b"\x3e", "ds")):
+            with self.subTest(prefix=label):
+                self.assertEqual(self._farIndirectTargets(segment_prefix), set())
+
+    def test_a_near_indirect_jump_through_the_same_slot_is_booked(self):
+        """Positive control: the same encoding one modrm bit away (ff 25, near) does reach an
+        address in this image, so the assertion above is about the far form and not about the
+        fixture being unreachable."""
+        image = bytearray(IMAGE_SIZE)
+        slot_rva = TEXT_RVA + 0x40
+        code = bytearray(b"\x55\x89\xe5")
+        code += b"\x3e\xff\x25" + struct.pack("<I", BASE + slot_rva)
+        image[TEXT_RVA : TEXT_RVA + len(code)] = code
+        image[slot_rva : slot_rva + 4] = struct.pack("<I", BASE + TEXT_RVA + 0x20)
+        callee = b"\x55\x89\xe5\x5d\xc3"
+        image[TEXT_RVA + 0x20 : TEXT_RVA + 0x20 + len(callee)] = callee
+
+        self.assertEqual(self._outrefsOf(bytes(image)), {BASE + slot_rva})
 
     def test_segment_qualified_indirect_call_is_booked(self):
         targets, callee = self._bookedCallTargets(b"\x3e")

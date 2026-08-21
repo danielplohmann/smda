@@ -3,7 +3,16 @@ import logging
 import re
 import struct
 
+from .definitions import stripFlatSegmentOverride
+
 LOGGER = logging.getLogger(__name__)
+
+# The walk below models `mov` and `lea` and reads every other mnemonic as harmless, which is
+# only true of instructions that write nothing. These do: the rest either overwrite their first
+# operand or write a register they never name - xchg and xadd write both, mul and div write
+# edx:eax, and a call clobbers whatever the ABI allows - so a value carried past one of them is
+# the value before it, and resolving with it names the wrong target rather than none.
+_VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"})
 
 
 class IndirectCallAnalyzer:
@@ -127,13 +136,26 @@ class IndirectCallAnalyzer:
         for ins in reversed(block):
             if debug_logging:
                 LOGGER.debug("0x%08x: %s %s", ins[0], ins[2], ins[3])
-            if ins[2] == "mov":
+            # the anchored patterns below describe an operand with no segment override;
+            # one that carries a zero-base override names the same slot
+            operands = stripFlatSegmentOverride(ins[3])
+            mnemonic = ins[2].split(" ")[-1]
+            if (
+                ins[0] != self.current_calling_addr
+                and mnemonic not in ("mov", "lea")
+                and mnemonic not in _VALUE_PRESERVING_MNEMONICS
+            ):
+                # the walk begins at the call being resolved, which is itself a clobber; every
+                # instruction before it is not
+                LOGGER.debug("giving up at 0x%08x: %s may write %s", ins[0], mnemonic, register_name)
+                return False
+            if mnemonic == "mov":
                 # mov <reg>, <reg>
-                match1 = self.RE_MOV_REG_REG.match(ins[3])
+                match1 = self.RE_MOV_REG_REG.match(operands)
                 if match1 and match1.group("reg1") == register_name:
                     register_name = match1.group("reg2")
                 # mov <reg>, <const>
-                match2 = self.RE_MOV_REG_CONST.match(ins[3])
+                match2 = self.RE_MOV_REG_CONST.match(operands)
                 if match2:
                     registers[match2.group("reg")] = int(match2.group("val"), 16)
                     LOGGER.debug(
@@ -144,7 +166,7 @@ class IndirectCallAnalyzer:
                     if match2.group("reg") == register_name:
                         abs_value_found = True
                 # mov <reg>, dword ptr [<addr>]
-                match3 = self.RE_REG_DWORD_PTR_ADDR.match(ins[3])
+                match3 = self.RE_REG_DWORD_PTR_ADDR.match(operands)
                 if match3:
                     # Import resolvers may key APIs by the pointer slot address,
                     # so preserve known import slots instead of dereferencing them.
@@ -172,7 +194,7 @@ class IndirectCallAnalyzer:
                             if match3.group("reg") == register_name:
                                 abs_value_found = True
                 # mov <reg>, qword ptr [reg + <addr>]
-                match4 = self.RE_REG_QWORD_PTR_RIP_ADDR.match(ins[3])
+                match4 = self.RE_REG_QWORD_PTR_RIP_ADDR.match(operands)
                 if match4:
                     # rip-relative addressing already resolves the slot; the register then
                     # receives the whole qword stored there, not rip plus its low half
@@ -190,13 +212,13 @@ class IndirectCallAnalyzer:
                         )
                         if match4.group("reg") == register_name:
                             abs_value_found = True
-            elif ins[2] == "lea":
+            elif mnemonic == "lea":
                 LOGGER.debug("*checking %s %s", ins[2], ins[3])
                 # lea <reg>, dword ptr [<addr>] and lea <reg>, [<addr>]
                 # lea computes an address; the register receives the address itself, so
                 # dereferencing it here would resolve the call against the wrong target
                 for pattern in (self.RE_REG_DWORD_PTR_ADDR, self.RE_REG_ADDR):
-                    match1 = pattern.match(ins[3])
+                    match1 = pattern.match(operands)
                     if match1:
                         address = int(match1.group("addr"), 16)
                         registers[match1.group("reg")] = address
