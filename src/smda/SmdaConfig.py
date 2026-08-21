@@ -18,8 +18,10 @@ class SmdaConfig:
 
     ### SMDA disassembler config
     # cooperative budget in seconds for disassembly, polled between candidates, between passes,
-    # every 256 basic blocks within a function and between tailcall resolutions; work already in
-    # flight still finishes, so a run overshoots rather than being cut off; 0 disables it
+    # every 256 basic blocks within a function and between tailcall resolutions. The verdict
+    # latches the first time it trips, so a function the budget cut short is not re-promoted
+    # by a later pass; work already in flight still finishes, so a run overshoots rather than
+    # being cut off; 0 disables it
     TIMEOUT = 300
     # maximum number of bytes to allocate while loading
     MAX_IMAGE_SIZE = 100 * 1024 * 1024

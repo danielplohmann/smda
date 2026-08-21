@@ -48,6 +48,21 @@ There is also a demo script:
 
 * analyze.py -- example usage: perform disassembly on a file or memory dump and optionally store results in JSON to a given output path.
 
+#### Raw buffers and the instruction set
+
+`disassembleFile` reads the instruction set from the container header. `disassembleBuffer` has no
+header to read, so it guesses: DEX and AArch64 are recognized from the bytes, and anything else is
+analysed as x86. A buffer holding ARM32, MIPS, PowerPC, SPARC, SH4, m68k, Xtensa, NIOS2 or OpenRISC
+code is now recognized as well, and comes back as `status == "error"` naming the instruction set
+rather than as a report whose every block is wrong.
+
+The guess is evidence, not proof: it looks for a run of that architecture's function-return
+encoding, aligned, close enough together to be one code region, and not sitting inside text. Across
+60939 files of every type on one machine it named nothing that was not that architecture, and it
+recognized all ten bundled foreign samples. It is still a guess over bytes the caller supplies, and
+it is biased towards silence, so **pass `architecture=` whenever you know it** - an explicitly named
+architecture is never overruled.
+
 ### Batch mode
 
 Disassembly is CPU-bound and every input file is independent, so corpora are processed in parallel:
@@ -118,10 +133,14 @@ promoting targets that are not yet known needs this pass.
 
 Analysis is also bounded by `TIMEOUT` (300s by default), but cooperatively rather than as a
 wall-clock guarantee. The budget is polled between function candidates, between passes, every 256
-basic blocks within a single function, and between tailcall resolutions, so no one pass runs
-unbounded. It still bounds how much *new* work is begun rather than how long a call takes to
-return: whatever is already in flight — the block being decoded, the candidate being analyzed —
-finishes first, so a run overshoots by that much. A run that exceeded the budget comes back with
+basic blocks within a single function, between tailcall resolutions, and inside the record walks
+that carve an exception table out of a headerless image. The verdict latches the first time it trips, so
+every later pass sees it: a function the budget cut short is left truncated rather than being
+carved into a second function by the gap scan, and the function set stays a lower bound. It bounds
+how much *new* work is begun rather than how long a call takes to return: whatever is already in
+flight — the block being decoded, the candidate being analyzed — finishes first, so a run overshoots
+by that much. Label providers are the exception, and deliberately so: they parse before analysis
+begins and each caps its own table reads, so `TIMEOUT` does not bound them. A run that exceeded the budget comes back with
 `status == "timeout"`: the function set is a lower bound, not the whole binary. Check the status
 before comparing counts across samples, and pass `TIMEOUT = 0` to disable the bound entirely. A
 caller that needs a hard wall-clock ceiling has to impose one itself.
