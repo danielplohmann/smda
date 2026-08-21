@@ -14,6 +14,7 @@ the metadata scan (a zero corpus delta says nothing about it).
 
 import struct
 import unittest
+from types import SimpleNamespace
 
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.Disassembler import Disassembler
@@ -259,6 +260,71 @@ class MachoAddressRefCandidateTestSuite(unittest.TestCase):
             self.assertIn(target, fcm.candidates)
             # weak address evidence: no inbound call references were recorded
             self.assertEqual(fcm.candidates[target].call_ref_sources, set())
+
+
+class MachoMetadataSlotExtentTestSuite(unittest.TestCase):
+    """A section header declares an extent; the mapped image decides what can be read. Striding
+    over a damaged `section.size` only spends the analysis budget, so the walk is clamped - but a
+    slot a rebase names still resolves outside the image, so those are kept."""
+
+    BASE = 0x100000000
+    IMAGE = 0x4000
+    SECTION = 0x1000
+
+    def _manager(self):
+        binary_info = SimpleNamespace(base_addr=self.BASE, binary_size=self.IMAGE)
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info)
+        return manager
+
+    def _slots(self, declared_size, stride=8, rebases=(), adjustment=0):
+        section = SimpleNamespace(virtual_address=self.BASE + self.SECTION, size=declared_size)
+        return list(self._manager()._machoMetadataSlots(section, stride, adjustment, rebases))
+
+    def test_a_section_claiming_more_than_the_image_stops_at_the_image(self):
+        slots = self._slots(0x40000000)
+
+        self.assertEqual(slots[0], self.BASE + self.SECTION)
+        self.assertLess(slots[-1], self.BASE + self.IMAGE)
+        self.assertEqual(len(slots), (self.IMAGE - self.SECTION) // 8)
+
+    def test_an_honestly_sized_section_yields_every_slot(self):
+        """Positive control: the clamp only removes what the image does not hold, so a section
+        that fits is walked in full."""
+        self.assertEqual(self._slots(0x80), [self.BASE + self.SECTION + i * 8 for i in range(16)])
+
+    def test_a_rebased_slot_beyond_the_image_is_still_yielded(self):
+        """The clamp is for cost, not for meaning: a stored pointer outside the mapped image
+        reads back None, but one a rebase names resolves from the fixup table instead."""
+        rebased = self.BASE + self.IMAGE + 0x40
+
+        self.assertIn(rebased, self._slots(0x40000000, rebases={rebased: 0}))
+
+    def test_a_section_starting_below_the_image_resumes_on_the_stride(self):
+        """A section can also be declared to start before the mapped image. The walk resumes at
+        the first slot at or after the image that the declared extent's own stride would have
+        visited, so the same addresses are seen - never a shifted lattice."""
+        section = SimpleNamespace(virtual_address=self.BASE - 0x100, size=0x400)
+        slots = list(self._manager()._machoMetadataSlots(section, 8, 0, ()))
+
+        self.assertEqual(slots[0], self.BASE)
+        self.assertTrue(all((slot - section.virtual_address) % 8 == 0 for slot in slots))
+
+    def test_a_section_starting_below_the_image_keeps_an_odd_phase(self):
+        """Positive control for the phase: a start that is not a multiple of the stride must keep
+        its own offset rather than snapping to the image boundary."""
+        section = SimpleNamespace(virtual_address=self.BASE - 0x104, size=0x400)
+        slots = list(self._manager()._machoMetadataSlots(section, 8, 0, ()))
+
+        self.assertEqual(slots[0], self.BASE + 4)
+        self.assertTrue(all((slot - section.virtual_address) % 8 == 0 for slot in slots))
+
+    def test_a_rebased_slot_off_the_stride_is_not_yielded(self):
+        """Second control: the union keeps the lattice the declared extent set, so it cannot
+        invent a slot the unclamped walk would never have visited."""
+        rebased = self.BASE + self.IMAGE + 0x44
+
+        self.assertNotIn(rebased, self._slots(0x40000000, rebases={rebased: 0}))
 
 
 if __name__ == "__main__":

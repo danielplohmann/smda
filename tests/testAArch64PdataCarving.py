@@ -1,7 +1,17 @@
 import struct
+import traceback
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
+import smda.aarch64.FunctionCandidateManager as arm64_candidates
+from smda.aarch64.FunctionCandidateManager import (
+    _ARM64_PDATA_ENTRY_SIZE,
+    _ARM64_PDATA_MIN_ENTRIES,
+    _ARM64_PDATA_SAMPLE_STRIDE,
+    _ARM64_PDATA_SEED_ENTRIES,
+    FunctionCandidateManager,
+)
 from smda.common.BinaryInfo import BinaryInfo
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
@@ -101,6 +111,123 @@ class Arm64ExceptionRecordCarvingTestSuite(unittest.TestCase):
         image, _starts = _mappedImage((FRAME_PROLOGUE, RET), stride=8, records=8)
 
         self.assertEqual(_exceptionCandidates(_candidateManager(image)), set())
+
+
+class Arm64SamplingStrideTestSuite(unittest.TestCase):
+    def test_the_stride_cannot_step_over_a_qualifying_table(self):
+        """The scan samples every _ARM64_PDATA_SAMPLE_STRIDE bytes and needs
+        _ARM64_PDATA_SEED_ENTRIES consecutive records from wherever it lands, so a table at
+        an arbitrary offset is only reachable while the stride fits inside what a shortest
+        qualifying table leaves after the seed run. Widening the stride, or raising the seed
+        length without raising the minimum, silently stops carving short tables."""
+        reachable = (_ARM64_PDATA_MIN_ENTRIES - _ARM64_PDATA_SEED_ENTRIES) * _ARM64_PDATA_ENTRY_SIZE
+
+        self.assertLessEqual(_ARM64_PDATA_SAMPLE_STRIDE, reachable)
+
+
+class Arm64CarveBudgetTestSuite(unittest.TestCase):
+    """A buffer that looks like one enormous exception table keeps the record walk inside a
+    single call, where the sampling loop's own poll never comes round again."""
+
+    POLL_INTERVAL = 4096
+
+    def _longTable(self, records):
+        size = 0x2000 + records * _ARM64_PDATA_ENTRY_SIZE + 0x1000
+        image = bytearray(size)
+        for index in range(records):
+            struct.pack_into("<II", image, 0x2000 + index * _ARM64_PDATA_ENTRY_SIZE, 4 + index * 4, PACKED_UNWIND)
+        return bytes(image)
+
+    def test_the_record_walk_gives_up_when_the_budget_is_spent(self):
+        image = self._longTable(self.POLL_INTERVAL * 2)
+        manager = _candidateManager(_mappedImage((FRAME_PROLOGUE, RET), stride=8)[0])
+        manager._cb_analysis_timeout = lambda: True
+
+        counted = manager._countArm64ExceptionRecords(image, len(image), 0x2000, len(image))
+
+        self.assertEqual(counted, self.POLL_INTERVAL)
+
+    def test_the_same_walk_completes_within_budget(self):
+        """Positive control: with the budget intact the walk counts every record, so the stop
+        above is the poll rather than the records failing validation."""
+        image = self._longTable(self.POLL_INTERVAL * 2)
+        manager = _candidateManager(_mappedImage((FRAME_PROLOGUE, RET), stride=8)[0])
+        manager._cb_analysis_timeout = None
+
+        counted = manager._countArm64ExceptionRecords(image, len(image), 0x2000, len(image))
+
+        self.assertEqual(counted, self.POLL_INTERVAL * 2)
+
+    def test_the_admit_loop_gives_up_when_the_budget_is_spent(self):
+        """The budget is intact while the table is being located and spent afterwards.
+
+        Answering "spent" throughout would stop the locate instead, and the admit loop this
+        is about would never run - the test would pass while proving nothing.
+        """
+        image, _starts = _mappedImage((FRAME_PROLOGUE, RET), stride=8, records=64)
+        manager = _candidateManager(image)
+        manager.candidates = {}
+        manager._cb_analysis_timeout = lambda: (
+            not any(frame.name == "_locateArm64ExceptionRecordTable" for frame in traceback.extract_stack())
+        )
+
+        with mock.patch.object(arm64_candidates, "_TIMEOUT_POLL_INTERVAL", 4):
+            manager._carveArm64ExceptionRecords(IMAGE_BASE)
+
+        self.assertEqual(len(_exceptionCandidates(manager)), 4)
+
+    def test_the_admit_loop_takes_every_record_within_budget(self):
+        """Positive control for the loop itself: the same table admits all 64 when nothing
+        stops it, so the count above is the poll and not the table being short."""
+        image, _starts = _mappedImage((FRAME_PROLOGUE, RET), stride=8, records=64)
+        manager = _candidateManager(image)
+        manager.candidates = {}
+        manager._cb_analysis_timeout = None
+
+        with mock.patch.object(arm64_candidates, "_TIMEOUT_POLL_INTERVAL", 4):
+            manager._carveArm64ExceptionRecords(IMAGE_BASE)
+
+        self.assertEqual(len(_exceptionCandidates(manager)), 64)
+
+
+class Arm64CarveFalsePositiveTestSuite(unittest.TestCase):
+    """The validator's bar is only meaningful if real AArch64 code and data does not clear it."""
+
+    def test_real_aarch64_code_is_not_mistaken_for_an_exception_table(self):
+        fixture = Path(__file__).resolve().parent / "aarch64_static_xored"
+        raw = bytes(byte ^ (index % 256) for index, byte in enumerate(fixture.read_bytes()))
+        manager = _candidateManager(raw)
+
+        self.assertEqual(manager._locateArm64ExceptionRecordTable(raw), (0, 0))
+        self.assertEqual(_exceptionCandidates(manager), set())
+
+    def test_no_bundled_non_arm64_image_holds_a_qualifying_table(self):
+        """Measured more widely than this: over 2961 files (the bundled fixtures, 50 locally
+        built x86 binaries and the system libraries on one machine) the scan located a
+        qualifying run in 51, all of them x86, and the entry-shape gate admitted a candidate
+        from none of them. Those files also all carry a section table, so the carve - which
+        only runs on a headerless image - never reaches them at all."""
+        for name in ("mirai_x64_xored", "mirai_i386_xored", "cutwail_xored", "rust_pe_gnu_xored"):
+            with self.subTest(fixture=name):
+                fixture = Path(__file__).resolve().parent / name
+                raw = bytes(byte ^ (index % 256) for index, byte in enumerate(fixture.read_bytes()))
+                manager = FunctionCandidateManager(_config())
+                manager.disassembly = None
+                manager._cb_analysis_timeout = None
+
+                self.assertEqual(manager._locateArm64ExceptionRecordTable(raw), (0, 0))
+
+    def test_the_same_buffer_with_a_planted_table_is_carved(self):
+        """Positive control: the fixture is not simply too small or unreadable for the carve."""
+        fixture = Path(__file__).resolve().parent / "aarch64_static_xored"
+        raw = bytearray(byte ^ (index % 256) for index, byte in enumerate(fixture.read_bytes()))
+        planted_at = len(raw) - RECORDS * _ARM64_PDATA_ENTRY_SIZE - 0x100
+        for index in range(RECORDS):
+            struct.pack_into("<II", raw, planted_at + index * _ARM64_PDATA_ENTRY_SIZE, 4 + index * 4, PACKED_UNWIND)
+
+        offset, count = _candidateManager(bytes(raw))._locateArm64ExceptionRecordTable(bytes(raw))
+
+        self.assertEqual((offset, count), (planted_at, RECORDS))
 
 
 class Arm64ExceptionRecordValidationTestSuite(unittest.TestCase):
