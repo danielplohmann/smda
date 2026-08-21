@@ -414,6 +414,51 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertIn(0x0, result.functions)
         self.assertEqual(result.ins2fn.get(0x10), 0x0)
 
+    def test_push_ret_through_a_register_does_not_reference_address_zero(self):
+        # `push eax; ret` names no literal, so the operand reader returns its
+        # "nothing found" 0 -- which a base-0 image accepts as a real address
+        buf = (
+            b"\xcc" * 0x100
+            + b"\x55"  # 0x100: push ebp
+            + b"\x89\xe5"  # 0x101: mov ebp, esp
+            + b"\x31\xc0"  # 0x103: xor eax, eax
+            + b"\x50"  # 0x105: push eax
+            + b"\xc3"  # 0x106: ret
+            + b"\xcc" * 0x100
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x100, result.functions)
+        self.assertNotIn(0, result.code_refs_to)
+
+    def test_push_ret_through_a_literal_still_resolves(self):
+        """Positive control for the pair above, in the same layout: a push naming a
+        real address must still be followed, on either side of the register case."""
+        buf = (
+            b"\xcc" * 0x100
+            + b"\x55"  # 0x100: push ebp
+            + b"\x89\xe5"  # 0x101: mov ebp, esp
+            + b"\x68\x20\x02\x00\x00"  # 0x103: push 0x220
+            + b"\xc3"  # 0x108: ret
+            + b"\xcc" * 0x117
+            + b"\x31\xc0"  # 0x220: xor eax, eax
+            + b"\xc3"  # 0x222: ret
+        )
+        binary_info = BinaryInfo(buf)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        binary_info.architecture = "intel"
+
+        result = IntelDisassembler(SmdaConfig()).analyzeBuffer(binary_info, cbAnalysisTimeout=None)
+
+        self.assertIn(0x100, result.functions)
+        self.assertEqual(result.ins2fn.get(0x220), 0x100)
+
     def test_accepts_missing_timeout_callback(self):
         binary_info = BinaryInfo(b"\x90\xc3")
         binary_info.base_addr = 0

@@ -216,7 +216,7 @@ class JumpTableAnalyzer:
                 if raw_entry_bytes is None or len(raw_entry_bytes) < 4:
                     break
                 entry = struct.unpack("<I", raw_entry_bytes)[0]
-                if not self.disassembly.isAddrWithinMemoryImage(entry):
+                if not entry or not self.disassembly.isAddrWithinMemoryImage(entry):
                     if bound_was_recovered:
                         continue
                     break
@@ -295,13 +295,13 @@ class JumpTableAnalyzer:
         else:
             LOGGER.warning("Unsupported %s-bit jump table analysis", bitness)
             return jumptable_addresses
-        if self.disassembly.isAddrWithinMemoryImage(jumptable_address):
+        if jumptable_address and self.disassembly.isAddrWithinMemoryImage(jumptable_address):
             for i in range(jumptable_size):
                 raw_entry_bytes = self.disassembly.getBytes(jumptable_address + i * entry_size, entry_size)
                 if raw_entry_bytes is None or len(raw_entry_bytes) < entry_size:
                     break
                 table_entry = struct.unpack(entry_format, raw_entry_bytes)[0]
-                if not self.disassembly.isAddrWithinMemoryImage(table_entry):
+                if not table_entry or not self.disassembly.isAddrWithinMemoryImage(table_entry):
                     break
                 state.addDataRef(
                     jump_instruction_address,

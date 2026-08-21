@@ -489,7 +489,7 @@ class X86Backend(ArchBackend):
                 )
             if previous_address is not None and previous_mnemonic == "push":
                 push_ret_destination = d.getReferencedAddr(previous_instruction[3].strip())
-                if d.disassembly.isAddrWithinMemoryImage(push_ret_destination):
+                if push_ret_destination and d.disassembly.isAddrWithinMemoryImage(push_ret_destination):
                     LOGGER.debug(
                         "  analyzeFunction() found push-return jump obfuscation: @0x%08x",
                         i_address,
