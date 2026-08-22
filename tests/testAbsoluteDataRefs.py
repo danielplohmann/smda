@@ -32,6 +32,31 @@ def _record(op_str, *, image_size=0x1000, base_addr=0x400000, code_areas=None):
     return {ref[1] for ref in state.data_refs}
 
 
+def _covered(op_str, **kwargs):
+    """The bytes the pass marked as data, not merely the addresses it named."""
+    disassembly = MagicMock()
+    base_addr = kwargs.get("base_addr", 0x400000)
+    image_size = kwargs.get("image_size", 0x1000)
+    disassembly.binary_info = SimpleNamespace(
+        binary=b"\x00" * image_size,
+        base_addr=base_addr,
+        binary_size=image_size,
+        bitness=32,
+        code_areas=[],
+        isInCodeAreas=lambda addr: False,
+    )
+    disassembly.isAddrWithinMemoryImage = lambda addr: base_addr <= addr < base_addr + image_size
+    disassembler = MagicMock()
+    disassembler.disassembly = disassembly
+    state = SimpleNamespace(data_refs=set(), data_bytes=set())
+    state.addDataRef = lambda a, b, size=1: (
+        state.data_refs.add((a, b)),
+        state.data_bytes.update(range(b, b + size)),
+    )
+    X86Backend._recordAbsoluteDataRefs(disassembler, 0x401000, op_str, state)
+    return state.data_bytes
+
+
 class AbsoluteOperandTestSuite(unittest.TestCase):
     def test_an_absolute_source_is_recorded(self):
         self.assertEqual(_record("edx, dword ptr [0x400500]"), {0x400500})
@@ -59,6 +84,41 @@ class AbsoluteOperandTestSuite(unittest.TestCase):
 
     def test_an_address_outside_the_image_is_not_recorded(self):
         self.assertEqual(_record("edx, dword ptr [0x7fff0000]"), set())
+
+    def test_an_x87_extended_operand_is_recorded(self):
+        """capstone prints the 80-bit x87 operand of fld/fstp as `xword ptr`, not `tbyte ptr`,
+        so a long-double global left no trace until that keyword was recognized."""
+        self.assertEqual(_record("xword ptr [0x400500]"), {0x400500})
+
+    def test_a_packed_bcd_operand_is_recorded(self):
+        """The sibling 80-bit keyword: `tbyte ptr` is what fbld/fbstp get."""
+        self.assertEqual(_record("tbyte ptr [0x400500]"), {0x400500})
+
+    def test_a_reference_covers_the_whole_datum(self):
+        """A dword read touches four bytes. Marking only the first leaves the other three
+        eligible for the gap scan to promote into a function start."""
+        self.assertEqual(_covered("edx, dword ptr [0x400500]"), set(range(0x400500, 0x400504)))
+
+    def test_each_size_keyword_covers_its_own_width(self):
+        for keyword, width in (
+            ("byte", 1),
+            ("word", 2),
+            ("dword", 4),
+            ("qword", 8),
+            ("xword", 10),
+            ("tbyte", 10),
+            ("xmmword", 16),
+            ("ymmword", 32),
+            ("zmmword", 64),
+        ):
+            with self.subTest(keyword=keyword):
+                covered = _covered(f"edx, {keyword} ptr [0x400500]")
+                self.assertEqual(covered, set(range(0x400500, 0x400500 + width)))
+
+    def test_an_operand_with_no_size_keyword_covers_one_byte(self):
+        """Control for the rule above: capstone prints no keyword when the form names no
+        width, and inventing one would mark bytes the instruction never reads."""
+        self.assertEqual(_covered("[0x400500]"), {0x400500})
 
     def test_a_declared_code_area_is_not_data(self):
         self.assertEqual(_record("edx, dword ptr [0x400500]", code_areas=[(0x400000, 0x400800)]), set())
