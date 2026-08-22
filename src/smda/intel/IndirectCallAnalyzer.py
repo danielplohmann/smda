@@ -3,7 +3,7 @@ import logging
 import re
 import struct
 
-from .definitions import CALL_INS, CJMP_INS, JMP_INS, stripFlatSegmentOverride
+from .definitions import CALL_INS, CJMP_INS, JMP_INS, canonicalRegister, stripFlatSegmentOverride
 
 LOGGER = logging.getLogger(__name__)
 
@@ -134,6 +134,32 @@ class IndirectCallAnalyzer:
         bitness = getattr(self.disassembly.binary_info, "bitness", 32)
         return register_name in (_CALLEE_SAVED_64 if bitness == 64 else _CALLEE_SAVED_32)
 
+    _MODELLED_WRITE_PATTERNS = (
+        "RE_MOV_REG_REG",
+        "RE_MOV_REG_CONST",
+        "RE_REG_DWORD_PTR_ADDR",
+        "RE_REG_QWORD_PTR_RIP_ADDR",
+        "RE_REG_ADDR",
+    )
+
+    def _writesUnmodelledRegister(self, operands, register_name, registers):
+        """Whether this mov/lea writes a register the walk is reading, in a form it cannot read.
+
+        Returns True only for the tracked register, whose value the walk would otherwise take
+        from an earlier instruction. A write of some other tracked register is not a reason to
+        stop, but its recorded value is stale from here on, so it is dropped.
+        """
+        if any(getattr(self, name).match(operands) for name in self._MODELLED_WRITE_PATTERNS):
+            return False
+        destination = canonicalRegister(operands.split(",")[0])
+        if destination is None:
+            return False
+        if destination == canonicalRegister(register_name):
+            return True
+        for spelling in [name for name in registers if canonicalRegister(name) == destination]:
+            registers.pop(spelling, None)
+        return False
+
     def processBlock(self, analysis_state, block, registers, register_name, processed, depth):
         if not block:
             return False
@@ -166,6 +192,18 @@ class IndirectCallAnalyzer:
                 # the walk begins at the call being resolved, which is itself a clobber; every
                 # instruction before it is not
                 LOGGER.debug("giving up at 0x%08x: %s may write %s", ins[0], mnemonic, register_name)
+                return False
+            # mov and lea are exempted from the clobber check above because the patterns below
+            # model them - but only some of their forms. A form none of the patterns match still
+            # writes its destination, and reading past it resolves the call against whatever
+            # wrote the register earlier: a wrong answer rather than a missing one.
+            # `mov eax, dword ptr [esi]`, the vtable dispatch load, is the common case.
+            if (
+                mnemonic in ("mov", "lea")
+                and ins[0] != self.current_calling_addr
+                and self._writesUnmodelledRegister(operands, register_name, registers)
+            ):
+                LOGGER.debug("giving up at 0x%08x: unmodelled %s write of %s", ins[0], mnemonic, register_name)
                 return False
             if mnemonic == "mov":
                 # mov <reg>, <reg>
