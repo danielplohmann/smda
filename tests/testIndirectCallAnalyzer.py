@@ -144,6 +144,51 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
 
         self.assertEqual(self._resolveThrough(block), {})
 
+    def test_an_unmodelled_mov_write_stops_the_walk(self):
+        """The mov/lea exemption assumed the patterns below model every mov. They model only
+        some forms, and `mov eax, dword ptr [esi]` - the vtable dispatch load - is not one of
+        them, so the walk read past the real last write and bound the call to a dead
+        assignment. On a 32-bit PE corpus that shape reaches the walk a few hundred times per
+        sample."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "mov", "eax, dword ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_unmodelled_write_through_a_sub_register_stops_the_walk(self):
+        """al is part of eax, so a value written through one is readable through the other."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "mov", "al, byte ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_unmodelled_write_of_an_untracked_register_does_not_stop_the_walk(self):
+        """Control for the rule above: only the tracked register's value is at stake, so an
+        unmodelled write elsewhere must not throw the resolution away."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "mov", "ebx, dword ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {"eax": 0x402000})
+
+    def test_a_store_to_memory_does_not_stop_the_walk(self):
+        """Second control: a mov whose destination is memory writes no register at all."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 5, "mov", "dword ptr [0x400500], eax"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {"eax": 0x402000})
+
     def test_a_call_between_the_definition_and_the_call_stops_the_walk(self):
         """Same class through the ABI rather than the operand: a call clobbers the register
         without naming it at all."""
