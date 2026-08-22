@@ -38,9 +38,26 @@ LOGGER = logging.getLogger(__name__)
 # register, or a rip-relative displacement, makes the effective address unknown here, so
 # those forms deliberately do not match.
 ABSOLUTE_MEM_OPERAND_RE = re.compile(
-    r"^(?:(?:byte|word|dword|qword|tbyte|xmmword|ymmword|zmmword) ptr )?"
+    r"^(?:(?P<width>byte|word|dword|qword|xword|tbyte|xmmword|ymmword|zmmword) ptr )?"
     r"\[(?P<address>0x[0-9a-fA-F]{1,16}|[0-9])\]$"
 )
+
+# What each size keyword capstone prints is worth in bytes, so a reference covers the whole
+# datum rather than only its first byte. Both 80-bit keywords are here and they are not
+# interchangeable: capstone prints `xword ptr` for the x87 extended-precision operand of
+# fld/fstp, and `tbyte ptr` only for the packed-BCD operand of fbld/fbstp. An operand capstone
+# prints with no size keyword names no width, and stays at one byte.
+_OPERAND_WIDTHS = {
+    "byte": 1,
+    "word": 2,
+    "dword": 4,
+    "qword": 8,
+    "xword": 10,
+    "tbyte": 10,
+    "xmmword": 16,
+    "ymmword": 32,
+    "zmmword": 64,
+}
 
 MEM_REG_SLOT_RE = re.compile(
     r"^(?P<size>dword|qword) ptr \[(?P<reg>[a-z][a-z0-9]{1,3})"
@@ -289,7 +306,7 @@ class X86Backend(ArchBackend):
             if declares_code_areas and binary_info.isInCodeAreas(address):
                 continue
             emitted.add(address)
-            state.addDataRef(i_address, address)
+            state.addDataRef(i_address, address, size=_OPERAND_WIDTHS.get(match.group("width"), 1))
 
     @staticmethod
     def _collectMemRegSlot(state, i_address, i_op_str):

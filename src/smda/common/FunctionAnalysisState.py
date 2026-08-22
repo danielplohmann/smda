@@ -230,6 +230,13 @@ class FunctionAnalysisState:
                 return False
         # in case we have a successful analysis, forward results to disassembly
         if self.num_blocks_analyzed:
+            if self.start_addr not in self.instruction_start_bytes:
+                # analyzeFunction declines to book an instruction whose address is already
+                # claimed as data, so a candidate landing inside a datum can reach here with
+                # blocks decoded from a branch target but nothing at its own entry. Recording
+                # that as a function yields one whose offset is not the start of any of its
+                # blocks, and whose borders and ins2fn describe a different range entirely.
+                return False
             self._finalizeRegularAnalysis()
         return True
 
