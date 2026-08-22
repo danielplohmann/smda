@@ -55,6 +55,19 @@ def _twoTableImage():
     return second[2], manager
 
 
+LONG_IMAGE_SIZE = 0x30000
+RUN_VALUE = BASE + CODE_RVA
+RUN_UNRECOVERED = BASE + CODE_RVA + 0x50
+RUN_HIGH = BASE + CODE_RVA + 0x100
+
+
+def _longRunImage():
+    """An image that is one uninterrupted run of code-pointer-shaped dwords."""
+    image = bytearray(struct.pack("<I", RUN_VALUE) * (LONG_IMAGE_SIZE // 4))
+    struct.pack_into("<I", image, 0x100, RUN_UNRECOVERED)
+    return bytes(image), BASE + 0x100
+
+
 def _manager(image, functions=RECOVERED, data_refs=None, code=(), bitness=32, delphi=True):
     binary_info = BinaryInfo(image)
     binary_info.base_addr = BASE
@@ -223,6 +236,31 @@ class PointerTableCandidateTestSuite(unittest.TestCase):
         self.assertEqual(list(candidates), [])
         self.assertIn(second_unrecovered, manager.candidates)
 
+    def test_the_budget_is_polled_while_a_long_run_is_admitted(self):
+        """A run can be as long as the image, and is walked twice more after it is found, so
+        the budget has to be consulted inside those walks and not only by the outer scan."""
+        long_image, referenced_addr = _longRunImage()
+        manager = _manager(long_image, functions=(RUN_VALUE, RUN_HIGH))
+        manager.disassembly.data_refs_from = {BASE + CODE_RVA: {referenced_addr}}
+        polls = []
+
+        def _tripAfterTheOuterScan():
+            polls.append(len(polls))
+            return len(polls) > 4
+
+        manager._cb_analysis_timeout = _tripAfterTheOuterScan
+        self.assertEqual(list(manager.locatePointerTableCandidates()), [])
+        # the outer scan of a three-chunk image polls three times; a fourth means a poll
+        # happened inside the admission walk, which is what this test is about
+        self.assertGreater(len(polls), 3)
+
+    def test_a_long_run_is_admitted_when_the_budget_is_not_spent(self):
+        """Control for the rule above: without a spent budget the same run is read."""
+        long_image, referenced_addr = _longRunImage()
+        manager = _manager(long_image, functions=(RUN_VALUE, RUN_HIGH))
+        manager.disassembly.data_refs_from = {BASE + CODE_RVA: {referenced_addr}}
+        self.assertEqual(list(manager.locatePointerTableCandidates()), [RUN_UNRECOVERED])
+
     def test_the_architecture_neutral_base_declares_no_late_sources(self):
         self.assertEqual(list(CommonFunctionCandidateManager(SmdaConfig()).locateLateCandidates()), [])
 
@@ -232,6 +270,8 @@ LATE_RVA = 0x2000
 LATE_ADDR = BASE + LATE_RVA
 SECOND_LATE_RVA = 0x2100
 SECOND_LATE_ADDR = BASE + SECOND_LATE_RVA
+CALLEE_RVA = 0x2200
+CALLEE_ADDR = BASE + CALLEE_RVA
 
 
 def _lateImage():
@@ -251,15 +291,15 @@ def _config():
     return config
 
 
-def _offsets(image):
-    # the declared code area covers only the first body, so nothing the candidate manager or
-    # the gap scan does can reach the two later ones - they are recoverable solely by being
-    # handed to the orchestrator as late candidates
+def _offsets(image, code_areas=None):
+    # the declared code area covers only the first body by default, so nothing the candidate
+    # manager or the gap scan does can reach the later ones - they are recoverable solely by
+    # being handed to the orchestrator as late candidates
     report = Disassembler(config=_config()).disassembleBuffer(
         image,
         BASE,
         bitness=32,
-        code_areas=[(BASE + CODE_RVA, BASE + CODE_RVA + 0x10)],
+        code_areas=code_areas or [(BASE + CODE_RVA, BASE + CODE_RVA + 0x10)],
         architecture="intel",
     )
     return {function.offset for function in report.getFunctions()}
@@ -277,6 +317,25 @@ class LateCandidateOrchestrationTestSuite(unittest.TestCase):
         ):
             recovered = _offsets(image)
         self.assertLessEqual({LATE_ADDR, SECOND_LATE_ADDR}, recovered)
+
+    def test_a_callee_the_late_pass_discovers_is_analyzed(self):
+        """A late function can resolve a register-indirect call and register its callee. The
+        tailcall pass is off by default, so without a drain of its own that callee stays
+        registered and never analyzed."""
+        image = bytearray(IMAGE_SIZE)
+        image[CODE_RVA : CODE_RVA + 6] = b"\x55\x89\xe5\x5d\xc3\x90"
+        # mov eax, CALLEE_ADDR ; call eax ; ret - deliberately no prologue, so nothing but the
+        # late pass reaches it, and the callee is reachable only through the resolved call
+        image[LATE_RVA : LATE_RVA + 8] = b"\xb8" + struct.pack("<I", CALLEE_ADDR) + b"\xff\xd0\xc3"
+        image[CALLEE_RVA : CALLEE_RVA + 3] = b"\x31\xc0\xc3"  # xor eax, eax ; ret
+        areas = [(BASE + CODE_RVA, BASE + CODE_RVA + 0x10), (LATE_ADDR, CALLEE_ADDR + 4)]
+
+        # control: neither body is reachable without the late pass
+        self.assertEqual(_offsets(bytes(image), areas), {BASE + CODE_RVA})
+        with mock.patch.object(IntelFunctionCandidateManager, "locateLateCandidates", lambda self: iter([LATE_ADDR])):
+            recovered = _offsets(bytes(image), areas)
+
+        self.assertLessEqual({LATE_ADDR, CALLEE_ADDR}, recovered)
 
     def test_the_orchestrator_stops_the_late_pass_at_the_analysis_timeout(self):
         def _spendAfterFirst(manager):
