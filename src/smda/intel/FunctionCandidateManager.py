@@ -413,21 +413,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         accepted = {}
         run_start = None
         scan_end = len(buffer) - (len(buffer) % _POINTER_TABLE_ENTRY_SIZE)
-        offset = 0
-        while offset < scan_end:
-            if self._candidateTimeoutTripped():
-                return
-            chunk_end = min(offset + _POINTER_TABLE_POLL_BYTES, scan_end)
-            entry_offset = offset
-            for (value,) in struct.iter_unpack("<I", buffer[offset:chunk_end]):
-                if lowest <= value <= highest and not is_code(base_addr + entry_offset):
-                    if run_start is None:
-                        run_start = entry_offset
-                elif run_start is not None:
-                    self._admitPointerTableRun(buffer, run_start, entry_offset, referenced, accepted)
-                    run_start = None
-                entry_offset += _POINTER_TABLE_ENTRY_SIZE
-            offset = chunk_end
+        for entry_addr, value in self._pointerTableEntries(buffer, 0, scan_end):
+            if lowest <= value <= highest and not is_code(entry_addr):
+                if run_start is None:
+                    run_start = entry_addr - base_addr
+            elif run_start is not None:
+                self._admitPointerTableRun(buffer, run_start, entry_addr - base_addr, referenced, accepted)
+                run_start = None
+        if self._candidateTimeoutTripped():
+            return
         if run_start is not None:
             self._admitPointerTableRun(buffer, run_start, scan_end, referenced, accepted)
         # register every accepted start before analyzing any of them, so an earlier one cannot
@@ -440,24 +434,47 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             yield start
 
+    def _pointerTableEntries(self, buffer, start, end):
+        """Walk aligned dwords of [start, end), polling the analysis budget between chunks.
+
+        Every traversal of the image and of a single run goes through here, so no one of them
+        can run for seconds without the budget being consulted: a crafted image can make one
+        run as long as the image itself, and a run is walked twice more after it is found.
+        """
+        base_addr = self.disassembly.binary_info.base_addr
+        offset = start
+        while offset < end:
+            if self._candidateTimeoutTripped():
+                return
+            chunk_end = min(offset + _POINTER_TABLE_POLL_BYTES, end)
+            entry_addr = base_addr + offset
+            for (value,) in struct.iter_unpack("<I", buffer[offset:chunk_end]):
+                yield entry_addr, value
+                entry_addr += _POINTER_TABLE_ENTRY_SIZE
+            offset = chunk_end
+
     def _admitPointerTableRun(self, buffer, run_start, run_end, referenced, accepted):
         """Read one run of code-pointer-shaped dwords as a method table, or decline it.
 
-        The run is re-read from the image rather than carried along as a list of entries: a
-        crafted image can make one run as long as the image itself, and every test here either
-        streams over it or is decided from its length.
+        The run is re-read from the image rather than carried along as a list of entries, so
+        what a single run costs is bounded time rather than memory proportional to the image.
         """
         entries = (run_end - run_start) // _POINTER_TABLE_ENTRY_SIZE
         if entries < _POINTER_TABLE_MIN_RUN:
             return
         functions = self.disassembly.functions
-        known = sum(1 for (value,) in struct.iter_unpack("<I", buffer[run_start:run_end]) if value in functions)
+        known = 0
+        is_referenced = False
+        for entry_addr, value in self._pointerTableEntries(buffer, run_start, run_end):
+            if value in functions:
+                known += 1
+            if not is_referenced and entry_addr in referenced:
+                is_referenced = True
+        if self._candidateTimeoutTripped() or not is_referenced:
+            return
         if known < _POINTER_TABLE_MIN_KNOWN_RATIO * entries:
             return
-        base_addr = self.disassembly.binary_info.base_addr
-        if referenced.isdisjoint(range(base_addr + run_start, base_addr + run_end, _POINTER_TABLE_ENTRY_SIZE)):
-            return
-        for (value,) in struct.iter_unpack("<I", buffer[run_start:run_end]):
+        for _, value in self._pointerTableEntries(buffer, run_start, run_end):
             if value in functions or self.disassembly.isCode(value):
                 continue
             if not self._passesCodeFilter(value):
