@@ -37,6 +37,11 @@ LOGGER = logging.getLogger(__name__)
 # an absolute memory operand: "dword ptr [0x401000]", "[0x401000]". A base or index
 # register, or a rip-relative displacement, makes the effective address unknown here, so
 # those forms deliberately do not match.
+# A bracket whose first character is a hex prefix or a lone decimal digit: the only two forms
+# the full operand pattern below can accept. Scanning for that once over the whole operand
+# string is cheaper than splitting it and matching each part, and this runs per instruction.
+ABSOLUTE_OPERAND_HINT = re.compile(r"\[(?:0x|[0-9]\])")
+
 ABSOLUTE_MEM_OPERAND_RE = re.compile(
     r"^(?:(?P<width>byte|word|dword|qword|xword|tbyte|xmmword|ymmword|zmmword) ptr )?"
     r"\[(?P<address>0x[0-9a-fA-F]{1,16}|[0-9])\]$"
@@ -289,14 +294,19 @@ class X86Backend(ArchBackend):
         form read here. A bracketed branch operand names the pointer slot the branch reads
         through, which is data whatever the branch analyzers do with the value found in it.
         """
-        if not i_op_str:
+        # This runs for every instruction the engine decodes, so the two cheapest facts about
+        # the form being looked for come first: an absolute memory operand is written in
+        # brackets, and only an operand carrying a segment override needs one stripped. On a
+        # static x86-64 ELF two thirds of operands have no bracket at all.
+        if not i_op_str or ABSOLUTE_OPERAND_HINT.search(i_op_str) is None:
             return
         binary_info = d.disassembly.binary_info
         if binary_info is None:
             return
         declares_code_areas = bool(getattr(binary_info, "code_areas", None))
         emitted = set()
-        for operand in stripFlatSegmentOverride(i_op_str).split(", "):
+        normalized = stripFlatSegmentOverride(i_op_str) if ":" in i_op_str else i_op_str
+        for operand in normalized.split(", "):
             match = ABSOLUTE_MEM_OPERAND_RE.match(operand.strip())
             if match is None:
                 continue
@@ -525,7 +535,10 @@ class X86Backend(ArchBackend):
         if " " in i_mnemonic_noprefix:
             i_mnemonic_noprefix = i_mnemonic_noprefix.rpartition(" ")[2]
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
-        self._recordAbsoluteDataRefs(d, i_address, i_op_str, state)
+        # the engine calls this for every decoded instruction, so the operand is screened for a
+        # bracket here rather than paying a call to find out there is nothing to record
+        if i_op_str and "[" in i_op_str:
+            self._recordAbsoluteDataRefs(d, i_address, i_op_str, state)
         if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)
         elif i_kind == _KIND_JMP:
