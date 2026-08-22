@@ -382,6 +382,19 @@ class TestChangedAddressSignals(unittest.TestCase):
 
         self.assertTrue(signals["ends_in_return"])
 
+    def test_a_far_or_interrupt_return_does_not_read_as_a_routine_ending(self):
+        """A compiled routine returns to its caller with a near return. 0xca, 0xcb and 0xcf are
+        ordinary bytes in text and data, so a body that decodes a string lands on one often -
+        counting those would read a decoded string as a whole routine. The control is the same
+        two-instruction body ending in `ret`, which must still read as one."""
+        for mnemonic in ("retf", "retfq", "iret", "iretd", "iretq"):
+            with self.subTest(mnemonic=mnemonic):
+                xcfg = {"1000": _function(1000, [(1000, "in"), (1001, mnemonic)])}
+                self.assertFalse(er.describe_changed_address(1000, xcfg, {}, [])["ends_in_return"])
+
+        control = {"1000": _function(1000, [(1000, "in"), (1001, "ret")])}
+        self.assertTrue(er.describe_changed_address(1000, control, {}, [])["ends_in_return"])
+
     def test_an_address_the_report_does_not_carry_is_skipped(self):
         self.assertIsNone(er.describe_changed_address(1000, {}, {}, []))
 
