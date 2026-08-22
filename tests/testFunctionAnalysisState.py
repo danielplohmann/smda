@@ -266,10 +266,6 @@ class CilBlockCollisionTestSuite(unittest.TestCase):
         self.assertEqual([[0x100, 0x102]], [[ins[0] for ins in block] for block in blocks])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FunctionEntryIntegrityTestSuite(unittest.TestCase):
     """A recorded function's entry must be the start of one of its own blocks.
 
@@ -320,3 +316,7 @@ class FunctionEntryIntegrityTestSuite(unittest.TestCase):
         self.assertTrue(state.finalizeAnalysis())
         self.assertIn(0x100, disassembly.functions)
         self.assertIn(0x100, {block[0][0] for block in disassembly.functions[0x100]})
+
+
+if __name__ == "__main__":
+    unittest.main()
