@@ -34,6 +34,14 @@ LOGGER = logging.getLogger(__name__)
 # purpose: the slot is then not a single address, and those operands belong to jump tables.
 # capstone prints a displacement below 10 as a bare decimal digit, so "[esi + 8]" - the most
 # common slot stride - has no 0x prefix to match on.
+# an absolute memory operand: "dword ptr [0x401000]", "[0x401000]". A base or index
+# register, or a rip-relative displacement, makes the effective address unknown here, so
+# those forms deliberately do not match.
+ABSOLUTE_MEM_OPERAND_RE = re.compile(
+    r"^(?:(?:byte|word|dword|qword|tbyte|xmmword|ymmword|zmmword) ptr )?"
+    r"\[(?P<address>0x[0-9a-fA-F]{1,16}|[0-9])\]$"
+)
+
 MEM_REG_SLOT_RE = re.compile(
     r"^(?P<size>dword|qword) ptr \[(?P<reg>[a-z][a-z0-9]{1,3})"
     r"(?: (?P<sign>[+-]) (?P<disp>0x[0-9a-f]{1,16}|[0-9]))?\]$"
@@ -116,6 +124,8 @@ _KIND_TABLES = (
 # one lookup replaces the membership chain that 77% of instructions fell all the way through;
 # collapsing to a single dict is only valid while the tables stay disjoint
 _INS_KIND = {mnemonic: kind for table, kind in _KIND_TABLES for mnemonic in table}
+# a branch's operand names a code target, which the branch analyzers already record
+_BRANCH_KINDS = frozenset({_KIND_CALL, _KIND_JMP, _KIND_LOOP, _KIND_CJMP})
 if len(_INS_KIND) != sum(len(table) for table, _ in _KIND_TABLES):
     raise AssertionError("intel control-flow mnemonic tables overlap")
 
@@ -250,6 +260,37 @@ class X86Backend(ArchBackend):
         elif i_op_str.startswith("qword ptr ["):
             # case = "QWORD-PTR-REG"
             self._collectMemRegSlot(state, i_address, i_op_str)
+
+    @staticmethod
+    def _recordAbsoluteDataRefs(d, i_address, i_op_str, state, i_kind):
+        """Book a data reference for every absolute memory operand naming an image address.
+
+        Until now the intel backend recorded a data reference only from JumpTableAnalyzer, so
+        an address a function loads outright - a dispatch table, a global, a stored method
+        pointer - left no trace in the report at all, and nothing downstream could see it.
+        The AArch64 backend has always recorded these from its own operands.
+
+        A branch's operand is a code reference and is handled by the branch analyzers; only
+        the remaining instructions are read here.
+        """
+        if i_kind in _BRANCH_KINDS or not i_op_str:
+            return
+        binary_info = d.disassembly.binary_info
+        if binary_info is None:
+            return
+        declares_code_areas = bool(getattr(binary_info, "code_areas", None))
+        emitted = set()
+        for operand in stripFlatSegmentOverride(i_op_str).split(", "):
+            match = ABSOLUTE_MEM_OPERAND_RE.match(operand.strip())
+            if match is None:
+                continue
+            address = int(match.group("address"), 0)
+            if address in emitted or not d.disassembly.isAddrWithinMemoryImage(address):
+                continue
+            if declares_code_areas and binary_info.isInCodeAreas(address):
+                continue
+            emitted.add(address)
+            state.addDataRef(i_address, address)
 
     @staticmethod
     def _collectMemRegSlot(state, i_address, i_op_str):
@@ -468,6 +509,7 @@ class X86Backend(ArchBackend):
         if " " in i_mnemonic_noprefix:
             i_mnemonic_noprefix = i_mnemonic_noprefix.rpartition(" ")[2]
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
+        self._recordAbsoluteDataRefs(d, i_address, i_op_str, state, i_kind)
         if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)
         elif i_kind == _KIND_JMP:
