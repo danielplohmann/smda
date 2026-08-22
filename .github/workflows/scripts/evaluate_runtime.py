@@ -248,7 +248,7 @@ def check_determinism(aggregated):
 # Changed-address classification
 # --------------------------------------------------------------------------- #
 
-_RETURN_MNEMONICS = frozenset({"ret", "retn", "retf", "retfq", "iret", "iretd", "iretq", "retaa", "retab"})
+_ROUTINE_RETURN_MNEMONICS = frozenset({"ret", "retn", "retaa", "retab"})
 _LANDING_PAD_MNEMONICS = frozenset({"endbr32", "endbr64"})
 _FRAME_SETUP = {"rbp": "rbp, rsp", "ebp": "ebp, esp"}
 
@@ -341,7 +341,7 @@ def describe_changed_address(addr, xcfg, other_owner, other_sorted):
         "addr": addr,
         "inrefs": len(func.get("inrefs") or []),
         "instructions": len(instructions),
-        "ends_in_return": instructions[-1][1].split(" ")[-1] in _RETURN_MNEMONICS,
+        "ends_in_return": instructions[-1][1].split(" ")[-1] in _ROUTINE_RETURN_MNEMONICS,
         "starts_like_a_function": _starts_like_a_function(instructions),
         "absorbed_by": other_owner.get(addr),
         "branches_into_survivor_interior": sum(1 for t in targets if t in other_owner and other_owner[t] != t),
@@ -359,8 +359,9 @@ def label_changed_address(signals, dropped):
     2. something references it - a called address is a function whatever its body looks like, and
        this is the rule that catches a real function whose body ends in a tail-call `jmp` rather
        than a `ret`;
-    3. its body reads like a whole routine - it ends in a return, and the other side does not
-       decode different instructions inside its extent;
+    3. its body reads like a whole routine - it ends in the near return a compiled routine
+       returns to its caller with, and the other side does not decode different instructions
+       inside its extent;
     4. it opens the way a compiler opens a function, which is the one reading that survives a
        body the other side decodes at different offsets - an entry reached only indirectly can
        have no inbound reference and can end in a tail-call, but it still starts like an entry;
