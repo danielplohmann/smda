@@ -44,6 +44,7 @@ class FunctionCandidateManager:
         self._candidate_offsets = set()
         self.candidate_index = 0
         self._all_call_refs = {}
+        self._delphi_detected = False
         self.symbol_addresses = []
         self.identified_alignment = 0
         self.go_objects = None
@@ -444,6 +445,11 @@ class FunctionCandidateManager:
                 continue
             yield fde_start
 
+    def locateLateCandidates(self):
+        """Candidate sources that need a near-complete function set, not just the primary
+        pass: they run after gap analysis and its drain. No sources here."""
+        return ()
+
     def _machoActiveBinaryAndAdjustment(self):
         binary_info = self.disassembly.binary_info
         lief_binary = binary_info.getLiefBinary()
@@ -582,6 +588,7 @@ class FunctionCandidateManager:
             for add in self.delphi_kb_objects:
                 self.addLanguageSpecCandidate(add, "delphi_kb")
         elif self.lang_analyzer.checkDelphi():
+            self._delphi_detected = True
             LOGGER.debug("Programming language recognized as Delphi, adding function start addresses from VMTs")
             delphi_objects = self.lang_analyzer.getDelphiObjects()
             LOGGER.debug("delphi candidates based on legacy VMT analysis: %d", len(delphi_objects))

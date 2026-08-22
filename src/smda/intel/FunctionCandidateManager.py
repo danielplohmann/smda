@@ -50,6 +50,15 @@ _ENTRY_PAD_SEQUENCES = {
 # MSVC aligns function entries to 16 bytes.
 _CODE_ALIGNMENT = 16
 
+# Delphi method tables are runs of 32-bit pointers into code. A run is only read as a table
+# when most of its entries are already recovered functions and code takes a data reference to
+# it; measured on a PE corpus, the self-validation test alone admits a thousand addresses that
+# point at data. The scan polls the analysis budget once per 64 KiB rather than per entry.
+_POINTER_TABLE_ENTRY_SIZE = 4
+_POINTER_TABLE_MIN_RUN = 4
+_POINTER_TABLE_MIN_KNOWN_RATIO = 0.8
+_POINTER_TABLE_POLL_BYTES = 0x10000
+
 # Written as `A(BA)+B` rather than the equivalent `(AB){2,}` so the pattern starts with a literal:
 # only then does the regex engine emit a prefix fast-search instead of entering the matcher at
 # every offset of the mapped image.
@@ -374,6 +383,88 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     def locateDeferredCandidates(self):
         yield from self.locateEhFrameCandidates()
         yield from self.locateMachoFunctionStartCandidates()
+
+    def locateLateCandidates(self):
+        yield from self.locatePointerTableCandidates()
+
+    def locatePointerTableCandidates(self):
+        """Entries of a function-pointer table that the primary pass did not recover.
+
+        The entries a Delphi program only ever calls through its method table are reachable no
+        other way - no call names them, so nothing seeds them. A run of aligned dwords is read
+        as a table only when most of its entries are already recovered functions and code takes
+        a data reference to the run itself; both facts are products of the passes before this
+        one, which is why it runs after gap analysis rather than at the deferred hook.
+        """
+        if not self._delphi_detected or self.bitness != 32:
+            return
+        functions = self.disassembly.functions
+        if not functions:
+            return
+        buffer = memoryview(self.disassembly.binary_info.binary)
+        base_addr = self.disassembly.binary_info.base_addr
+        lowest, highest = min(functions), max(functions)
+        referenced = set()
+        for targets in self.disassembly.data_refs_from.values():
+            referenced.update(targets)
+        is_code = self.disassembly.isCode
+        # insertion-ordered set: a table can be laid out twice, and re-analyzing a start
+        # the previous run already accepted would be wasted work
+        accepted = {}
+        run_start = None
+        scan_end = len(buffer) - (len(buffer) % _POINTER_TABLE_ENTRY_SIZE)
+        offset = 0
+        while offset < scan_end:
+            if self._candidateTimeoutTripped():
+                return
+            chunk_end = min(offset + _POINTER_TABLE_POLL_BYTES, scan_end)
+            entry_offset = offset
+            for (value,) in struct.iter_unpack("<I", buffer[offset:chunk_end]):
+                if lowest <= value <= highest and not is_code(base_addr + entry_offset):
+                    if run_start is None:
+                        run_start = entry_offset
+                elif run_start is not None:
+                    self._admitPointerTableRun(buffer, run_start, entry_offset, referenced, accepted)
+                    run_start = None
+                entry_offset += _POINTER_TABLE_ENTRY_SIZE
+            offset = chunk_end
+        if run_start is not None:
+            self._admitPointerTableRun(buffer, run_start, scan_end, referenced, accepted)
+        # register every accepted start before analyzing any of them, so an earlier one cannot
+        # absorb a later one it branches into
+        self._candidate_offsets.update(accepted)
+        for start in accepted:
+            if self._candidateTimeoutTripped():
+                return
+            if is_code(start):
+                continue
+            yield start
+
+    def _admitPointerTableRun(self, buffer, run_start, run_end, referenced, accepted):
+        """Read one run of code-pointer-shaped dwords as a method table, or decline it.
+
+        The run is re-read from the image rather than carried along as a list of entries: a
+        crafted image can make one run as long as the image itself, and every test here either
+        streams over it or is decided from its length.
+        """
+        entries = (run_end - run_start) // _POINTER_TABLE_ENTRY_SIZE
+        if entries < _POINTER_TABLE_MIN_RUN:
+            return
+        functions = self.disassembly.functions
+        known = sum(1 for (value,) in struct.iter_unpack("<I", buffer[run_start:run_end]) if value in functions)
+        if known < _POINTER_TABLE_MIN_KNOWN_RATIO * entries:
+            return
+        base_addr = self.disassembly.binary_info.base_addr
+        if referenced.isdisjoint(range(base_addr + run_start, base_addr + run_end, _POINTER_TABLE_ENTRY_SIZE)):
+            return
+        for (value,) in struct.iter_unpack("<I", buffer[run_start:run_end]):
+            if value in functions or self.disassembly.isCode(value):
+                continue
+            if not self._passesCodeFilter(value):
+                continue
+            self.ensureCandidate(value)
+            if value in self.candidates:
+                accepted[value] = None
 
     def locateCandidates(self):
         # add guaranteed / high-value starts first so that, if the candidate cap is hit, the most reliable
