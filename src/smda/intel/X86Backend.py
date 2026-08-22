@@ -124,8 +124,6 @@ _KIND_TABLES = (
 # one lookup replaces the membership chain that 77% of instructions fell all the way through;
 # collapsing to a single dict is only valid while the tables stay disjoint
 _INS_KIND = {mnemonic: kind for table, kind in _KIND_TABLES for mnemonic in table}
-# a branch's operand names a code target, which the branch analyzers already record
-_BRANCH_KINDS = frozenset({_KIND_CALL, _KIND_JMP, _KIND_LOOP, _KIND_CJMP})
 if len(_INS_KIND) != sum(len(table) for table, _ in _KIND_TABLES):
     raise AssertionError("intel control-flow mnemonic tables overlap")
 
@@ -262,7 +260,7 @@ class X86Backend(ArchBackend):
             self._collectMemRegSlot(state, i_address, i_op_str)
 
     @staticmethod
-    def _recordAbsoluteDataRefs(d, i_address, i_op_str, state, i_kind):
+    def _recordAbsoluteDataRefs(d, i_address, i_op_str, state):
         """Book a data reference for every absolute memory operand naming an image address.
 
         Until now the intel backend recorded a data reference only from JumpTableAnalyzer, so
@@ -270,10 +268,11 @@ class X86Backend(ArchBackend):
         pointer - left no trace in the report at all, and nothing downstream could see it.
         The AArch64 backend has always recorded these from its own operands.
 
-        A branch's operand is a code reference and is handled by the branch analyzers; only
-        the remaining instructions are read here.
+        A direct branch names its target as a bare immediate, so it cannot match the bracketed
+        form read here. A bracketed branch operand names the pointer slot the branch reads
+        through, which is data whatever the branch analyzers do with the value found in it.
         """
-        if i_kind in _BRANCH_KINDS or not i_op_str:
+        if not i_op_str:
             return
         binary_info = d.disassembly.binary_info
         if binary_info is None:
@@ -509,7 +508,7 @@ class X86Backend(ArchBackend):
         if " " in i_mnemonic_noprefix:
             i_mnemonic_noprefix = i_mnemonic_noprefix.rpartition(" ")[2]
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
-        self._recordAbsoluteDataRefs(d, i_address, i_op_str, state, i_kind)
+        self._recordAbsoluteDataRefs(d, i_address, i_op_str, state)
         if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)
         elif i_kind == _KIND_JMP:
