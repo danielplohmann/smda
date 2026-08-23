@@ -43,6 +43,19 @@ LOOP_INS = frozenset({"loop", "loopne", "loope"})
 JMP_INS = frozenset({"jmp", "ljmp"})
 CALL_INS = frozenset({"call", "lcall"})
 RET_INS = frozenset({"ret", "retn", "retf", "retfq", "iret", "iretd", "iretq"})
+# A backward def-use walk models a few mnemonics and may only carry a value past one that is
+# known to leave the register it is chasing alone. A branch touches rip and the flags, the rest
+# compare or read. LOOP_INS is absent deliberately: `loop` decrements rcx.
+#
+# `push` is the exception to the heading and is here on narrower grounds: it writes rsp. The
+# jump-table walk never chases rsp, because a table base arrives from a rip-relative `lea`. The
+# indirect-call walk can be handed one, since the slot pattern it starts from accepts any base
+# register and a spilled function pointer is called through `[rsp + disp]`; there a `push`
+# between the spill and the call is wrongly read as leaving rsp alone. Nothing in that walk
+# assigns a value to a destination spelled rsp, so today it can only miss a clobber rather than
+# resolve a wrong target. Excluding push here would stop that walk more often, and stopping it
+# costs recovered functions rather than API names -- measure before changing it.
+VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"}) | CJMP_INS | JMP_INS
 END_INS = frozenset(
     {
         "ret",
