@@ -637,6 +637,15 @@ class RegisterWriteVerdictTest(unittest.TestCase):
         self.assertIs(JumpTableAnalyzer._writesRegister("imul", "rbx, rcx", "rbx"), True)
         self.assertIs(JumpTableAnalyzer._writesRegister("imul", "rbx, rcx, 5", "rbx"), True)
 
+    def test_a_multi_operand_imul_leaves_the_pair_the_implicit_form_writes(self):
+        """The other direction: only the one-operand form writes rdx:rax. Answering for the pair
+        regardless of form stops a walk chasing a base held in rax or rdx at an `imul` that
+        cannot touch it, which abandons the table rather than resolving it wrongly."""
+        for operands in ("rbx, rcx", "rbx, rcx, 5"):
+            for register in ("rax", "rdx"):
+                with self.subTest(operands=operands, register=register):
+                    self.assertIs(JumpTableAnalyzer._writesRegister("imul", operands, register), False)
+
     def test_a_one_operand_imul_writes_the_pair_it_does_not_name(self):
         self.assertIs(JumpTableAnalyzer._writesRegister("imul", "rcx", "rax"), True)
         self.assertIs(JumpTableAnalyzer._writesRegister("imul", "rcx", "rdx"), True)

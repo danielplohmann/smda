@@ -296,6 +296,20 @@ class PushPairPrologueOffsetTest(unittest.TestCase):
     def test_a_match_at_the_very_start_of_the_image_is_left_alone(self):
         self.assertEqual(self._seeded(self.PUSH_PAIR + b"\xc3"), [self.BASE])
 
+    def test_an_entry_packed_behind_a_tail_jump_still_moves_the_seed(self):
+        """Requiring the byte before the 0x55 to end a function was tried and reverted. A
+        function can end with a tail `jmp` or a `ud2`, whose last byte is arbitrary, and Rust
+        packs the next entry straight behind one: keying on that byte cost four real functions
+        on the bundled Rust PE. These are the endings it got wrong."""
+        for label, ending in (
+            ("jmp short", b"\xeb\xc6"),
+            ("jmp rel32", b"\xe9\x30\xed\xff\xff"),
+            ("ud2", b"\x0f\x0b"),
+        ):
+            with self.subTest(ending=label):
+                binary = b"\x00" * 0x10 + ending + b"\x55" + self.PUSH_PAIR + b"\xc3"
+                self.assertEqual(self._seeded(binary), [self.BASE + 0x10 + len(ending)])
+
     def test_another_seeded_prologue_keeps_its_own_address(self):
         """Control: the adjustment is scoped to the one seeded pattern that is a run of
         callee-saved pushes. The other two open with `sub rsp` behind a single push, which is

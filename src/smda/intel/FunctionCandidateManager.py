@@ -462,6 +462,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # matches one byte into the prologue and names the body instead of the entry - the
             # same shape as the hotpatch adjustment below, where the match is real and its
             # address is one instruction late.
+            # The scan reads raw bytes and establishes no instruction boundary, so this cannot
+            # prove the 0x55 starts an instruction rather than ending one - `push 0x55` spells
+            # the same byte. Requiring the byte before it to end a function was tried and is
+            # unsound: a function can end with a tail `jmp` or a `ud2`, whose last byte is
+            # arbitrary, and that shape is ordinary in Rust output. It cost four real functions
+            # on the bundled Rust PE, whose entries sit directly behind `eb`/`e9` jumps and
+            # `0f 0b`. Measured instead over 404 matches across four images: 347 of them shift
+            # onto a byte SMDA independently recovers as an instruction start, 30 land in bytes
+            # it never decodes either way, and none shift onto the interior of an instruction.
             if offset and prologue_match.group() == _PUSH_PAIR_PROLOGUE and binary[offset - 1] == _PUSH_RBP:
                 offset -= 1
             candidate_addr = (self.disassembly.binary_info.base_addr + offset) & self.getBitMask()
