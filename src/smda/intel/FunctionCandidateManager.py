@@ -69,6 +69,9 @@ _PDATA_ENTRY_SIZE = 12
 _TIMEOUT_POLL_INTERVAL = 4096
 _PUSH_RBP = 0x55
 _PUSH_PAIR_PROLOGUE = b"\x41\x57\x41\x56"  # push r15; push r14
+# How far back a declared entry has to sit for the byte in question to be inside it rather
+# than an entry itself: one instruction's worth of the openings this pattern appears behind.
+_DECLARED_START_WINDOW = 8
 _PDATA_MIN_ENTRIES = 16
 _PDATA_SEED_ENTRIES = 4
 # A sample only finds a table if it lands inside one with a whole seed window left, so this
@@ -448,6 +451,24 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     )
                     self.setInitialCandidate(function_addr)
 
+    def _followsDeclaredStart(self, addr):
+        """Whether a function the image itself declares begins in the bytes just before addr.
+
+        Symbols, call references and exception records are all located before the prologue
+        scan runs, so this asks a question the raw bytes cannot: if a declared entry sits a
+        few bytes back, addr is inside that entry's opening instruction rather than being an
+        entry of its own. The window is one instruction's worth of the shortest openings -
+        widening it to a full 15 costs a real shift on the reference images, and eight covers
+        every shape measured.
+        """
+        for candidate_addr in range(max(0, addr - _DECLARED_START_WINDOW), addr):
+            candidate = self.candidates.get(candidate_addr & self.getBitMask())
+            if candidate is not None and (
+                candidate.call_ref_sources or candidate.is_symbol or candidate.is_exception_handler
+            ):
+                return True
+        return False
+
     def _seedPrologueMatches(self, pattern):
         """returns True once the analysis timeout trips, so callers can stop scanning
         further patterns instead of each one re-discovering the timeout on its own first match."""
@@ -462,16 +483,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # matches one byte into the prologue and names the body instead of the entry - the
             # same shape as the hotpatch adjustment below, where the match is real and its
             # address is one instruction late.
-            # The scan reads raw bytes and establishes no instruction boundary, so this cannot
-            # prove the 0x55 starts an instruction rather than ending one - `push 0x55` spells
-            # the same byte. Requiring the byte before it to end a function was tried and is
-            # unsound: a function can end with a tail `jmp` or a `ud2`, whose last byte is
-            # arbitrary, and that shape is ordinary in Rust output. It cost four real functions
-            # on the bundled Rust PE, whose entries sit directly behind `eb`/`e9` jumps and
-            # `0f 0b`. Measured instead over 404 matches across four images: 347 of them shift
-            # onto a byte SMDA independently recovers as an instruction start, 30 land in bytes
-            # it never decodes either way, and none shift onto the interior of an instruction.
+            # The scan reads raw bytes and establishes no instruction boundary, so a 0x55 here
+            # is equally `push rbp` or the last byte of something else - `push 0x55` spells the
+            # same byte, and shifting onto it books an address one byte inside the real entry.
+            # The image itself settles it: symbols, call references and exception records are
+            # all located before this scan runs, so a declared entry opening in the bytes just
+            # before that 0x55 places it inside that entry's first instruction. That is the
+            # same kind of evidence the hotpatch adjustment below defers to.
             if offset and prologue_match.group() == _PUSH_PAIR_PROLOGUE and binary[offset - 1] == _PUSH_RBP:
+                if self._followsDeclaredStart(
+                    (self.disassembly.binary_info.base_addr + offset - 1) & self.getBitMask()
+                ):
+                    # A declared entry opens in the bytes just before that 0x55, so the byte is
+                    # inside its first instruction - `push 0x55` spells one - and neither this
+                    # match nor the byte before it starts a function. Seeding either books an
+                    # address inside a function the image already names.
+                    continue
                 offset -= 1
             candidate_addr = (self.disassembly.binary_info.base_addr + offset) & self.getBitMask()
             if not self._passesCodeFilter(candidate_addr):

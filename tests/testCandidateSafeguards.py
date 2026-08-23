@@ -296,6 +296,39 @@ class PushPairPrologueOffsetTest(unittest.TestCase):
     def test_a_match_at_the_very_start_of_the_image_is_left_alone(self):
         self.assertEqual(self._seeded(self.PUSH_PAIR + b"\xc3"), [self.BASE])
 
+    def _seededWithDeclared(self, binary, declared):
+        """As _seeded, but with addresses the image declares already registered - the state the
+        prologue scan actually runs in, since symbols, call references and exception records
+        are all located before it."""
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.bitness = 64
+        manager._code_areas = []
+        binary_info = types.SimpleNamespace(bitness=64, base_addr=self.BASE, binary=binary)
+        manager.disassembly = types.SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        for addr in declared:
+            manager.ensureCandidate(addr)
+            manager.candidates[addr].addCallRef(addr - 0x100)
+        manager._seedPrologueMatches(re.escape(self.PUSH_PAIR))
+        return sorted(a for a in manager.candidates if a not in declared)
+
+    def test_a_declared_entry_just_before_the_0x55_suppresses_the_seed(self):
+        """`push 0x55` ends in the same byte a `push rbp` is spelled with, so the raw-byte
+        check cannot tell them apart and the shift books an address one byte inside the real
+        entry. The image settles it: a declared start in the bytes just before means the 0x55
+        is inside its opening instruction, so neither address begins a function and no seed
+        belongs here at all."""
+        binary = b"\x00" * 0x10 + b"\x6a\x55" + self.PUSH_PAIR + b"\xc3"
+
+        self.assertEqual(self._seededWithDeclared(binary, [self.BASE + 0x10]), [])
+
+    def test_a_declared_entry_far_from_the_0x55_still_moves_the_seed(self):
+        """Control: the suppression keys on a declared entry being close enough for the 0x55 to
+        sit inside its first instruction. One further back is an ordinary neighbouring function
+        and must not stop a genuine `push rbp` entry being seeded."""
+        binary = b"\x00" * 0x10 + b"\x55" + self.PUSH_PAIR + b"\xc3"
+
+        self.assertEqual(self._seededWithDeclared(binary, [self.BASE]), [self.BASE + 0x10])
+
     def test_an_entry_packed_behind_a_tail_jump_still_moves_the_seed(self):
         """Requiring the byte before the 0x55 to end a function was tried and reverted. A
         function can end with a tail `jmp` or a `ud2`, whose last byte is arbitrary, and Rust
