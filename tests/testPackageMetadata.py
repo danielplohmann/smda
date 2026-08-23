@@ -19,12 +19,38 @@ from smda.SmdaConfig import SmdaConfig  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _version_tuple(version):
+    return tuple(int(part) for part in version.split("."))
+
+
 class TestPackageMetadata(unittest.TestCase):
     def test_the_two_version_strings_agree(self):
         self.assertEqual(smda.__version__, SmdaConfig.VERSION)
 
     def test_the_version_is_a_three_part_release(self):
         self.assertRegex(smda.__version__, r"^\d+\.\d+\.\d+$")
+
+    def test_the_escaper_compatibility_marker_is_a_three_part_release(self):
+        self.assertRegex(SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY, r"^\d+\.\d+\.\d+$")
+
+    def test_the_escaper_compatibility_marker_is_not_newer_than_the_package(self):
+        self.assertLessEqual(
+            _version_tuple(SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY),
+            _version_tuple(SmdaConfig.VERSION),
+        )
+
+    def test_the_escaper_compatibility_marker_covers_the_4_4_5_output_change(self):
+        # 4.4.5 changed Intel escaped operands (segment-qualified memory, AVX-512)
+        # and six mnemonic groups. MCRIT selects samples whose recorded
+        # smda_version is strictly below this marker, so the marker must be at
+        # least 4.4.5 or those reports stay invisible to the repair path.
+        marker = _version_tuple(SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY)
+        self.assertLessEqual(_version_tuple("4.4.5"), marker)
+        self.assertLess(_version_tuple("4.4.4"), marker)
+        # The previous marker, 1.13.16, compared less than every 2.x/4.x report
+        # and so selected nothing after 1.13.16 — including the 4.4.4 reports
+        # whose escaped output 4.4.5 invalidated.
+        self.assertFalse(_version_tuple("4.4.4") < _version_tuple("1.13.16"))
 
     def test_the_changelog_documents_the_current_version(self):
         changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
