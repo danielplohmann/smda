@@ -306,9 +306,17 @@ class JumpTableAnalyzer:
         if mnemonic in VALUE_PRESERVING_MNEMONICS:
             return False
         implicit = _IMPLICIT_REGISTER_WRITES.get(mnemonic)
+        # Only the implicit *form* makes those writes. Every entry here is operand-less or
+        # single-operand except `imul`, whose two- and three-operand forms write nothing but
+        # the register they name - so applying the pair to those stops a walk chasing a base
+        # held in rax or rdx at an `imul rcx, rsi` that cannot touch it, and abandons the
+        # table. The syscall walk in the backend already draws the same distinction.
+        names_its_destination = implicit is not None
+        if implicit is not None and operands.count(",") > 0:
+            implicit = None
         if implicit is not None and canonical_register in implicit:
             return True
-        if implicit is not None or mnemonic in _NAMED_DESTINATION_MNEMONICS:
+        if names_its_destination or mnemonic in _NAMED_DESTINATION_MNEMONICS:
             return canonicalRegister(operands.split(",")[0]) == canonical_register
         return None
 
