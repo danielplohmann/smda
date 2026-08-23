@@ -223,16 +223,21 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ExceptionRecordAlignmentExemptionTest(unittest.TestCase):
-    """An exception record is the image's own declaration of a function start, so the
-    inferred alignment floor must not filter it out of the analysis queue."""
+class DeclaredStartAlignmentExemptionTest(unittest.TestCase):
+    """The alignment floor is inferred from where call-referenced candidates happen to sit, so
+    it bounds a guess about an unknown function. An exception record and a direct call are both
+    the image's own declaration of a start, and neither must be filtered out of the queue."""
 
     def _manager(self, alignment):
         manager = FunctionCandidateManager(SmdaConfig())
         manager.bitness = 32
         manager.identified_alignment = alignment
         manager._code_areas = []
-        binary_info = types.SimpleNamespace(bitness=32, base_addr=0, binary=b"\x00" * 0x1000)
+        # a real prologue at the unaligned address, so a candidate can score without an
+        # inbound call and the floor is the only thing that can filter it
+        binary = bytearray(b"\x00" * 0x1000)
+        binary[0x1001:0x1004] = b"\x55\x8b\xec"  # push ebp; mov ebp, esp
+        binary_info = types.SimpleNamespace(bitness=32, base_addr=0, binary=bytes(binary))
         manager.disassembly = types.SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
         return manager
 
@@ -246,8 +251,16 @@ class ExceptionRecordAlignmentExemptionTest(unittest.TestCase):
     def test_unaligned_exception_record_is_still_analyzed(self):
         self.assertEqual(self._yielded(4, lambda c: c.setIsExceptionHandler(True)), [0x1001])
 
-    def test_unaligned_inferred_candidate_is_still_filtered(self):
-        self.assertEqual(self._yielded(4, lambda c: c.addCallRef(0x2000)), [])
+    def test_unaligned_call_referenced_candidate_is_analyzed(self):
+        """The inference itself tolerates a twentieth of the call-referenced population sitting
+        off the alignment, so filtering all of it discards what the inference allowed for:
+        `abort` in a static glibc is at an odd address and is reached by 37 direct calls."""
+        self.assertEqual(self._yielded(4, lambda c: c.addCallRef(0x2000)), [0x1001])
+
+    def test_unaligned_candidate_with_no_inbound_call_is_still_filtered(self):
+        """Control: the floor still bounds a guess. A byte pattern matching a prologue at an
+        odd address is exactly the guess it exists to refuse."""
+        self.assertEqual(self._yielded(4, lambda c: c.setInitialCandidate(True)), [])
 
     def test_alignment_floor_of_zero_filters_nothing(self):
-        self.assertEqual(self._yielded(0, lambda c: c.addCallRef(0x2000)), [0x1001])
+        self.assertEqual(self._yielded(0, lambda c: c.setInitialCandidate(True)), [0x1001])
