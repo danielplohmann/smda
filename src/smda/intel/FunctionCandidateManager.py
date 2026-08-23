@@ -67,6 +67,8 @@ _PDATA_ENTRY_SIZE = 12
 # _TIMEOUT_POLL_BLOCKS in the engine. A whole exception table is walked inside one call, so
 # the poll in the pass around it never comes round again while that walk is running
 _TIMEOUT_POLL_INTERVAL = 4096
+_PUSH_RBP = 0x55
+_PUSH_PAIR_PROLOGUE = b"\x41\x57\x41\x56"  # push r15; push r14
 _PDATA_MIN_ENTRIES = 16
 _PDATA_SEED_ENTRIES = 4
 # A sample only finds a table if it lands inside one with a whole seed window left, so this
@@ -454,6 +456,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return True
             offset = prologue_match.start()
+            # `push r15; push r14` is a run of callee-saved pushes rather than a distinguishing
+            # first instruction, so it matches wherever such a run reaches r15. clang orders
+            # `push rbp` first in a function that keeps no frame pointer, and the pair then
+            # matches one byte into the prologue and names the body instead of the entry - the
+            # same shape as the hotpatch adjustment below, where the match is real and its
+            # address is one instruction late.
+            if offset and prologue_match.group() == _PUSH_PAIR_PROLOGUE and binary[offset - 1] == _PUSH_RBP:
+                offset -= 1
             candidate_addr = (self.disassembly.binary_info.base_addr + offset) & self.getBitMask()
             if not self._passesCodeFilter(candidate_addr):
                 continue
