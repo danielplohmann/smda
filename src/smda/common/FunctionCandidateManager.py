@@ -162,10 +162,14 @@ class FunctionCandidateManager:
                     self.identified_alignment
                     and candidate.alignment < self.identified_alignment
                     and not candidate.is_exception_handler
+                    and not candidate.call_ref_sources
                 ):
                     # The floor is inferred from call-referenced candidates, so it only bounds
-                    # a guess; an exception record is the image's own declaration. Exempting
-                    # symbols as well was measured to cost true positives -- do not widen this.
+                    # a guess; an exception record is the image's own declaration, and so is a
+                    # direct call to the address. The inference tolerates a twentieth of that
+                    # population sitting off the alignment, so applying the floor to all of it
+                    # discards exactly what the inference allowed for. Exempting symbols as
+                    # well was measured to cost true positives -- do not widen this.
                     continue
                 yield candidate
 
