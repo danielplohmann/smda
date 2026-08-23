@@ -18,7 +18,16 @@ def _makeAnalyzer(binary=b"", base_addr=0x1000, bitness=64):
     disassembler = MagicMock()
     disassembly = MagicMock()
     disassembly.binary_info = SimpleNamespace(
-        binary=binary, base_addr=base_addr, binary_size=len(binary) or 0x100, bitness=bitness
+        binary=binary,
+        base_addr=base_addr,
+        binary_size=len(binary) or 0x100,
+        bitness=bitness,
+        # a binary with no section table - a memory dump - has no code areas, and BinaryInfo
+        # then answers for the whole image; tests needing the section-bounded answer set it
+        isInCodeAreas=MagicMock(return_value=True),
+        # an executable, the permissive case: an image the loader relocates holds no absolute
+        # table a compiler emitted, so tests for that arm set it
+        isPositionIndependentElf=MagicMock(return_value=False),
     )
     disassembler.disassembly = disassembly
     disassembler.getBitMask.return_value = 0xFFFFFFFFFFFFFFFF
@@ -144,6 +153,36 @@ class IndexTiedBoundTestSuite(unittest.TestCase):
         ]
 
         self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 4)
+
+    def test_a_call_between_the_index_and_its_bound_drops_the_tie(self):
+        """A call returns its value in rax and clobbers whatever the ABI allows, but its
+        operand is a bare address, so the destination parse reads no key from it and the tie
+        used to survive it - reporting a compare from before the call as this dispatch's
+        bound. A recovered bound is trusted as exact, so an overlarge one runs the entry scan
+        past the end of its own table."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 5, "call", "0x2000"),
+            (0x100A, 5, "cmp", "esi, 0x3"),
+            (0x100F, 2, "mov", "ecx, eax"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 4)
+
+    def test_a_sign_extension_between_the_index_and_its_bound_keeps_the_tie(self):
+        """Control for the case above: an operand-less instruction is not a reason to drop the
+        tie by itself. `cdqe` widens the index in place and sits between the table read and
+        its bound in ordinary compiler output, so severing there would lose the bound outright
+        rather than fall back to the nearer compare."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 2, "cdqe", ""),
+            (0x1007, 2, "mov", "ecx, eax"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 1001)
 
     def test_a_copy_between_the_index_and_its_bound_keeps_the_tie(self):
         """Positive control: a copy is the one thing that carries the index forward, so the
