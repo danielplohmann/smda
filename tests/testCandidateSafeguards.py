@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import logging
+import re
 import struct
 import types
 import unittest
@@ -264,3 +265,41 @@ class DeclaredStartAlignmentExemptionTest(unittest.TestCase):
 
     def test_alignment_floor_of_zero_filters_nothing(self):
         self.assertEqual(self._yielded(0, lambda c: c.setInitialCandidate(True)), [0x1001])
+
+
+class PushPairPrologueOffsetTest(unittest.TestCase):
+    """`push r15; push r14` is seeded as a prologue, but it is a run of callee-saved pushes
+    rather than a distinguishing first instruction. clang orders `push rbp` first in a
+    function that keeps no frame pointer, and the pair then matches one byte in and names the
+    body: `main` in every clang -O1 and above build of the reference corpus was recovered one
+    byte late, counted as a body split rather than as the function it is."""
+
+    BASE = 0x400000
+    PUSH_PAIR = b"\x41\x57\x41\x56"
+
+    def _seeded(self, binary, pattern=PUSH_PAIR):
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.bitness = 64
+        manager._code_areas = []
+        binary_info = types.SimpleNamespace(bitness=64, base_addr=self.BASE, binary=binary)
+        manager.disassembly = types.SimpleNamespace(binary_info=binary_info, analysis_timeout=False)
+        manager._seedPrologueMatches(re.escape(pattern))
+        return sorted(manager.candidates)
+
+    def test_a_leading_push_rbp_moves_the_seed_to_the_entry(self):
+        self.assertEqual(self._seeded(b"\x00" * 0x10 + b"\x55" + self.PUSH_PAIR + b"\xc3"), [self.BASE + 0x10])
+
+    def test_another_leading_byte_leaves_the_seed_where_it_matched(self):
+        """Control: only a `push rbp` immediately before the pair can be the same prologue."""
+        self.assertEqual(self._seeded(b"\x00" * 0x10 + b"\x90" + self.PUSH_PAIR + b"\xc3"), [self.BASE + 0x11])
+
+    def test_a_match_at_the_very_start_of_the_image_is_left_alone(self):
+        self.assertEqual(self._seeded(self.PUSH_PAIR + b"\xc3"), [self.BASE])
+
+    def test_another_seeded_prologue_keeps_its_own_address(self):
+        """Control: the adjustment is scoped to the one seeded pattern that is a run of
+        callee-saved pushes. The other two open with `sub rsp` behind a single push, which is
+        a frame setup rather than a run, so a stray 0x55 in front of one does not extend it
+        and must not move the seed."""
+        opener = b"\x40\x53\x48\x83\xec"  # push rbx; sub rsp, imm8
+        self.assertEqual(self._seeded(b"\x00" * 0x10 + b"\x55" + opener, pattern=opener), [self.BASE + 0x11])
