@@ -27,6 +27,24 @@ RUST_MAIN_DEMANGLED = "rust_pe_symbols::main"
 RUST_TRAIT_IMPL = "_RNvXs5_NtNtCslFVcyoAu48q_3std2io5errorNtB5_5ErrorNtNtCs55qC6OcLGgs_4core3fmt7Display3fmt"
 RUST_TRAIT_IMPL_DEMANGLED = "<std::io::error::Error as core::fmt::Display>::fmt"
 NOT_RUST = ("_RTC_Initialize", "_ReadFile@20", "_RoInitialize@4")
+MSVC_PE_FIXTURE = os.path.join(FIXTURE_DIR, "msvc_cxx_pdb_pe_xored")
+MSVC_PDB_FIXTURE = os.path.join(FIXTURE_DIR, "msvc_cxx_pdb_xored")
+# the two translation units of the x64 fixture: one built with debug info, whose procedure
+# records carry the name already undecorated, and one without, which contributes publics only
+MSVC_PROC_NAME = "geometry::combine"
+MSVC_PROC_RVA = 0x1000
+MSVC_PUBLIC = "?measure@text@@YAHPEBDI@Z"
+MSVC_PUBLIC_DEMANGLED = "int __cdecl text::measure(char const *, unsigned int)"
+MSVC_PUBLIC_RVA = 0x1064
+# shapes the demangler declines: a function-local name with no type, and a name truncated
+# past its parameter list
+MSVC_DECLINED = ("?x@?1??f@@YAHXZ@51", "?a2@@YAHX")
+# a PDB carries one RTTI type descriptor per polymorphic class
+MSVC_RTTI = "??_R0?AVexception@std@@@8"
+MSVC_RTTI_DEMANGLED = "class std::exception `RTTI Type Descriptor'"
+# a name scoped inside a function reads, which is what a PDB's statics and lambdas look like
+MSVC_LOCAL_SCOPE = "?x@?1??f@@YAHXZ@4HA"
+MSVC_LOCAL_SCOPE_DEMANGLED = "int `int __cdecl f(void)'::`2'::x"
 
 
 def decode_fixture(path):
@@ -85,11 +103,23 @@ class PdbFragmentAttributionTestSuite(unittest.TestCase):
         provider._parseSymbols(FakePdb(functions))
         return provider
 
-    def test_a_non_rust_entry_point_is_reported_as_the_pdb_spells_it(self):
-        provider = self._providerWith([make_function("?mangled@@YAXXZ", 0x1000, 0x40)])
-        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "?mangled@@YAXXZ")
-        self.assertEqual(provider.getFunctionSymbols(), {BASE_ADDR + 0x1000: "?mangled@@YAXXZ"})
+    def test_an_undecorated_entry_point_is_reported_as_the_pdb_spells_it(self):
+        provider = self._providerWith([make_function("_platform_seed", 0x1000, 0x40)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "_platform_seed")
+        self.assertEqual(provider.getFunctionSymbols(), {BASE_ADDR + 0x1000: "_platform_seed"})
         self.assertTrue(provider.is_active())
+
+    def test_an_msvc_entry_point_is_reported_demangled(self):
+        provider = self._providerWith([make_function(MSVC_PUBLIC, 0x1000, 0x40)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), MSVC_PUBLIC_DEMANGLED)
+
+    def test_a_fragment_of_an_msvc_procedure_is_labelled_with_the_readable_name(self):
+        provider = self._providerWith([make_function(MSVC_PUBLIC, 0x1000, 0x100)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1060), f"{MSVC_PUBLIC_DEMANGLED}$+0x60")
+
+    def test_a_fragment_of_a_declined_msvc_procedure_keeps_the_decorated_parent(self):
+        provider = self._providerWith([make_function("?a2@@YAHX", 0x1000, 0x100)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1060), "?a2@@YAHX$+0x60")
 
     def test_a_rust_entry_point_is_reported_demangled(self):
         provider = self._providerWith([make_function(RUST_MAIN, 0x1000, 0x40)])
@@ -144,6 +174,23 @@ class PdbFragmentAttributionTestSuite(unittest.TestCase):
         )
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "_FlushFileBuffers@4")
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1060), "")
+
+    def test_a_name_holding_a_control_character_is_skipped(self):
+        provider = self._providerWith(
+            [make_function("clean", 0x1000, 0x40), make_function("bell\x07name", 0x2000, 0x40)]
+        )
+        self.assertEqual(provider.getFunctionSymbols(), {BASE_ADDR + 0x1000: "clean"})
+        # nor may it become a fragment parent, which would carry the byte into every label
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x2010), "")
+
+    def test_a_non_ascii_name_is_kept(self):
+        # a demangled Rust identifier is legitimately non-ASCII; only control bytes are refused
+        provider = self._providerWith([make_function("hello::wörld", 0x1000, 0x40)])
+        self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), "hello::wörld")
+
+    def test_an_empty_name_is_skipped(self):
+        provider = self._providerWith([make_function("", 0x1000, 0x40)])
+        self.assertEqual(provider.getFunctionSymbols(), {})
 
     def test_a_procedure_without_a_resolvable_rva_is_skipped(self):
         unresolved = make_function("unresolved", 0x1000, 0x100)
@@ -316,8 +363,24 @@ class PdbSymbolDemanglingTestSuite(unittest.TestCase):
         self.assertEqual(demangle(name), "")
         self.assertEqual(_demangleSymbolName(name), name)
 
-    def test_an_msvc_decorated_name_is_left_to_the_reader(self):
-        self.assertEqual(_demangleSymbolName("?mangled@@YAXXZ"), "?mangled@@YAXXZ")
+    def test_an_msvc_decorated_name_is_demangled(self):
+        self.assertEqual(_demangleSymbolName(MSVC_PUBLIC), MSVC_PUBLIC_DEMANGLED)
+        self.assertEqual(_demangleSymbolName("?mangled@@YAXXZ"), "void __cdecl mangled(void)")
+
+    def test_an_msvc_name_the_demangler_declines_keeps_its_decorated_spelling(self):
+        for name in MSVC_DECLINED:
+            self.assertEqual(_demangleSymbolName(name), name)
+
+    def test_an_rtti_type_descriptor_is_demangled(self):
+        self.assertEqual(_demangleSymbolName(MSVC_RTTI), MSVC_RTTI_DEMANGLED)
+
+    def test_a_name_scoped_inside_a_function_is_demangled(self):
+        # a PDB carries these by the hundred: every function-local static and lambda
+        self.assertEqual(_demangleSymbolName(MSVC_LOCAL_SCOPE), MSVC_LOCAL_SCOPE_DEMANGLED)
+
+    def test_a_name_that_only_looks_msvc_is_left_alone(self):
+        for name in ("?", "?????", "?not a symbol"):
+            self.assertEqual(_demangleSymbolName(name), name)
 
     def test_an_unexpected_demangler_failure_keeps_the_original_name(self):
         with mock.patch.object(pdb_module, "is_rust_language_evidence", side_effect=RecursionError):
@@ -335,6 +398,44 @@ class PdbSymbolDemanglingTestSuite(unittest.TestCase):
             provider._parseSymbols(FakePdb(functions))
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x1000), RUST_MAIN)
         self.assertEqual(provider.getSymbol(BASE_ADDR + 0x2000), RUST_MAIN)
+
+
+class MsvcPdbFixtureTestSuite(unittest.TestCase):
+    """The x64 fixture pair is a clang-cl/lld-link DLL built from two translation units, one
+    compiled with /Z7 and one without, so the PDB carries both name shapes a real MSVC build
+    produces: procedure records that already spell the name, and decorated publics."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.exe_path = os.path.join(self.tempdir.name, "sample.exe")
+        self.pdb_path = os.path.join(self.tempdir.name, "sample.pdb")
+        for path, fixture in ((self.exe_path, MSVC_PE_FIXTURE), (self.pdb_path, MSVC_PDB_FIXTURE)):
+            with open(path, "wb") as fout:
+                fout.write(decode_fixture(fixture))
+
+    def _provider(self):
+        provider = PdbSymbolProvider(None)
+        provider.update(make_binary_info(self.pdb_path))
+        return provider
+
+    def test_a_decorated_public_is_reported_as_a_signature(self):
+        self.assertEqual(self._provider().getSymbol(BASE_ADDR + MSVC_PUBLIC_RVA), MSVC_PUBLIC_DEMANGLED)
+
+    def test_a_procedure_record_name_is_reported_as_the_pdb_spells_it(self):
+        self.assertEqual(self._provider().getSymbol(BASE_ADDR + MSVC_PROC_RVA), MSVC_PROC_NAME)
+
+    def test_no_reported_name_stays_decorated(self):
+        names = self._provider().getFunctionSymbols().values()
+        self.assertTrue(names)
+        self.assertEqual([name for name in names if name.startswith("?")], [])
+
+    def test_a_supplied_pdb_names_the_functions_it_describes(self):
+        report = Disassembler(backend="intel").disassembleFile(self.exe_path, pdb_path=self.pdb_path)
+        self.assertEqual(report.status, "ok")
+        named = {function.function_name for function in report.getFunctions()}
+        self.assertIn(MSVC_PUBLIC_DEMANGLED, named)
+        self.assertIn(MSVC_PROC_NAME, named)
 
 
 if __name__ == "__main__":

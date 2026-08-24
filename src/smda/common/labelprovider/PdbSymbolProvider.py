@@ -9,6 +9,7 @@ import purepdb
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .MsvcDemangler import demangle_msvc_symbol
 from .rust_demangler import demangle
 from .RustSymbolEvidence import is_rust_language_evidence
 
@@ -19,20 +20,22 @@ IMPORT_MODULE_PREFIX = "Import:"
 
 
 def _demangleSymbolName(name):
-    """Return the readable form of a Rust symbol, or the name as the PDB spells it."""
+    """Return the readable form of an MSVC or Rust symbol, or the name as the PDB spells it."""
     try:
+        if name.startswith("?"):
+            return demangle_msvc_symbol(name)
         if is_rust_language_evidence(name):
             demangled = demangle(name)
             if demangled:
                 return demangled
     except Exception as exc:
         reraise_non_operational_exception(exc)
-        LOGGER.debug("Failed to demangle Rust symbol %s: %s", name, exc)
+        LOGGER.debug("Failed to demangle symbol %s: %s", name, exc)
     return name
 
 
 class PdbSymbolProvider(AbstractLabelProvider):
-    """Resolver for PDB symbols. Rust names are demangled; every other name is
+    """Resolver for PDB symbols. MSVC and Rust names are demangled; every other name is
     reported as the PDB stores it."""
 
     def __init__(self, config):
@@ -105,6 +108,11 @@ class PdbSymbolProvider(AbstractLabelProvider):
                 continue
             address = self._base_addr + function.rva
             name = _demangleSymbolName(function.name)
+            if not name or any(char < " " or char == "\x7f" for char in name):
+                # a PDB string table holds whatever bytes were written into it, and this name
+                # travels into the serialized report; the test is for control characters
+                # rather than for non-ASCII, which a demangled Rust identifier legitimately is
+                continue
             self._func_symbols[address] = name
             module = function.module or ""
             if function.code_size and not module.startswith(IMPORT_MODULE_PREFIX):
