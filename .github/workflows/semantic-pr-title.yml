@@ -20,6 +20,9 @@ permissions:
 jobs:
   validate-pr-title:
     name: Validate PR title
+    # Dependabot titles its PRs with a deps/deps-dev scope that this list does not allow,
+    # and its titles are not editable by a maintainer without closing the PR.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check Conventional Commit format
