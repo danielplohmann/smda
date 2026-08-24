@@ -5,6 +5,7 @@ import traceback
 from typing import Any, List, Optional
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
+from smda.aarch64.definitions import looksLikeAArch64
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -227,19 +228,30 @@ class Disassembler:
         bitness: Optional[int] = None,
         code_areas: Optional[List[Any]] = None,
         oep: Optional[int] = None,
-        architecture: str = "intel",
+        architecture: str = "",
     ) -> SmdaReport:
         """
         Disassemble a given buffer (file_content), with given base_addr.
-        Optionally specify bitness, the areas to which disassembly should be limited to (code_areas) and an entry point (oep)
+        Optionally specify bitness, the areas to which disassembly should be limited to (code_areas), an entry point (oep)
+        and the architecture. Leaving the architecture empty asks for auto-detection and falls back to intel;
+        naming one is honoured as given, so a caller can hand foreign bytes to a specific backend deliberately.
         """
-        # Auto-detect DEX when the caller did not explicitly override architecture.
-        # disassembleUnmappedBuffer / disassembleFile already use FileLoader for detection;
-        # this path bypasses it, so we check the magic bytes manually here.
-        if not self._explicit_backend and architecture == "intel" and DexFileLoader.isCompatible(file_content):
-            architecture = "dalvik"
-            if bitness is None:
-                bitness = DexFileLoader.getBitness(file_content)
+        # disassembleUnmappedBuffer / disassembleFile detect the architecture through
+        # FileLoader; this path bypasses it, so an unspecified architecture is decided
+        # from the bytes here.
+        if not self._explicit_backend and not architecture:
+            if DexFileLoader.isCompatible(file_content):
+                architecture = "dalvik"
+                if bitness is None:
+                    bitness = DexFileLoader.getBitness(file_content)
+            elif looksLikeAArch64(file_content):
+                # A dump carries no container header to read the instruction set from, and
+                # decoding AArch64 as x86 produces a full report whose every block is wrong.
+                LOGGER.warning("Buffer contains AArch64 machine code; disassembling as aarch64 rather than intel.")
+                architecture = "aarch64"
+                if bitness is None:
+                    bitness = 64
+        architecture = architecture or "intel"
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
         binary_info.bitness = bitness
