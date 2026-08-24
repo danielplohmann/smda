@@ -301,12 +301,12 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
         binary_info = _binary_info(elf)
         with mock.patch("lief.ELF.Binary", _MockElfBinary):
             resolver.update(binary_info)
-            # The human-readable label view demangles ...
-            self.assertEqual(provider.parseImports(elf), {0x4000: (None, "operator new(unsigned long)")})
-        # ... while API references stay comparable with PE and Mach-O import names.
+            self.assertEqual(provider.parseImports(elf), {0x4000: (None, "_Znwm")})
+        # both views spell the import the way the binary does, so the merged
+        # xmetadata entry cannot hold two spellings of the same import
         self.assertEqual(resolver.getApi(0x4000), (None, "_Znwm"))
 
-    def test_elf_exports_and_imports_use_itanium_demangling(self):
+    def test_elf_exports_demangle_while_imports_keep_their_encoded_name(self):
         imported = _MockSymbol("_Z3barv", imported=True)
         elf = _MockElfBinary(
             exported_functions=[_MockExport("_Z3foov", 0x1000)],
@@ -324,7 +324,7 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
             ),
         ):
             self.assertEqual(provider.parseExports(elf), {0x1000: "foo()"})
-            self.assertEqual(provider.parseImports(elf), {0x4000: (None, "bar()")})
+            self.assertEqual(provider.parseImports(elf), {0x4000: (None, "_Z3barv")})
 
     def test_binary_info_elf_imported_functions_use_relocation_slots(self):
         binary_info = BinaryInfo(b"")
@@ -335,6 +335,25 @@ class TestElfApiSymbolSeparation(unittest.TestCase):
         ):
             imported = binary_info.getImportedFunctions()
         self.assertEqual(imported, {0x4000: (None, "printf")})
+
+    def test_binary_info_elf_imported_functions_stay_encoded(self):
+        imported = _MockSymbol("_Z3barv", imported=True)
+        elf = _MockElfBinary(
+            exported_functions=[],
+            symtab_symbols=[],
+            dynamic_symbols=[imported],
+            relocations=[_MockReloc(0x4000, imported)],
+            entrypoint=0,
+        )
+        binary_info = BinaryInfo(b"")
+        binary_info.base_addr = 0x400000
+        with (
+            mock.patch.object(binary_info, "getLiefBinary", return_value=elf),
+            mock.patch("lief.ELF.Binary", _MockElfBinary),
+        ):
+            # BinarySynthesizer writes these back as the literal names of a reconstructed
+            # import table, so a signature here would be an unusable import name
+            self.assertEqual(binary_info.getImportedFunctions(), {0x4000: (None, "_Z3barv")})
 
     def test_binary_info_elf_symbols_merge_symtab_sources(self):
         binary_info = BinaryInfo(b"")

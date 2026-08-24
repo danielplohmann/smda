@@ -287,6 +287,26 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         assert relocations[slot_a].symbol.name == "system"
         assert relocations[slot_b].symbol.name == "strdup"
 
+    def testDecoratedImportNamesReachTheImportTableVerbatim(self):
+        pe_report = SmdaReport.fromDict(self.pe_report.toDict())
+        pe_slot = min(int(key) for key in pe_report.xmetadata["imported_functions"])
+        pe_report.xmetadata["imported_functions"] = {pe_slot: ("solver.dll", "?compute@Solver@@QEAAHH@Z")}
+        parsed = lief.parse(pe_report.synthesizeBinary())
+        pe_names = {entry.name for imported in parsed.imports for entry in imported.entries if entry.name}
+        assert "?compute@Solver@@QEAAHH@Z" in pe_names
+
+        elf_report = SmdaReport.fromDict(self.elf_report.toDict())
+        data_va = next(start for name, start, _ in self.elf_report.code_sections if name == ".data")
+        elf_report.xmetadata["imported_functions"] = {data_va + 0x8: ("libstdc++.so.6", "_Znwm")}
+        parsed = lief.parse(elf_report.synthesizeBinary())
+        assert "_Znwm" in {symbol.name for symbol in parsed.dynamic_symbols}
+
+        macho_report = SmdaReport.fromDict(self.macho_report.toDict())
+        macho_slot = min(int(key) for key in macho_report.xmetadata["imported_functions"])
+        macho_report.xmetadata["imported_functions"] = {macho_slot: ("/usr/lib/libc++.1.dylib", "__Znwm")}
+        parsed = lief.parse(macho_report.synthesizeBinary())
+        assert "__Znwm" in {symbol.name for symbol in parsed.symbols}
+
     def testFunctionsOutsideEverySectionGetASyntheticSection(self):
         # keeps the header (so the full path runs, not the minimal one) but moves every
         # section clear of the functions, which is the branch that builds the synthetic
