@@ -1,0 +1,620 @@
+# MSVC mangled names, one per line, followed by a tab and the spelling that
+# llvm-undname 22.1.7 produces for it.
+#
+# The mangled names are the corpus from LLVM's demangler tests
+# (llvm/test/Demangle/ms-*.test), which LLVM publishes under the Apache License 2.0
+# with the LLVM exception; the expected column was produced by running llvm-undname
+# over them. Duplicates present in the upstream files were dropped.
+#
+# They are kept here so the demangler can be measured against a reference rather than
+# against its own output: every name must come back either exactly as listed, or
+# unchanged, and never as a third spelling.
+?foo@@YAXI@Z	void __cdecl foo(unsigned int)
+?foo@@YAXN@Z	void __cdecl foo(double)
+?foo_pad@@YAXPAD@Z	void __cdecl foo_pad(char *)
+?foo_pad@@YAXPEAD@Z	void __cdecl foo_pad(char *)
+?foo_pbd@@YAXPBD@Z	void __cdecl foo_pbd(char const *)
+?foo_pbd@@YAXPEBD@Z	void __cdecl foo_pbd(char const *)
+?foo_pcd@@YAXPCD@Z	void __cdecl foo_pcd(char volatile *)
+?foo_pcd@@YAXPECD@Z	void __cdecl foo_pcd(char volatile *)
+?foo_qad@@YAXQAD@Z	void __cdecl foo_qad(char *const)
+?foo_qad@@YAXQEAD@Z	void __cdecl foo_qad(char *const)
+?foo_rad@@YAXRAD@Z	void __cdecl foo_rad(char *volatile)
+?foo_rad@@YAXREAD@Z	void __cdecl foo_rad(char *volatile)
+?foo_sad@@YAXSAD@Z	void __cdecl foo_sad(char *const volatile)
+?foo_sad@@YAXSEAD@Z	void __cdecl foo_sad(char *const volatile)
+?foo_piad@@YAXPIAD@Z	void __cdecl foo_piad(char *__restrict)
+?foo_piad@@YAXPEIAD@Z	void __cdecl foo_piad(char *__restrict)
+?foo_qiad@@YAXQIAD@Z	void __cdecl foo_qiad(char *const __restrict)
+?foo_qiad@@YAXQEIAD@Z	void __cdecl foo_qiad(char *const __restrict)
+?foo_riad@@YAXRIAD@Z	void __cdecl foo_riad(char *volatile __restrict)
+?foo_riad@@YAXREIAD@Z	void __cdecl foo_riad(char *volatile __restrict)
+?foo_siad@@YAXSIAD@Z	void __cdecl foo_siad(char *const volatile __restrict)
+?foo_siad@@YAXSEIAD@Z	void __cdecl foo_siad(char *const volatile __restrict)
+?foo_papad@@YAXPAPAD@Z	void __cdecl foo_papad(char **)
+?foo_papad@@YAXPEAPEAD@Z	void __cdecl foo_papad(char **)
+?foo_papbd@@YAXPAPBD@Z	void __cdecl foo_papbd(char const **)
+?foo_papbd@@YAXPEAPEBD@Z	void __cdecl foo_papbd(char const **)
+?foo_papcd@@YAXPAPCD@Z	void __cdecl foo_papcd(char volatile **)
+?foo_papcd@@YAXPEAPECD@Z	void __cdecl foo_papcd(char volatile **)
+?foo_pbqad@@YAXPBQAD@Z	void __cdecl foo_pbqad(char *const *)
+?foo_pbqad@@YAXPEBQEAD@Z	void __cdecl foo_pbqad(char *const *)
+?foo_pcrad@@YAXPCRAD@Z	void __cdecl foo_pcrad(char *volatile *)
+?foo_pcrad@@YAXPECREAD@Z	void __cdecl foo_pcrad(char *volatile *)
+?foo_qapad@@YAXQAPAD@Z	void __cdecl foo_qapad(char **const)
+?foo_qapad@@YAXQEAPEAD@Z	void __cdecl foo_qapad(char **const)
+?foo_rapad@@YAXRAPAD@Z	void __cdecl foo_rapad(char **volatile)
+?foo_rapad@@YAXREAPEAD@Z	void __cdecl foo_rapad(char **volatile)
+?foo_pbqbd@@YAXPBQBD@Z	void __cdecl foo_pbqbd(char const *const *)
+?foo_pbqbd@@YAXPEBQEBD@Z	void __cdecl foo_pbqbd(char const *const *)
+?foo_pbqcd@@YAXPBQCD@Z	void __cdecl foo_pbqcd(char volatile *const *)
+?foo_pbqcd@@YAXPEBQECD@Z	void __cdecl foo_pbqcd(char volatile *const *)
+?foo_pcrbd@@YAXPCRBD@Z	void __cdecl foo_pcrbd(char const *volatile *)
+?foo_pcrbd@@YAXPECREBD@Z	void __cdecl foo_pcrbd(char const *volatile *)
+?foo_pcrcd@@YAXPCRCD@Z	void __cdecl foo_pcrcd(char volatile *volatile *)
+?foo_pcrcd@@YAXPECRECD@Z	void __cdecl foo_pcrcd(char volatile *volatile *)
+?foo_aad@@YAXAAD@Z	void __cdecl foo_aad(char &)
+?foo_aad@@YAXAEAD@Z	void __cdecl foo_aad(char &)
+?foo_abd@@YAXABD@Z	void __cdecl foo_abd(char const &)
+?foo_abd@@YAXAEBD@Z	void __cdecl foo_abd(char const &)
+?foo_aapad@@YAXAAPAD@Z	void __cdecl foo_aapad(char *&)
+?foo_aapad@@YAXAEAPEAD@Z	void __cdecl foo_aapad(char *&)
+?foo_aapbd@@YAXAAPBD@Z	void __cdecl foo_aapbd(char const *&)
+?foo_aapbd@@YAXAEAPEBD@Z	void __cdecl foo_aapbd(char const *&)
+?foo_abqad@@YAXABQAD@Z	void __cdecl foo_abqad(char *const &)
+?foo_abqad@@YAXAEBQEAD@Z	void __cdecl foo_abqad(char *const &)
+?foo_abqbd@@YAXABQBD@Z	void __cdecl foo_abqbd(char const *const &)
+?foo_abqbd@@YAXAEBQEBD@Z	void __cdecl foo_abqbd(char const *const &)
+?foo_aay144h@@YAXAAY144H@Z	void __cdecl foo_aay144h(int (&)[5][5])
+?foo_aay144h@@YAXAEAY144H@Z	void __cdecl foo_aay144h(int (&)[5][5])
+?foo_aay144cbh@@YAXAAY144$$CBH@Z	void __cdecl foo_aay144cbh(int const (&)[5][5])
+?foo_aay144cbh@@YAXAEAY144$$CBH@Z	void __cdecl foo_aay144cbh(int const (&)[5][5])
+?foo_qay144h@@YAX$$QAY144H@Z	void __cdecl foo_qay144h(int (&&)[5][5])
+?foo_qay144h@@YAX$$QEAY144H@Z	void __cdecl foo_qay144h(int (&&)[5][5])
+?foo_qay144cbh@@YAX$$QAY144$$CBH@Z	void __cdecl foo_qay144cbh(int const (&&)[5][5])
+?foo_qay144cbh@@YAX$$QEAY144$$CBH@Z	void __cdecl foo_qay144cbh(int const (&&)[5][5])
+?foo_p6ahxz@@YAXP6AHXZ@Z	void __cdecl foo_p6ahxz(int (__cdecl *)(void))
+?foo_a6ahxz@@YAXA6AHXZ@Z	void __cdecl foo_a6ahxz(int (__cdecl &)(void))
+?foo_q6ahxz@@YAX$$Q6AHXZ@Z	void __cdecl foo_q6ahxz(int (__cdecl &&)(void))
+?foo_qay04h@@YAXQAY04H@Z	void __cdecl foo_qay04h(int (*const)[5])
+?foo_qay04h@@YAXQEAY04H@Z	void __cdecl foo_qay04h(int (*const)[5])
+?foo_qay04cbh@@YAXQAY04$$CBH@Z	void __cdecl foo_qay04cbh(int const (*const)[5])
+?foo_qay04cbh@@YAXQEAY04$$CBH@Z	void __cdecl foo_qay04cbh(int const (*const)[5])
+?foo@@YAXPAY02N@Z	void __cdecl foo(double (*)[3])
+?foo@@YAXPEAY02N@Z	void __cdecl foo(double (*)[3])
+?foo@@YAXQAN@Z	void __cdecl foo(double *const)
+?foo@@YAXQEAN@Z	void __cdecl foo(double *const)
+?foo_const@@YAXQBN@Z	void __cdecl foo_const(double const *const)
+?foo_const@@YAXQEBN@Z	void __cdecl foo_const(double const *const)
+?foo_volatile@@YAXQCN@Z	void __cdecl foo_volatile(double volatile *const)
+?foo_volatile@@YAXQECN@Z	void __cdecl foo_volatile(double volatile *const)
+?foo@@YAXPAY02NQBNN@Z	void __cdecl foo(double (*)[3], double const *const, double)
+?foo@@YAXPEAY02NQEBNN@Z	void __cdecl foo(double (*)[3], double const *const, double)
+?foo_fnptrconst@@YAXP6AXQAH@Z@Z	void __cdecl foo_fnptrconst(void (__cdecl *)(int *const))
+?foo_fnptrconst@@YAXP6AXQEAH@Z@Z	void __cdecl foo_fnptrconst(void (__cdecl *)(int *const))
+?foo_fnptrarray@@YAXP6AXQAH@Z@Z	void __cdecl foo_fnptrarray(void (__cdecl *)(int *const))
+?foo_fnptrarray@@YAXP6AXQEAH@Z@Z	void __cdecl foo_fnptrarray(void (__cdecl *)(int *const))
+?foo_fnptrbackref1@@YAXP6AXQAH@Z1@Z	void __cdecl foo_fnptrbackref1(void (__cdecl *)(int *const), void (__cdecl *)(int *const))
+?foo_fnptrbackref1@@YAXP6AXQEAH@Z1@Z	void __cdecl foo_fnptrbackref1(void (__cdecl *)(int *const), void (__cdecl *)(int *const))
+?foo_fnptrbackref2@@YAXP6AXQAH@Z1@Z	void __cdecl foo_fnptrbackref2(void (__cdecl *)(int *const), void (__cdecl *)(int *const))
+?foo_fnptrbackref2@@YAXP6AXQEAH@Z1@Z	void __cdecl foo_fnptrbackref2(void (__cdecl *)(int *const), void (__cdecl *)(int *const))
+?foo_fnptrbackref3@@YAXP6AXQAH@Z1@Z	void __cdecl foo_fnptrbackref3(void (__cdecl *)(int *const), void (__cdecl *)(int *const))
+?foo_fnptrbackref3@@YAXP6AXQEAH@Z1@Z	void __cdecl foo_fnptrbackref3(void (__cdecl *)(int *const), void (__cdecl *)(int *const))
+?foo_fnptrbackref4@@YAXP6AXPAH@Z1@Z	void __cdecl foo_fnptrbackref4(void (__cdecl *)(int *), void (__cdecl *)(int *))
+?foo_fnptrbackref4@@YAXP6AXPEAH@Z1@Z	void __cdecl foo_fnptrbackref4(void (__cdecl *)(int *), void (__cdecl *)(int *))
+?ret_fnptrarray@@YAP6AXQAH@ZXZ	void (__cdecl * __cdecl ret_fnptrarray(void))(int *const)
+?ret_fnptrarray@@YAP6AXQEAH@ZXZ	void (__cdecl * __cdecl ret_fnptrarray(void))(int *const)
+?mangle_no_backref0@@YAXQAHPAH@Z	void __cdecl mangle_no_backref0(int *const, int *)
+?mangle_no_backref0@@YAXQEAHPEAH@Z	void __cdecl mangle_no_backref0(int *const, int *)
+?mangle_no_backref1@@YAXQAHQAH@Z	void __cdecl mangle_no_backref1(int *const, int *const)
+?mangle_no_backref1@@YAXQEAHQEAH@Z	void __cdecl mangle_no_backref1(int *const, int *const)
+?mangle_no_backref2@@YAXP6AXXZP6AXXZ@Z	void __cdecl mangle_no_backref2(void (__cdecl *)(void), void (__cdecl *)(void))
+?mangle_yes_backref0@@YAXQAH0@Z	void __cdecl mangle_yes_backref0(int *const, int *const)
+?mangle_yes_backref0@@YAXQEAH0@Z	void __cdecl mangle_yes_backref0(int *const, int *const)
+?mangle_yes_backref1@@YAXQAH0@Z	void __cdecl mangle_yes_backref1(int *const, int *const)
+?mangle_yes_backref1@@YAXQEAH0@Z	void __cdecl mangle_yes_backref1(int *const, int *const)
+?mangle_yes_backref2@@YAXQBQ6AXXZ0@Z	void __cdecl mangle_yes_backref2(void (__cdecl *const *const)(void), void (__cdecl *const *const)(void))
+?mangle_yes_backref2@@YAXQEBQ6AXXZ0@Z	void __cdecl mangle_yes_backref2(void (__cdecl *const *const)(void), void (__cdecl *const *const)(void))
+?mangle_yes_backref3@@YAXQAP6AXXZ0@Z	void __cdecl mangle_yes_backref3(void (__cdecl **const)(void), void (__cdecl **const)(void))
+?mangle_yes_backref3@@YAXQEAP6AXXZ0@Z	void __cdecl mangle_yes_backref3(void (__cdecl **const)(void), void (__cdecl **const)(void))
+?mangle_yes_backref4@@YAXQIAH0@Z	void __cdecl mangle_yes_backref4(int *const __restrict, int *const __restrict)
+?mangle_yes_backref4@@YAXQEIAH0@Z	void __cdecl mangle_yes_backref4(int *const __restrict, int *const __restrict)
+?pr23325@@YAXQBUS@@0@Z	void __cdecl pr23325(struct S const *const, struct S const *const)
+?pr23325@@YAXQEBUS@@0@Z	void __cdecl pr23325(struct S const *const, struct S const *const)
+?f1@@YAXPBD0@Z	void __cdecl f1(char const *, char const *)
+?f2@@YAXPBDPAD@Z	void __cdecl f2(char const *, char *)
+?f3@@YAXHPBD0@Z	void __cdecl f3(int, char const *, char const *)
+?f4@@YAPBDPBD0@Z	char const * __cdecl f4(char const *, char const *)
+?f5@@YAXPBDIDPBX0I@Z	void __cdecl f5(char const *, unsigned int, char, void const *, char const *, unsigned int)
+?f6@@YAX_N0@Z	void __cdecl f6(bool, bool)
+?f7@@YAXHPAHH0_N1PA_N@Z	void __cdecl f7(int, int *, int, int *, bool, bool, bool *)
+?g1@@YAXUS@@@Z	void __cdecl g1(struct S)
+?g2@@YAXUS@@0@Z	void __cdecl g2(struct S, struct S)
+?g3@@YAXUS@@0PAU1@1@Z	void __cdecl g3(struct S, struct S, struct S *, struct S *)
+?g4@@YAXPBDPAUS@@01@Z	void __cdecl g4(char const *, struct S *, char const *, struct S *)
+?mbb@S@@QAEX_N0@Z	public: void __thiscall S::mbb(bool, bool)
+?h1@@YAXPBD0P6AXXZ1@Z	void __cdecl h1(char const *, char const *, void (__cdecl *)(void), void (__cdecl *)(void))
+?h2@@YAXP6AXPAX@Z0@Z	void __cdecl h2(void (__cdecl *)(void *), void *)
+?h3@@YAP6APAHPAH0@ZP6APAH00@Z10@Z	int * (__cdecl * __cdecl h3(int * (__cdecl *)(int *, int *), int * (__cdecl *)(int *, int *), int *))(int *, int *)
+?foo@0@YAXXZ	void __cdecl foo::foo(void)
+??$?HH@S@@QEAAAEAU0@H@Z	public: struct S & __cdecl S::operator+<int>(int)
+?foo_abbb@@YAXV?$A@V?$B@D@@V1@V1@@@@Z	void __cdecl foo_abbb(class A<class B<char>, class B<char>, class B<char>>)
+?foo_abb@@YAXV?$A@DV?$B@D@@V1@@@@Z	void __cdecl foo_abb(class A<char, class B<char>, class B<char>>)
+?foo_abc@@YAXV?$A@DV?$B@D@@V?$C@D@@@@@Z	void __cdecl foo_abc(class A<char, class B<char>, class C<char>>)
+?foo_bt@@YAX_NV?$B@$$A6A_N_N@Z@@@Z	void __cdecl foo_bt(bool, class B<bool __cdecl(bool)>)
+?foo_abbb@@YAXV?$A@V?$B@D@N@@V12@V12@@N@@@Z	void __cdecl foo_abbb(class N::A<class N::B<char>, class N::B<char>, class N::B<char>>)
+?foo_abb@@YAXV?$A@DV?$B@D@N@@V12@@N@@@Z	void __cdecl foo_abb(class N::A<char, class N::B<char>, class N::B<char>>)
+?foo_abc@@YAXV?$A@DV?$B@D@N@@V?$C@D@2@@N@@@Z	void __cdecl foo_abc(class N::A<char, class N::B<char>, class N::C<char>>)
+?abc_foo@@YA?AV?$A@DV?$B@D@N@@V?$C@D@2@@N@@XZ	class N::A<char, class N::B<char>, class N::C<char>> __cdecl abc_foo(void)
+?z_foo@@YA?AVZ@N@@V12@@Z	class N::Z __cdecl z_foo(class N::Z)
+?b_foo@@YA?AV?$B@D@N@@V12@@Z	class N::B<char> __cdecl b_foo(class N::B<char>)
+?d_foo@@YA?AV?$D@DD@N@@V12@@Z	class N::D<char, char> __cdecl d_foo(class N::D<char, char>)
+?abc_foo_abc@@YA?AV?$A@DV?$B@D@N@@V?$C@D@2@@N@@V12@@Z	class N::A<char, class N::B<char>, class N::C<char>> __cdecl abc_foo_abc(class N::A<char, class N::B<char>, class N::C<char>>)
+?foo5@@YAXV?$Y@V?$Y@V?$Y@V?$Y@VX@NA@@@NB@@@NA@@@NB@@@NA@@@Z	void __cdecl foo5(class NA::Y<class NB::Y<class NA::Y<class NB::Y<class NA::X>>>>)
+?foo11@@YAXV?$Y@VX@NA@@@NA@@V1NB@@@Z	void __cdecl foo11(class NA::Y<class NA::X>, class NB::Y<class NA::X>)
+?foo112@@YAXV?$Y@VX@NA@@@NA@@V?$Y@VX@NB@@@NB@@@Z	void __cdecl foo112(class NA::Y<class NA::X>, class NB::Y<class NB::X>)
+?foo22@@YAXV?$Y@V?$Y@VX@NA@@@NB@@@NA@@V?$Y@V?$Y@VX@NA@@@NA@@@NB@@@Z	void __cdecl foo22(class NA::Y<class NB::Y<class NA::X>>, class NB::Y<class NA::Y<class NA::X>>)
+?foo@L@PR13207@@QAEXV?$I@VA@PR13207@@@2@@Z	public: void __thiscall PR13207::L::foo(class PR13207::I<class PR13207::A>)
+?foo@PR13207@@YAXV?$I@VA@PR13207@@@1@@Z	void __cdecl PR13207::foo(class PR13207::I<class PR13207::A>)
+?foo2@PR13207@@YAXV?$I@VA@PR13207@@@1@0@Z	void __cdecl PR13207::foo2(class PR13207::I<class PR13207::A>, class PR13207::I<class PR13207::A>)
+?bar@PR13207@@YAXV?$J@VA@PR13207@@VB@2@@1@@Z	void __cdecl PR13207::bar(class PR13207::J<class PR13207::A, class PR13207::B>)
+?spam@PR13207@@YAXV?$K@VA@PR13207@@VB@2@VC@2@@1@@Z	void __cdecl PR13207::spam(class PR13207::K<class PR13207::A, class PR13207::B, class PR13207::C>)
+?baz@PR13207@@YAXV?$K@DV?$F@D@PR13207@@V?$I@D@2@@1@@Z	void __cdecl PR13207::baz(class PR13207::K<char, class PR13207::F<char>, class PR13207::I<char>>)
+?qux@PR13207@@YAXV?$K@DV?$I@D@PR13207@@V12@@1@@Z	void __cdecl PR13207::qux(class PR13207::K<char, class PR13207::I<char>, class PR13207::I<char>>)
+?foo@NA@PR13207@@YAXV?$Y@VX@NA@PR13207@@@12@@Z	void __cdecl PR13207::NA::foo(class PR13207::NA::Y<class PR13207::NA::X>)
+?foofoo@NA@PR13207@@YAXV?$Y@V?$Y@VX@NA@PR13207@@@NA@PR13207@@@12@@Z	void __cdecl PR13207::NA::foofoo(class PR13207::NA::Y<class PR13207::NA::Y<class PR13207::NA::X>>)
+?foo@NB@PR13207@@YAXV?$Y@VX@NA@PR13207@@@12@@Z	void __cdecl PR13207::NB::foo(class PR13207::NB::Y<class PR13207::NA::X>)
+?bar@NB@PR13207@@YAXV?$Y@VX@NB@PR13207@@@NA@2@@Z	void __cdecl PR13207::NB::bar(class PR13207::NA::Y<class PR13207::NB::X>)
+?spam@NB@PR13207@@YAXV?$Y@VX@NA@PR13207@@@NA@2@@Z	void __cdecl PR13207::NB::spam(class PR13207::NA::Y<class PR13207::NA::X>)
+?foobar@NB@PR13207@@YAXV?$Y@V?$Y@VX@NB@PR13207@@@NB@PR13207@@@NA@2@V312@@Z	void __cdecl PR13207::NB::foobar(class PR13207::NA::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>)
+?foobarspam@NB@PR13207@@YAXV?$Y@VX@NB@PR13207@@@12@V?$Y@V?$Y@VX@NB@PR13207@@@NB@PR13207@@@NA@2@V412@@Z	void __cdecl PR13207::NB::foobarspam(class PR13207::NB::Y<class PR13207::NB::X>, class PR13207::NA::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>)
+?foobarbaz@NB@PR13207@@YAXV?$Y@VX@NB@PR13207@@@12@V?$Y@V?$Y@VX@NB@PR13207@@@NB@PR13207@@@NA@2@V412@2@Z	void __cdecl PR13207::NB::foobarbaz(class PR13207::NB::Y<class PR13207::NB::X>, class PR13207::NA::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>)
+?foobarbazqux@NB@PR13207@@YAXV?$Y@VX@NB@PR13207@@@12@V?$Y@V?$Y@VX@NB@PR13207@@@NB@PR13207@@@NA@2@V412@2V?$Y@V?$Y@V?$Y@VX@NB@PR13207@@@NB@PR13207@@@NB@PR13207@@@52@@Z	void __cdecl PR13207::NB::foobarbazqux(class PR13207::NB::Y<class PR13207::NB::X>, class PR13207::NA::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>, class PR13207::NA::Y<class PR13207::NB::Y<class PR13207::NB::Y<class PR13207::NB::X>>>)
+?foo@NC@PR13207@@YAXV?$Y@VX@NB@PR13207@@@12@@Z	void __cdecl PR13207::NC::foo(class PR13207::NC::Y<class PR13207::NB::X>)
+?foobar@NC@PR13207@@YAXV?$Y@V?$Y@V?$Y@VX@NA@PR13207@@@NA@PR13207@@@NB@PR13207@@@12@@Z	void __cdecl PR13207::NC::foobar(class PR13207::NC::Y<class PR13207::NB::Y<class PR13207::NA::Y<class PR13207::NA::X>>>)
+?fun_normal@fn_space@@YA?AURetVal@1@H@Z	struct fn_space::RetVal __cdecl fn_space::fun_normal(int)
+??$fun_tmpl@H@fn_space@@YA?AURetVal@0@ABH@Z	struct fn_space::RetVal __cdecl fn_space::fun_tmpl<int>(int const &)
+??$fun_tmpl_recurse@H$1??$fun_tmpl_recurse@H$1?ident@fn_space@@YA?AURetVal@2@H@Z@fn_space@@YA?AURetVal@1@H@Z@fn_space@@YA?AURetVal@0@H@Z	struct fn_space::RetVal __cdecl fn_space::fun_tmpl_recurse<int, &struct fn_space::RetVal __cdecl fn_space::fun_tmpl_recurse<int, &struct fn_space::RetVal __cdecl fn_space::ident(int)>(int)>(int)
+??$fun_tmpl_recurse@H$1?ident@fn_space@@YA?AURetVal@2@H@Z@fn_space@@YA?AURetVal@0@H@Z	struct fn_space::RetVal __cdecl fn_space::fun_tmpl_recurse<int, &struct fn_space::RetVal __cdecl fn_space::ident(int)>(int)
+?AddEmitPasses@EmitAssemblyHelper@?A0x43583946@@AEAA_NAEAVPassManager@legacy@llvm@@W4BackendAction@clang@@AEAVraw_pwrite_stream@5@PEAV85@@Z	private: bool __cdecl `anonymous namespace'::EmitAssemblyHelper::AddEmitPasses(class llvm::legacy::PassManager &, enum clang::BackendAction, class llvm::raw_pwrite_stream &, class llvm::raw_pwrite_stream *)
+??$forward@P8?$DecoderStream@$01@media@@AEXXZ@std@@YA$$QAP8?$DecoderStream@$01@media@@AEXXZAAP812@AEXXZ@Z	void (__thiscall media::DecoderStream<2>::*&& __cdecl std::forward<void (__thiscall media::DecoderStream<2>::*)(void)>(void (__thiscall media::DecoderStream<2>::*&)(void)))(void)
+?a@FTypeWithQuals@@3U?$S@$$A8@@BAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) const> FTypeWithQuals::a
+?b@FTypeWithQuals@@3U?$S@$$A8@@CAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) volatile> FTypeWithQuals::b
+?c@FTypeWithQuals@@3U?$S@$$A8@@IAAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) __restrict> FTypeWithQuals::c
+?d@FTypeWithQuals@@3U?$S@$$A8@@GBAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) const &> FTypeWithQuals::d
+?e@FTypeWithQuals@@3U?$S@$$A8@@GCAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) volatile &> FTypeWithQuals::e
+?f@FTypeWithQuals@@3U?$S@$$A8@@IGAAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) __restrict &> FTypeWithQuals::f
+?g@FTypeWithQuals@@3U?$S@$$A8@@HBAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) const &&> FTypeWithQuals::g
+?h@FTypeWithQuals@@3U?$S@$$A8@@HCAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) volatile &&> FTypeWithQuals::h
+?i@FTypeWithQuals@@3U?$S@$$A8@@IHAAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) __restrict &&> FTypeWithQuals::i
+?j@FTypeWithQuals@@3U?$S@$$A6AHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void)> FTypeWithQuals::j
+?k@FTypeWithQuals@@3U?$S@$$A8@@GAAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) &> FTypeWithQuals::k
+?l@FTypeWithQuals@@3U?$S@$$A8@@HAAHXZ@1@A	struct FTypeWithQuals::S<int __cdecl(void) &&> FTypeWithQuals::l
+?Char16Var@@3_SA	char16_t Char16Var
+?Char32Var@@3_UA	char32_t Char32Var
+?LRef@@YAXAAH@Z	void __cdecl LRef(int &)
+?RRef@@YAH$$QAH@Z	int __cdecl RRef(int &&)
+?Null@@YAX$$T@Z	void __cdecl Null(std::nullptr_t)
+?fun@PR18022@@YA?AU<unnamed-type-a>@1@U21@0@Z	struct PR18022::<unnamed-type-a> __cdecl PR18022::fun(struct PR18022::<unnamed-type-a>, struct PR18022::<unnamed-type-a>)
+?lambda@?1??define_lambda@@YAHXZ@4V<lambda_1>@?0??1@YAHXZ@A	class `int __cdecl define_lambda(void)'::`1'::<lambda_1> `int __cdecl define_lambda(void)'::`2'::lambda
+??R<lambda_1>@?0??define_lambda@@YAHXZ@QBE@XZ	public: __thiscall `int __cdecl define_lambda(void)'::`1'::<lambda_1>::operator()(void) const
+?local@?2???R<lambda_1>@?0??define_lambda@@YAHXZ@QBE@XZ@4HA	int `public: __thiscall `int __cdecl define_lambda(void)'::`1'::<lambda_1>::operator()(void) const'::`3'::local
+??$use_lambda_arg@V<lambda_1>@?0??call_with_lambda_arg1@@YAXXZ@@@YAXV<lambda_1>@?0??call_with_lambda_arg1@@YAXXZ@@Z	void __cdecl use_lambda_arg<class `void __cdecl call_with_lambda_arg1(void)'::`1'::<lambda_1>>(class `void __cdecl call_with_lambda_arg1(void)'::`1'::<lambda_1>)
+?foo@A@PR19361@@QIGAEXXZ	public: void __thiscall PR19361::A::foo(void) __restrict &
+?foo@A@PR19361@@QIHAEXXZ	public: void __thiscall PR19361::A::foo(void) __restrict &&
+??__K_deg@@YAHO@Z	int __cdecl operator ""_deg(long double)
+??$templ_fun_with_pack@$S@@YAXXZ	void __cdecl templ_fun_with_pack<>(void)
+??$func@H$$ZH@@YAHAEBU?$Foo@H@@0@Z	int __cdecl func<int, int>(struct Foo<int> const &, struct Foo<int> const &)
+??$templ_fun_with_ty_pack@$$$V@@YAXXZ	void __cdecl templ_fun_with_ty_pack<>(void)
+??$templ_fun_with_ty_pack@$$V@@YAXXZ	void __cdecl templ_fun_with_ty_pack<>(void)
+??$f@$$YAliasA@PR20047@@@PR20047@@YAXXZ	void __cdecl PR20047::f<PR20047::AliasA>(void)
+?f@UnnamedType@@YAXAAU<unnamed-type-TD>@A@1@@Z	void __cdecl UnnamedType::f(struct UnnamedType::A::<unnamed-type-TD> &)
+?f@UnnamedType@@YAXPAW4<unnamed-type-e>@?$B@H@1@@Z	void __cdecl UnnamedType::f(enum UnnamedType::B<int>::<unnamed-type-e> *)
+??$f@W4<unnamed-type-E>@?1??g@PR24651@@YAXXZ@@PR24651@@YAXW4<unnamed-type-E>@?1??g@0@YAXXZ@@Z	void __cdecl PR24651::f<enum `void __cdecl PR24651::g(void)'::`2'::<unnamed-type-E>>(enum `void __cdecl PR24651::g(void)'::`2'::<unnamed-type-E>)
+??$f@T<unnamed-type-$S1>@PR18204@@@PR18204@@YAHPAT<unnamed-type-$S1>@0@@Z	int __cdecl PR18204::f<union PR18204::<unnamed-type-$S1>>(union PR18204::<unnamed-type-$S1> *)
+??R<lambda_0>@?0??PR26105@@YAHXZ@QBE@H@Z	public: __thiscall `int __cdecl PR26105(void)'::`1'::<lambda_0>::operator()(int) const
+??R<lambda_1>@?0???R<lambda_0>@?0??PR26105@@YAHXZ@QBE@H@Z@QBE@H@Z	public: __thiscall `public: __thiscall `int __cdecl PR26105(void)'::`1'::<lambda_0>::operator()(int) const'::`1'::<lambda_1>::operator()(int) const
+?unaligned_foo1@@YAPFAHXZ	int __unaligned * __cdecl unaligned_foo1(void)
+?unaligned_foo2@@YAPFAPFAHXZ	int __unaligned *__unaligned * __cdecl unaligned_foo2(void)
+?unaligned_foo3@@YAHXZ	int __cdecl unaligned_foo3(void)
+?unaligned_foo4@@YAXPFAH@Z	void __cdecl unaligned_foo4(int __unaligned *)
+?unaligned_foo5@@YAXPIFAH@Z	void __cdecl unaligned_foo5(int __unaligned *__restrict)
+??$unaligned_foo6@PAH@@YAPAHPAH@Z	int * __cdecl unaligned_foo6<int *>(int *)
+??$unaligned_foo6@PFAH@@YAPFAHPFAH@Z	int __unaligned * __cdecl unaligned_foo6<int __unaligned *>(int __unaligned *)
+?unaligned_foo8@unaligned_foo8_S@@QFCEXXZ	public: void __thiscall unaligned_foo8_S::unaligned_foo8(void) volatile __unaligned
+??R<lambda_1>@x@A@PR31197@@QBE@XZ	public: __thiscall PR31197::A::x::<lambda_1>::operator()(void) const
+?white@?1???R<lambda_1>@x@A@PR31197@@QBE@XZ@4HA	int `public: __thiscall PR31197::A::x::<lambda_1>::operator()(void) const'::`2'::white
+?f@@YAXW4<unnamed-enum-enumerator>@@@Z	void __cdecl f(enum <unnamed-enum-enumerator>)
+?a@@3HA	int a
+?b@N@@3HA	int N::b
+?anonymous@?A@N@@3HA	int N::`anonymous namespace'::anonymous
+?$RT1@NeedsReferenceTemporary@@3ABHB	int const &NeedsReferenceTemporary::$RT1
+?$RT1@NeedsReferenceTemporary@@3AEBHEB	int const &NeedsReferenceTemporary::$RT1
+?_c@@YAHXZ	int __cdecl _c(void)
+?d@foo@@0FB	private: static short const foo::d
+?e@foo@@1JC	protected: static long volatile foo::e
+?f@foo@@2DD	public: static char const volatile foo::f
+??0foo@@QAE@XZ	public: __thiscall foo::foo(void)
+??0foo@@QEAA@XZ	public: __cdecl foo::foo(void)
+??1foo@@QAE@XZ	public: __thiscall foo::~foo(void)
+??1foo@@QEAA@XZ	public: __cdecl foo::~foo(void)
+??0foo@@QAE@H@Z	public: __thiscall foo::foo(int)
+??0foo@@QEAA@H@Z	public: __cdecl foo::foo(int)
+??0foo@@QAE@PAD@Z	public: __thiscall foo::foo(char *)
+??0foo@@QEAA@PEAD@Z	public: __cdecl foo::foo(char *)
+?bar@@YA?AVfoo@@XZ	class foo __cdecl bar(void)
+??Hfoo@@QAEHH@Z	public: int __thiscall foo::operator+(int)
+??Hfoo@@QEAAHH@Z	public: int __cdecl foo::operator+(int)
+??$?HH@S@@QEAAAEANH@Z	public: double & __cdecl S::operator+<int>(int)
+?static_method@foo@@SAPAV1@XZ	public: static class foo * __cdecl foo::static_method(void)
+?static_method@foo@@SAPEAV1@XZ	public: static class foo * __cdecl foo::static_method(void)
+?g@bar@@2HA	public: static int bar::g
+?h1@@3QAHA	int *const h1
+?h2@@3QBHB	int const *const h2
+?h3@@3QIAHIA	int *const __restrict h3
+?h3@@3QEIAHEIA	int *const __restrict h3
+?i@@3PAY0BE@HA	int (*i)[20]
+?FunArr@@3PAY0BE@P6AHHH@ZA	int (__cdecl *(*FunArr)[20])(int, int)
+?j@@3P6GHCE@ZA	int (__stdcall *j)(signed char, unsigned char)
+?funptr@@YAP6AHXZXZ	int (__cdecl * __cdecl funptr(void))(void)
+?m@@3PRfoo@@DR1@	char const foo::*m
+?m@@3PERfoo@@DER1@	char const foo::*m
+?k@@3PTfoo@@DT1@	char const volatile foo::*k
+?k@@3PETfoo@@DET1@	char const volatile foo::*k
+?l@@3P8foo@@AEHH@ZQ1@	int (__thiscall foo::*l)(int)
+?g_cInt@@3HB	int const g_cInt
+?g_vInt@@3HC	int volatile g_vInt
+?g_cvInt@@3HD	int const volatile g_cvInt
+?beta@@YI_N_J_W@Z	bool __fastcall beta(__int64, wchar_t)
+?beta@@YA_N_J_W@Z	bool __cdecl beta(__int64, wchar_t)
+?alpha@@YGXMN@Z	void __stdcall alpha(float, double)
+?alpha@@YAXMN@Z	void __cdecl alpha(float, double)
+?gamma@@YAXVfoo@@Ubar@@Tbaz@@W4quux@@@Z	void __cdecl gamma(class foo, struct bar, union baz, enum quux)
+?delta@@YAXQAHABJ@Z	void __cdecl delta(int *const, long const &)
+?delta@@YAXQEAHAEBJ@Z	void __cdecl delta(int *const, long const &)
+?epsilon@@YAXQAY19BE@H@Z	void __cdecl epsilon(int (*const)[10][20])
+?epsilon@@YAXQEAY19BE@H@Z	void __cdecl epsilon(int (*const)[10][20])
+?zeta@@YAXP6AHHH@Z@Z	void __cdecl zeta(int (__cdecl *)(int, int))
+??2@YAPAXI@Z	void * __cdecl operator new(unsigned int)
+??3@YAXPAX@Z	void __cdecl operator delete(void *)
+??_U@YAPAXI@Z	void * __cdecl operator new[](unsigned int)
+??_V@YAXPAX@Z	void __cdecl operator delete[](void *)
+?color1@@3PANA	double *color1
+?color2@@3QBNB	double const *const color2
+?color3@@3QAY02$$CBNA	double const (*const color3)[3]
+?color4@@3QAY02$$CBNA	double const (*const color4)[3]
+?memptr1@@3RESB@@HES1@	int volatile B::*volatile memptr1
+?memptr2@@3PESB@@HES1@	int volatile B::*memptr2
+?memptr3@@3REQB@@HEQ1@	int B::*volatile memptr3
+?funmemptr1@@3RESB@@R6AHXZES1@	int (__cdecl *volatile B::*volatile funmemptr1)(void)
+?funmemptr2@@3PESB@@R6AHXZES1@	int (__cdecl *volatile B::*funmemptr2)(void)
+?funmemptr3@@3REQB@@P6AHXZEQ1@	int (__cdecl *B::*volatile funmemptr3)(void)
+?memptrtofun1@@3R8B@@EAAXXZEQ1@	void (__cdecl B::*volatile memptrtofun1)(void)
+?memptrtofun2@@3P8B@@EAAXXZEQ1@	void (__cdecl B::*memptrtofun2)(void)
+?memptrtofun3@@3P8B@@EAAXXZEQ1@	void (__cdecl B::*memptrtofun3)(void)
+?memptrtofun4@@3R8B@@EAAHXZEQ1@	int (__cdecl B::*volatile memptrtofun4)(void)
+?memptrtofun5@@3P8B@@EAA?CHXZEQ1@	int volatile (__cdecl B::*memptrtofun5)(void)
+?memptrtofun6@@3P8B@@EAA?BHXZEQ1@	int const (__cdecl B::*memptrtofun6)(void)
+?memptrtofun7@@3R8B@@EAAP6AHXZXZEQ1@	int (__cdecl * (__cdecl B::*volatile memptrtofun7)(void))(void)
+?memptrtofun8@@3P8B@@EAAR6AHXZXZEQ1@	int (__cdecl *volatile (__cdecl B::*memptrtofun8)(void))(void)
+?memptrtofun9@@3P8B@@EAAQ6AHXZXZEQ1@	int (__cdecl *const (__cdecl B::*memptrtofun9)(void))(void)
+?fooE@@YA?AW4E@@XZ	enum E __cdecl fooE(void)
+?fooX@@YA?AVX@@XZ	class X __cdecl fooX(void)
+?s0@PR13182@@3PADA	char *PR13182::s0
+?s1@PR13182@@3PADA	char *PR13182::s1
+?s2@PR13182@@3QBDB	char const *const PR13182::s2
+?s3@PR13182@@3QBDB	char const *const PR13182::s3
+?s4@PR13182@@3RCDC	char volatile *volatile PR13182::s4
+?s5@PR13182@@3SDDD	char const volatile *const volatile PR13182::s5
+?s6@PR13182@@3PBQBDB	char const *const *PR13182::s6
+?local@?1??extern_c_func@@9@4HA	int `extern "C" extern_c_func'::`2'::local
+?v@?1??f@@YAHXZ@4U<unnamed-type-v>@?1??1@YAHXZ@A	struct `int __cdecl f(void)'::`2'::<unnamed-type-v> `int __cdecl f(void)'::`2'::v
+?v@?1???$f@H@@YAHXZ@4U<unnamed-type-v>@?1???$f@H@@YAHXZ@A	struct `int __cdecl f<int>(void)'::`2'::<unnamed-type-v> `int __cdecl f<int>(void)'::`2'::v
+??2OverloadedNewDelete@@SAPAXI@Z	public: static void * __cdecl OverloadedNewDelete::operator new(unsigned int)
+??_UOverloadedNewDelete@@SAPAXI@Z	public: static void * __cdecl OverloadedNewDelete::operator new[](unsigned int)
+??3OverloadedNewDelete@@SAXPAX@Z	public: static void __cdecl OverloadedNewDelete::operator delete(void *)
+??_VOverloadedNewDelete@@SAXPAX@Z	public: static void __cdecl OverloadedNewDelete::operator delete[](void *)
+??HOverloadedNewDelete@@QAEHH@Z	public: int __thiscall OverloadedNewDelete::operator+(int)
+??2OverloadedNewDelete@@SAPEAX_K@Z	public: static void * __cdecl OverloadedNewDelete::operator new(unsigned __int64)
+??_UOverloadedNewDelete@@SAPEAX_K@Z	public: static void * __cdecl OverloadedNewDelete::operator new[](unsigned __int64)
+??3OverloadedNewDelete@@SAXPEAX@Z	public: static void __cdecl OverloadedNewDelete::operator delete(void *)
+??_VOverloadedNewDelete@@SAXPEAX@Z	public: static void __cdecl OverloadedNewDelete::operator delete[](void *)
+??HOverloadedNewDelete@@QEAAHH@Z	public: int __cdecl OverloadedNewDelete::operator+(int)
+??2TypedefNewDelete@@SAPAXI@Z	public: static void * __cdecl TypedefNewDelete::operator new(unsigned int)
+??_UTypedefNewDelete@@SAPAXI@Z	public: static void * __cdecl TypedefNewDelete::operator new[](unsigned int)
+??3TypedefNewDelete@@SAXPAX@Z	public: static void __cdecl TypedefNewDelete::operator delete(void *)
+??_VTypedefNewDelete@@SAXPAX@Z	public: static void __cdecl TypedefNewDelete::operator delete[](void *)
+?vector_func@@YQXXZ	void __vectorcall vector_func(void)
+?swift_func@@YSXXZ	void __attribute__((__swiftcall__)) swift_func(void)
+?swift_async_func@@YWXXZ	void __attribute__((__swiftasynccall__)) swift_async_func(void)
+??$fn_tmpl@$1?extern_c_func@@YAXXZ@@YAXXZ	void __cdecl fn_tmpl<&void __cdecl extern_c_func(void)>(void)
+?overloaded_fn@@$$J0YAXXZ	extern "C" void __cdecl overloaded_fn(void)
+?f@UnnamedType@@YAXQAPAU<unnamed-type-T1>@S@1@@Z	void __cdecl UnnamedType::f(struct UnnamedType::S::<unnamed-type-T1> **const)
+?f@UnnamedType@@YAXUT2@S@1@@Z	void __cdecl UnnamedType::f(struct UnnamedType::S::T2)
+?f@UnnamedType@@YAXPAUT4@S@1@@Z	void __cdecl UnnamedType::f(struct UnnamedType::S::T4 *)
+?f@UnnamedType@@YAXUT4@S@1@@Z	void __cdecl UnnamedType::f(struct UnnamedType::S::T4)
+?f@UnnamedType@@YAXUT5@S@1@@Z	void __cdecl UnnamedType::f(struct UnnamedType::S::T5)
+?f@Atomic@@YAXU?$_Atomic@H@__clang@@@Z	void __cdecl Atomic::f(struct __clang::_Atomic<int>)
+?f@Complex@@YAXU?$_Complex@H@__clang@@@Z	void __cdecl Complex::f(struct __clang::_Complex<int>)
+?f@Float16@@YAXU_Float16@__clang@@@Z	void __cdecl Float16::f(struct __clang::_Float16)
+??0?$L@H@NS@@QEAA@XZ	public: __cdecl NS::L<int>::L<int>(void)
+??0Bar@Foo@@QEAA@XZ	public: __cdecl Foo::Bar::Bar(void)
+??0?$L@V?$H@PAH@PR26029@@@PR26029@@QAE@XZ	public: __thiscall PR26029::L<class PR26029::H<int *>>::L<class PR26029::H<int *>>(void)
+??$emplace_back@ABH@?$vector@HV?$allocator@H@std@@@std@@QAE?A?<decltype-auto>@@ABH@Z	public: <decltype-auto> __thiscall std::vector<int, class std::allocator<int>>::emplace_back<int const &>(int const &)
+?pub_foo@S@@QAEXXZ	public: void __thiscall S::pub_foo(void)
+?pub_stat_foo@S@@SAXXZ	public: static void __cdecl S::pub_stat_foo(void)
+?pub_virt_foo@S@@UAEXXZ	public: virtual void __thiscall S::pub_virt_foo(void)
+?prot_foo@S@@IAEXXZ	protected: void __thiscall S::prot_foo(void)
+?prot_stat_foo@S@@KAXXZ	protected: static void __cdecl S::prot_stat_foo(void)
+?prot_virt_foo@S@@MAEXXZ	protected: virtual void __thiscall S::prot_virt_foo(void)
+?priv_foo@S@@AAEXXZ	private: void __thiscall S::priv_foo(void)
+?priv_stat_foo@S@@CAXXZ	private: static void __cdecl S::priv_stat_foo(void)
+?priv_virt_foo@S@@EAEXXZ	private: virtual void __thiscall S::priv_virt_foo(void)
+??@a6a285da2eea70dba6b578022be61d81@	??@a6a285da2eea70dba6b578022be61d81@
+??@a6a285da2eea70dba6b578022be61d81@asdf	??@a6a285da2eea70dba6b578022be61d81@
+??@a6a285da2eea70dba6b578022be61d81@??_R4@	??@a6a285da2eea70dba6b578022be61d81@??_R4@
+?M@?@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`0'::M
+?M@?0??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`1'::M
+?M@?1??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`2'::M
+?M@?2??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`3'::M
+?M@?3??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`4'::M
+?M@?4??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`5'::M
+?M@?5??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`6'::M
+?M@?6??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`7'::M
+?M@?7??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`8'::M
+?M@?8??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`9'::M
+?M@?9??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`10'::M
+?M@?L@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`11'::M
+?M@?M@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`12'::M
+?M@?N@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`13'::M
+?M@?O@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`14'::M
+?M@?P@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`15'::M
+?M@?BA@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`16'::M
+?M@?BB@??L@@YAHXZ@4HA	int `int __cdecl L(void)'::`17'::M
+?j@?1??L@@YAHXZ@4UJ@@A	struct J `int __cdecl L(void)'::`2'::j
+?NN@0XX@@3HA	int XX::NN::NN
+?MM@0NN@XX@@3HA	int XX::NN::MM::MM
+?NN@MM@0XX@@3HA	int XX::NN::MM::NN
+?OO@0NN@01XX@@3HA	int XX::NN::OO::NN::OO::OO
+?NN@OO@010XX@@3HA	int XX::NN::OO::NN::OO::NN
+?M@?1??0@YAHXZ@4HA	int `int __cdecl M(void)'::`2'::M
+?L@?2??M@0?2??0@YAHXZ@QEAAHXZ@4HA	int `public: int __cdecl `int __cdecl L(void)'::`3'::L::M(void)'::`3'::L
+?M@?2??0L@?2??1@YAHXZ@QEAAHXZ@4HA	int `public: int __cdecl `int __cdecl L(void)'::`3'::L::M(void)'::`3'::M
+?M@?1???$L@H@@YAHXZ@4HA	int `int __cdecl L<int>(void)'::`2'::M
+?SN@?$NS@H@NS@@QEAAHXZ	public: int __cdecl NS::NS<int>::SN(void)
+?NS@?1??SN@?$NS@H@0@QEAAHXZ@4HA	int `public: int __cdecl NS::NS<int>::SN(void)'::`2'::NS
+?SN@?1??0?$NS@H@NS@@QEAAHXZ@4HA	int `public: int __cdecl NS::NS<int>::SN(void)'::`2'::SN
+?NS@?1??SN@?$NS@H@10@QEAAHXZ@4HA	int `public: int __cdecl NS::SN::NS<int>::SN(void)'::`2'::NS
+?SN@?1??0?$NS@H@0NS@@QEAAHXZ@4HA	int `public: int __cdecl NS::SN::NS<int>::SN(void)'::`2'::SN
+?X@?$C@H@C@0@2HB	public: static int const X::C::C<int>::X
+?X@?$C@H@C@1@2HB	public: static int const C<int>::C::C<int>::X
+?X@?$C@H@C@2@2HB	public: static int const C::C::C<int>::X
+?C@?1??B@?$C@H@0101A@@QEAAHXZ@4U201013@A	struct A::B::C::B::C::C<int> `public: int __cdecl A::B::C::B::C::C<int>::B(void)'::`2'::C
+?B@?1??0?$C@H@C@020A@@QEAAHXZ@4HA	int `public: int __cdecl A::B::C::B::C::C<int>::B(void)'::`2'::B
+?A@?1??B@?$C@H@C@1310@QEAAHXZ@4HA	int `public: int __cdecl A::B::C::B::C::C<int>::B(void)'::`2'::A
+?a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@a@@3HA	int a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a::a
+??0Base@@QEAA@XZ	public: __cdecl Base::Base(void)
+??1Base@@UEAA@XZ	public: virtual __cdecl Base::~Base(void)
+??2@YAPEAX_K@Z	void * __cdecl operator new(unsigned __int64)
+??3@YAXPEAX_K@Z	void __cdecl operator delete(void *, unsigned __int64)
+??4Base@@QEAAHH@Z	public: int __cdecl Base::operator=(int)
+??6Base@@QEAAHH@Z	public: int __cdecl Base::operator<<(int)
+??5Base@@QEAAHH@Z	public: int __cdecl Base::operator>>(int)
+??7Base@@QEAAHXZ	public: int __cdecl Base::operator!(void)
+??8Base@@QEAAHH@Z	public: int __cdecl Base::operator==(int)
+??9Base@@QEAAHH@Z	public: int __cdecl Base::operator!=(int)
+??ABase@@QEAAHH@Z	public: int __cdecl Base::operator[](int)
+??BBase@@QEAAHXZ	public: int __cdecl Base::operator int(void)
+??CBase@@QEAAHXZ	public: int __cdecl Base::operator->(void)
+??DBase@@QEAAHXZ	public: int __cdecl Base::operator*(void)
+??EBase@@QEAAHXZ	public: int __cdecl Base::operator++(void)
+??EBase@@QEAAHH@Z	public: int __cdecl Base::operator++(int)
+??FBase@@QEAAHXZ	public: int __cdecl Base::operator--(void)
+??FBase@@QEAAHH@Z	public: int __cdecl Base::operator--(int)
+??GBase@@QEAAHH@Z	public: int __cdecl Base::operator-(int)
+??HBase@@QEAAHH@Z	public: int __cdecl Base::operator+(int)
+??IBase@@QEAAHH@Z	public: int __cdecl Base::operator&(int)
+??JBase@@QEAAHH@Z	public: int __cdecl Base::operator->*(int)
+??KBase@@QEAAHH@Z	public: int __cdecl Base::operator/(int)
+??LBase@@QEAAHH@Z	public: int __cdecl Base::operator%(int)
+??MBase@@QEAAHH@Z	public: int __cdecl Base::operator<(int)
+??NBase@@QEAAHH@Z	public: int __cdecl Base::operator<=(int)
+??OBase@@QEAAHH@Z	public: int __cdecl Base::operator>(int)
+??PBase@@QEAAHH@Z	public: int __cdecl Base::operator>=(int)
+??QBase@@QEAAHH@Z	public: int __cdecl Base::operator,(int)
+??RBase@@QEAAHXZ	public: int __cdecl Base::operator()(void)
+??SBase@@QEAAHXZ	public: int __cdecl Base::operator~(void)
+??TBase@@QEAAHH@Z	public: int __cdecl Base::operator^(int)
+??UBase@@QEAAHH@Z	public: int __cdecl Base::operator|(int)
+??VBase@@QEAAHH@Z	public: int __cdecl Base::operator&&(int)
+??WBase@@QEAAHH@Z	public: int __cdecl Base::operator||(int)
+??XBase@@QEAAHH@Z	public: int __cdecl Base::operator*=(int)
+??YBase@@QEAAHH@Z	public: int __cdecl Base::operator+=(int)
+??ZBase@@QEAAHH@Z	public: int __cdecl Base::operator-=(int)
+??_0Base@@QEAAHH@Z	public: int __cdecl Base::operator/=(int)
+??_1Base@@QEAAHH@Z	public: int __cdecl Base::operator%=(int)
+??_2Base@@QEAAHH@Z	public: int __cdecl Base::operator>>=(int)
+??_3Base@@QEAAHH@Z	public: int __cdecl Base::operator<<=(int)
+??_4Base@@QEAAHH@Z	public: int __cdecl Base::operator&=(int)
+??_5Base@@QEAAHH@Z	public: int __cdecl Base::operator|=(int)
+??_6Base@@QEAAHH@Z	public: int __cdecl Base::operator^=(int)
+??_7Base@@6B@	const Base::`vftable'
+??_7A@B@@6BC@D@@@	const B::A::`vftable'{for `D::C'}
+??_7A@B@@6BC@D@@E@F@@@	const B::A::`vftable'{for `D::C's `F::E'}
+??_7A@B@@6BC@D@@E@F@@G@H@@@	const B::A::`vftable'{for `D::C's `F::E's `H::G'}
+??_8Middle2@@7B@	const Middle2::`vbtable'
+??_7A@@6BB@@@	const A::`vftable'{for `B'}
+??_7A@@6BB@@C@@@	const A::`vftable'{for `B's `C'}
+??_7A@@6BB@@C@@D@@@	const A::`vftable'{for `B's `C's `D'}
+??_9Base@@$B7AA	[thunk]: __cdecl Base::`vcall'{8, {flat}}
+??_B?1??getS@@YAAAUS@@XZ@51	`struct S & __cdecl getS(void)'::`2'::`local static guard'{2}
+??_C@_02PCEFGMJL@hi?$AA@	"hi"
+??_DDiamond@@QEAAXXZ	public: void __cdecl Diamond::`vbase dtor'(void)
+??_EBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`vector deleting dtor'(unsigned int)
+??_EBase@@G3AEPAXI@Z	[thunk]: private: void * __thiscall Base::`vector deleting dtor'`adjustor{4}'(unsigned int)
+??_F?$SomeTemplate@H@@QAEXXZ	public: void __thiscall SomeTemplate<int>::`default ctor closure'(void)
+??_GBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`scalar deleting dtor'(unsigned int)
+??_H@YAXPEAX_K1P6APEAX0@Z@Z	void __cdecl `vector ctor iterator'(void *, unsigned __int64, unsigned __int64, void * (__cdecl *)(void *))
+??_I@YAXPEAX_K1P6AX0@Z@Z	void __cdecl `vector dtor iterator'(void *, unsigned __int64, unsigned __int64, void (__cdecl *)(void *))
+??_JBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`vector vbase ctor iterator'(unsigned int)
+??_KBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`virtual displacement map'(unsigned int)
+??_LBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`eh vector ctor iterator'(unsigned int)
+??_MBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`eh vector dtor iterator'(unsigned int)
+??_NBase@@UEAAPEAXI@Z	public: virtual void * __cdecl Base::`eh vector vbase ctor iterator'(unsigned int)
+??_O?$SomeTemplate@H@@QAEXXZ	public: void __thiscall SomeTemplate<int>::`copy ctor closure'(void)
+??_SBase@@6B@	const Base::`local vftable'
+??_TDerived@@QEAAXXZ	public: void __cdecl Derived::`local vftable ctor closure'(void)
+??_U@YAPEAX_KAEAVklass@@@Z	void * __cdecl operator new[](unsigned __int64, class klass &)
+??_V@YAXPEAXAEAVklass@@@Z	void __cdecl operator delete[](void *, class klass &)
+??_R0?AUBase@@@8	struct Base `RTTI Type Descriptor'
+??_R1A@?0A@EA@Base@@8	Base::`RTTI Base Class Descriptor at (0, -1, 0, 64)'
+??_R2Base@@8	Base::`RTTI Base Class Array'
+??_R3Base@@8	Base::`RTTI Class Hierarchy Descriptor'
+??_R4Base@@6B@	const Base::`RTTI Complete Object Locator'
+??__EFoo@@YAXXZ	void __cdecl `dynamic initializer for 'Foo''(void)
+??__E?i@C@@0HA@@YAXXZ	void __cdecl `dynamic initializer for `private: static int C::i''(void)
+??__FFoo@@YAXXZ	void __cdecl `dynamic atexit destructor for 'Foo''(void)
+??__F_decisionToDFA@XPathLexer@@0V?$vector@VDFA@dfa@antlr4@@V?$allocator@VDFA@dfa@antlr4@@@std@@@std@@A@YAXXZ	void __cdecl `dynamic atexit destructor for `private: static class std::vector<class antlr4::dfa::DFA, class std::allocator<class antlr4::dfa::DFA>> XPathLexer::_decisionToDFA''(void)
+??__J?1??f@@YAAAUS@@XZ@51	`struct S & __cdecl f(void)'::`2'::`local static thread guard'{2}
+?a1@@YAXXZ	void __cdecl a1(void)
+?a2@@YAHXZ	int __cdecl a2(void)
+?a3@@YA?BHXZ	int const __cdecl a3(void)
+?a4@@YA?CHXZ	int volatile __cdecl a4(void)
+?a5@@YA?DHXZ	int const volatile __cdecl a5(void)
+?a6@@YAMXZ	float __cdecl a6(void)
+?b1@@YAPAHXZ	int * __cdecl b1(void)
+?b2@@YAPBDXZ	char const * __cdecl b2(void)
+?b3@@YAPAMXZ	float * __cdecl b3(void)
+?b4@@YAPBMXZ	float const * __cdecl b4(void)
+?b5@@YAPCMXZ	float volatile * __cdecl b5(void)
+?b6@@YAPDMXZ	float const volatile * __cdecl b6(void)
+?b7@@YAAAMXZ	float & __cdecl b7(void)
+?b8@@YAABMXZ	float const & __cdecl b8(void)
+?b9@@YAACMXZ	float volatile & __cdecl b9(void)
+?b10@@YAADMXZ	float const volatile & __cdecl b10(void)
+?b11@@YAPAPBDXZ	char const ** __cdecl b11(void)
+?c1@@YA?AVA@@XZ	class A __cdecl c1(void)
+?c2@@YA?BVA@@XZ	class A const __cdecl c2(void)
+?c3@@YA?CVA@@XZ	class A volatile __cdecl c3(void)
+?c4@@YA?DVA@@XZ	class A const volatile __cdecl c4(void)
+?c5@@YAPBVA@@XZ	class A const * __cdecl c5(void)
+?c6@@YAPCVA@@XZ	class A volatile * __cdecl c6(void)
+?c7@@YAPDVA@@XZ	class A const volatile * __cdecl c7(void)
+?c8@@YAAAVA@@XZ	class A & __cdecl c8(void)
+?c9@@YAABVA@@XZ	class A const & __cdecl c9(void)
+?c10@@YAACVA@@XZ	class A volatile & __cdecl c10(void)
+?c11@@YAADVA@@XZ	class A const volatile & __cdecl c11(void)
+?d1@@YA?AV?$B@H@@XZ	class B<int> __cdecl d1(void)
+?d2@@YA?AV?$B@PBD@@XZ	class B<char const *> __cdecl d2(void)
+?d3@@YA?AV?$B@VA@@@@XZ	class B<class A> __cdecl d3(void)
+?d4@@YAPAV?$B@VA@@@@XZ	class B<class A> * __cdecl d4(void)
+?d5@@YAPBV?$B@VA@@@@XZ	class B<class A> const * __cdecl d5(void)
+?d6@@YAPCV?$B@VA@@@@XZ	class B<class A> volatile * __cdecl d6(void)
+?d7@@YAPDV?$B@VA@@@@XZ	class B<class A> const volatile * __cdecl d7(void)
+?d8@@YAAAV?$B@VA@@@@XZ	class B<class A> & __cdecl d8(void)
+?d9@@YAABV?$B@VA@@@@XZ	class B<class A> const & __cdecl d9(void)
+?d10@@YAACV?$B@VA@@@@XZ	class B<class A> volatile & __cdecl d10(void)
+?d11@@YAADV?$B@VA@@@@XZ	class B<class A> const volatile & __cdecl d11(void)
+?e1@@YA?AW4Enum@@XZ	enum Enum __cdecl e1(void)
+?e2@@YA?BW4Enum@@XZ	enum Enum const __cdecl e2(void)
+?e3@@YAPAW4Enum@@XZ	enum Enum * __cdecl e3(void)
+?e4@@YAAAW4Enum@@XZ	enum Enum & __cdecl e4(void)
+?f1@@YA?AUS@@XZ	struct S __cdecl f1(void)
+?f2@@YA?BUS@@XZ	struct S const __cdecl f2(void)
+?f3@@YAPAUS@@XZ	struct S * __cdecl f3(void)
+?f4@@YAPBUS@@XZ	struct S const * __cdecl f4(void)
+?f5@@YAPDUS@@XZ	struct S const volatile * __cdecl f5(void)
+?f6@@YAAAUS@@XZ	struct S & __cdecl f6(void)
+?f7@@YAQAUS@@XZ	struct S *const __cdecl f7(void)
+?f8@@YAPQS@@HXZ	int S::* __cdecl f8(void)
+?f9@@YAQQS@@HXZ	int S::*const __cdecl f9(void)
+?f10@@YAPIQS@@HXZ	int S::*__restrict __cdecl f10(void)
+?f11@@YAQIQS@@HXZ	int S::*const __restrict __cdecl f11(void)
+?g1@@YAP6AHH@ZXZ	int (__cdecl * __cdecl g1(void))(int)
+?g2@@YAQ6AHH@ZXZ	int (__cdecl *const __cdecl g2(void))(int)
+?g3@@YAPAP6AHH@ZXZ	int (__cdecl ** __cdecl g3(void))(int)
+?g4@@YAPBQ6AHH@ZXZ	int (__cdecl *const * __cdecl g4(void))(int)
+?h1@@YAAIAHXZ	int &__restrict __cdecl h1(void)
+?f@@3V?$C@H@@A	class C<int> f
+??0?$Class@VTypename@@@@QAE@XZ	public: __thiscall Class<class Typename>::Class<class Typename>(void)
+??0?$Class@VTypename@@@@QEAA@XZ	public: __cdecl Class<class Typename>::Class<class Typename>(void)
+??0?$Class@$$CBVTypename@@@@QAE@XZ	public: __thiscall Class<class Typename const>::Class<class Typename const>(void)
+??0?$Class@$$CBVTypename@@@@QEAA@XZ	public: __cdecl Class<class Typename const>::Class<class Typename const>(void)
+??0?$Class@$$CCVTypename@@@@QAE@XZ	public: __thiscall Class<class Typename volatile>::Class<class Typename volatile>(void)
+??0?$Class@$$CCVTypename@@@@QEAA@XZ	public: __cdecl Class<class Typename volatile>::Class<class Typename volatile>(void)
+??0?$Class@$$CDVTypename@@@@QAE@XZ	public: __thiscall Class<class Typename const volatile>::Class<class Typename const volatile>(void)
+??0?$Class@$$CDVTypename@@@@QEAA@XZ	public: __cdecl Class<class Typename const volatile>::Class<class Typename const volatile>(void)
+??0?$Class@V?$Nested@VTypename@@@@@@QAE@XZ	public: __thiscall Class<class Nested<class Typename>>::Class<class Nested<class Typename>>(void)
+??0?$Class@V?$Nested@VTypename@@@@@@QEAA@XZ	public: __cdecl Class<class Nested<class Typename>>::Class<class Nested<class Typename>>(void)
+??0?$Class@QAH@@QAE@XZ	public: __thiscall Class<int *const>::Class<int *const>(void)
+??0?$Class@QEAH@@QEAA@XZ	public: __cdecl Class<int *const>::Class<int *const>(void)
+??0?$Class@$$A6AHXZ@@QAE@XZ	public: __thiscall Class<int __cdecl(void)>::Class<int __cdecl(void)>(void)
+??0?$Class@$$A6AHXZ@@QEAA@XZ	public: __cdecl Class<int __cdecl(void)>::Class<int __cdecl(void)>(void)
+??0?$Class@$$BY0A@H@@QAE@XZ	public: __thiscall Class<int[]>::Class<int[]>(void)
+??0?$Class@$$BY0A@H@@QEAA@XZ	public: __cdecl Class<int[]>::Class<int[]>(void)
+??0?$Class@$$BY04H@@QAE@XZ	public: __thiscall Class<int[5]>::Class<int[5]>(void)
+??0?$Class@$$BY04H@@QEAA@XZ	public: __cdecl Class<int[5]>::Class<int[5]>(void)
+??0?$Class@$$BY04$$CBH@@QAE@XZ	public: __thiscall Class<int const[5]>::Class<int const[5]>(void)
+??0?$Class@$$BY04$$CBH@@QEAA@XZ	public: __cdecl Class<int const[5]>::Class<int const[5]>(void)
+??0?$Class@$$BY04QAH@@QAE@XZ	public: __thiscall Class<int *const[5]>::Class<int *const[5]>(void)
+??0?$Class@$$BY04QEAH@@QEAA@XZ	public: __cdecl Class<int *const[5]>::Class<int *const[5]>(void)
+??0?$BoolTemplate@$0A@@@QAE@XZ	public: __thiscall BoolTemplate<0>::BoolTemplate<0>(void)
+??0?$BoolTemplate@$0A@@@QEAA@XZ	public: __cdecl BoolTemplate<0>::BoolTemplate<0>(void)
+??0?$BoolTemplate@$00@@QAE@XZ	public: __thiscall BoolTemplate<1>::BoolTemplate<1>(void)
+??0?$BoolTemplate@$00@@QEAA@XZ	public: __cdecl BoolTemplate<1>::BoolTemplate<1>(void)
+??$Foo@H@?$BoolTemplate@$00@@QAEXH@Z	public: void __thiscall BoolTemplate<1>::Foo<int>(int)
+??$Foo@H@?$BoolTemplate@$00@@QEAAXH@Z	public: void __cdecl BoolTemplate<1>::Foo<int>(int)
+??0?$IntTemplate@$0A@@@QAE@XZ	public: __thiscall IntTemplate<0>::IntTemplate<0>(void)
+??0?$IntTemplate@$0A@@@QEAA@XZ	public: __cdecl IntTemplate<0>::IntTemplate<0>(void)
+??0?$IntTemplate@$04@@QAE@XZ	public: __thiscall IntTemplate<5>::IntTemplate<5>(void)
+??0?$IntTemplate@$04@@QEAA@XZ	public: __cdecl IntTemplate<5>::IntTemplate<5>(void)
+??0?$IntTemplate@$0L@@@QAE@XZ	public: __thiscall IntTemplate<11>::IntTemplate<11>(void)
+??0?$IntTemplate@$0L@@@QEAA@XZ	public: __cdecl IntTemplate<11>::IntTemplate<11>(void)
+??0?$IntTemplate@$0BAA@@@QAE@XZ	public: __thiscall IntTemplate<256>::IntTemplate<256>(void)
+??0?$IntTemplate@$0BAA@@@QEAA@XZ	public: __cdecl IntTemplate<256>::IntTemplate<256>(void)
+??0?$IntTemplate@$0CAB@@@QAE@XZ	public: __thiscall IntTemplate<513>::IntTemplate<513>(void)
+??0?$IntTemplate@$0CAB@@@QEAA@XZ	public: __cdecl IntTemplate<513>::IntTemplate<513>(void)
+??0?$IntTemplate@$0EAC@@@QAE@XZ	public: __thiscall IntTemplate<1026>::IntTemplate<1026>(void)
+??0?$IntTemplate@$0EAC@@@QEAA@XZ	public: __cdecl IntTemplate<1026>::IntTemplate<1026>(void)
+??0?$IntTemplate@$0PPPP@@@QAE@XZ	public: __thiscall IntTemplate<65535>::IntTemplate<65535>(void)
+??0?$IntTemplate@$0PPPP@@@QEAA@XZ	public: __cdecl IntTemplate<65535>::IntTemplate<65535>(void)
+??0?$IntTemplate@$0?0@@QAE@XZ	public: __thiscall IntTemplate<-1>::IntTemplate<-1>(void)
+??0?$IntTemplate@$0?0@@QEAA@XZ	public: __cdecl IntTemplate<-1>::IntTemplate<-1>(void)
+??0?$IntTemplate@$0?8@@QAE@XZ	public: __thiscall IntTemplate<-9>::IntTemplate<-9>(void)
+??0?$IntTemplate@$0?8@@QEAA@XZ	public: __cdecl IntTemplate<-9>::IntTemplate<-9>(void)
+??0?$IntTemplate@$0?9@@QAE@XZ	public: __thiscall IntTemplate<-10>::IntTemplate<-10>(void)
+??0?$IntTemplate@$0?9@@QEAA@XZ	public: __cdecl IntTemplate<-10>::IntTemplate<-10>(void)
+??0?$IntTemplate@$0?L@@@QAE@XZ	public: __thiscall IntTemplate<-11>::IntTemplate<-11>(void)
+??0?$IntTemplate@$0?L@@@QEAA@XZ	public: __cdecl IntTemplate<-11>::IntTemplate<-11>(void)
+??0?$UnsignedIntTemplate@$0PPPPPPPP@@@QAE@XZ	public: __thiscall UnsignedIntTemplate<4294967295>::UnsignedIntTemplate<4294967295>(void)
+??0?$UnsignedIntTemplate@$0PPPPPPPP@@@QEAA@XZ	public: __cdecl UnsignedIntTemplate<4294967295>::UnsignedIntTemplate<4294967295>(void)
+??0?$LongLongTemplate@$0?IAAAAAAAAAAAAAAA@@@QAE@XZ	public: __thiscall LongLongTemplate<-9223372036854775808>::LongLongTemplate<-9223372036854775808>(void)
+??0?$LongLongTemplate@$0?IAAAAAAAAAAAAAAA@@@QEAA@XZ	public: __cdecl LongLongTemplate<-9223372036854775808>::LongLongTemplate<-9223372036854775808>(void)
+??0?$LongLongTemplate@$0HPPPPPPPPPPPPPPP@@@QAE@XZ	public: __thiscall LongLongTemplate<9223372036854775807>::LongLongTemplate<9223372036854775807>(void)
+??0?$LongLongTemplate@$0HPPPPPPPPPPPPPPP@@@QEAA@XZ	public: __cdecl LongLongTemplate<9223372036854775807>::LongLongTemplate<9223372036854775807>(void)
+??0?$UnsignedLongLongTemplate@$0?0@@QAE@XZ	public: __thiscall UnsignedLongLongTemplate<-1>::UnsignedLongLongTemplate<-1>(void)
+??0?$UnsignedLongLongTemplate@$0?0@@QEAA@XZ	public: __cdecl UnsignedLongLongTemplate<-1>::UnsignedLongLongTemplate<-1>(void)
+??$foo@H@space@@YAABHABH@Z	int const & __cdecl space::foo<int>(int const &)
+??$foo@H@space@@YAAEBHAEBH@Z	int const & __cdecl space::foo<int>(int const &)
+??$FunctionPointerTemplate@$1?spam@@YAXXZ@@YAXXZ	void __cdecl FunctionPointerTemplate<&void __cdecl spam(void)>(void)
+??$variadic_fn_template@HHHH@@YAXABH000@Z	void __cdecl variadic_fn_template<int, int, int, int>(int const &, int const &, int const &, int const &)
+??$variadic_fn_template@HHD$$BY01D@@YAXABH0ABDAAY01$$CBD@Z	void __cdecl variadic_fn_template<int, int, char, char[2]>(int const &, int const &, char const &, char const (&)[2])
+??0?$VariadicClass@HD_N@@QAE@XZ	public: __thiscall VariadicClass<int, char, bool>::VariadicClass<int, char, bool>(void)
+??0?$VariadicClass@_NDH@@QAE@XZ	public: __thiscall VariadicClass<bool, char, int>::VariadicClass<bool, char, int>(void)
+?template_template_fun@@YAXU?$Type@U?$Thing@USecond@@$00@@USecond@@@@@Z	void __cdecl template_template_fun(struct Type<struct Thing<struct Second, 1>, struct Second>)
+??$template_template_specialization@$$A6AXU?$Type@U?$Thing@USecond@@$00@@USecond@@@@@Z@@YAXXZ	void __cdecl template_template_specialization<void __cdecl(struct Type<struct Thing<struct Second, 1>, struct Second>)>(void)
+?f@@YAXU?$S1@$0A@@@@Z	void __cdecl f(struct S1<0>)
+?recref@@YAXU?$type1@$E?inst@@3Urecord@@B@@@Z	void __cdecl recref(struct type1<struct record const inst>)
+?fun@@YAXU?$UUIDType1@Uuuid@@$1?_GUID_12345678_1234_1234_1234_1234567890ab@@3U__s_GUID@@B@@@Z	void __cdecl fun(struct UUIDType1<struct uuid, &struct __s_GUID const _GUID_12345678_1234_1234_1234_1234567890ab>)
+?fun@@YAXU?$UUIDType2@Uuuid@@$E?_GUID_12345678_1234_1234_1234_1234567890ab@@3U__s_GUID@@B@@@Z	void __cdecl fun(struct UUIDType2<struct uuid, struct __s_GUID const _GUID_12345678_1234_1234_1234_1234567890ab>)
+?FunctionDefinedWithInjectedName@@YAXU?$TypeWithFriendDefinition@H@@@Z	void __cdecl FunctionDefinedWithInjectedName(struct TypeWithFriendDefinition<int>)
+?bar@?$UUIDType4@$1?_GUID_12345678_1234_1234_1234_1234567890ab@@3U__s_GUID@@B@@QAEXXZ	public: void __thiscall UUIDType4<&struct __s_GUID const _GUID_12345678_1234_1234_1234_1234567890ab>::bar(void)
+??$f@US@@$1?g@1@QEAAXXZ@@YAXXZ	void __cdecl f<struct S, &public: void __cdecl S::g(void)>(void)
+??$?0N@?$Foo@H@@QEAA@N@Z	public: __cdecl Foo<int>::Foo<int><double>(double)
+?f@C@@WBA@EAAHXZ	[thunk]: public: virtual int __cdecl C::f`adjustor{16}'(void)
+??_EDerived@@$4PPPPPPPM@A@EAAPEAXI@Z	[thunk]: public: virtual void * __cdecl Derived::`vector deleting dtor'`vtordisp{-4, 0}'(unsigned int)
+?f@A@simple@@$R477PPPPPPPM@7AEXXZ	[thunk]: public: virtual void __thiscall simple::A::f`vtordispex{8, 8, -4, 8}'(void)
+?bar@Foo@@SGXXZ	public: static void __stdcall Foo::bar(void)
+?bar@Foo@@QAGXXZ	public: void __stdcall Foo::bar(void)
+?f2@@YIXXZ	void __fastcall f2(void)
+?f1@@YGXXZ	void __stdcall f1(void)

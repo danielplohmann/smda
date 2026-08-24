@@ -189,19 +189,20 @@ class RustSymbolProvider(AbstractLabelProvider):
         # working example: 3969e1a88a063155a6f61b0ca1ac33114c1a39151f3c7dd019084abd30553eab
         # Parse PE symbols (COFF) if available and LIEF extracted them
         # (Similar logic to PeSymbolProvider but focusing on Rust)
+        sections = list(lief_binary.sections)
         for symbol in lief_binary.symbols:
             # Check if it is a function symbol and has a section
             if hasattr(symbol.complex_type, "name") and symbol.complex_type.name == "FUNCTION":
-                if symbol.section is None:
-                    # section_idx 0/-1/-2 (undefined-external/absolute/debug): not a locally
-                    # defined function, its value is not a usable in-image offset.
+                if not 1 <= symbol.section_idx <= len(sections):
                     continue
                 raw_name = lief_name(symbol)
                 try:
                     if self._is_rust_symbol(raw_name):
                         demangled = demangle(raw_name)
                         if demangled:
-                            function_offset = active_base + symbol.section.virtual_address + symbol.value
+                            function_offset = (
+                                active_base + sections[symbol.section_idx - 1].virtual_address + symbol.value
+                            )
                             if function_offset not in self._func_symbols:
                                 self._func_symbols[function_offset] = demangled
                 except _DEMANGLE_ERRORS as exc:
@@ -223,16 +224,15 @@ class RustSymbolProvider(AbstractLabelProvider):
         return function_symbols
 
     def _is_rust_symbol(self, name: str) -> bool:
-        """Check if a symbol name appears to be a Rust mangled symbol.
+        """Check whether a symbol name is a Rust mangled symbol.
 
-        Legacy Rust mangling uses _ZN prefix (compatible with C++ Itanium ABI).
-        Rust v0 mangling uses _R prefix.
-        Some platforms may use __ prefix variants.
-
-        Note: We intentionally exclude bare 'R' and 'ZN' prefixes as they are
-        too broad and could match non-Rust symbols.
+        The prefixes alone are not enough to decide: legacy Rust mangling shares _ZN with
+        the C++ Itanium ABI, and this provider is consulted before the format providers,
+        so claiming a C++ name here replaces a full Itanium signature with the degraded
+        spelling the Rust legacy demangler produces for it. The shared evidence gate parses
+        the name before answering, which is what tells the two apart.
         """
-        return name.startswith(("_ZN", "_R", "__ZN", "__R"))
+        return is_rust_language_evidence(name)
 
     def getSymbol(self, address):
         return self._func_symbols.get(address, "")
