@@ -14,9 +14,13 @@ import bisect
 import logging
 import struct
 
+import lief
+
 from smda.utility.BracketQueue import BracketQueue
+from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 from smda.utility.PriorityQueue import PriorityQueue
 
+from .EhFrameDecoder import decodeEhFrameFdeRanges, decodeEhFrameHdrStarts
 from .LanguageAnalyzer import LanguageAnalyzer
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +29,8 @@ LOGGER = logging.getLogger(__name__)
 class FunctionCandidateManager:
     #: architecture-specific FunctionCandidate subclass used by ensureCandidate()
     CANDIDATE_CLASS = None
+    #: instruction-start alignment a recovered candidate address has to satisfy
+    CANDIDATE_ALIGNMENT = 1
 
     def __init__(self, config):
         self.config = config
@@ -383,6 +389,146 @@ class FunctionCandidateManager:
         code_map claims) before they can be filtered; yields addresses the engine
         analyzes between the primary pass and gap analysis. No sources here."""
         return ()
+
+    def _executableRanges(self):
+        """Ranges an FDE start has to fall inside to be a function start."""
+        return self._code_areas
+
+    def locateEhFrameCandidates(self):
+        """ELF .eh_frame FDE starts (opt-in).
+
+        Every FDE names a code range that unwinding treats as one routine, so an FDE
+        start the primary pass left unclaimed is strong evidence of a missed function
+        (e.g. a wrapper only reached through data). Runs after the primary pass so
+        code_map claims can veto entries: an already-claimed start would split existing
+        functions, which this pass must never do. Accepted starts get ordinary candidate
+        bookkeeping - deliberately NOT the PE exception-candidate priority, since
+        .eh_frame commonly also covers non-function ranges.
+        """
+        if not self.config.USE_ELF_EH_FRAME_CANDIDATES:
+            return
+        fde_starts = self._ehFrameFunctionStarts()
+        if not fde_starts:
+            return
+        exec_ranges = self._executableRanges()
+
+        def in_exec(addr):
+            return not exec_ranges or any(start <= addr < end for start, end in exec_ranges)
+
+        accepted = []
+        for fde_start in sorted(fde_starts):
+            if self._candidateTimeoutTripped():
+                return
+            if fde_start % self.CANDIDATE_ALIGNMENT != 0 or not in_exec(fde_start):
+                continue
+            if not self._passesCodeFilter(fde_start):
+                continue
+            if self.disassembly.isCode(fde_start):
+                continue
+            self.ensureCandidate(fde_start)
+            # MAX_FUNCTION_CANDIDATES can reject the registration; never analyze
+            # a start that was not actually recorded
+            if fde_start in self.candidates:
+                accepted.append(fde_start)
+        # register ALL accepted starts as known function starts before analyzing
+        # any of them: the branch classifier consults getFunctionStartCandidates()
+        # during analysis, so an earlier deferred function could otherwise absorb
+        # a later FDE start it branches or tailcalls into
+        self._candidate_offsets.update(accepted)
+        for fde_start in accepted:
+            if self._candidateTimeoutTripped():
+                return
+            # re-checked per yield: an earlier deferred candidate's analysis may
+            # still have claimed this start in the meantime (e.g. as a callee)
+            if self.disassembly.isCode(fde_start):
+                continue
+            yield fde_start
+
+    def _machoActiveBinaryAndAdjustment(self):
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if not isinstance(lief_binary, (lief.MachO.Binary, lief.MachO.FatBinary)):
+            return None, 0
+        macho = get_active_macho_binary(lief_binary, bitness=binary_info.bitness, architecture=binary_info.architecture)
+        if macho is None or not isinstance(macho, lief.MachO.Binary):
+            return None, 0
+        adjustment = get_macho_address_adjustment(
+            macho,
+            base_addr=binary_info.base_addr,
+            bitness=binary_info.bitness,
+            architecture=binary_info.architecture,
+        )
+        return macho, adjustment
+
+    def locateMachoFunctionStartCandidates(self):
+        """Mach-O LC_FUNCTION_STARTS entries.
+
+        The load command carries a delta-encoded list of every function start in the
+        image, written by the linker and kept when the binary is stripped, so it is
+        the Mach-O counterpart of the PE exception directory rather than of
+        .eh_frame's unwind ranges. Runs deferred like the other metadata sources so a
+        start the primary pass already claimed is left alone.
+
+        lief accumulates the load command's deltas into offsets from the __TEXT
+        segment's virtual address, not into virtual addresses, so each entry has to be
+        rebased on that segment - which is also where a fat slice's own base comes from.
+        """
+        if not self.config.USE_MACHO_FUNCTION_STARTS:
+            return
+        macho, adjustment = self._machoActiveBinaryAndAdjustment()
+        if macho is None:
+            return
+        function_starts = getattr(macho, "function_starts", None)
+        if function_starts is None:
+            return
+        text_segment = next((segment for segment in macho.segments if segment.name == "__TEXT"), None)
+        if text_segment is None:
+            return
+        image_base = text_segment.virtual_address + adjustment
+        accepted = []
+        for offset in sorted(set(function_starts.functions)):
+            if self._candidateTimeoutTripped():
+                return
+            start = image_base + offset
+            if start % self.CANDIDATE_ALIGNMENT != 0:
+                continue
+            if not self._passesCodeFilter(start) or not self.disassembly.isAddrWithinMemoryImage(start):
+                continue
+            if self.disassembly.isCode(start):
+                continue
+            self.ensureCandidate(start)
+            if start in self.candidates:
+                self.candidates[start].setIsSymbol(True)
+                accepted.append(start)
+        self._candidate_offsets.update(accepted)
+        for start in accepted:
+            if self._candidateTimeoutTripped():
+                return
+            if self.disassembly.isCode(start):
+                continue
+            yield start
+
+    def _ehFrameFunctionStarts(self):
+        binary_info = self.disassembly.binary_info
+        pointer_size = 8 if binary_info.bitness == 64 else 4
+        section_starts = set()
+        lief_binary = binary_info.getLiefBinary()
+        if isinstance(lief_binary, lief.ELF.Binary):
+            eh_frame = next((section for section in lief_binary.sections if section.name == ".eh_frame"), None)
+            if eh_frame is not None and eh_frame.virtual_address and eh_frame.size:
+                section_bytes = self.disassembly.getBytes(eh_frame.virtual_address, eh_frame.size)
+                if section_bytes:
+                    section_starts = {
+                        fde_range[0]
+                        for fde_range in decodeEhFrameFdeRanges(
+                            bytes(section_bytes), eh_frame.virtual_address, pointer_size=pointer_size
+                        )
+                    }
+        # The two sources are unioned rather than tried in order. A memory image keeps its
+        # program headers but not its section table, so .eh_frame_hdr is the only route
+        # there; and the section decoder skips records whose CIE it cannot read, so a
+        # partial section result would otherwise hide the starts the search table still names.
+        return section_starts | decodeEhFrameHdrStarts(self.disassembly, pointer_size=pointer_size)
 
     def _buildQueue(self):
         LOGGER.debug("Located %d function candidates", len(self.candidates))
