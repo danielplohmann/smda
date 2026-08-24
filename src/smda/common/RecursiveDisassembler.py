@@ -488,6 +488,13 @@ class RecursiveDisassembler:
         # candidates may have been discovered during gap analysis (e.g. tailcall targets triggered
         # by _analyzeUncondBranch); drain them before moving to the tailcall pass.
         self._drainCandidateQueue(cbAnalysisTimeout)
+        for late_addr in self.fc_manager.locateLateCandidates():
+            if self._analysisTimeoutTripped(cbAnalysisTimeout):
+                break
+            self.analyzeFunction(late_addr)
+        # a late function can resolve a register-indirect call and register its callee; the
+        # tailcall pass below is off by default, so nothing else would drain that candidate.
+        self._drainCandidateQueue(cbAnalysisTimeout)
         # third pass, fix potential tailcall functions that were identified during analysis
         if self.config.RESOLVE_TAILCALLS:
             tailcalled_functions = self.tailcall_analyzer.resolveTailcalls(self)
