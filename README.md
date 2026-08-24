@@ -225,6 +225,14 @@ Run tests with:
 make test
 ```
 
+## Escaper Output Compatibility
+
+Anything that stores escaped-operand signatures - minhashes and escaped-block shingles, as MCRIT does - has to know when SMDA's escaping itself changed, because a hash computed under the older escaping will not match one computed now. Two constants carry that, and they move independently.
+
+`SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY` (currently `4.4.5`) covers mnemonic groups and escaped operands, which is what `getMnemonicGroup` and `getEscapedOperands` produce. `SmdaFunction.INTEL_PIC_HASH_ESCAPE_VERSION` (currently `4.3.5`) covers the separate `escapeBinary` path behind pic-hashes. A report whose `smda_version` is below the relevant marker was produced under different escaping, so its stored hashes have to be recomputed before they can be compared against current ones.
+
+If you change any `InstructionEscaper`'s output, bump `ESCAPER_DOWNWARD_COMPATIBILITY` in the same commit. `tests/testEscaperFingerprint.py` hashes a committed corpus of escaped representations and fails when that output moves, which is the reminder to do it.
+
 ## Version History
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

@@ -4,7 +4,7 @@ import os
 
 class SmdaConfig:
     # keep this in sync with smda.__version__
-    VERSION = "4.4.7"
+    VERSION = "4.5.0"
     # Bump this whenever any architecture's InstructionEscaper changes its
     # output (mnemonic groups or escaped operands). Downstream indexes such as
     # MCRIT treat reports whose smda_version is below this value as stale.
