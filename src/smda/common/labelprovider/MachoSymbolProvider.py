@@ -12,7 +12,7 @@ from smda.utility.MachoBinary import (
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import parse_macho_bindings
-from .MachoDemangler import demangle_macho_symbol
+from .MachoDemangler import demangle_macho_symbol, primeSwiftSymbols
 
 lief.logging.disable()
 LOGGER = logging.getLogger(__name__)
@@ -69,6 +69,19 @@ class MachoSymbolProvider(AbstractLabelProvider):
             return demangled
         return demangle_macho_symbol(raw_name)
 
+    @classmethod
+    def _collectSymbolNames(cls, lief_binary):
+        names = []
+        for attribute in ("symbols", "exported_symbols"):
+            try:
+                for symbol in getattr(lief_binary, attribute, []) or []:
+                    name = cls._get_symbol_name(symbol)
+                    if name:
+                        names.append(name)
+            except Exception as exc:
+                LOGGER.debug("Failed collecting Mach-O %s for demangling: %s", attribute, exc)
+        return names
+
     def _filter_symbols_to_code(self, symbols, binary_info):
         if not binary_info:
             return symbols
@@ -83,6 +96,7 @@ class MachoSymbolProvider(AbstractLabelProvider):
         if not lief_binary or not isinstance(lief_binary, lief.MachO.Binary):
             return
 
+        primeSwiftSymbols(self._collectSymbolNames(lief_binary))
         adjustment = self._get_address_adjustment(lief_binary)
 
         if hasattr(lief_binary, "entrypoint"):
