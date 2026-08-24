@@ -3,14 +3,10 @@ import logging
 import re
 import struct
 
-from .definitions import CALL_INS, CJMP_INS, JMP_INS, canonicalRegister, stripFlatSegmentOverride
+from .definitions import CALL_INS, VALUE_PRESERVING_MNEMONICS, canonicalRegister, stripFlatSegmentOverride
 
 LOGGER = logging.getLogger(__name__)
 
-# The walk models `mov` and `lea`; a value may only be carried past another mnemonic that is
-# known to write no general register. These write none - a branch touches rip and the flags, the
-# rest compare or read. LOOP_INS is absent deliberately: `loop` decrements rcx.
-_VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"}) | CJMP_INS | JMP_INS
 # Vector moves whose destination is a vector register or memory. `movd`/`movq` are absent because
 # they also spell a vector-to-general move, and `movsd` because capstone spells the string
 # instruction - which writes esi and edi - with the same mnemonic as the scalar-double move.
@@ -185,7 +181,7 @@ class IndirectCallAnalyzer:
             if (
                 ins[0] != self.current_calling_addr
                 and mnemonic not in ("mov", "lea")
-                and mnemonic not in _VALUE_PRESERVING_MNEMONICS
+                and mnemonic not in VALUE_PRESERVING_MNEMONICS
                 and mnemonic not in _VECTOR_MOVE_MNEMONICS
                 and not self._callPreserves(mnemonic, register_name)
             ):

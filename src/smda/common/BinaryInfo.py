@@ -13,6 +13,12 @@ from smda.utility.MachoFileLoader import MachoFileLoader
 LOGGER = logging.getLogger(__name__)
 
 
+# lief spells the ELF header's type as an enum member; read it the way the symbol providers
+# read theirs, so a lief that names it differently leaves every ELF looking relocated rather
+# than raising in the middle of an analysis
+_ELF_TYPE_EXEC = getattr(getattr(lief.ELF.Header, "FILE_TYPE", None), "EXEC", None)
+
+
 class BinaryInfo:
     """simple DTO to contain most information related to the binary/buffer to be analyzed
 
@@ -72,6 +78,7 @@ class BinaryInfo:
         self.has_backend = False
         self._lief_binary = None
         self._lief_type = None
+        self._position_independent_elf = None
         self._symbol_provider = None
         self.abi = ""
 
@@ -91,6 +98,27 @@ class BinaryInfo:
             else:
                 self._lief_type = "OTHER"
         return self._lief_type
+
+    def isPositionIndependentElf(self):
+        """Whether this is an ELF the loader places at a base of its own choosing.
+
+        Every absolute address such an image stores has to be relocated when it is loaded, and
+        no compiler emits a switch table that way: it emits offsets from a base the code
+        computes for itself, precisely so the table needs no relocation. An absolute table of
+        code addresses in a shared object is therefore something else - the function pointers a
+        tail call dispatches through, whose targets are separate functions.
+
+        An ELF whose header type cannot be read answers True as well. The caller uses this to
+        refuse to read a table, and refusing one costs a switch its case bodies where admitting
+        one merges whole functions together.
+        """
+        if self._position_independent_elf is None:
+            self._position_independent_elf = False
+            if self._getLiefType() == "ELF":
+                header = getattr(self.getLiefBinary(), "header", None)
+                file_type = getattr(header, "file_type", None)
+                self._position_independent_elf = file_type is None or file_type != _ELF_TYPE_EXEC
+        return self._position_independent_elf
 
     def getBinaryData(self):
         """Safely retrieves binary data from either raw_data or a file path."""

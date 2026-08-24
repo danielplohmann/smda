@@ -186,7 +186,8 @@ class JumpTableBacktrackWindowTestSuite(unittest.TestCase):
             (0x1006, 2, "nop", "", b""),
         ]
 
-        self.assertEqual(analyzer._directHandler("eax", state, backtracked), 0x403000)
+        # the handler reports the width of an entry alongside the table it found
+        self.assertEqual(analyzer._directHandler("eax", state, backtracked), (0x403000, 4))
         self.assertEqual(state.data_refs, [(0x1000, 0x403000, 4)])
 
 
@@ -235,7 +236,18 @@ class JumpTableDirectEntriesTestSuite(unittest.TestCase):
         analyzer = JumpTableAnalyzer.__new__(JumpTableAnalyzer)
         table = b"\x00\x10\x40\x00" + b"\x20\x10\x40\x00"
 
+        class _StubBinaryInfo:
+            @staticmethod
+            def isInCodeAreas(addr):
+                return True
+
+            @staticmethod
+            def isPositionIndependentElf():
+                return False
+
         class _StubDisassembly:
+            binary_info = _StubBinaryInfo()
+
             @staticmethod
             def isAddrWithinMemoryImage(addr):
                 return True

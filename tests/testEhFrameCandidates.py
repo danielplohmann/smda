@@ -19,6 +19,7 @@ import lief
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager as AArch64FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.EhFrameDecoder import PT_GNU_EH_FRAME, decodeEhFrameFdeRanges, decodeEhFrameHdrStarts
+from smda.common.FunctionCandidateManager import FunctionCandidateManager as CommonFunctionCandidateManager
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as IntelFunctionCandidateManager
@@ -172,6 +173,11 @@ class EhFrameDecoderTestSuite(unittest.TestCase):
 
     def test_intel_manager_yields_nothing_while_the_sources_are_off(self):
         self.assertEqual(tuple(IntelFunctionCandidateManager(SmdaConfig()).locateDeferredCandidates()), ())
+
+    def test_the_shared_base_contributes_no_deferred_source(self):
+        """The base class documents itself as having no deferred sources, so a backend that
+        does not override it must get an empty pass rather than an error."""
+        self.assertEqual(tuple(CommonFunctionCandidateManager(SmdaConfig()).locateDeferredCandidates()), ())
 
 
 def _build_aarch64_elf_with_ehframe(code, eh_frame, base=0x400000, vaddr=0x401000, eh_vaddr=0x402000):

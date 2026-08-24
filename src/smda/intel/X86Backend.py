@@ -29,6 +29,9 @@ from .MnemonicTfIdf import MnemonicTfIdf
 
 LOGGER = logging.getLogger(__name__)
 
+# what a toolchain that emits CET landing pads aligns a function entry to
+_ENTRY_ALIGNMENT = 16
+
 # a call/jmp through a pointer slot the sample computes itself ("dword ptr [ebx + 0x2c]"),
 # the shape a runtime-built import table is used through. An index register is excluded on
 # purpose: the slot is then not a single address, and those operands belong to jump tables.
@@ -461,6 +464,32 @@ class X86Backend(ArchBackend):
             state.setThunkCall(True)
         return resolved_api
 
+    @staticmethod
+    def _isPaddedLandingPad(d, state, i_address, previous_instruction, start_addr):
+        """Whether this landing pad starts the function the decode is about to absorb.
+
+        Only a pad reached by falling through padding qualifies. One that begins a block is
+        the target of a branch already inside this function - which is how a switch case body
+        is spelled in CET code - and cutting there would carve every one of them out.
+
+        A function that has already booked an instruction past this address wraps around it,
+        so cutting there would leave one function nested inside another. The alignment cut
+        below declines for the same reason.
+
+        Being a candidate is the weakest of these: every landing pad inside a code area is one,
+        because the prologue scan seeds them all. It only rules out an address that candidate
+        discovery already refused - one outside the code areas, or past the candidate cap.
+        """
+        if (
+            previous_instruction is None
+            or i_address == start_addr
+            or i_address % _ENTRY_ALIGNMENT
+            or previous_instruction[2].rpartition(" ")[2] != "nop"
+            or not d.fc_manager.isFunctionCandidate(i_address)
+        ):
+            return False
+        return state.max_instruction_start <= i_address
+
     def _analyzeEndInstruction(self, state):
         state.setSanelyEnding(True)
         state.setNextInstructionReachable(False)
@@ -534,6 +563,23 @@ class X86Backend(ArchBackend):
         i_mnemonic_noprefix = i_mnemonic
         if " " in i_mnemonic_noprefix:
             i_mnemonic_noprefix = i_mnemonic_noprefix.rpartition(" ")[2]
+        if i_mnemonic_noprefix == "endbr64" and self._isPaddedLandingPad(
+            d, state, i_address, previous_instruction, start_addr
+        ):
+            # The alignment cut below fires only where the padding follows a call, so a
+            # function that ends any other way and is padded up to the next entry runs
+            # straight into it and reports the pair as one. A CET landing pad is emitted only
+            # where an indirect branch can arrive, which is the entry-shape evidence that
+            # alignment and padding alone do not carry.
+            #
+            # The fall-through reference is deliberately kept. Where the pad belongs to
+            # another function this edge is what a tail call into it looks like, and where it
+            # is a switch case body the dispatch already owns, removing it would delete a real
+            # edge and leave the block before it with no successor at all.
+            state.setBlockEndingInstruction(True)
+            state.endBlock()
+            state.setSanelyEnding(True)
+            return True
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
         # the engine calls this for every decoded instruction, so the operand is screened for a
         # bracket here rather than paying a call to find out there is nothing to record
