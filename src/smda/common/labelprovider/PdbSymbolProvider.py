@@ -108,6 +108,11 @@ class PdbSymbolProvider(AbstractLabelProvider):
                 continue
             address = self._base_addr + function.rva
             name = _demangleSymbolName(function.name)
+            if not name or any(char < " " or char == "\x7f" for char in name):
+                # a PDB string table holds whatever bytes were written into it, and this name
+                # travels into the serialized report; the test is for control characters
+                # rather than for non-ASCII, which a demangled Rust identifier legitimately is
+                continue
             self._func_symbols[address] = name
             module = function.module or ""
             if function.code_size and not module.startswith(IMPORT_MODULE_PREFIX):
