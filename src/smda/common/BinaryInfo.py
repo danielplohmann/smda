@@ -53,6 +53,7 @@ class BinaryInfo:
     is_library = False
     is_buffer = False
     has_backend = False
+    format_recognized = False
     sha256 = ""
     sha1 = ""
     md5 = ""
