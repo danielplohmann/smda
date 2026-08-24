@@ -221,7 +221,7 @@ class MachoFileLoader:
         max_virtual_address, min_virtual_address, min_raw_offset = _calculate_boundaries(macho_file)
 
         if not max_virtual_address:
-            LOGGER.debug("MachO: no section or segment data")
+            LOGGER.warning("MachO: no section or segment data")
             return b""
 
         # create mapped region.

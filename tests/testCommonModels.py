@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import logging
 import struct
 import tempfile
 import unittest
@@ -561,6 +562,23 @@ class TestBinaryInfoCodeAreas(unittest.TestCase):
         self.assertTrue(binary_info.isInCodeAreas(0x400000))
         self.assertTrue(binary_info.isInCodeAreas(0x4000FF))
         self.assertFalse(binary_info.isInCodeAreas(0x400100))
+
+
+class TestBinaryInfoBinaryData(unittest.TestCase):
+    def test_an_unreadable_binary_path_is_reported_at_warning(self):
+        # getBinaryData feeds getLiefBinary and every lief-backed provider through it, so a
+        # read failure here silently unnames the whole run
+        binary_info = BinaryInfo(b"")
+        binary_info.file_path = str(Path(__file__).resolve().parent / "does_not_exist.bin")
+        # another test module's import-time logging.disable() would hide these records
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+
+        with self.assertLogs("smda.common.BinaryInfo", level="WARNING") as logged:
+            self.assertIsNone(binary_info.getBinaryData())
+
+        self.assertIn("Failed to read binary", logged.output[0])
 
 
 class TestSmdaFunctionRobustness(unittest.TestCase):

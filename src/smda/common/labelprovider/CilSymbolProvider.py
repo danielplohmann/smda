@@ -42,7 +42,7 @@ class CilSymbolProvider(AbstractLabelProvider):
             pe = dnfile.dnPE(data=binary_info.raw_data) if parsed is None else parsed
         except Exception as exc:
             reraise_non_operational_exception(exc)
-            LOGGER.debug("Failed to parse CIL symbols: %s", exc)
+            LOGGER.warning("Failed to parse CIL symbols: %s", exc)
             return
         if not getattr(pe, "net", None) or not getattr(pe.net, "mdtables", None):
             return

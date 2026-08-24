@@ -271,7 +271,7 @@ class ElfFileLoader:
         )
 
         if not max_virtual_address:
-            LOGGER.debug("ELF: no section or segment data")
+            LOGGER.warning("ELF: no section or segment data")
             return b""
 
         # create mapped region.
