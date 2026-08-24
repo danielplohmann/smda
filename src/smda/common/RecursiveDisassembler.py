@@ -6,6 +6,7 @@ import re
 from bisect import bisect_right
 from itertools import chain
 
+from smda.common.analysis_budget import analysisTimeoutTripped
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.labelprovider.DelphiKbSymbolProvider import DelphiKbSymbolProvider
@@ -26,6 +27,7 @@ LOGGER = logging.getLogger(__name__)
 
 # a leading sign is preserved so that negative displacements ("[rip - 0x20]") resolve correctly
 _REFERENCED_ADDR_RE = re.compile(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)")
+_TIMEOUT_POLL_BLOCKS = 256
 
 
 class RecursiveDisassembler:
@@ -61,6 +63,7 @@ class RecursiveDisassembler:
         self.disassembly.setConfidenceThreshold(config.CONFIDENCE_THRESHOLD)
         self._symbol_cache = {}
         self._api_cache = {}
+        self._cb_analysis_timeout = None
 
     def _addLabelProviders(self):
         self._registerLabelProvider(WinApiResolver(self.config))
@@ -205,6 +208,11 @@ class RecursiveDisassembler:
         before the tailcall candidate was known). Revert the gap function so the
         current analysis can absorb its bytes as ordinary blocks.
 
+        That premise does not hold for a gap function whose entry carries an indirect-branch
+        landing pad: the scan did not guess such a start, the image declared it as somewhere an
+        indirect branch may land, so reverting it for a candidate found inside its body would
+        demote a declared entry in favour of an address carrying no such marker.
+
         Returns True if a gap function was reverted.
         """
         owner_fn = self.disassembly.ins2fn.get(colliding_addr)
@@ -212,6 +220,8 @@ class RecursiveDisassembler:
             return False
         candidate = self.fc_manager.candidates.get(owner_fn)
         if candidate is None or not candidate.is_gap_candidate:
+            return False
+        if candidate.isLandingPadEntry():
             return False
         if owner_fn not in self.disassembly.functions:
             return False
@@ -251,7 +261,11 @@ class RecursiveDisassembler:
             # state.getBlocks(); this collision path is unreachable from the gap pass today, so
             # the change is behavior-neutral (output stays byte-for-byte identical).
             return state
+        blocks_processed = 0
         while state.hasUnprocessedBlocks():
+            blocks_processed += 1
+            if blocks_processed % _TIMEOUT_POLL_BLOCKS == 0 and self._analysisTimeoutTripped():
+                break
             debug_logging = LOGGER.isEnabledFor(logging.DEBUG)
             if debug_logging:
                 LOGGER.debug(
@@ -399,6 +413,7 @@ class RecursiveDisassembler:
         )
         self._symbol_cache = {}
         self._api_cache = {}
+        self._cb_analysis_timeout = cbAnalysisTimeout
         self.disassembly = DisassemblyResult()
         self.disassembly.smda_version = self.config.VERSION
         # analyzeBuffer replaces the DisassemblyResult allocated in __init__; re-apply
@@ -439,10 +454,7 @@ class RecursiveDisassembler:
         self._tfidf = self.backend.createTfIdf(binary_info.bitness)
         LOGGER.debug("Starting heuristical analysis.")
         # first pass, analyze locations identifiable by heuristics (e.g. call-reference, common prologue)
-        for candidate in self.fc_manager.getNextFunctionStartCandidate():
-            if cbAnalysisTimeout and cbAnalysisTimeout():
-                break
-            state = self.analyzeFunction(candidate.addr)
+        self._drainCandidateQueue(cbAnalysisTimeout)
         LOGGER.debug(
             "Finished heuristical analysis, functions: %d",
             len(self.disassembly.functions),
@@ -450,13 +462,13 @@ class RecursiveDisassembler:
         # deferred candidate sources need the primary pass's code_map claims to filter
         # against; they run before gap analysis so accepted starts anchor real functions
         for deferred_addr in self.fc_manager.locateDeferredCandidates():
-            if cbAnalysisTimeout and cbAnalysisTimeout():
+            if self._analysisTimeoutTripped(cbAnalysisTimeout):
                 break
             state = self.analyzeFunction(deferred_addr)
         # second pass, analyze remaining gaps for additional candidates in an iterative way
         gap_candidate = self.fc_manager.nextGapCandidate()
         while gap_candidate is not None:
-            if cbAnalysisTimeout and cbAnalysisTimeout():
+            if self._analysisTimeoutTripped(cbAnalysisTimeout):
                 break
             LOGGER.debug("based on gap, performing function analysis of 0x%08x", gap_candidate)
             state = self.analyzeFunction(gap_candidate, as_gap=True)
@@ -475,10 +487,7 @@ class RecursiveDisassembler:
         LOGGER.debug("Finished gap analysis, functions: %d", len(self.disassembly.functions))
         # candidates may have been discovered during gap analysis (e.g. tailcall targets triggered
         # by _analyzeUncondBranch); drain them before moving to the tailcall pass.
-        for candidate in self.fc_manager.getNextFunctionStartCandidate():
-            if cbAnalysisTimeout and cbAnalysisTimeout():
-                break
-            state = self.analyzeFunction(candidate.addr)
+        self._drainCandidateQueue(cbAnalysisTimeout)
         # third pass, fix potential tailcall functions that were identified during analysis
         if self.config.RESOLVE_TAILCALLS:
             tailcalled_functions = self.tailcall_analyzer.resolveTailcalls(self)
@@ -486,10 +495,7 @@ class RecursiveDisassembler:
                 self.fc_manager.addTailcallCandidate(addr)
             LOGGER.debug("Finished tailcall analysis, functions.")
             # drain any candidates that were added during tailcall resolution
-            for candidate in self.fc_manager.getNextFunctionStartCandidate():
-                if cbAnalysisTimeout and cbAnalysisTimeout():
-                    break
-                state = self.analyzeFunction(candidate.addr)
+            self._drainCandidateQueue(cbAnalysisTimeout)
         if self.config.USE_PE_X64_PDATA_ENDS:
             self._splitMergedFunctionsAtPdataEnds(cbAnalysisTimeout)
         self.disassembly.failed_analysis_addr = self.fc_manager.getAbortedCandidates()
@@ -514,7 +520,7 @@ class RecursiveDisassembler:
             )
             self.disassembly.language_guess = lang_analyzer.getGuess()
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
-        if cbAnalysisTimeout and cbAnalysisTimeout():
+        if self._analysisTimeoutTripped(cbAnalysisTimeout):
             self.disassembly.analysis_timeout = True
         return self.disassembly
 
@@ -526,11 +532,11 @@ class RecursiveDisassembler:
         pdata_ends = self.fc_manager.pdata_end_addresses
         if not pdata_ends:
             return 0
-        if self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+        if self._analysisTimeoutTripped(cbAnalysisTimeout):
             return 0
         split_points_by_owner = {}
         for index, end_addr in enumerate(sorted(pdata_ends)):
-            if index and index % 4096 == 0 and self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+            if index and index % 4096 == 0 and self._analysisTimeoutTripped(cbAnalysisTimeout):
                 return 0
             fn_start = self.disassembly.ins2fn.get(end_addr)
             if (
@@ -547,18 +553,34 @@ class RecursiveDisassembler:
                 split_points_by_owner.setdefault(fn_start, []).append(end_addr)
         splits_performed = 0
         for fn_start, genuine_splits in sorted(split_points_by_owner.items()):
-            if self._pdataSplitTimeoutTripped(cbAnalysisTimeout):
+            if self._analysisTimeoutTripped(cbAnalysisTimeout):
                 break
             splits_performed += self._partitionFunctionAtPdataEnds(fn_start, genuine_splits)
         return splits_performed
 
-    def _pdataSplitTimeoutTripped(self, cbAnalysisTimeout):
-        if self.disassembly.analysis_timeout:
-            return True
-        if cbAnalysisTimeout is not None and cbAnalysisTimeout():
-            self.disassembly.analysis_timeout = True
-            return True
-        return False
+    def _drainCandidateQueue(self, cbAnalysisTimeout):
+        """Analyse every queued candidate that is still unfinished, until the budget is spent.
+
+        Three passes drain the queue this way - the heuristic pass, the one after gap analysis
+        and the one after tailcall resolution - and they were three copies of the same four
+        lines. The tailcall drain is the reason to have it in one place: `resolveTailcalls`
+        analyses each address it returns, so the queue is normally empty by the time that copy
+        ran, and a poll that is only ever reached through the other two is a poll nobody can
+        check.
+        """
+        for candidate in self.fc_manager.getNextFunctionStartCandidate():
+            if self._analysisTimeoutTripped(cbAnalysisTimeout):
+                break
+            self.analyzeFunction(candidate.addr)
+
+    def _analysisTimeoutTripped(self, cbAnalysisTimeout=None):
+        """Whether the analysis budget is spent, latching the verdict onto the result.
+
+        Falls back to the callback analyzeBuffer was given, so a pass that is not handed one
+        is still bounded by the same budget as the passes around it.
+        """
+        callback = cbAnalysisTimeout if cbAnalysisTimeout is not None else self._cb_analysis_timeout
+        return analysisTimeoutTripped(self.disassembly, callback)
 
     def _hasNonFallthroughCodeRef(self, target_addr, owner_fn):
         for source_addr in self.disassembly.code_refs_to.get(target_addr, ()):

@@ -113,6 +113,195 @@ class IndirectCallAnalyzerTestSuite(unittest.TestCase):
         # eax should have 0x402000
         self.assertEqual(registers.get("eax"), 0x402000, f"Expected eax to be 0x402000, but got {registers.get('eax')}")
 
+    def _resolveThrough(self, block, register_name="eax", calling_addr=0x401100, bitness=32):
+        """Run the backward walk over `block` and return the register values it recovered.
+
+        The walk renames what it is tracking as it follows a copy chain, so the value can land
+        under a different key than the one it started from - the dict is what to assert on.
+        """
+        disassembler = MagicMock()
+        disassembler.resolveApi.return_value = (None, None)
+        analyzer = IndirectCallAnalyzer(disassembler)
+        analyzer.disassembly = MagicMock()
+        analyzer.disassembly.isAddrWithinMemoryImage.return_value = True
+        analyzer.disassembly.binary_info.bitness = bitness
+        analyzer.current_calling_addr = calling_addr
+        analyzer.current_slot = None
+        analyzer.state = MagicMock()
+        registers = {}
+        analyzer.processBlock(analyzer.state, block, registers, register_name, [], 0)
+        return registers
+
+    def test_a_write_between_the_definition_and_the_call_stops_the_walk(self):
+        """The walk modelled mov and lea and read every other mnemonic as harmless, so an
+        instruction that changes the register in between was skipped and the value from before
+        it resolved - a wrong call target, not a missing one."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 3, "add", "eax, 4"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_unmodelled_mov_write_stops_the_walk(self):
+        """The mov/lea exemption assumed the patterns below model every mov. They model only
+        some forms, and `mov eax, dword ptr [esi]` - the vtable dispatch load - is not one of
+        them, so the walk read past the real last write and bound the call to a dead
+        assignment. On a 32-bit PE corpus that shape reaches the walk a few hundred times per
+        sample."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "mov", "eax, dword ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_unmodelled_write_through_a_sub_register_stops_the_walk(self):
+        """al is part of eax, so a value written through one is readable through the other."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "mov", "al, byte ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_unmodelled_write_of_an_untracked_register_does_not_stop_the_walk(self):
+        """Control for the rule above: only the tracked register's value is at stake, so an
+        unmodelled write elsewhere must not throw the resolution away."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "mov", "ebx, dword ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {"eax": 0x402000})
+
+    def test_a_store_to_memory_does_not_stop_the_walk(self):
+        """Second control: a mov whose destination is memory writes no register at all."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 5, "mov", "dword ptr [0x400500], eax"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {"eax": 0x402000})
+
+    def test_a_call_between_the_definition_and_the_call_stops_the_walk(self):
+        """Same class through the ABI rather than the operand: a call clobbers the register
+        without naming it at all."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_a_branch_between_the_definition_and_the_call_does_not_stop_the_walk(self):
+        """A backtracked window spans blocks, so a branch sits between the definition and the
+        call routinely - across the bundled fixtures it is what stopped 612 of 978 walks. A
+        branch writes rip and the flags and no general register, so the value survives it."""
+        for mnemonic in ("jne", "jmp"):
+            with self.subTest(mnemonic=mnemonic):
+                block = [
+                    [0x401000, 5, "mov", "eax, 0x402000"],
+                    [0x401005, 2, "cmp", "ecx, 1"],
+                    [0x401007, 2, mnemonic, "0x401100"],
+                    [0x401100, 2, "call", "eax"],
+                ]
+
+                self.assertEqual(self._resolveThrough(block).get("eax"), 0x402000)
+
+    def test_a_loop_between_the_definition_and_the_call_still_stops_the_walk(self):
+        """Control on the other side of the same set: `loop` is a branch too, and it decrements
+        rcx, so it is deliberately not preserved."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 2, "loop", "0x401100"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_a_call_preserves_a_callee_saved_register(self):
+        """A resolved target is booked as a function candidate, so a walk that stops early costs
+        a function rather than an API name. Every x86 convention preserves ebx, so the definition
+        is still the value the call receives."""
+        block = [
+            [0x401000, 5, "mov", "ebx, 0x402000"],
+            [0x401005, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "ebx"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block, register_name="ebx").get("ebx"), 0x402000)
+
+    def test_a_callee_saved_register_survives_a_call_in_64_bit_code(self):
+        block = [
+            [0x401000, 7, "mov", "rbx, 0x402000"],
+            [0x401007, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "rbx"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block, register_name="rbx", bitness=64).get("rbx"), 0x402000)
+
+    def test_rsi_does_not_survive_a_call_in_64_bit_code(self):
+        """Control: esi is callee-saved on x86 and rsi is not under the SysV ABI, so the set is
+        chosen by bitness rather than by register name alone."""
+        block = [
+            [0x401000, 7, "mov", "rsi, 0x402000"],
+            [0x401007, 5, "call", "0x403000"],
+            [0x401100, 2, "call", "rsi"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block, register_name="rsi", bitness=64), {})
+
+    def test_a_vector_move_does_not_stop_the_walk(self):
+        """A move whose destination is a vector register writes no general register."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 4, "movaps", "xmm0, xmmword ptr [ecx]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block).get("eax"), 0x402000)
+
+    def test_a_string_move_still_stops_the_walk(self):
+        """Control on the mnemonic capstone overloads: `movsd` also spells the string
+        instruction, which writes esi and edi, so it is deliberately not preserved."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 1, "movsd", "dword ptr es:[edi], dword ptr [esi]"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block), {})
+
+    def test_an_undisturbed_definition_still_resolves(self):
+        """Positive control: the walk still starts at the call being resolved - which is itself
+        a clobber - and still reads a definition that nothing in between touched. Without this,
+        a guard that gave up immediately would satisfy both cases above."""
+        block = [
+            [0x401000, 5, "mov", "eax, 0x402000"],
+            [0x401005, 1, "nop", ""],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block).get("eax"), 0x402000)
+
+    def test_a_copy_chain_still_resolves(self):
+        """Second control: the mnemonics the walk does model keep working, so the guard has not
+        simply disabled resolution."""
+        block = [
+            [0x401000, 5, "mov", "edx, 0x402000"],
+            [0x401005, 2, "mov", "eax, edx"],
+            [0x401100, 2, "call", "eax"],
+        ]
+
+        self.assertEqual(self._resolveThrough(block).get("edx"), 0x402000)
+
     def test_processBlock_preserves_known_import_slot(self):
         import_slot = 0x403000
         memory_value = 0x500000

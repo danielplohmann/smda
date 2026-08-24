@@ -3,7 +3,25 @@ import logging
 import re
 import struct
 
+from .definitions import CALL_INS, CJMP_INS, JMP_INS, canonicalRegister, stripFlatSegmentOverride
+
 LOGGER = logging.getLogger(__name__)
+
+# The walk models `mov` and `lea`; a value may only be carried past another mnemonic that is
+# known to write no general register. These write none - a branch touches rip and the flags, the
+# rest compare or read. LOOP_INS is absent deliberately: `loop` decrements rcx.
+_VALUE_PRESERVING_MNEMONICS = frozenset({"cmp", "test", "push", "bt", "nop"}) | CJMP_INS | JMP_INS
+# Vector moves whose destination is a vector register or memory. `movd`/`movq` are absent because
+# they also spell a vector-to-general move, and `movsd` because capstone spells the string
+# instruction - which writes esi and edi - with the same mnemonic as the scalar-double move.
+_VECTOR_MOVE_MNEMONICS = frozenset({"movaps", "movapd", "movups", "movupd", "movdqa", "movdqu", "movntps", "movntdq"})
+# What a call leaves alone. Every x86 convention preserves ebx, esi, edi and ebp; on x86-64 only
+# the registers both the SysV and the Microsoft ABI make callee-saved are listed, so rsi and rdi
+# stay out.
+_CALLEE_SAVED_32 = frozenset({"ebx", "esi", "edi", "ebp", "bx", "si", "di", "bp", "bl", "bh"})
+_CALLEE_SAVED_64 = frozenset({"rbx", "rbp", "ebx", "ebp", "bx", "bp", "bl", "bh", "bpl"}) | {
+    f"r1{number}{suffix}" for number in "2345" for suffix in ("", "d", "w", "b")
+}
 
 
 class IndirectCallAnalyzer:
@@ -109,6 +127,39 @@ class IndirectCallAnalyzer:
             self.processBlock(analysis_state, start_block, {}, register_name, [], block_depth)
         self.current_slot = None
 
+    def _callPreserves(self, mnemonic, register_name):
+        """Whether a call leaves `register_name` as the caller left it."""
+        if mnemonic not in CALL_INS:
+            return False
+        bitness = getattr(self.disassembly.binary_info, "bitness", 32)
+        return register_name in (_CALLEE_SAVED_64 if bitness == 64 else _CALLEE_SAVED_32)
+
+    _MODELLED_WRITE_PATTERNS = (
+        "RE_MOV_REG_REG",
+        "RE_MOV_REG_CONST",
+        "RE_REG_DWORD_PTR_ADDR",
+        "RE_REG_QWORD_PTR_RIP_ADDR",
+        "RE_REG_ADDR",
+    )
+
+    def _writesUnmodelledRegister(self, operands, register_name, registers):
+        """Whether this mov/lea writes a register the walk is reading, in a form it cannot read.
+
+        Returns True only for the tracked register, whose value the walk would otherwise take
+        from an earlier instruction. A write of some other tracked register is not a reason to
+        stop, but its recorded value is stale from here on, so it is dropped.
+        """
+        if any(getattr(self, name).match(operands) for name in self._MODELLED_WRITE_PATTERNS):
+            return False
+        destination = canonicalRegister(operands.split(",")[0])
+        if destination is None:
+            return False
+        if destination == canonicalRegister(register_name):
+            return True
+        for spelling in [name for name in registers if canonicalRegister(name) == destination]:
+            registers.pop(spelling, None)
+        return False
+
     def processBlock(self, analysis_state, block, registers, register_name, processed, depth):
         if not block:
             return False
@@ -127,13 +178,40 @@ class IndirectCallAnalyzer:
         for ins in reversed(block):
             if debug_logging:
                 LOGGER.debug("0x%08x: %s %s", ins[0], ins[2], ins[3])
-            if ins[2] == "mov":
+            # the anchored patterns below describe an operand with no segment override;
+            # one that carries a zero-base override names the same slot
+            operands = stripFlatSegmentOverride(ins[3])
+            mnemonic = ins[2].split(" ")[-1]
+            if (
+                ins[0] != self.current_calling_addr
+                and mnemonic not in ("mov", "lea")
+                and mnemonic not in _VALUE_PRESERVING_MNEMONICS
+                and mnemonic not in _VECTOR_MOVE_MNEMONICS
+                and not self._callPreserves(mnemonic, register_name)
+            ):
+                # the walk begins at the call being resolved, which is itself a clobber; every
+                # instruction before it is not
+                LOGGER.debug("giving up at 0x%08x: %s may write %s", ins[0], mnemonic, register_name)
+                return False
+            # mov and lea are exempted from the clobber check above because the patterns below
+            # model them - but only some of their forms. A form none of the patterns match still
+            # writes its destination, and reading past it resolves the call against whatever
+            # wrote the register earlier: a wrong answer rather than a missing one.
+            # `mov eax, dword ptr [esi]`, the vtable dispatch load, is the common case.
+            if (
+                mnemonic in ("mov", "lea")
+                and ins[0] != self.current_calling_addr
+                and self._writesUnmodelledRegister(operands, register_name, registers)
+            ):
+                LOGGER.debug("giving up at 0x%08x: unmodelled %s write of %s", ins[0], mnemonic, register_name)
+                return False
+            if mnemonic == "mov":
                 # mov <reg>, <reg>
-                match1 = self.RE_MOV_REG_REG.match(ins[3])
+                match1 = self.RE_MOV_REG_REG.match(operands)
                 if match1 and match1.group("reg1") == register_name:
                     register_name = match1.group("reg2")
                 # mov <reg>, <const>
-                match2 = self.RE_MOV_REG_CONST.match(ins[3])
+                match2 = self.RE_MOV_REG_CONST.match(operands)
                 if match2:
                     registers[match2.group("reg")] = int(match2.group("val"), 16)
                     LOGGER.debug(
@@ -144,7 +222,7 @@ class IndirectCallAnalyzer:
                     if match2.group("reg") == register_name:
                         abs_value_found = True
                 # mov <reg>, dword ptr [<addr>]
-                match3 = self.RE_REG_DWORD_PTR_ADDR.match(ins[3])
+                match3 = self.RE_REG_DWORD_PTR_ADDR.match(operands)
                 if match3:
                     # Import resolvers may key APIs by the pointer slot address,
                     # so preserve known import slots instead of dereferencing them.
@@ -172,7 +250,7 @@ class IndirectCallAnalyzer:
                             if match3.group("reg") == register_name:
                                 abs_value_found = True
                 # mov <reg>, qword ptr [reg + <addr>]
-                match4 = self.RE_REG_QWORD_PTR_RIP_ADDR.match(ins[3])
+                match4 = self.RE_REG_QWORD_PTR_RIP_ADDR.match(operands)
                 if match4:
                     # rip-relative addressing already resolves the slot; the register then
                     # receives the whole qword stored there, not rip plus its low half
@@ -190,13 +268,13 @@ class IndirectCallAnalyzer:
                         )
                         if match4.group("reg") == register_name:
                             abs_value_found = True
-            elif ins[2] == "lea":
+            elif mnemonic == "lea":
                 LOGGER.debug("*checking %s %s", ins[2], ins[3])
                 # lea <reg>, dword ptr [<addr>] and lea <reg>, [<addr>]
                 # lea computes an address; the register receives the address itself, so
                 # dereferencing it here would resolve the call against the wrong target
                 for pattern in (self.RE_REG_DWORD_PTR_ADDR, self.RE_REG_ADDR):
-                    match1 = pattern.match(ins[3])
+                    match1 = pattern.match(operands)
                     if match1:
                         address = int(match1.group("addr"), 16)
                         registers[match1.group("reg")] = address

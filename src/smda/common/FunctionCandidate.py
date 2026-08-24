@@ -91,6 +91,15 @@ class FunctionCandidate:
         """Architecture-specific entry-shape score; implemented per backend."""
         raise NotImplementedError
 
+    def isLandingPadEntry(self):
+        """Whether this candidate starts on an indirect-branch landing pad.
+
+        A landing pad is the image's own declaration that an indirect branch may target the
+        address, so a candidate carrying one was not discovered by guessing. Backends without
+        the concept answer False.
+        """
+        return False
+
     def addCallRef(self, source_addr):
         previous_size = len(self.call_ref_sources)
         self.call_ref_sources.add(source_addr)

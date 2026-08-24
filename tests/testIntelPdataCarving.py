@@ -6,9 +6,12 @@ table. These tests pin the carver that recovers it from the raw image instead.
 """
 
 import struct
+import traceback
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
+import smda.intel.FunctionCandidateManager as intel_candidates
 from smda.common.BinaryInfo import BinaryInfo
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
@@ -161,6 +164,67 @@ class IntelPdataCarvingTestSuite(unittest.TestCase):
         manager.locateExceptionHandlerCandidates()
 
         self.assertEqual({}, manager.candidates)
+
+
+class IntelCarveBudgetTestSuite(unittest.TestCase):
+    """One exception table is walked inside a single call, so the poll in the pass around it
+    never comes round again. The record walk and the admit loop carry their own."""
+
+    POLL = 4
+
+    def _spentOnceTheTableIsFound(self, manager):
+        """A budget that is intact while the table is being located and spent afterwards.
+
+        Answering "spent" throughout would stop the locate instead, and the admit loop this
+        is about would never run - the test would pass while proving nothing.
+        """
+
+        def spent():
+            return not any(frame.name == "_locateExceptionRecordTable" for frame in traceback.extract_stack())
+
+        manager._cb_analysis_timeout = spent
+
+    def test_the_record_walk_gives_up_when_the_budget_is_spent(self):
+        manager = _manager(_image(24))
+        blob = manager.disassembly.binary_info.binary
+        manager._cb_analysis_timeout = lambda: True
+
+        with mock.patch.object(intel_candidates, "_TIMEOUT_POLL_INTERVAL", self.POLL):
+            counted = manager._countExceptionRecords(blob, len(blob), TABLE_RVA, 1000)
+
+        self.assertEqual(counted, self.POLL)
+
+    def test_the_same_walk_completes_within_budget(self):
+        """Positive control: with the budget intact the walk counts every record, so the stop
+        above is the poll rather than the records failing validation."""
+        manager = _manager(_image(24))
+        blob = manager.disassembly.binary_info.binary
+        manager._cb_analysis_timeout = None
+
+        with mock.patch.object(intel_candidates, "_TIMEOUT_POLL_INTERVAL", self.POLL):
+            counted = manager._countExceptionRecords(blob, len(blob), TABLE_RVA, 1000)
+
+        self.assertEqual(counted, 24)
+
+    def test_the_admit_loop_gives_up_when_the_budget_is_spent(self):
+        manager = _manager(_image(24))
+        self._spentOnceTheTableIsFound(manager)
+
+        with mock.patch.object(intel_candidates, "_TIMEOUT_POLL_INTERVAL", self.POLL):
+            manager._carveExceptionRecords(BASE, False)
+
+        self.assertEqual(len(manager.candidates), self.POLL)
+
+    def test_the_admit_loop_takes_every_record_within_budget(self):
+        """Positive control for the loop itself: the same table admits all 24 when nothing
+        stops it, so the count above is the poll and not the table being short."""
+        manager = _manager(_image(24))
+        manager._cb_analysis_timeout = None
+
+        with mock.patch.object(intel_candidates, "_TIMEOUT_POLL_INTERVAL", self.POLL):
+            manager._carveExceptionRecords(BASE, False)
+
+        self.assertEqual(len(manager.candidates), 24)
 
 
 if __name__ == "__main__":

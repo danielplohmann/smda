@@ -98,6 +98,8 @@ class TailcallAnalyzer:
     def resolveTailcalls(self, disassembler, verbose=False):
         newly_created_functions = set()
         for tailcall in self.getTailcalls():
+            if disassembler._analysisTimeoutTripped():
+                break
             if verbose:
                 LOGGER.debug("Processing tailcall:\n%s", json.dumps(tailcall, indent=2, sort_keys=True))
             # remove the information from the function-analysis state of the disassembly
@@ -117,7 +119,10 @@ class TailcallAnalyzer:
             disassembler.analyzeFunction(tailcall["destination_addr"])
             newly_created_functions.add(tailcall["destination_addr"])
             function = self.__getFunctionByStartAddr(tailcall["destination_addr"])
-            if function and tailcall["destination_function"] not in function.instruction_start_bytes:
+            absorbed = function is not None and tailcall["destination_function"] in function.instruction_start_bytes
+            candidate = disassembler.fc_manager.candidates.get(tailcall["destination_function"])
+            declared_entry = candidate is not None and candidate.isLandingPadEntry()
+            if function and (not absorbed or declared_entry):
                 # analyze the (previously) broken function a second time
                 try:
                     disassembler.analyzeFunction(tailcall["destination_function"])

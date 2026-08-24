@@ -13,6 +13,11 @@ class FunctionCandidate(_CommonFunctionCandidate):
         word = int.from_bytes(self.bytes[:4], "little")
         return is_function_prologue(word) or is_bti_landing_pad(word)
 
+    def isLandingPadEntry(self):
+        if len(self.bytes) < INSTRUCTION_SIZE:
+            return False
+        return is_bti_landing_pad(int.from_bytes(self.bytes[:INSTRUCTION_SIZE], "little"))
+
     def getFunctionStartScore(self):
         # Intentionally 0 for priority-queue scoring. AArch64 frame-record stores
         # (stp x29,x30,[sp,#-imm]!) also appear mid-function; feeding them into

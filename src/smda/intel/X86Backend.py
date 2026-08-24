@@ -19,6 +19,7 @@ from .definitions import (
     REGS_32BIT,
     REGS_64BIT,
     RET_INS,
+    stripFlatSegmentOverride,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
 from .FunctionCandidateManager import FunctionCandidateManager
@@ -171,6 +172,7 @@ class X86Backend(ArchBackend):
                 continue
             if mnemonic != "jmp":
                 return None
+            op_str = stripFlatSegmentOverride(op_str)
             if op_str.startswith("qword ptr [rip"):
                 return address + size + d.getReferencedAddr(op_str)
             if op_str.startswith("dword ptr [0x"):
@@ -194,15 +196,27 @@ class X86Backend(ArchBackend):
         # segment selector. There is no in-image target to book, so drop it like _analyzeJmp.
         if i_mnemonic.split(" ")[-1] == "lcall":
             return
+        i_op_str = stripFlatSegmentOverride(i_op_str)
+        # case = "LONG-CALL-INDIRECT": FF /3 loads a seg:offset pair from memory. capstone
+        # renders it with a bare "ptr " where a near indirect call (FF /2) always names its
+        # width, and that is the only difference between them once a segment override is
+        # normalized away. No arm below claims it today; saying so keeps it that way.
+        if i_op_str.startswith("ptr "):
+            return
         call_destination = d.getReferencedAddr(i_op_str)
         if i_op_str.startswith("dword ptr ["):
             if i_op_str.startswith("dword ptr [0x"):
                 # case = "DWORD-PTR"
                 dereferenced = d.disassembly.dereferenceDword(call_destination)
-                if dereferenced is not None:
+                if dereferenced and d.disassembly.isAddrWithinMemoryImage(dereferenced):
                     state.addCodeRef(i_address, dereferenced)
                     d._handleCallTarget(state, i_address, dereferenced)
                     d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
+                else:
+                    # import-like case: keep the reference on the slot itself
+                    state.addCodeRef(i_address, call_destination)
+                    if dereferenced is not None:
+                        d._handleApiTarget(i_address, call_destination, dereferenced, slot=call_destination)
             else:
                 # case = "DWORD-PTR-REG"
                 self._collectMemRegSlot(state, i_address, i_op_str)
@@ -210,7 +224,7 @@ class X86Backend(ArchBackend):
             rip = i_address + i_size
             call_destination = rip + d.getReferencedAddr(i_op_str)
             dereferenced = d.disassembly.dereferenceQword(call_destination)
-            if dereferenced is not None and d.disassembly.isAddrWithinMemoryImage(dereferenced):
+            if dereferenced and d.disassembly.isAddrWithinMemoryImage(dereferenced):
                 # the slot holds an in-image target (thunk/local function): book the call
                 # against the real destination, like the 32-bit dword-ptr path does
                 state.addCodeRef(i_address, dereferenced)
@@ -254,6 +268,7 @@ class X86Backend(ArchBackend):
         for i_address, i_size, i_mnemonic, i_op_str, _ in state.instructions:
             if i_mnemonic.split(" ")[-1] != "mov":
                 continue
+            i_op_str = stripFlatSegmentOverride(i_op_str)
             match = IMPORT_SLOT_LOAD_RE.match(i_op_str)
             if match is None:
                 continue
@@ -311,9 +326,15 @@ class X86Backend(ArchBackend):
 
     def _analyzeJmpInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
+        i_op_str = stripFlatSegmentOverride(i_op_str)
+        i = (i_address, i_size, i_mnemonic, i_op_str)
         # case = "FALLTHROUGH"
-        if ":" in i_op_str:
-            # case = "LONG-JMP"
+        if i_op_str.startswith("ptr ") or ":" in i_op_str:
+            # case = "LONG-JMP": a far branch names a segment and an offset, so it reaches no
+            # address in this image. The direct form (ljmp) holds a colon; the indirect form
+            # (FF /5) is told from a near indirect branch by the missing width - capstone
+            # renders "ptr [0x402000]" where a near one renders "dword ptr [0x402000]".
+            # Also the arm for an fs:/gs: operand whose base is not in the image.
             pass
         elif i_op_str.startswith("dword ptr [0x"):
             # case = "DWORD-PTR"
@@ -473,7 +494,7 @@ class X86Backend(ArchBackend):
                 )
             if previous_address is not None and previous_mnemonic == "push":
                 push_ret_destination = d.getReferencedAddr(previous_instruction[3].strip())
-                if d.disassembly.isAddrWithinMemoryImage(push_ret_destination):
+                if push_ret_destination and d.disassembly.isAddrWithinMemoryImage(push_ret_destination):
                     LOGGER.debug(
                         "  analyzeFunction() found push-return jump obfuscation: @0x%08x",
                         i_address,

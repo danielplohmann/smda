@@ -13,6 +13,7 @@ from dncil.cil.body.reader import CilMethodBodyReaderBase
 from dncil.clr.token import InvalidToken, StringToken, Token
 from dnfile.enums import MetadataTables
 
+from smda.common.analysis_budget import analysisTimeoutTripped
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.labelprovider.CilSymbolProvider import CilSymbolProvider
 from smda.DisassemblyResult import DisassemblyResult
@@ -332,11 +333,11 @@ class CilDisassembler:
                 continue
             if not method_body.instructions:
                 continue
-            if cbAnalysisTimeout and cbAnalysisTimeout():
+            if analysisTimeoutTripped(self.disassembly, cbAnalysisTimeout):
                 break
             self.analyzeFunction(pe, method_body.offset, method_body)
         # package up and finish
         self.disassembly.analysis_end_ts = datetime.datetime.now(datetime.timezone.utc)
-        if cbAnalysisTimeout and cbAnalysisTimeout():
+        if analysisTimeoutTripped(self.disassembly, cbAnalysisTimeout):
             self.disassembly.analysis_timeout = True
         return self.disassembly

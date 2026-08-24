@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from smda.Disassembler import Disassembler
+from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.JumpTableAnalyzer import JumpTableAnalyzer
 from smda.SmdaConfig import SmdaConfig
 
@@ -431,3 +432,170 @@ class DirectTableRecoveryTest(unittest.TestCase):
         # the three consumed entries are claimed as data, so the gap scan cannot seed
         # candidates inside the table
         self.assertEqual(sorted(report.data_refs_from[0x40000A]), [0x401000, 0x401004, 0x401008])
+
+
+class ZeroTableEntryTest(unittest.TestCase):
+    """A table entry of zero is what a run of zero bytes reads back as, and in an image
+    mapped at base 0 it is also inside the mapped range, so the image bound admits it."""
+
+    IMAGE_SIZE = 0x2000
+    LIVE = 0x1100
+    OUT_OF_IMAGE = 0xDEADBEEF
+
+    def _analyzer(self, entries, bitness=32):
+        analyzer = _makeAnalyzer(base_addr=0, binary_size=self.IMAGE_SIZE, bitness=bitness)
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(
+            side_effect=lambda addr: addr is not None and 0 <= addr < self.IMAGE_SIZE
+        )
+        entry_format = "<I" if bitness == 32 else "<Q"
+        entry_size = struct.calcsize(entry_format)
+        table = b"".join(struct.pack(entry_format, entry) for entry in entries)
+        analyzer.disassembly.getBytes = MagicMock(
+            side_effect=lambda addr, size: table[addr - 0x1090 : addr - 0x1090 + size]
+        )
+        return analyzer, entry_size
+
+    def test_a_base_zero_image_really_admits_address_zero(self):
+        """Positive control for the class, asserted against the real predicate: without this
+        the tests below could pass because the image bound already rejected zero, which is
+        the case they exist for."""
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = SimpleNamespace(base_addr=0, binary_size=self.IMAGE_SIZE)
+
+        self.assertTrue(disassembly.isAddrWithinMemoryImage(0))
+
+    def test_direct_scan_without_a_bound_stops_at_a_zero_entry(self):
+        analyzer, _ = self._analyzer([0, self.LIVE])
+
+        self.assertEqual(analyzer._extractDirectTableOffsets(0, 0x1090), [])
+
+    def test_direct_scan_without_a_bound_reads_a_live_entry(self):
+        """Positive control: the same harness terminated out of the image instead of by a
+        zero must collect the live entry, and must do so on either side of the fix, so an
+        empty result above cannot come from the scan never running."""
+        analyzer, _ = self._analyzer([self.LIVE, self.OUT_OF_IMAGE])
+
+        self.assertEqual(analyzer._extractDirectTableOffsets(0, 0x1090), [self.LIVE])
+
+    def test_a_recovered_bound_skips_a_zero_entry_and_keeps_scanning(self):
+        analyzer, _ = self._analyzer([0, self.LIVE])
+
+        self.assertEqual(analyzer._extractDirectTableOffsets(2, 0x1090), [self.LIVE])
+
+    def test_explicit_table_stops_at_a_zero_entry(self):
+        analyzer, _ = self._analyzer([0, self.LIVE], bitness=64)
+        state = SimpleNamespace(refs=[])
+        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+
+        self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, 0x1090), [])
+        self.assertEqual(state.refs, [])
+
+    def test_explicit_table_refuses_a_table_base_of_zero(self):
+        """The base reaches the scan through the same operand reader, which returns its
+        "nothing found" 0 for a dispatch naming no displacement (`jmp qword ptr [rax*8]`)."""
+        analyzer, _ = self._analyzer([self.LIVE, self.LIVE], bitness=64)
+        analyzer.disassembly.getBytes = MagicMock(side_effect=lambda addr, size: struct.pack("<Q", self.LIVE)[:size])
+        state = SimpleNamespace(refs=[])
+        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+
+        self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, 0), [])
+        self.assertEqual(state.refs, [])
+
+    def test_explicit_table_reads_a_live_entry(self):
+        """Positive control for the explicit-table arm, terminated out of the image so it
+        reads the same on either side of the fix."""
+        analyzer, entry_size = self._analyzer([self.LIVE, self.OUT_OF_IMAGE], bitness=64)
+        state = SimpleNamespace(refs=[])
+        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+
+        self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, 0x1090), [self.LIVE])
+        self.assertEqual(state.refs, [(0x2000, 0x1090, entry_size)])
+
+
+class ZeroTableEntryRecoveryTest(unittest.TestCase):
+    """End to end, in an image mapped at base 0: a dispatch whose derived table base lands
+    on zero bytes read address 0 as its only case target, and the function reaching the
+    dispatch was discarded whole rather than kept with an unresolved jump."""
+
+    FUNCTION = 0x100
+    TABLE = 0x1000
+    CASES = (0x40, 0x50, 0x60)
+
+    def _buffer(self, table_is_populated):
+        buffer = bytearray(0x2000)
+        code = bytes.fromhex("55")  # push ebp
+        code += bytes.fromhex("89e5")  # mov ebp, esp
+        code += bytes.fromhex("8b0485") + struct.pack("<I", self.TABLE)  # mov eax, [eax*4 + table]
+        code += bytes.fromhex("ffe0")  # jmp eax
+        buffer[self.FUNCTION : self.FUNCTION + len(code)] = code
+        for case in self.CASES:
+            buffer[self.FUNCTION + case : self.FUNCTION + case + 3] = bytes.fromhex("31c0c3")  # xor eax, eax; ret
+        if table_is_populated:
+            for index, case in enumerate(self.CASES):
+                struct.pack_into("<I", buffer, self.TABLE + index * 4, self.FUNCTION + case)
+            struct.pack_into("<I", buffer, self.TABLE + len(self.CASES) * 4, 0xDEADBEEF)
+        return bytes(buffer)
+
+    def _functions(self, table_is_populated):
+        config = SmdaConfig()
+        config.TIMEOUT = 30
+        config.WITH_STRINGS = False
+        config.CALCULATE_HASHING = False
+        report = Disassembler(config).disassembleBuffer(self._buffer(table_is_populated), 0, bitness=32)
+        self.assertEqual(report.status, "ok")
+        return report
+
+    def test_a_populated_table_dispatches_as_one_function(self):
+        """Positive control: the same image with a readable table must recover the dispatch
+        and its cases as one function, and does so on either side of the fix."""
+        report = self._functions(table_is_populated=True)
+
+        functions = list(report.getFunctions())
+        self.assertEqual([function.offset for function in functions], [self.FUNCTION])
+        self.assertEqual(
+            sorted(block.offset for block in functions[0].getBlocks()),
+            [self.FUNCTION] + [self.FUNCTION + case for case in self.CASES],
+        )
+
+    def test_a_zero_table_leaves_the_dispatching_function_recovered(self):
+        report = self._functions(table_is_populated=False)
+
+        self.assertIn(self.FUNCTION, [function.offset for function in report.getFunctions()])
+
+
+class PushRetZeroRecoveryTest(unittest.TestCase):
+    """End to end: `push <reg>; ret` names no literal, so the operand reader returns its
+    "nothing found" 0, which a base-0 image accepts - and address 0 was queued for decoding
+    as the return's destination, taking the whole function with it."""
+
+    FUNCTION = 0x100
+
+    def _report(self, through_a_register):
+        buffer = bytearray(0x400)
+        code = bytes.fromhex("55")  # push ebp
+        code += bytes.fromhex("89e5")  # mov ebp, esp
+        if through_a_register:
+            code += bytes.fromhex("31c0")  # xor eax, eax
+            code += bytes.fromhex("50")  # push eax
+        else:
+            code += b"\x68" + struct.pack("<I", 0x200)  # push 0x200
+        code += bytes.fromhex("c3")  # ret
+        buffer[self.FUNCTION : self.FUNCTION + len(code)] = code
+        buffer[0x200:0x203] = bytes.fromhex("31c0c3")  # xor eax, eax; ret
+        config = SmdaConfig()
+        config.TIMEOUT = 30
+        config.WITH_STRINGS = False
+        config.CALCULATE_HASHING = False
+        return Disassembler(config).disassembleBuffer(bytes(buffer), 0, bitness=32)
+
+    def test_a_register_destination_leaves_the_function_recovered(self):
+        report = self._report(through_a_register=True)
+
+        self.assertIn(self.FUNCTION, [function.offset for function in report.getFunctions()])
+
+    def test_a_literal_destination_is_still_followed(self):
+        """Positive control: the push-ret idiom naming a real address must keep working,
+        and reads the same on either side of the change."""
+        report = self._report(through_a_register=False)
+
+        self.assertIn(self.FUNCTION, [function.offset for function in report.getFunctions()])

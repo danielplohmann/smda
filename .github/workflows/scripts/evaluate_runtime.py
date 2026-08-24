@@ -23,6 +23,7 @@ All statistics are pure-Python (``statistics`` + ``random``); no third-party dep
 """
 
 import argparse
+import bisect
 import hashlib
 import json
 import math
@@ -31,6 +32,7 @@ import random
 import re
 import statistics
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -38,7 +40,7 @@ BASE_PATH = Path(__file__).resolve().parent.parent.parent.parent
 RUNTIME_PATH = BASE_PATH / "runtime_measurements"
 CACHE_PATH = RUNTIME_PATH / "cache"
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 
 def compute_file_hash(filepath):
@@ -240,6 +242,183 @@ def check_determinism(aggregated):
         "files_disagreeing": disagreeing,
         "median_timing_cv": statistics.median(cvs) if cvs else 0.0,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Changed-address classification
+# --------------------------------------------------------------------------- #
+
+_ROUTINE_RETURN_MNEMONICS = frozenset({"ret", "retn", "retaa", "retab"})
+_LANDING_PAD_MNEMONICS = frozenset({"endbr32", "endbr64"})
+_FRAME_SETUP = {"rbp": "rbp, rsp", "ebp": "ebp, esp"}
+
+
+def _is_register(operand):
+    """A bare register name, as opposed to an immediate or a memory operand.
+
+    Capstone prints an immediate below 10 without its `0x`, so a leading digit has to be
+    rejected explicitly rather than by looking for the prefix.
+    """
+    return bool(operand) and operand.isalnum() and not operand[0].isdigit()
+
+
+def _starts_like_a_function(instructions):
+    """Whether the first instructions read as a function entry rather than as padding.
+
+    Three shapes cover what compilers emit: a CET landing pad, the frame-pointer pair, and
+    the run of callee-saved pushes a register-convention entry opens with. Padding decoded
+    from the wrong offset reaches a branch or an immediate operand within an instruction or
+    two, which is what separates it from these.
+    """
+    head = [(m.split(" ")[-1], o.strip()) for _, m, o in instructions[:2]]
+    if not head:
+        return False
+    if head[0][0] in _LANDING_PAD_MNEMONICS:
+        return True
+    if len(head) < 2 or head[0][0] != "push" or not _is_register(head[0][1]):
+        return False
+    if head[1][0] == "push" and _is_register(head[1][1]):
+        return True
+    return head[1][0] == "mov" and head[1][1] == _FRAME_SETUP.get(head[0][1])
+
+
+CLASSIFICATION_NOTE = (
+    "The corpus carries no labelled function boundaries, so this gate can only see THAT the "
+    "function set changed. These labels read structure out of the two reports the run already "
+    "produced, to say which direction each change points. They are evidence for a human, not a "
+    "verdict: `likely_false_positive` means the dropped address decodes like padding read at the "
+    "wrong offset, and `likely_loss` means it decodes like a real function."
+)
+
+
+def _parse_address(raw):
+    """Addresses reach us as strings, decimal in a real report and hex in some fixtures."""
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    try:
+        return int(text, 16) if text.lower().startswith("0x") else int(text)
+    except ValueError:
+        return None
+
+
+def _index_report(path):
+    """Return ``(xcfg, owner, sorted_addresses)`` for one .smda report.
+
+    ``owner`` maps every decoded instruction address to the function that owns it, which is what
+    lets the other side answer "is this address still code, and whose?".
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    xcfg = data.get("xcfg", {})
+    owner = {}
+    for start, func in xcfg.items():
+        start_int = _parse_address(start)
+        if start_int is None:
+            continue
+        for instructions in func.get("blocks", {}).values():
+            for instruction in instructions:
+                owner[instruction[0]] = start_int
+    return xcfg, owner, sorted(owner)
+
+
+def describe_changed_address(addr, xcfg, other_owner, other_sorted):
+    """Structural signals for one function that exists on this side and not on the other."""
+    func = xcfg.get(str(addr))
+    if func is None:
+        func = next((f for k, f in xcfg.items() if _parse_address(k) == addr), None)
+    if func is None:
+        return None
+    instructions = sorted((i[0], i[2], i[3]) for block in func.get("blocks", {}).values() for i in block)
+    if not instructions:
+        return None
+    own_addresses = {a for a, _, _ in instructions}
+    low, high = instructions[0][0], instructions[-1][0]
+    targets = {t for ts in (func.get("outrefs") or {}).values() for t in ts}
+    targets |= {t for ts in (func.get("blockrefs") or {}).values() for t in ts}
+    window = other_sorted[bisect.bisect_left(other_sorted, low) : bisect.bisect_right(other_sorted, high)]
+    return {
+        "addr": addr,
+        "inrefs": len(func.get("inrefs") or []),
+        "instructions": len(instructions),
+        "ends_in_return": instructions[-1][1].split(" ")[-1] in _ROUTINE_RETURN_MNEMONICS,
+        "starts_like_a_function": _starts_like_a_function(instructions),
+        "absorbed_by": other_owner.get(addr),
+        "branches_into_survivor_interior": sum(1 for t in targets if t in other_owner and other_owner[t] != t),
+        "misaligned_overlap": sum(1 for a in window if a not in own_addresses),
+    }
+
+
+def label_changed_address(signals, dropped):
+    """Turn the structural signals into one label.
+
+    The rules are ordered, and the order is the whole design:
+
+    1. the address is still decoded on the other side, inside some other function - the boundary
+       moved rather than the function vanishing;
+    2. something references it - a called address is a function whatever its body looks like, and
+       this is the rule that catches a real function whose body ends in a tail-call `jmp` rather
+       than a `ret`;
+    3. its body reads like a whole routine - it ends in the near return a compiled routine
+       returns to its caller with, and the other side does not decode different instructions
+       inside its extent;
+    4. it opens the way a compiler opens a function, which is the one reading that survives a
+       body the other side decodes at different offsets - an entry reached only indirectly can
+       have no inbound reference and can end in a tail-call, but it still starts like an entry;
+    5. otherwise it reads like padding decoded from the wrong offset.
+    """
+    if signals["absorbed_by"] is not None:
+        return "absorbed" if dropped else "split_out"
+    if signals["inrefs"] > 0:
+        return "likely_loss" if dropped else "likely_recovery"
+    if signals["ends_in_return"] and signals["misaligned_overlap"] == 0:
+        return "likely_loss" if dropped else "likely_recovery"
+    if signals["starts_like_a_function"]:
+        return "likely_loss" if dropped else "likely_recovery"
+    return "likely_false_positive" if dropped else "likely_new_false_positive"
+
+
+def classify_regressions(regressions, base_folder, pr_folder):
+    """Label every changed address in every differing file.
+
+    Only the files that actually differ are re-read, and only one run per side, so the cost is
+    bounded by the size of the difference rather than by the size of the corpus.
+    """
+    counts = Counter()
+    files = []
+    for entry in regressions:
+        base_path = Path(base_folder) / entry["file"]
+        pr_path = Path(pr_folder) / entry["file"]
+        if not (base_path.exists() and pr_path.exists()):
+            continue
+        try:
+            base_xcfg, base_owner, base_sorted = _index_report(base_path)
+            pr_xcfg, pr_owner, pr_sorted = _index_report(pr_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            # This section is evidence, never a gate, so an unreadable report costs the reading
+            # and nothing else - failing the job over it would be strictly worse than the silence
+            # this replaces.
+            print(f"classification: skipping {entry['file']}: {exc}")
+            continue
+        rows = []
+        for side, raws, source, owner, ordered, dropped in (
+            ("only_in_base", entry.get("only_in_base", []), base_xcfg, pr_owner, pr_sorted, True),
+            ("only_in_pr", entry.get("only_in_pr", []), pr_xcfg, base_owner, base_sorted, False),
+        ):
+            for raw in raws:
+                addr = _parse_address(raw)
+                if addr is None:
+                    continue
+                signals = describe_changed_address(addr, source, owner, ordered)
+                if signals is None:
+                    continue
+                signals["side"] = side
+                signals["label"] = label_changed_address(signals, dropped=dropped)
+                counts[signals["label"]] += 1
+                rows.append(signals)
+        if rows:
+            files.append({"file": entry["file"], "addresses": rows})
+    return {"counts": dict(counts), "files": files, "note": CLASSIFICATION_NOTE}
 
 
 def build_paired(base_agg, pr_agg):
@@ -527,6 +706,62 @@ def _fmt_p(wilcoxon):
     return f"{p:.4f} (n={wilcoxon.get('n_nonzero', 0)})"
 
 
+_LABEL_HEADINGS = (
+    (
+        "likely_false_positive",
+        "Likely false positives removed",
+        "an address that decodes like padding read at the wrong offset",
+    ),
+    (
+        "likely_loss",
+        "Likely real functions lost",
+        "an address that decodes like a whole routine, or that something references",
+    ),
+    ("absorbed", "Absorbed into a neighbour", "still decoded, now inside another function - a boundary moved"),
+    ("split_out", "Split out of a neighbour", "new on the PR side, and the base side had it inside another function"),
+    ("likely_recovery", "Likely real functions recovered", "new on the PR side and it reads like a whole routine"),
+    ("likely_new_false_positive", "Likely new false positives", "new on the PR side and it reads like padding"),
+)
+
+
+def _classification_lines(classification):
+    """Markdown for the changed-address classification (informational, never gating)."""
+    counts = classification.get("counts") or {}
+    if not counts:
+        return []
+    lines = ["#### 🔍 What the changed addresses look like (informational — not gated)", ""]
+    lines.append(f"> {classification.get('note', '')}")
+    lines.append("")
+    lines.append("| Reading | Count | What it means |")
+    lines.append("| --- | --- | --- |")
+    for key, heading, meaning in _LABEL_HEADINGS:
+        if counts.get(key):
+            lines.append(f"| {heading} | **{counts[key]}** | {meaning} |")
+    lines.append("")
+    loss_rows = [
+        (entry["file"], row)
+        for entry in classification.get("files", [])
+        for row in entry["addresses"]
+        if row["label"] == "likely_loss"
+    ]
+    if loss_rows:
+        lines.append(f"<details>\n<summary>{len(loss_rows)} address(es) read as a lost function</summary>")
+        lines.append("")
+        lines.append("| File | Address | Inbound refs | Instructions | Ends in return |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for filename, row in loss_rows[:50]:
+            lines.append(
+                f"| `{filename}` | `0x{row['addr']:x}` | {row['inrefs']} | {row['instructions']} | "
+                f"{'yes' if row['ends_in_return'] else 'no'} |"
+            )
+        if len(loss_rows) > 50:
+            lines.append(f"| ... and {len(loss_rows) - 50} more | | | | |")
+        lines.append("")
+        lines.append("</details>")
+        lines.append("")
+    return lines
+
+
 def generate_markdown_report(model, output_path):
     """Render the PR-comment Markdown. Tables are kept contiguous; long lists go
     into collapsible <details> blocks."""
@@ -646,6 +881,7 @@ def generate_markdown_report(model, output_path):
         lines.append("")
         lines.append("</details>")
         lines.append("")
+        lines.extend(_classification_lines(corr.get("classification") or {}))
 
     if block_drift:
         lines.append("#### ℹ️ Block-count Drift (informational — not gated)")
@@ -836,6 +1072,11 @@ def evaluate(runtime_path):
     pr_det = check_determinism(pr_agg)
 
     paired = build_paired(base_agg, pr_agg)
+    # Read the direction of each changed address out of the reports the run already produced.
+    # Informational: it does not touch the gate, which still fails on any function-set difference.
+    classification = classify_regressions(
+        paired["regressions"], run_folders[base_folders[0]], run_folders[pr_folders[0]]
+    )
     # Cross-runner/run-to-run noise band: base and PR are timed on separate CI
     # runners, so treat a median speedup within the per-side timing CV as noise.
     noise_floor_pct = max(base_det["median_timing_cv"], pr_det["median_timing_cv"]) * 100.0
@@ -853,6 +1094,7 @@ def evaluate(runtime_path):
             "regressions": paired["regressions"],
             "only_in_base": paired["only_in_base"],
             "only_in_pr": paired["only_in_pr"],
+            "classification": classification,
         },
         "performance": {
             "base_summary": side_summary(base_agg),

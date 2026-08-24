@@ -63,6 +63,10 @@ _RE_PLTSEC_BLOCK = re.compile(
 _RE_PLTSEC_ENTRY = re.compile(b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?P<function>.{4})", re.DOTALL)
 
 _PDATA_ENTRY_SIZE = 12
+# items (candidates, matches or exception records) a scan steps over between budget polls, mirroring
+# _TIMEOUT_POLL_BLOCKS in the engine. A whole exception table is walked inside one call, so
+# the poll in the pass around it never comes round again while that walk is running
+_TIMEOUT_POLL_INTERVAL = 4096
 _PDATA_MIN_ENTRIES = 16
 _PDATA_SEED_ENTRIES = 4
 # A sample only finds a table if it lands inside one with a whole seed window left, so this
@@ -395,7 +399,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     def locateReferenceCandidates(self):
         # check for potential call instructions and check if their destinations have a common function prologue
         for match_count, call_match in enumerate(re.finditer(b"\xe8", self.disassembly.binary_info.binary)):
-            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+            if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
             if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + call_match.start()):
                 continue
@@ -417,7 +421,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # also check for "jmp dword ptr <offset>", as they sometimes point to local functions (i.e. non-API)
         if self.bitness == 32:
             for match_count, match in enumerate(re.finditer(b"\xff\x25", self.disassembly.binary_info.binary)):
-                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                     return
                 function_addr = self.resolvePointerReference(match.start())
                 if not self._passesCodeFilter(function_addr):
@@ -430,7 +434,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     self.setInitialCandidate(function_addr)
             # also check for "call dword ptr <offset>", as they sometimes point to local functions (i.e. non-API)
             for match_count, match in enumerate(re.finditer(b"\xff\x15", self.disassembly.binary_info.binary)):
-                if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+                if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                     return
                 function_addr = self.resolvePointerReference(match.start())
                 if not self._passesCodeFilter(function_addr):
@@ -447,7 +451,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         further patterns instead of each one re-discovering the timeout on its own first match."""
         binary = self.disassembly.binary_info.binary
         for match_count, prologue_match in enumerate(re.finditer(pattern, binary)):
-            if match_count % 4096 == 0 and self._candidateTimeoutTripped():
+            if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return True
             offset = prologue_match.start()
             candidate_addr = (self.disassembly.binary_info.base_addr + offset) & self.getBitMask()
@@ -605,6 +609,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         count = 0
         previous_end = 0
         while count < limit:
+            if count and count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                break
             record = self._readExceptionRecord(binary, size, offset, previous_end)
             if record is None:
                 break
@@ -654,6 +660,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return
         LOGGER.debug("carved %d RUNTIME_FUNCTION entries at 0x%08x", table_count, table_offset)
         for index in range(table_count):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return
             rva_start, rva_end, rva_unwind_info = struct.unpack_from(
                 "<III", binary, table_offset + index * _PDATA_ENTRY_SIZE
             )

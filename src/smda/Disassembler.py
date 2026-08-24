@@ -9,6 +9,7 @@ from smda.aarch64.definitions import looksLikeAArch64
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.common.instruction_set_probe import detectUnsupportedInstructionSet
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
 from smda.dalvik.DalvikDisassembler import DalvikDisassembler
@@ -238,6 +239,7 @@ class Disassembler:
         # disassembleUnmappedBuffer / disassembleFile detect the architecture through
         # FileLoader; this path bypasses it, so an unspecified architecture is decided
         # from the bytes here.
+        unsupported_instruction_set = None
         if not self._explicit_backend and not architecture:
             if DexFileLoader.isCompatible(file_content):
                 architecture = "dalvik"
@@ -250,6 +252,8 @@ class Disassembler:
                 architecture = "aarch64"
                 if bitness is None:
                     bitness = 64
+            else:
+                unsupported_instruction_set = detectUnsupportedInstructionSet(file_content)
         architecture = architecture or "intel"
         binary_info = BinaryInfo(file_content)
         binary_info.base_addr = base_addr
@@ -261,6 +265,12 @@ class Disassembler:
         self.initDisassembler(binary_info.architecture)
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
+            if unsupported_instruction_set:
+                raise RuntimeError(
+                    f"The buffer holds {unsupported_instruction_set} machine code, which SMDA has no "
+                    "backend for. Disassembling it as intel would return a report whose every block is "
+                    "wrong, so nothing is analysed. Name an architecture explicitly to override this."
+                )
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)
             if self.config.WITH_STRINGS:
                 go_pclntab_offset = GoSymbolProvider(None).getPcLntabOffset(binary_info)
