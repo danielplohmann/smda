@@ -34,6 +34,36 @@ LOGGER = logging.getLogger(__name__)
 # purpose: the slot is then not a single address, and those operands belong to jump tables.
 # capstone prints a displacement below 10 as a bare decimal digit, so "[esi + 8]" - the most
 # common slot stride - has no 0x prefix to match on.
+# an absolute memory operand: "dword ptr [0x401000]", "[0x401000]". A base or index
+# register, or a rip-relative displacement, makes the effective address unknown here, so
+# those forms deliberately do not match.
+# A bracket whose first character is a hex prefix or a lone decimal digit: the only two forms
+# the full operand pattern below can accept. Scanning for that once over the whole operand
+# string is cheaper than splitting it and matching each part, and this runs per instruction.
+ABSOLUTE_OPERAND_HINT = re.compile(r"\[(?:0x|[0-9]\])")
+
+ABSOLUTE_MEM_OPERAND_RE = re.compile(
+    r"^(?:(?P<width>byte|word|dword|qword|xword|tbyte|xmmword|ymmword|zmmword) ptr )?"
+    r"\[(?P<address>0x[0-9a-fA-F]{1,16}|[0-9])\]$"
+)
+
+# What each size keyword capstone prints is worth in bytes, so a reference covers the whole
+# datum rather than only its first byte. Both 80-bit keywords are here and they are not
+# interchangeable: capstone prints `xword ptr` for the x87 extended-precision operand of
+# fld/fstp, and `tbyte ptr` only for the packed-BCD operand of fbld/fbstp. An operand capstone
+# prints with no size keyword names no width, and stays at one byte.
+_OPERAND_WIDTHS = {
+    "byte": 1,
+    "word": 2,
+    "dword": 4,
+    "qword": 8,
+    "xword": 10,
+    "tbyte": 10,
+    "xmmword": 16,
+    "ymmword": 32,
+    "zmmword": 64,
+}
+
 MEM_REG_SLOT_RE = re.compile(
     r"^(?P<size>dword|qword) ptr \[(?P<reg>[a-z][a-z0-9]{1,3})"
     r"(?: (?P<sign>[+-]) (?P<disp>0x[0-9a-f]{1,16}|[0-9]))?\]$"
@@ -252,6 +282,43 @@ class X86Backend(ArchBackend):
             self._collectMemRegSlot(state, i_address, i_op_str)
 
     @staticmethod
+    def _recordAbsoluteDataRefs(d, i_address, i_op_str, state):
+        """Book a data reference for every absolute memory operand naming an image address.
+
+        Until now the intel backend recorded a data reference only from JumpTableAnalyzer, so
+        an address a function loads outright - a dispatch table, a global, a stored method
+        pointer - left no trace in the report at all, and nothing downstream could see it.
+        The AArch64 backend has always recorded these from its own operands.
+
+        A direct branch names its target as a bare immediate, so it cannot match the bracketed
+        form read here. A bracketed branch operand names the pointer slot the branch reads
+        through, which is data whatever the branch analyzers do with the value found in it.
+        """
+        # This runs for every instruction the engine decodes, so the two cheapest facts about
+        # the form being looked for come first: an absolute memory operand is written in
+        # brackets, and only an operand carrying a segment override needs one stripped. On a
+        # static x86-64 ELF two thirds of operands have no bracket at all.
+        if not i_op_str or ABSOLUTE_OPERAND_HINT.search(i_op_str) is None:
+            return
+        binary_info = d.disassembly.binary_info
+        if binary_info is None:
+            return
+        declares_code_areas = bool(getattr(binary_info, "code_areas", None))
+        emitted = set()
+        normalized = stripFlatSegmentOverride(i_op_str) if ":" in i_op_str else i_op_str
+        for operand in normalized.split(", "):
+            match = ABSOLUTE_MEM_OPERAND_RE.match(operand.strip())
+            if match is None:
+                continue
+            address = int(match.group("address"), 0)
+            if address in emitted or not d.disassembly.isAddrWithinMemoryImage(address):
+                continue
+            if declares_code_areas and binary_info.isInCodeAreas(address):
+                continue
+            emitted.add(address)
+            state.addDataRef(i_address, address, size=_OPERAND_WIDTHS.get(match.group("width"), 1))
+
+    @staticmethod
     def _collectMemRegSlot(state, i_address, i_op_str):
         match = MEM_REG_SLOT_RE.match(i_op_str)
         if match is None:
@@ -468,6 +535,10 @@ class X86Backend(ArchBackend):
         if " " in i_mnemonic_noprefix:
             i_mnemonic_noprefix = i_mnemonic_noprefix.rpartition(" ")[2]
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
+        # the engine calls this for every decoded instruction, so the operand is screened for a
+        # bracket here rather than paying a call to find out there is nothing to record
+        if i_op_str and "[" in i_op_str:
+            self._recordAbsoluteDataRefs(d, i_address, i_op_str, state)
         if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)
         elif i_kind == _KIND_JMP:

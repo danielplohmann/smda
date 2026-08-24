@@ -1,8 +1,10 @@
 import unittest
 
 from smda.cil.FunctionAnalysisState import FunctionAnalysisState as CilFunctionAnalysisState
+from smda.common.BinaryInfo import BinaryInfo
 from smda.common.FunctionAnalysisState import FunctionAnalysisState
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
+from smda.DisassemblyResult import DisassemblyResult
 
 
 class _BareState(FunctionAnalysisState):
@@ -262,6 +264,58 @@ class CilBlockCollisionTestSuite(unittest.TestCase):
         blocks = state.getBlocks()
 
         self.assertEqual([[0x100, 0x102]], [[ins[0] for ins in block] for block in blocks])
+
+
+class FunctionEntryIntegrityTestSuite(unittest.TestCase):
+    """A recorded function's entry must be the start of one of its own blocks.
+
+    analyzeFunction declines to book an instruction whose address is already claimed as data,
+    so a candidate that lands inside a datum can finish analysis with blocks decoded from a
+    branch target and nothing at its own entry. Recording that produces a function whose
+    offset is not in any of its blocks, and whose borders and ins2fn describe a different
+    address range than the offset it is filed under.
+    """
+
+    def _state(self, start_addr):
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = BinaryInfo(b"\x00" * 0x200)
+        state = FunctionAnalysisState(start_addr, disassembly)
+        state.CALL_MNEMONICS = frozenset(["call"])
+        state.END_MNEMONICS = frozenset(["ret", "jmp"])
+        state.label = ""
+        return state, disassembly
+
+    def test_a_function_whose_entry_produced_no_instruction_is_declined(self):
+        state, disassembly = self._state(0x100)
+        state.addInstruction(0x80, 1, "ret", "", b"\xc3")
+        state.endBlock()
+
+        self.assertFalse(state.finalizeAnalysis())
+        self.assertNotIn(0x100, disassembly.functions)
+        self.assertNotIn(0x100, disassembly.function_borders)
+
+    def test_a_function_whose_entry_produced_an_instruction_is_kept(self):
+        """Control for the rule above: the guard must decline only the malformed shape."""
+        state, disassembly = self._state(0x100)
+        state.addInstruction(0x100, 1, "ret", "", b"\xc3")
+        state.endBlock()
+
+        self.assertTrue(state.finalizeAnalysis())
+        self.assertIn(0x100, disassembly.functions)
+        self.assertEqual({block[0][0] for block in disassembly.functions[0x100]}, {0x100})
+
+    def test_a_block_below_the_entry_is_kept_when_the_entry_itself_decoded(self):
+        """A backward branch into a block that starts below the entry is ordinary - a shared
+        tail or thunk - and must not be confused with the malformed shape above."""
+        state, disassembly = self._state(0x100)
+        state.addInstruction(0x100, 2, "jmp", "0x80", b"\xeb\x7e")
+        state.endBlock()
+        state.addInstruction(0x80, 1, "ret", "", b"\xc3")
+        state.endBlock()
+
+        self.assertTrue(state.finalizeAnalysis())
+        self.assertIn(0x100, disassembly.functions)
+        self.assertIn(0x100, {block[0][0] for block in disassembly.functions[0x100]})
 
 
 if __name__ == "__main__":
