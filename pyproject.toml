@@ -30,6 +30,7 @@ dependencies = [
     "dnfile",
     "lief>=0.16.0",
     "pycxxfilt>=0.1.0",
+    "purepdb>=0.3.0",
 ]
 
 [project.urls]
@@ -209,11 +210,6 @@ rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
 [[tool.ty.overrides]]
 include = ["src/smda/synthesis/PeSynthesizer.py"]
 rules = { "invalid-argument-type" = "ignore" }
-
-# The pdbparse dependency is optional; suppress unresolved-import for it
-[[tool.ty.overrides]]
-include = ["src/smda/common/labelprovider/PdbSymbolProvider.py"]
-rules = { "unresolved-import" = "ignore" }
 
 # atheris is installed only in the fuzzing CI job, and targets.py is deliberately
 # importable without it so the regression replay path works in the normal test run
