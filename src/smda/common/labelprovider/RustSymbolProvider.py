@@ -11,7 +11,6 @@ from .AbstractLabelProvider import AbstractLabelProvider
 from .ElfSymbolProvider import is_defined_elf_symbol
 from .import_parsers import resolve_pe_base_addr
 from .rust_demangler import demangle
-from .rust_demangler.utils import remove_bad_spaces
 from .RustSymbolEvidence import RUST_DEMANGLE_ERRORS, is_rust_language_evidence
 
 LOGGER = logging.getLogger(__name__)
@@ -169,7 +168,6 @@ class RustSymbolProvider(AbstractLabelProvider):
                 try:
                     demangled = demangle(raw_name)
                     if demangled:
-                        demangled = remove_bad_spaces(demangled)
                         self._func_symbols[adjusted] = demangled
                 except _DEMANGLE_ERRORS as exc:
                     LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
@@ -194,7 +192,6 @@ class RustSymbolProvider(AbstractLabelProvider):
                 if self._is_rust_symbol(raw_name):
                     demangled = demangle(raw_name)
                     if demangled:
-                        demangled = remove_bad_spaces(demangled)
                         self._func_symbols[active_base + function.address] = demangled
             except _DEMANGLE_ERRORS as exc:
                 LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)
@@ -218,7 +215,6 @@ class RustSymbolProvider(AbstractLabelProvider):
                     if self._is_rust_symbol(raw_name):
                         demangled = demangle(raw_name)
                         if demangled:
-                            demangled = remove_bad_spaces(demangled)
                             function_offset = active_base + symbol.section.virtual_address + symbol.value
                             if function_offset not in self._func_symbols:
                                 self._func_symbols[function_offset] = demangled
@@ -239,7 +235,6 @@ class RustSymbolProvider(AbstractLabelProvider):
                     try:
                         demangled = demangle(raw_name)
                         if demangled:
-                            demangled = remove_bad_spaces(demangled)
                             function_symbols[symbol.value] = demangled
                     except _DEMANGLE_ERRORS as exc:
                         LOGGER.debug("Failed to demangle Rust symbol %s: %s", raw_name, exc)

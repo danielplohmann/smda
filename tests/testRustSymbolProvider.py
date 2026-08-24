@@ -16,7 +16,6 @@ from smda.common.labelprovider.rust_demangler.rust_v0 import (
     UnableTov0Demangle,
     V0Demangler,
 )
-from smda.common.labelprovider.rust_demangler.utils import remove_bad_spaces
 from smda.common.labelprovider.RustSymbolEvidence import is_rust_language_evidence
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
@@ -122,7 +121,7 @@ class TestRustDemangler(unittest.TestCase):
     def test_v0_non_c_abi_fn_type_demangles(self):
         # the skip-pass abi validation was inverted, rejecting every valid
         # non-C abi (e.g. extern "system") fn-type symbol
-        self.assertEqual(demangle("_RIC1aFK6systemuEuE"), 'a::<extern "system"fn(())>')
+        self.assertEqual(demangle("_RIC1aFK6systemuEuE"), 'a::<extern "system" fn(())>')
 
     def test_legacy_strict_hash(self):
         """Test that hash segments are properly handled in legacy symbols."""
@@ -554,15 +553,33 @@ class TestPeSymbolProviderWithoutRustDemangling(unittest.TestCase):
         self.assertEqual(results[0x403000], "ExportedFunc")
 
 
-class TestUtilityFunctions(unittest.TestCase):
-    """Tests for utility functions."""
+class TestDemangledSpacing(unittest.TestCase):
+    """Demangled names reach the report spelled the way rustc spells them."""
 
-    def test_space_cleanup(self):
-        """Test remove_bad_spaces utility function."""
-        # Inner spaces removed
-        self.assertEqual(remove_bad_spaces("Vec< T >"), "Vec<T>")
-        # Separating space becomes underscore
-        self.assertEqual(remove_bad_spaces("Foo< Bar Baz >"), "Foo<Bar_Baz>")
+    # a real symbol from a rust-lld/MSVC x64 image
+    TRAIT_IMPL = "_RNvXs5_NtNtCslFVcyoAu48q_3std2io5errorNtB5_5ErrorNtNtCs55qC6OcLGgs_4core3fmt7Display3fmt"
+
+    def test_a_trait_impl_keeps_the_as_separator(self):
+        self.assertEqual(demangle(self.TRAIT_IMPL), "<std::io::error::Error as core::fmt::Display>::fmt")
+
+    def test_a_generic_argument_list_keeps_its_separating_space(self):
+        self.assertEqual(demangle("_RIC1aKh4_Kh4_E"), "a::<4, 4>")
+
+    def test_a_function_pointer_abi_is_separated_from_its_fn(self):
+        # real symbol; the space after the ABI string used to be missing
+        name = "_RNvMs3_NtCs8oYkXk2gzQW_5alloc7raw_vecINtB5_6RawVecTOhFUKCBN_EuENtNtCslFVcyoAu48q_3std5alloc6SystemE8grow_oneB13_"
+        self.assertIn('unsafe extern "C" fn(*mut u8)', demangle(name))
+
+    def test_the_provider_stores_the_name_the_demangler_produced(self):
+        provider = RustSymbolProvider(None)
+        mock_binary = MockLiefBinary([], exported_functions=[MockExport(self.TRAIT_IMPL, 0x1000)])
+        mock_binary.imagebase = 0x140000000
+        mock_binary.sections = [MockSection(0x20000000, 0x1000)]
+
+        with mock.patch("lief.PE.Binary", MockLiefBinary):
+            provider._update_pe(mock_binary, base_addr=0x400000)
+
+        self.assertEqual(provider.getSymbol(0x401000), demangle(self.TRAIT_IMPL))
 
 
 class TestRustV0ConstBackrefs(unittest.TestCase):

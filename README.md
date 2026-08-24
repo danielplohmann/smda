@@ -198,6 +198,7 @@ Thanks to Jonathan Crussell for helping me to beef up SMDA enough to make it a d
 Thanks to Willi Ballenthin for improving the handling of ELF files, including properly handling API usage!
 Thanks to Daniel Enders for his contributions to the parsing of the Golang function registry and label information!
 The project uses the implementation of Tarjan's Algorithm by Bas Westerbaan and the implementation of Lengauer-Tarjan's Algorithm for the DominatorTree by Armin Rigo.
+Rust symbol demangling is derived from the rust_demangler package by Team bi0s (MIT), with behaviour reimplemented from Ghidra's Rust demanglers (Apache-2.0); see [NOTICE](NOTICE) for the full list of third-party components.
 Thanks to r0ny123 for his major code quality improvements via ruff and various contributions for several aspects of this project!
 
 Pull requests welcome! :)
