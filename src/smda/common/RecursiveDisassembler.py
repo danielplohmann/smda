@@ -434,8 +434,10 @@ class RecursiveDisassembler:
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
         if binary_info.bitness not in [32, 64]:
             binary_info.bitness = self.backend.probeBitness(self.disassembly)
-            LOGGER.debug(
-                "Automatically Recognized Bitness as: %d",
+            LOGGER.warning(
+                "No bitness was supplied; inferred %d-bit from the buffer's contents. "
+                "Pass the bitness explicitly when it is known - decoding in the wrong mode "
+                "yields a plausible-looking report whose blocks and edges are all wrong.",
                 binary_info.bitness,
             )
         else:
