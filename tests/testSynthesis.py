@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import struct
+import types
 import unittest
 from pathlib import Path
 
@@ -251,6 +252,29 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
         synthesized_names = {entry.name for imported in parsed.imports for entry in imported.entries if entry.name}
         assert {"AAASynthFuncA", "AAASynthFuncB"} <= synthesized_names
 
+    def testAnImportNamedLikeAnOrdinalIsNotRewrittenIntoOne(self):
+        """A PE imports by name or by ordinal; the report keeps only the string."""
+        report = SmdaReport.fromDict(self.pe_report.toDict())
+        imports = report.xmetadata["imported_functions"]
+        base_slot = next(int(k) for k in imports)
+        # "#1" cannot have come from the import parsers for this DLL: they write "#N"
+        # only when no table resolves it, and ws2_32.dll ordinal 1 resolves to accept.
+        # "#99999" is past a WORD, so it never came from an import table either. Only
+        # "#4000" is a real ordinal - in range, and resolving nowhere.
+        report.xmetadata["imported_functions"] = {
+            str(base_slot): ("ws2_32.dll", "#1"),
+            str(base_slot + 0x10): ("ws2_32.dll", "#4000"),
+            str(base_slot + 0x20): ("ws2_32.dll", "#99999"),
+        }
+        parsed = lief.parse(report.synthesizeBinary(output_format=FORMAT_PE))
+        entries = [entry for imported in parsed.imports for entry in imported.entries]
+        by_name = {entry.name for entry in entries if entry.name}
+        by_ordinal = {entry.ordinal for entry in entries if not entry.name}
+        self.assertIn("#1", by_name)
+        self.assertIn("#99999", by_name)
+        self.assertNotIn(1, by_ordinal)
+        self.assertIn(4000, by_ordinal)
+
     def testElfSynthesisFromSections(self):
         report = self.elf_report
         synthesized = report.synthesizeBinary()
@@ -321,6 +345,21 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
                 parsed = lief.parse(synthesized)
                 assert parsed is not None
                 assert parsed.sections
+
+    def testASectionSpanningMoreThanTheImageLimitIsDropped(self):
+        # the extents come from the report and the span is what gets allocated, so a section
+        # claiming tens of gigabytes has to be dropped rather than laid out: a 611-byte
+        # report reached 10GB through this before the bound
+        for output_format, report in ((FORMAT_ELF, self.elf_report), (FORMAT_MACHO, self.macho_report)):
+            with self.subTest(output_format=output_format):
+                rebuilt = SmdaReport.fromDict(report.toDict())
+                first = rebuilt.code_sections[0]
+                rebuilt.code_sections = [(first[0], first[1], first[1] + 0x13DAF6E5B0), *rebuilt.code_sections[1:]]
+
+                synthesized = rebuilt.synthesizeBinary(output_format=output_format)
+
+                assert len(synthesized) <= SmdaConfig.MAX_IMAGE_SIZE
+                assert lief.parse(synthesized) is not None
 
     def testElfSynthesisMinimal(self):
         report = SmdaReport.fromDict(self.elf_report.toDict())
@@ -407,7 +446,7 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
             return True
 
         synthesizer._writeThunkAt = _record
-        synthesizer._parseOrdinal = lambda func: 1
+        synthesizer._parseOrdinal = lambda dll, func: 1
         # two slots of one DLL a megabyte apart: only the real slots may be written
         far = 0x1000 + 0x100000
         synthesizer._writeThunks(
@@ -435,7 +474,7 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
             return True
 
         synthesizer._writeThunkAt = _record
-        synthesizer._parseOrdinal = lambda func: 1
+        synthesizer._parseOrdinal = lambda dll, func: 1
         synthesizer._writeThunks(
             [],
             {0x1000: ("kernel32.dll", "a"), 0x100C: ("kernel32.dll", "b")},
@@ -628,3 +667,251 @@ class SynthesisLayoutTestSuite(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SynthesisSectionOverflowTestSuite(unittest.TestCase):
+    """Recovered code can run past the end of the section it starts in — a call at the tail of
+    __text whose fall-through lands in the padding before __stubs. Planting must not drop the
+    whole block over the byte that overflows."""
+
+    def _sections(self, va_start, va_end, next_start=None):
+        sections = [
+            {
+                "name": ".text",
+                "va_start": va_start,
+                "va_end": va_end,
+                "executable": True,
+                "raw": bytearray(b"\x90" * (va_end - va_start)),
+            }
+        ]
+        if next_start is not None:
+            sections.append(
+                {
+                    "name": ".next",
+                    "va_start": next_start,
+                    "va_end": next_start + 0x10,
+                    "executable": True,
+                    "raw": bytearray(b"\x90" * 0x10),
+                }
+            )
+        return sections
+
+    def _synthesizer(self, chunks):
+        from smda.synthesis.BinarySynthesizer import BinarySynthesizer
+
+        synthesizer = BinarySynthesizer.__new__(BinarySynthesizer)
+        synthesizer.report = types.SimpleNamespace(architecture="intel", xcfg={0x1000: object()})
+        synthesizer.warnings = []
+        synthesizer._iterFunctionChunks = staticmethod(lambda _function: iter(chunks))
+        return synthesizer
+
+    def test_a_block_overflowing_its_section_grows_it_into_unclaimed_space(self):
+        # the block needs one byte past .text, and nothing else claims it
+        sections = self._sections(0x1000, 0x1005)
+        synthesizer = self._synthesizer([(0x1000, b"\xe8\x01\x02\x03\x04\x90")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1006)
+        self.assertEqual(bytes(sections[0]["raw"]), b"\xe8\x01\x02\x03\x04\x90")
+        self.assertEqual(synthesizer.warnings, [])
+
+    def test_growth_stops_at_the_next_section_and_the_fitting_bytes_are_still_planted(self):
+        # .next starts immediately, so the overflowing byte has nowhere to go; the five bytes
+        # that do fit must still be planted rather than dropped with the block
+        sections = self._sections(0x1000, 0x1005, next_start=0x1005)
+        synthesizer = self._synthesizer([(0x1000, b"\xe8\x01\x02\x03\x04\xcc")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1005)
+        self.assertEqual(bytes(sections[0]["raw"]), b"\xe8\x01\x02\x03\x04")
+        # the tail lands in the neighbouring executable section, which does cover it
+        self.assertEqual(bytes(sections[1]["raw"][:1]), b"\xcc")
+        self.assertEqual(synthesizer.warnings, [])
+
+    def test_growth_takes_only_the_overflow_not_the_whole_gap(self):
+        sections = self._sections(0x1000, 0x1005, next_start=0x2000)
+        synthesizer = self._synthesizer([(0x1000, b"\xe8\x01\x02\x03\x04\x90")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1006)
+        self.assertEqual(synthesizer.warnings, [])
+
+    def test_a_block_in_a_gap_between_sections_is_reported(self):
+        # nothing to grow: the block starts inside no section at all
+        sections = self._sections(0x1000, 0x1005, next_start=0x2000)
+        synthesizer = self._synthesizer([(0x1500, b"\xe8\x01\x02\x03\x04")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(sections[0]["va_end"], 0x1005)
+        self.assertEqual(len(synthesizer.warnings), 1)
+        self.assertIn("fit no executable section", synthesizer.warnings[0])
+
+    def test_a_block_below_its_section_is_clipped_not_wrapped(self):
+        sections = self._sections(0x1000, 0x1010)
+        synthesizer = self._synthesizer([(0x0FFE, b"\xaa\xbb\xcc")])
+
+        synthesizer._plantFunctionChunks(sections, [0x1000])
+
+        self.assertEqual(bytes(sections[0]["raw"][:1]), b"\xcc")
+        self.assertEqual(bytes(sections[0]["raw"][1:2]), b"\x90")
+        self.assertEqual(len(synthesizer.warnings), 1)
+
+    def test_komplex_round_trips_every_instruction_in_all_three_formats(self):
+        report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("komplex_xored"))
+        for output_format in (FORMAT_PE, FORMAT_ELF, FORMAT_MACHO):
+            parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=output_format))))
+            corrupt = []
+            for function in report.getFunctions():
+                for block in function.getBlocks():
+                    for instruction in block.getInstructions():
+                        expected = bytes.fromhex(instruction.bytes)
+                        try:
+                            got = bytes(parsed.get_content_from_virtual_address(instruction.offset, len(expected)))
+                        except Exception:
+                            got = b""
+                        if got != expected:
+                            corrupt.append(hex(instruction.offset))
+            self.assertEqual(corrupt, [], f"{output_format} lost {len(corrupt)} instructions")
+
+
+class SynthesisForeignHeaderTestSuite(unittest.TestCase):
+    """A report keeps the header of the binary it came from. A synthesizer must only read its
+    own format's fields out of it, or it decodes whatever those bytes happen to hold."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # a PE-origin report based above 4 GiB: a 32-bit Mach-O cannot express its addresses
+        cls.pe_origin = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("rust_pe_gnu_xored"))
+
+    def test_a_pe_header_does_not_make_a_64_bit_report_a_32_bit_macho(self):
+        blob = bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_MACHO))
+
+        self.assertEqual(struct.unpack("<I", blob[:4])[0], 0xFEEDFACF)
+
+    def test_a_pe_header_does_not_supply_the_macho_cpu_type(self):
+        blob = bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_MACHO))
+
+        # CPU_TYPE_X86_64, derived from the report, not bytes 4:8 of an MZ header
+        self.assertEqual(struct.unpack("<I", blob[4:8])[0], 0x01000007)
+
+    def test_addresses_above_four_gib_survive_the_macho_round_trip(self):
+        parsed = lief.parse(list(bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_MACHO))))
+
+        lost = 0
+        for function in self.pe_origin.getFunctions():
+            for block in function.getBlocks():
+                for instruction in block.getInstructions():
+                    expected = bytes.fromhex(instruction.bytes)
+                    try:
+                        got = bytes(parsed.get_content_from_virtual_address(instruction.offset, len(expected)))
+                    except Exception:
+                        got = b""
+                    lost += got != expected
+        self.assertEqual(lost, 0)
+
+    def test_a_real_macho_header_still_selects_the_word_size(self):
+        from smda.synthesis.MachoSynthesizer import MachoSynthesizer
+
+        synthesizer = MachoSynthesizer.__new__(MachoSynthesizer)
+        # a 32-bit Mach-O header must still win over a report claiming 64-bit
+        synthesizer.report = types.SimpleNamespace(
+            xheader=struct.pack("<I", 0xFEEDFACE) + b"\x00" * 0x40, bitness=64, architecture="intel"
+        )
+        self.assertFalse(synthesizer._is64())
+
+        synthesizer.report.xheader = struct.pack("<I", 0xFEEDFACF) + b"\x00" * 0x40
+        self.assertTrue(synthesizer._is64())
+
+    def test_a_foreign_header_falls_back_to_the_report_bitness(self):
+        from smda.synthesis.MachoSynthesizer import MachoSynthesizer
+
+        synthesizer = MachoSynthesizer.__new__(MachoSynthesizer)
+        synthesizer.report = types.SimpleNamespace(xheader=b"MZ" + b"\x90" * 0x40, bitness=64, architecture="intel")
+        self.assertTrue(synthesizer._is64())
+
+        synthesizer.report.bitness = 32
+        self.assertFalse(synthesizer._is64())
+
+    def test_a_pe_header_does_not_reach_the_synthesized_elf_identity(self):
+        blob = bytes(self.pe_origin.synthesizeBinary(output_format=FORMAT_ELF))
+        e_type = struct.unpack("<H", blob[16:18])[0]
+
+        self.assertEqual(blob[7:16], b"\x00" * 9)  # EI_PAD must be zero
+        self.assertEqual(e_type, 2)  # ET_EXEC, not whatever bytes 16:18 of an MZ header hold
+
+    def test_a_real_elf_header_still_supplies_the_identity(self):
+        from smda.synthesis.ElfSynthesizer import ElfSynthesizer
+
+        synthesizer = ElfSynthesizer.__new__(ElfSynthesizer)
+        synthesizer.report = types.SimpleNamespace(
+            xheader=b"\x7fELF" + bytes(range(4, 0x14)) + b"\x00" * 0x20, bitness=64, architecture="intel"
+        )
+        self.assertTrue(synthesizer._hasElfHeader(0x14))
+        self.assertEqual(synthesizer._getMachine(), struct.unpack("<H", bytes(range(4, 0x14))[0x0E:0x10])[0])
+
+
+class SynthesisLowRvaTestSuite(unittest.TestCase):
+    """ELF binaries put their entry stub immediately after the program headers, so a report of
+    one has functions below the RVA where a PE section can start. The image base is what has to
+    move for those to be representable."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("bashlite_xored"))
+
+    def test_functions_below_the_first_section_rva_are_planted(self):
+        parsed = lief.parse(list(bytes(self.report.synthesizeBinary(output_format=FORMAT_PE))))
+
+        lost = 0
+        for function in self.report.getFunctions():
+            for block in function.getBlocks():
+                for instruction in block.getInstructions():
+                    expected = bytes.fromhex(instruction.bytes)
+                    try:
+                        got = bytes(parsed.get_content_from_virtual_address(instruction.offset, len(expected)))
+                    except Exception:
+                        got = b""
+                    lost += got != expected
+        self.assertEqual(lost, 0)
+
+    def test_the_lowered_image_base_stays_64k_aligned(self):
+        parsed = lief.parse(list(bytes(self.report.synthesizeBinary(output_format=FORMAT_PE))))
+
+        self.assertLess(parsed.optional_header.imagebase, self.report.base_addr)
+        self.assertEqual(parsed.optional_header.imagebase % 0x10000, 0)
+
+    def test_the_entry_point_keeps_its_absolute_address(self):
+        parsed = lief.parse(list(bytes(self.report.synthesizeBinary(output_format=FORMAT_PE))))
+        absolute = parsed.optional_header.imagebase + parsed.optional_header.addressof_entrypoint
+
+        self.assertEqual(absolute, self.report.base_addr + self.report.oep)
+
+    def test_the_xheader_path_keeps_the_reported_base(self):
+        # cutwail carries a real PE header, so it synthesizes from that layout rather than from
+        # function extents; the lowering must not reach it
+        report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("cutwail_xored"))
+        parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=FORMAT_PE))))
+
+        self.assertEqual(parsed.optional_header.imagebase, report.base_addr)
+
+    def test_a_base_is_not_lowered_when_the_lowest_function_already_clears_the_headers(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.report = types.SimpleNamespace(base_addr=0x400000)
+
+        self.assertEqual(synthesizer._imageBaseFor([0x401000, 0x402000], 0x1000), 0x400000)
+
+    def test_the_base_is_never_lowered_below_zero(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.report = types.SimpleNamespace(base_addr=0)
+
+        self.assertEqual(synthesizer._imageBaseFor([0x40], 0x1000), 0)

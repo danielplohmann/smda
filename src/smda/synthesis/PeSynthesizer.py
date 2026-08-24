@@ -3,6 +3,7 @@ import struct
 import lief
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.common.labelprovider.OrdinalHelper import OrdinalHelper
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 from smda.utility.lief_helper import lief_name, safe_lief_parse
 
@@ -36,6 +37,8 @@ DATA_DIR_BASE_PE32_PLUS = 112
 MACHINE_I386 = 0x014C
 MACHINE_AMD64 = 0x8664
 MACHINE_ARM64 = 0xAA64
+
+IMAGE_BASE_ALIGNMENT = 0x10000
 
 MAX_SYNTHETIC_SECTION_SPAN = 0x2000000
 
@@ -97,10 +100,23 @@ class PeSynthesizer(BinarySynthesizer):
                     break
 
     @staticmethod
-    def _parseOrdinal(name):
-        if name.startswith("#") and name[1:].isdigit():
-            return int(name[1:])
-        return None
+    def _parseOrdinal(dll_name, name):
+        """The ordinal a name stands for, or None when the name is the import's own.
+
+        A PE imports by name or by ordinal, and the report keeps only the string, so
+        "#5" is ambiguous on its own. Two things settle it. An ordinal is a WORD, so a
+        larger number never came from an import table. And the import parsers write
+        "#N" only for an ordinal no table resolves, so a name that does resolve cannot
+        have come from them either. Both are real imports spelled that way, and writing
+        one as an ordinal would rename it on the way back - or, past a WORD, truncate it
+        into a different import entirely.
+        """
+        if not (name.startswith("#") and name[1:].isdigit()):
+            return None
+        ordinal = int(name[1:])
+        if ordinal > 0xFFFF or OrdinalHelper.resolveOrdinal(dll_name, ordinal):
+            return None
+        return ordinal
 
     def _buildImportTables(self, import_rvas, ptr_size):
         """Groups imports by DLL and builds descriptor/hint/dll-name blobs.
@@ -126,7 +142,7 @@ class PeSynthesizer(BinarySynthesizer):
             dll_str_offsets[dll_name] = len(dll_strs)
             dll_strs += dll_name.encode("ascii", errors="replace") + b"\x00"
             for _rva, func in funcs:
-                if self._parseOrdinal(func) is not None:
+                if self._parseOrdinal(dll_name, func) is not None:
                     continue
                 if (dll_name, func) in hint_offsets:
                     continue
@@ -149,11 +165,12 @@ class PeSynthesizer(BinarySynthesizer):
     def _writeThunks(self, regions, import_rvas, dll_funcs, sec_vaddr, hint_off, hint_offsets, ptr_size):
         ordinal_flag = 1 << (ptr_size * 8 - 1)
         for rva, (dll, func) in import_rvas.items():
-            ordinal = self._parseOrdinal(func)
+            dll_key = dll or "unknown.dll"
+            ordinal = self._parseOrdinal(dll_key, func)
             if ordinal is not None:
                 thunk_value = ordinal_flag | ordinal
             else:
-                thunk_value = sec_vaddr + hint_off + hint_offsets[(dll or "unknown.dll", func)]
+                thunk_value = sec_vaddr + hint_off + hint_offsets[(dll_key, func)]
             if not self._writeThunkAt(regions, rva, thunk_value, ptr_size):
                 self._warn("import thunk 0x%x (%s.%s) outside all sections", rva, dll, func)
 
@@ -381,7 +398,7 @@ class PeSynthesizer(BinarySynthesizer):
         )
         return bytes(header) + b"".join(bytes(r["raw"]) for r in regions)
 
-    def _buildMinimalOptionalHeader(self, regions, bitness, size_of_headers, image_end, entry_rva, import_dir):
+    def _buildMinimalOptionalHeader(self, regions, bitness, size_of_headers, image_end, entry_rva, import_dir, base):
         is_64 = bitness == 64
         dir_base = DATA_DIR_BASE_PE32_PLUS if is_64 else DATA_DIR_BASE_PE32
         size = 0xF0 if is_64 else 0xE0
@@ -395,9 +412,9 @@ class PeSynthesizer(BinarySynthesizer):
         text_rva = min((r["vaddr"] for r in regions if r["executable"]), default=0)
         struct.pack_into("<I", opt, 20, text_rva)
         if is_64:
-            struct.pack_into("<Q", opt, 24, self.report.base_addr)
+            struct.pack_into("<Q", opt, 24, base)
         else:
-            struct.pack_into("<I", opt, 28, self.report.base_addr & 0xFFFFFFFF)
+            struct.pack_into("<I", opt, 28, base & 0xFFFFFFFF)
             data_rva = min((r["vaddr"] for r in regions if not r["executable"]), default=0)
             struct.pack_into("<I", opt, 24, data_rva)
         struct.pack_into("<II", opt, 32, 0x1000, 0x200)
@@ -417,13 +434,30 @@ class PeSynthesizer(BinarySynthesizer):
             struct.pack_into("<I", opt, dir_base + 12, import_dir[1])
         return opt
 
-    def _synthesizeMinimal(self, offsets, with_imports, with_strings):
+    def _imageBaseFor(self, offsets, section_alignment):
+        """Image base low enough that the lowest function sits above the PE headers.
+
+        A PE section cannot start at RVA 0 -- that range belongs to the headers -- so a report
+        whose code begins right after an ELF header has functions no section can hold. Lowering
+        the image base shifts every RVA up by the same amount and leaves the absolute addresses
+        untouched. The result stays 64K-aligned, as the format requires of an image base.
+        """
         base = self.report.base_addr
+        lowest = min(offsets)
+        if lowest - base >= section_alignment:
+            return base
+        candidate = align_down(lowest - section_alignment, IMAGE_BASE_ALIGNMENT)
+        if candidate < 0:
+            return base
+        return candidate
+
+    def _synthesizeMinimal(self, offsets, with_imports, with_strings):
         bitness = self._getBitness()
         ptr_size = 8 if bitness == 64 else 4
         section_alignment = 0x1000
         file_alignment = 0x200
 
+        base = self._imageBaseFor(offsets, section_alignment)
         regions: list[dict] = []
         min_rva = min(offset - base for offset in offsets)
         max_rva = max(self._functionExtentEnd(self.report.xcfg[offset]) - base for offset in offsets)
@@ -524,10 +558,14 @@ class PeSynthesizer(BinarySynthesizer):
         image_end = align_up(max(r["vaddr"] + r["vsize"] for r in regions), section_alignment)
         entry_rva = text_vaddr
         if self.report.oep:
-            entry_rva = self.report.oep - base if self.report.oep >= base else self.report.oep
+            # oep is relative to the report's own base, which the synthetic base may sit below,
+            # so resolve it to an absolute address before turning it back into an RVA
+            report_base = self.report.base_addr
+            oep = self.report.oep if self.report.oep >= report_base else report_base + self.report.oep
+            entry_rva = oep - base
 
         optional_header = self._buildMinimalOptionalHeader(
-            regions, bitness, size_of_headers, image_end, entry_rva, import_dir
+            regions, bitness, size_of_headers, image_end, entry_rva, import_dir, base
         )
 
         raw_offset = size_of_headers

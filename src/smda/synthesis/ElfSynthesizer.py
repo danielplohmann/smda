@@ -2,6 +2,7 @@ import struct
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaReport import MAX_ADDRESS_VALUE
+from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 PT_LOAD = 1
@@ -95,8 +96,17 @@ class ElfSynthesizer(BinarySynthesizer):
     def _getBitness(self):
         return 64 if self.report.bitness == 64 else 32
 
+    def _hasElfHeader(self, min_length):
+        """True only when the stored header is long enough AND is itself an ELF header.
+
+        A report keeps the header of the binary it came from, whatever format that was, so
+        reading these fields off a PE or Mach-O header yields whatever those bytes happen to
+        hold -- an e_type of 0xb8, say, which is not a defined ELF type at all.
+        """
+        return self._hasHeader(min_length) and bytes(self.report.xheader[0:4]) == b"\x7fELF"
+
     def _getMachine(self):
-        if self._hasHeader(0x14):
+        if self._hasElfHeader(0x14):
             machine = struct.unpack("<H", self.report.xheader[0x12:0x14])[0]
             if machine:
                 return machine
@@ -119,6 +129,11 @@ class ElfSynthesizer(BinarySynthesizer):
         index = 0
         for name, start, end in sorted(self.report.code_sections or [], key=lambda entry: entry[1]):
             if not start or not end or end <= start:
+                continue
+            if end - start > SmdaConfig.MAX_IMAGE_SIZE:
+                # the extents come from the report, and the span is what gets allocated: a
+                # section claiming 0x13DAF6E5B0 bytes asked for 10GB from a 611-byte report
+                self._warn("synthesis: dropping section spanning 0x%x bytes", end - start)
                 continue
             if not name:
                 while f".smda{index}" in taken:
@@ -170,19 +185,7 @@ class ElfSynthesizer(BinarySynthesizer):
             )
             sections.sort(key=lambda section: section["va_start"])
 
-        for offset in offsets:
-            for block_offset, chunk in self._iterFunctionChunks(self.report.xcfg[offset]):
-                for section in sections:
-                    if (
-                        section["executable"]
-                        and section["va_start"] <= block_offset
-                        and block_offset + len(chunk) <= section["va_end"]
-                    ):
-                        start = block_offset - section["va_start"]
-                        section["raw"][start : start + len(chunk)] = chunk
-                        break
-                else:
-                    self._warn("block 0x%x of function 0x%x fits no executable section, skipped", block_offset, offset)
+        self._plantFunctionChunks(sections, offsets)
 
         if with_strings:
             for data_addr, content in self._iterStringRefs():
@@ -380,9 +383,9 @@ class ElfSynthesizer(BinarySynthesizer):
         ehdr[4] = 2 if is_64 else 1
         ehdr[5] = 1
         ehdr[6] = 1
-        if self._hasHeader(16):
+        if self._hasElfHeader(16):
             ehdr[7:16] = self.report.xheader[7:16]
-        e_type = struct.unpack("<H", self.report.xheader[16:18])[0] if self._hasHeader(18) else ET_EXEC
+        e_type = struct.unpack("<H", self.report.xheader[16:18])[0] if self._hasElfHeader(18) else ET_EXEC
         machine = self._getMachine()
         entry = 0
         if self.report.oep:

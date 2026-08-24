@@ -2,6 +2,7 @@ import struct
 from typing import Any, Dict, List
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
+from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
 MH_MAGIC = 0xFEEDFACE
@@ -98,14 +99,25 @@ class MachoSynthesizer(BinarySynthesizer):
             self._warn("Mach-O synthesis from sections failed (%s), falling back to minimal layout", exc)
             return self._synthesizeMinimal(offsets)
 
+    def _hasMachoHeader(self, min_length):
+        """True only when the stored header is long enough AND is itself a Mach-O header.
+
+        A report keeps the header of the binary it came from, whatever format that was, so
+        reading these fields off a PE or ELF header yields whatever those bytes happen to hold.
+        """
+        if not self._hasHeader(min_length):
+            return False
+        magic = struct.unpack("<I", self.report.xheader[0:4])[0]
+        return magic in (MH_MAGIC, MH_CIGAM, MH_MAGIC_64, MH_CIGAM_64)
+
     def _is64(self):
-        if self._hasHeader(4):
+        if self._hasMachoHeader(4):
             magic = struct.unpack("<I", self.report.xheader[0:4])[0]
             return magic in (MH_MAGIC_64, MH_CIGAM_64)
         return self.report.bitness != 32
 
     def _getCpuType(self):
-        if self._hasHeader(8):
+        if self._hasMachoHeader(8):
             cpu_type = struct.unpack("<I", self.report.xheader[4:8])[0]
             if cpu_type:
                 return cpu_type
@@ -114,12 +126,12 @@ class MachoSynthesizer(BinarySynthesizer):
         return CPU_TYPE_X86_64 if self._is64() else CPU_TYPE_I386
 
     def _getCpuSubtype(self):
-        if self._hasHeader(12):
+        if self._hasMachoHeader(12):
             return struct.unpack("<I", self.report.xheader[8:12])[0]
         return 0
 
     def _getFiletype(self):
-        if self._hasHeader(16):
+        if self._hasMachoHeader(16):
             return struct.unpack("<I", self.report.xheader[12:16])[0]
         return MH_EXECUTE
 
@@ -127,6 +139,11 @@ class MachoSynthesizer(BinarySynthesizer):
         sections = []
         for name, start, end in sorted(self.report.code_sections or [], key=lambda entry: entry[1]):
             if not start or not end or end <= start:
+                continue
+            if end - start > SmdaConfig.MAX_IMAGE_SIZE:
+                # the extents come from the report, and the span is what gets allocated: a
+                # section claiming 0x13DAF6E5B0 bytes asked for 10GB from a 611-byte report
+                self._warn("synthesis: dropping section spanning 0x%x bytes", end - start)
                 continue
             sections.append({"name": name or "", "va_start": start, "va_end": end})
         return sections
@@ -362,19 +379,7 @@ class MachoSynthesizer(BinarySynthesizer):
             else:
                 section["raw"] = bytearray(size)
 
-        for offset in offsets:
-            for block_offset, chunk in self._iterFunctionChunks(self.report.xcfg[offset]):
-                for section in sections:
-                    if (
-                        section["executable"]
-                        and section["va_start"] <= block_offset
-                        and block_offset + len(chunk) <= section["va_end"]
-                    ):
-                        start = block_offset - section["va_start"]
-                        section["raw"][start : start + len(chunk)] = chunk
-                        break
-                else:
-                    self._warn("block 0x%x of function 0x%x fits no executable section, skipped", block_offset, offset)
+        self._plantFunctionChunks(sections, offsets)
 
         if with_strings:
             for data_addr, content in self._iterStringRefs():
