@@ -11,6 +11,7 @@ from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.ItaniumDemangler import is_itanium_cpp_symbol, is_msvc_cpp_symbol
 from smda.common.labelprovider.RustSymbolEvidence import is_rust_language_evidence
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
+from smda.utility.lief_helper import lief_name
 from smda.utility.MachoBinary import get_active_macho_binary
 
 LOGGER = logging.getLogger(__name__)
@@ -228,10 +229,7 @@ class LanguageAnalyzer:
             except (AttributeError, UnicodeDecodeError):
                 continue
             for symbol in symbols:
-                try:
-                    symbol_name = symbol.name
-                except (AttributeError, UnicodeDecodeError):
-                    continue
+                symbol_name = lief_name(symbol)
                 if (
                     symbol_name
                     and not is_rust_language_evidence(symbol_name)

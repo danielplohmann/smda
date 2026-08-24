@@ -1,9 +1,10 @@
 #!/usr/bin/python
 
-import contextlib
 import logging
 
 import lief
+
+from smda.utility.lief_helper import lief_name
 
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import parse_pe_delay_imports, parse_pe_imports, resolve_pe_base_addr
@@ -61,11 +62,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                 # forwarder/extern entries redirect to another module's export and have no
                 # local address (LIEF sets .address to 0 for them) - not a local function.
                 continue
-            function_name = ""
-            with contextlib.suppress(UnicodeDecodeError, AttributeError):
-                # here may occur a LIEF exception that we want to skip ->
-                # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
-                function_name = function.name
+            function_name = lief_name(function)
             if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
                 function_symbols[active_base + function.address] = function_name
         return function_symbols
@@ -86,11 +83,7 @@ class PeSymbolProvider(AbstractLabelProvider):
                     # 0/-1/-2 are undefined-external/absolute/debug: not a locally defined
                     # function, so its value is not a usable in-image offset.
                     continue
-                function_name = ""
-                with contextlib.suppress(UnicodeDecodeError, AttributeError):
-                    # here may occur a LIEF exception that we want to skip ->
-                    # UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-3: code point not in range(0x110000)
-                    function_name = symbol.name
+                function_name = lief_name(symbol)
                 if function_name and all(ord(c) in range(0x20, 0x7F) for c in function_name):
                     function_offset = active_base + sections[section_idx - 1].virtual_address + symbol.value
                     if function_offset not in function_symbols:

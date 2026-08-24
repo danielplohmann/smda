@@ -4,6 +4,8 @@ import logging
 
 import lief
 
+from smda.utility.lief_helper import lief_name
+
 from .AbstractLabelProvider import AbstractLabelProvider
 from .import_parsers import parse_elf_relocation_imports
 from .ItaniumDemangler import demangle_itanium_symbol
@@ -85,23 +87,14 @@ class ElfSymbolProvider(AbstractLabelProvider):
 
     _isDefinedSymbol = staticmethod(is_defined_elf_symbol)
 
-    @staticmethod
-    def _getSymbolName(symbol):
-        try:
-            raw_name = symbol.name
-        except (AttributeError, UnicodeDecodeError):
-            return ""
-        return raw_name if isinstance(raw_name, str) else ""
+    _getSymbolName = staticmethod(lief_name)
 
     @classmethod
     def _formatSymbolName(cls, symbol):
         raw_name = cls._getSymbolName(symbol)
         if not raw_name:
             return ""
-        try:
-            demangled_name = getattr(symbol, "demangled_name", None)
-        except (AttributeError, UnicodeDecodeError):
-            demangled_name = None
+        demangled_name = lief_name(symbol, "demangled_name")
         if demangled_name and demangled_name != raw_name:
             return demangled_name
         return demangle_itanium_symbol(raw_name)

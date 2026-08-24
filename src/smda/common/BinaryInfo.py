@@ -7,7 +7,7 @@ import lief
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
-from smda.utility.lief_helper import safe_lief_parse
+from smda.utility.lief_helper import lief_name, safe_lief_parse
 from smda.utility.MachoFileLoader import MachoFileLoader
 
 LOGGER = logging.getLogger(__name__)
@@ -221,18 +221,18 @@ class BinaryInfo:
                 section_size = section.virtual_size or section.sizeof_raw_data
                 if section_size % 0x1000 != 0:
                     section_size += 0x1000 - (section_size % 0x1000)
-                yield section.name, section_start, section_start + section_size
+                yield lief_name(section), section_start, section_start + section_size
         elif lief_type == "ELF":
             for section in parsed_binary.sections:
                 section_start = section.virtual_address
                 section_size = section.size
-                yield section.name, section_start, section_start + section_size
+                yield lief_name(section), section_start, section_start + section_size
         elif lief_type == "MACH_O":
             adjustment = symbol_provider._get_address_adjustment(parsed_binary)
             for section in parsed_binary.sections:
                 section_start = section.virtual_address + adjustment
                 section_size = section.size
-                yield section.name, section_start, section_start + section_size
+                yield lief_name(section), section_start, section_start + section_size
 
     def isInCodeAreas(self, address):
         is_inside = False
