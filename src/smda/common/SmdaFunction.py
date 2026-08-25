@@ -26,6 +26,12 @@ from .SmdaInstruction import SmdaInstruction
 
 LOGGER = logging.getLogger(__name__)
 
+# escapeBinary() output is fully determined by (escaper, bytes, mnemonic, operands,
+# flag, bounds), so results may be reused across functions and runs; the cap bounds
+# retained strings when many distinct samples are analyzed in one process
+_ESCAPE_CACHE = {}
+_ESCAPE_CACHE_LIMIT = 1 << 17
+
 # AArch64 PIC hashing changed in 4.1.0 when control-flow opcode masking was unified,
 # and again in 4.2.0 when `escapeBinary` was made per-mnemonic immediate-aware
 # (nibble-keep-mask) so that relocated instructions produce the same pic_hash.
@@ -450,16 +456,28 @@ class SmdaFunction:
         else:
             lower_addr = binary_info.base_addr
             upper_addr = lower_addr + binary_info.binary_size
-            escaped_binary_seqs = [
-                escaper.escapeBinary(
-                    instruction,
-                    escape_intraprocedural_jumps=True,
-                    lower_addr=lower_addr,
-                    upper_addr=upper_addr,
-                )
-                for key in self._sorted_block_keys
-                for instruction in blocks[key]
-            ]
+            cache = _ESCAPE_CACHE
+            if len(cache) >= _ESCAPE_CACHE_LIMIT:
+                cache.clear()
+            escaped_binary_seqs = []
+            append = escaped_binary_seqs.append
+            cache_get = cache.get
+            for key in self._sorted_block_keys:
+                for instruction in blocks[key]:
+                    cache_key = (
+                        escaper,
+                        instruction.bytes,
+                        instruction.mnemonic,
+                        instruction.operands,
+                        True,
+                        lower_addr,
+                        upper_addr,
+                    )
+                    escaped = cache_get(cache_key)
+                    if escaped is None:
+                        escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
+                        cache[cache_key] = escaped
+                    append(escaped)
         return "".join(escaped_binary_seqs).encode("ascii")
 
     def getOpcHash(self):
@@ -583,6 +601,13 @@ class SmdaFunction:
                 normalized_targets.add(block_start)
 
             active_try_ranges.append({"start": range_start, "end": range_end, "targets": normalized_targets})
+
+        # without try_ranges the pass below reduces to re-sorting what getBlockRefs()
+        # already produced as sorted, deduplicated lists
+        if not active_try_ranges:
+            result = {block_start: list(current_blockrefs.get(block_start, [])) for block_start in sorted(self.blocks)}
+            self._normalized_blockrefs = result
+            return result
 
         # 2. Iterate blocks once to build normalized_blockrefs and apply try_ranges
         for block_start, block in self.blocks.items():
