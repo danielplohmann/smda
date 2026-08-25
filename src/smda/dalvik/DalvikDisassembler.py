@@ -1178,6 +1178,8 @@ class DalvikDisassembler:
         payload_ranges = list(seed_payload_ranges)
         payload_range_set = set(payload_ranges)
 
+        resolve_reference = lambda ref_kind, ref_index: self._resolveReference(resolver, ref_kind, ref_index)  # noqa: E731
+
         while state.hasUnprocessedBlocks():
             block_start_addr = state.chooseNextBlock()
             if block_start_addr is None:
@@ -1200,7 +1202,7 @@ class DalvikDisassembler:
                     decoded = decode_instruction(
                         bytecode,
                         idx,
-                        lambda ref_kind, ref_index: self._resolveReference(resolver, ref_kind, ref_index),
+                        resolve_reference,
                     )
                 except ValueError as exc:
                     self.disassembly.errors[bytecode_offset + idx] = {
