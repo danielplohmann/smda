@@ -272,7 +272,9 @@ class DalvikFunctionAnalysisState:
         return self.blocks
 
     def hasUnprocessedBlocks(self):
-        return bool(self._queued_blocks - self.processed_blocks)
+        # addBlockToQueue() never queues a processed block and chooseNextBlock() moves each
+        # pop straight into processed_blocks, so the two sets are always disjoint
+        return bool(self._queued_blocks)
 
     def isProcessed(self, addr):
         return addr in self.processed_bytes
