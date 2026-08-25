@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import tempfile
@@ -135,6 +136,34 @@ class TestPeSymbolProviderImports(unittest.TestCase):
         resolver.setOsName("second")
         self.assertEqual(resolver.getApi(0, 0x1000), (None, None))
         self.assertEqual(resolver.getApi(0, 0x3000), ("second.dll", "SharedAddress"))
+
+    def test_win_api_resolver_defers_parsing_uncached_databases(self):
+        api_db = {
+            "os_name": "testos",
+            "dlls": {
+                "0000_test_testdll.dll": {
+                    "bitness": 32,
+                    "base_address": 0x70000000,
+                    "exports": [{"name": "TestApi", "address": 0x1000, "ordinal": 1}],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "apiscout_testos.json")
+            with open(db_path, "w", encoding="utf-8") as f_json:
+                json.dump(api_db, f_json)
+            config = SimpleNamespace(API_COLLECTION_FILES={"testos": db_path})
+            resolver = WinApiResolver(config)
+
+            # an uncached database is only parsed once an API lookup needs it
+            self.assertEqual(list(resolver._api_map.keys()), ["lief"])
+            self.assertIsNone(resolver._os_name)
+            self.assertEqual(resolver._deferred_dbs, [("testos", db_path)])
+
+            resolver.update(SimpleNamespace(is_buffer=True))
+            self.assertEqual(resolver.getApi(0, 0x70001000), ("testdll.dll", "TestApi"))
+            self.assertEqual(resolver._os_name, "testos")
+            self.assertIsNone(resolver._deferred_dbs)
 
     def test_parse_imports_uses_active_base_addr_not_imagebase(self):
         provider = PeSymbolProvider(None)
