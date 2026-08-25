@@ -5,7 +5,12 @@ import os
 class SmdaConfig:
     # keep this in sync with smda.__version__
     VERSION = "4.4.7"
-    ESCAPER_DOWNWARD_COMPATIBILITY = "1.13.16"
+    # Bump this whenever any architecture's InstructionEscaper changes its
+    # output (mnemonic groups or escaped operands). Downstream indexes such as
+    # MCRIT treat reports whose smda_version is below this value as stale.
+    # Last output change: 4.4.5 (segment-qualified memory operands, AVX-512
+    # registers, six mnemonic groups).
+    ESCAPER_DOWNWARD_COMPATIBILITY = "4.4.5"
     CONFIG_FILE_PATH = str(os.path.abspath(__file__))
     PROJECT_ROOT = str(os.path.abspath(os.sep.join([CONFIG_FILE_PATH, "..", "..", ".."])))
 
