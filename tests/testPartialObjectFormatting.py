@@ -29,6 +29,12 @@ class TestPartialObjectFormatting(unittest.TestCase):
         report.message = "boom"
         self.assertIn("boom", str(report))
 
+    def test_report_str_marks_a_timed_out_analysis(self):
+        report = SmdaReport()
+        self.assertNotIn("INCOMPLETE", str(report))
+        report.status = "timeout"
+        self.assertIn("INCOMPLETE", str(report))
+
     def test_pic_hash_helpers_tolerate_missing_hash(self):
         function = SmdaFunction()
         self.assertIsNone(function.getPicHashAsLong())

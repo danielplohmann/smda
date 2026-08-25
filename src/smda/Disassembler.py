@@ -45,6 +45,7 @@ class Disassembler:
         self._start_time = None
         self._timeout = 0
         self._last_timeout_log_second = -1
+        self._timeout_reported = False
         # cache the last DisassemblyResult
         self.disassembly = None
 
@@ -83,6 +84,14 @@ class Disassembler:
         time_diff = datetime.datetime.now(datetime.timezone.utc) - start_time
         elapsed_seconds = int(time_diff.total_seconds())
         if elapsed_seconds >= self._timeout:
+            if not self._timeout_reported:
+                self._timeout_reported = True
+                LOGGER.warning(
+                    "Analysis stopped after %ds by the configured timeout (%ds): the report is "
+                    'incomplete, its function set is a lower bound, and its status is "timeout".',
+                    elapsed_seconds,
+                    self._timeout,
+                )
             LOGGER.debug("Current analysis callback time %s", time_diff)
             return True
         # Log on 30s bucket transitions (not exact-second boundaries) so the message
@@ -290,6 +299,7 @@ class Disassembler:
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
         self._last_timeout_log_second = -1
+        self._timeout_reported = False
         self._ensureHashes(binary_info)
         if self.disassembler:
             self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
