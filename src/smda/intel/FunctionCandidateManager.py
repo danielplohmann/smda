@@ -788,12 +788,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         The declared size is a 32-bit field an image is free to overstate, and a
         section extent is rounded up past what a truncated dump holds; the walk
         stops at the first read that comes back short, so neither can send it
-        past the bytes that exist.
+        past the bytes that exist. What is left is a table as long as the image,
+        which is why the walk polls the timeout rather than only bounding itself.
         """
         rva_start = va_start - base_addr
         rva_end = va_end - base_addr
         # entries are 12 bytes (3 DWORDs): BeginAddress, EndAddress, UnwindInfoAddress
-        for offset in range(rva_start, rva_end - 11, 12):
+        for index, offset in enumerate(range(rva_start, rva_end - 11, 12)):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return
             packed_entry = self.disassembly.getRawBytes(offset, 12)
             if len(packed_entry) < 12:
                 break

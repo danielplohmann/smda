@@ -2,11 +2,15 @@ import logging
 import struct
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import lief
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.Disassembler import Disassembler
+from smda.intel.FunctionCandidateManager import (
+    FunctionCandidateManager as IntelFunctionCandidateManager,
+)
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.PeFileLoader import PeFileLoader
 
@@ -134,6 +138,40 @@ class OverstatedTableSizeTest(unittest.TestCase):
         )
         # control: the honest run is the one that recovers everything the image declares
         self.assertEqual(self.declared - {function.offset for function in honest.getFunctions()}, set())
+
+
+class ExceptionTableTimeoutTest(unittest.TestCase):
+    """A declared table can be as long as the image, so bounding the walk is not enough."""
+
+    SIZE = 1 << 20
+    BASE = 0x140000000
+
+    def _entriesWalked(self, timeout_tripped):
+        # uniformly nonzero, so no entry reads as a zero BeginAddress and nothing in the
+        # walk's own stop conditions ends it before the declared range does
+        buffer = bytes(((index * 7) % 255) + 1 for index in range(4096)) * (self.SIZE // 4096)
+        binary_info = BinaryInfo(buffer)
+        binary_info.base_addr = self.BASE
+        binary_info.bitness = 64
+        manager = IntelFunctionCandidateManager(SmdaConfig())
+        manager.bitness = 64
+        manager.disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            getRawBytes=lambda offset, size: buffer[offset : offset + size],
+            analysis_timeout=False,
+        )
+        manager._cb_analysis_timeout = lambda: timeout_tripped
+        walked = []
+        manager._admitExceptionRecord = lambda *args: walked.append(args)
+        manager._readExceptionTable(self.BASE, self.BASE, self.BASE + self.SIZE, False)
+        return len(walked)
+
+    def testAWalkOverATableAsLongAsTheImageStopsOnTheTimeout(self):
+        entries = self.SIZE // 12
+        # control: with time left the walk covers every entry the range declares, so the
+        # short count below is the timeout stopping it rather than the range being empty
+        self.assertEqual(self._entriesWalked(timeout_tripped=False), entries)
+        self.assertLess(self._entriesWalked(timeout_tripped=True), entries // 10)
 
 
 def _withoutExceptionDirectory(data, parsed):
