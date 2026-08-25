@@ -1058,6 +1058,18 @@ class TestIntelDisassembler(unittest.TestCase):
             preceding = [self._ins("mov", "rax, 0x3c"), read_only]
             self.assertEqual(disassembler._resolveSyscallNumber(preceding, 64), 60)
 
+    def test_syscall_number_unresolved_on_pop_all_clobber(self):
+        disassembler = self._create_disassembler()
+        # popa/popad restores eax from the stack and carries no explicit operand, so the
+        # operand-less arm let the stale mov value through as the syscall number. 32-bit
+        # only - the encoding is invalid in long mode. capstone spells them popal/popaw.
+        for pop_all in (self._ins("popal", ""), self._ins("popaw", "")):
+            preceding = [self._ins("mov", "eax, 0x1"), pop_all]
+            self.assertIsNone(disassembler._resolveSyscallNumber(preceding, 32))
+        # pushal writes only esp, so it must not stop resolution
+        pushed = [self._ins("mov", "eax, 0x1"), self._ins("pushal", "")]
+        self.assertEqual(disassembler._resolveSyscallNumber(pushed, 32), 1)
+
     def test_syscall_number_unresolved_on_implicit_rax_clobber(self):
         disassembler = self._create_disassembler()
         # instructions that implicitly write rax/eax must stop resolution (no false 60)

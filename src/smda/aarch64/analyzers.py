@@ -11,7 +11,13 @@ import struct
 from collections import Counter
 from copy import deepcopy
 
-from capstone.arm64_const import ARM64_SFT_LSL
+from capstone.arm64_const import (
+    ARM64_EXT_SXTB,
+    ARM64_EXT_SXTH,
+    ARM64_EXT_SXTW,
+    ARM64_EXT_SXTX,
+    ARM64_SFT_LSL,
+)
 
 from .dataflow import (
     _applyConstantWrite,
@@ -29,6 +35,8 @@ LOGGER = logging.getLogger(__name__)
 # mid-function, so code_refs_to is only partially populated and deep chases would
 # just burn time chasing edges that don't exist yet.
 JUMPTABLE_PREDECESSOR_DEPTH = 2
+
+SIGNED_EXTENDS = frozenset((ARM64_EXT_SXTB, ARM64_EXT_SXTH, ARM64_EXT_SXTW, ARM64_EXT_SXTX))
 
 
 def _updateConstantTracking(d, cap_ins, constants):
@@ -603,8 +611,14 @@ class AArch64JumpTableAnalyzer:
                         table_base = constants[reg2]
                         is_relative = True
                         index_op = op1
-                    if index_op is not None and index_op.shift.type == ARM64_SFT_LSL:
-                        entry_shift = index_op.shift.value
+                    if index_op is not None:
+                        if index_op.shift.type == ARM64_SFT_LSL:
+                            entry_shift = index_op.shift.value
+                        # `add Xd, Xbase, Wi, sxtw #2` folds the index's sign-extension into
+                        # the merging add, so a signed table can reach this point without any
+                        # ldrsw/sxtw of its own to mark it.
+                        if index_op.ext in SIGNED_EXTENDS:
+                            is_signed = True
                 elif op1.type == 1 and op2.type == 2:  # REG + IMM
                     reg1 = norm_reg(ins.reg_name(op1.reg))
                     tracked_regs.add(reg1)

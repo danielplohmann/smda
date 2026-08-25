@@ -117,6 +117,34 @@ class AArch64DataflowTestSuite(unittest.TestCase):
 
         self.assertEqual(constants.get("x1"), 0x100)
 
+    def test_bl_invalidates_the_link_register_it_writes_implicitly(self):
+        # adrp x30, #0x1000 ; bl #... -> the branch clobbers x30 (capstone names it lr and
+        # reports it only in the implicit regs_write list, since bl's sole operand is the
+        # branch immediate), so the tracked page value must not survive the call.
+        instructions = _decode(self.cs, [0x9000001E, 0x94000001])
+        self.assertEqual(instructions[0].mnemonic, "adrp")
+        self.assertEqual(instructions[1].mnemonic, "bl")
+
+        self.assertEqual(propagateConstants(instructions[:1], None).get("lr"), 0x1000)
+        self.assertNotIn("lr", propagateConstants(instructions, None))
+
+    def test_blr_invalidates_the_link_register_it_writes_implicitly(self):
+        # The same implicit x30 write on the register-indirect call, whose own operand is a
+        # register - so it clears the modelled branches' operands[0] check and would still
+        # never reach the link register without the implicit-write pass.
+        instructions = _decode(self.cs, [0x9000001E, 0xD63F0100])
+        self.assertEqual(instructions[1].mnemonic, "blr")
+
+        self.assertNotIn("lr", propagateConstants(instructions, None))
+
+    def test_br_leaves_tracked_registers_alone(self):
+        # Counter-case: a plain indirect branch writes no register, so the implicit-write
+        # pass must not invalidate anything the modelled branches resolved.
+        instructions = _decode(self.cs, [0x9000001E, 0xD61F0100])
+        self.assertEqual(instructions[1].mnemonic, "br")
+
+        self.assertEqual(propagateConstants(instructions, None).get("lr"), 0x1000)
+
 
 class DataRefImmediateGateTestSuite(unittest.TestCase):
     """The gate that decides whether _recordDataRefs re-decodes an instruction for details."""

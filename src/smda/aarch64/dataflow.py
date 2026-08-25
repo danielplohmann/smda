@@ -61,9 +61,22 @@ def _invalidateWritebackBase(cap_ins, constants):
             constants.pop(norm_reg(cap_ins.reg_name(op.mem.base)), None)
 
 
+def _invalidateImplicitWrites(cap_ins, constants):
+    """Pop every register the instruction writes without naming it in an operand.
+
+    ``bl`` and ``blr`` clobber x30, which capstone reports only in the implicit
+    ``regs_write`` list - ``bl``'s sole operand is the branch immediate, so neither the
+    modelled branches (which read ``operands[0]``) nor the CS_AC_WRITE fallback (which
+    walks register operands) can see it.
+    """
+    for reg in cap_ins.regs_write:
+        constants.pop(norm_reg(cap_ins.reg_name(reg)), None)
+
+
 def _applyConstantWrite(cap_ins, constants, disassembler):
     """Apply one instruction's effect (if any) to a dest-register -> value map, in place."""
     _applyRegisterWrite(cap_ins, constants, disassembler)
+    _invalidateImplicitWrites(cap_ins, constants)
     # after the instruction's own effect: a post-index load still reads the base's
     # pre-increment value, so the invalidation must not run before it is resolved
     _invalidateWritebackBase(cap_ins, constants)
