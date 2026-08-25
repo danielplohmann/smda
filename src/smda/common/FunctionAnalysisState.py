@@ -330,7 +330,9 @@ class FunctionAnalysisState:
         return self.blocks
 
     def hasUnprocessedBlocks(self):
-        return bool(self._queued_blocks - self.processed_blocks)
+        # chooseNextBlock() moves every pop straight into processed_blocks and
+        # addBlockToQueue() refuses processed blocks, so the two sets stay disjoint
+        return bool(self._queued_blocks)
 
     def isProcessed(self, addr):
         return addr in self.processed_bytes
