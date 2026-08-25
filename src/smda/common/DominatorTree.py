@@ -141,8 +141,9 @@ def build_dominator_tree(G, r):
 
 
 def get_nesting_depth(graph, domtree, root):
-    expanded_graph = fix_graph(graph)
-    significant_nodes = set.union(*([set(v) for v in expanded_graph.values() if len(v) > 1] + [set()]))
+    # fix_graph() would only add empty successor lists here, which cannot contribute
+    # to significant_nodes (len(v) > 1), so the raw graph yields the identical set
+    significant_nodes = set.union(*([set(v) for v in graph.values() if len(v) > 1] + [set()]))
 
     # print("significant_nodes", significant_nodes)
     def maximum_costs(root_node):
