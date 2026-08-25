@@ -366,6 +366,8 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         function_offset = dynamic_offset + 2 + (2 * table_length)
         for _ in range(table_length):
             method_addr = self._read_ptr(function_offset, self._ptr_size)
+            if method_addr is None:
+                break
             if method_addr and self._binary_info.isInCodeAreas(method_addr):
                 function_offsets.add(method_addr)
             function_offset += self._ptr_size

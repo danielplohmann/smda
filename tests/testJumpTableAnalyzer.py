@@ -247,6 +247,59 @@ class TestJumpTableSignedness(unittest.TestCase):
         self.assertEqual(result, [0x1000])
 
 
+class BogusTableBoundTestSuite(unittest.TestCase):
+    """_findJumpTableSize takes the first `cmp reg, imm` from the backtrack window, so an
+    unrelated compare becomes the entry count: a 32-bit float classification (`cmp ecx,
+    0x7f800000`, the IEEE-754 infinity pattern) sitting a few instructions ahead of a switch
+    yields a bound of 0x7f800001 entries. Both table readers must therefore stop at the first
+    unreadable entry -- the read offset only grows, so every later entry is unreadable too, and
+    continuing instead of stopping spends billions of iterations recovering nothing."""
+
+    BOGUS_SIZE = 0x7F800000 + 1
+    # a stopping scan reads one entry past the last in-image one; anything beyond that is the
+    # runaway, and this bound keeps the pre-fix behaviour a fast failure rather than a hang
+    CALL_BUDGET = 16
+
+    def test_direct_table_scan_stops_at_the_image_edge(self):
+        analyzer = _makeAnalyzer(base_addr=0x1000, binary_size=0x100)
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(side_effect=lambda addr: 0x1000 <= addr < 0x1100)
+        table = struct.pack("<II", 0x1010, 0x1020)
+        calls = []
+
+        def getBytes(addr, size):
+            calls.append(addr)
+            self.assertLessEqual(len(calls), self.CALL_BUDGET, "table scan did not stop at the image edge")
+            if not 0x1000 <= addr < 0x1100:
+                return None
+            return table[addr - 0x10F8 : addr - 0x10F8 + size]
+
+        analyzer.disassembly.getBytes = getBytes
+
+        result = analyzer._extractDirectTableOffsets(jumptable_size=self.BOGUS_SIZE, off_jumptable=0x10F8)
+
+        self.assertEqual(result, [0x1010, 0x1020])
+
+    def test_relative_table_scan_stops_at_the_buffer_end(self):
+        # getRawBytes slices the mapped image, so a read past its end comes back short
+        # rather than as None -- the same runaway with a different failure shape.
+        analyzer = _makeAnalyzer(base_addr=0x1000, binary_size=0x100)
+        analyzer.disassembly.isAddrWithinMemoryImage = MagicMock(side_effect=lambda addr: 0x1000 <= addr < 0x1100)
+        # the switch bodies precede the table here, so the relative entries are negative
+        table = struct.pack("<ii", -0x98, -0x88)
+        calls = []
+
+        def getRawBytes(offset, size):
+            calls.append(offset)
+            self.assertLessEqual(len(calls), self.CALL_BUDGET, "table scan did not stop at the buffer end")
+            return table[offset - 0xF8 : offset - 0xF8 + size]
+
+        analyzer.disassembly.getRawBytes = getRawBytes
+
+        result = analyzer._extractRelativeTableOffsets(jumptable_size=self.BOGUS_SIZE, off_jumptable=0x10F8)
+
+        self.assertEqual(result, [0x1060, 0x1070])
+
+
 class X64BonusOffsetTestSuite(unittest.TestCase):
     def test_bonus_offset_taken_from_the_first_matching_mov(self):
         analyzer = _makeAnalyzer(bitness=64)

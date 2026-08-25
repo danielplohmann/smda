@@ -596,7 +596,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
             me_addr = self._read_ptr(me_ref_offset)
 
             if me_addr is None:
-                continue
+                break
 
             me_offset = self._addr_to_offset(me_addr)
             method_info = self._extract_method_info(me_offset)
