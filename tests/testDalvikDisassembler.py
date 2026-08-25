@@ -932,6 +932,70 @@ class DalvikDisassemblerTestSuite(unittest.TestCase):
         self.assertEqual(resolver.formatRef("call_site", 0), cs_display)
         self.assertEqual(resolver.formatRef("method_handle", 0), mh_display)
 
+    def testAnOrphanLabelIsChosenByTypeNotByName(self):
+        """A DEX method name is arbitrary UTF-8, so it cannot decide what the object is."""
+        from smda.dalvik.DalvikDisassembler import DalvikDisassembler, _OrphanCodeItemMethod
+
+        code_item = build_code_item(bytes.fromhex("0e00"))
+
+        def label_for(method):
+            disassembler = DalvikDisassembler(config)
+            disassembler.disassembly = DisassemblyResult()
+            binary_info = BinaryInfo(code_item)
+            binary_info.raw_data = code_item
+            binary_info.architecture = "dalvik"
+            disassembler.disassembly.binary_info = binary_info
+            return disassembler.analyzeFunction(None, SyntheticDalvikResolver(), method).label
+
+        genuine = _OrphanCodeItemMethod(0x10)
+        self.assertEqual(label_for(genuine), "orphan_code_item@0x10")
+
+        impostor = SyntheticDalvikMethod()
+        impostor.name = genuine.name
+        self.assertEqual(label_for(impostor), "LSynthetic;->method()V")
+
+    def testAnUnreadableTypeObjectIsNotLaunderedIntoADescriptor(self):
+        """A lief object repr must not reach a report field dressed as a type descriptor."""
+        from smda.dalvik.DalvikDisassembler import DexReferenceResolver
+
+        class _EmptyDex:
+            strings = []
+            methods = []
+            fields = []
+            types = []
+            prototypes = []
+            classes = []
+
+        class _UnreadableValue:
+            # neither fullname nor name, so the str() fallback is what answers
+            def __str__(self):
+                return "<lief.DEX.Type object at 0x7f0000000000>"
+
+        class _UnreadableType:
+            def __init__(self):
+                self.value = _UnreadableValue()
+
+        class _ReadableValue:
+            def __str__(self):
+                return "java.lang.String"
+
+        class _ReadableType:
+            def __init__(self):
+                self.value = _ReadableValue()
+
+        resolver = DexReferenceResolver(_EmptyDex(), raw_data=b"")
+        # both are held for the whole test: _formatType caches by id(), so a temporary that
+        # dies before the next one is built can hand its address to it
+        unreadable, readable = _UnreadableType(), _ReadableType()
+        # normalization rewrites dots to slashes, so testing its output for the "<lief."
+        # prefix cannot see one: "L<lief/DEX/Type object at 0x...>;" passes that test
+        self.assertEqual(
+            resolver._normalizeTypeString("<lief.DEX.Type object at 0x7f00>"), "L<lief/DEX/Type object at 0x7f00>;"
+        )
+        self.assertEqual(resolver._formatType(unreadable), "<_UnreadableType>")
+        # a value that really does spell a type still reads through the same fallback
+        self.assertEqual(resolver._formatType(readable), "Ljava/lang/String;")
+
     def testEncodedValueExtensionRulesPerAosp(self):
         """encoded_value: byte/short/int/long sign-extend, char zero-extends, float/double right-zero-extend."""
         from smda.dalvik.DalvikDisassembler import DexReferenceResolver
