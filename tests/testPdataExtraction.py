@@ -107,6 +107,16 @@ class MockBinaryInfo:
             # .pdata at 0x1000
             yield ".pdata", self.base_addr + PDATA_OFFSET, self.base_addr + PDATA_OFFSET + self.pdata_size
 
+    def getExceptionDirectory(self):
+        # this fixture is bytes rather than a PE, so it declares no directory and the
+        # section name is the only evidence of where the table is
+        return None
+
+    def getLiefBinary(self):
+        # nor a parsed container, so the declared-range lookup finds no `.eh_frame` and the
+        # rules built on it are inert here
+        return None
+
 
 class PdataExtractionTestSuite(unittest.TestCase):
     def test_pdata_candidates(self):

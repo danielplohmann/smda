@@ -20,7 +20,7 @@ defaults:
 
 jobs:
   # Fast fixture benchmark — the CI correctness/perf gate. Runs first so a broken
-  # PR fails before we spin up the (slower) malpedia matrix runners. Also resolves
+  # PR fails before we spin up the (slower) malpedia runner. Also resolves
   # whether the malpedia password is available, which gates the heavier jobs.
   fixture_gate:
     name: Fixture Benchmark Gate
@@ -85,26 +85,24 @@ jobs:
         env:
           MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
 
-  # Malpedia disassembly. Base and PR run as concurrent matrix legs (instead of
-  # six sequential passes in one job). The base leg's results are cached on the
-  # base commit SHA, so re-pushing to a PR while master is unchanged skips the
-  # base passes entirely.
+  # Malpedia disassembly. Both sides are timed here, in one job on one runner, in
+  # base/PR/PR/base/base/PR order — the same reason the fixture gate above runs its
+  # passes that way. The paired statistic compares the two sides file by file, so a
+  # per-runner speed offset lands on it directly, and the noise band it is judged
+  # against comes from repeated passes within a side, which cannot price a second
+  # machine. Measured while the sides ran as separate legs: three consecutive runs
+  # whose PR side produced identical output — same recovered functions, same two
+  # differing files — reported +1.26%, -13.18% and -15.53%, because the PR side drew
+  # a different runner each time (sum-of-best-times 252.83s, 282.21s, 289.04s) while
+  # the base side, restored from cache, stayed bit-identical at 252.53s across all
+  # three. Caching a side is what froze one end of that comparison: a restored side
+  # is by construction a measurement from another machine and another hour.
   malpedia:
-    name: Malpedia Benchmark (${{ matrix.side }})
+    name: Malpedia Benchmark
     needs: fixture_gate
     if: needs.fixture_gate.outputs.password_available == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - side: base
-            pythonpath: base-repo/src
-          - side: pr
-            pythonpath: src
-    env:
-      RUNS: 3
+    timeout-minutes: 40
     steps:
       - name: Checkout PR code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,34 +110,13 @@ jobs:
           persist-credentials: false
 
       - name: Checkout base code
-        if: matrix.side == 'base'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
           path: base-repo
           persist-credentials: false
 
-      - name: Resolve base SHA
-        if: matrix.side == 'base'
-        id: basesha
-        run: echo "sha=$(git -C base-repo rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      # Cache base results on the base commit SHA + harness hash. Exact-match only
-      # (no restore-keys) so a stale base never silently compares against the
-      # wrong baseline.
-      - name: Restore cached base results
-        if: matrix.side == 'base'
-        id: basecache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            runtime_measurements/base_0
-            runtime_measurements/base_1
-            runtime_measurements/base_2
-          key: smda-base-${{ runner.os }}-py3.11-${{ steps.basesha.outputs.sha }}-${{ hashFiles('.github/workflows/scripts/process_malpedia.py') }}
-
       - name: Set up Python
-        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -147,32 +124,43 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
-        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Verify benchmark imports
+        run: |
+          PYTHONPATH=base-repo/src python -c "import os, smda; expected = os.path.abspath('base-repo/src'); actual = os.path.abspath(smda.__file__); print('base smda:', actual); assert actual.startswith(expected + os.sep), f'Expected base smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
+          PYTHONPATH=src python -c "import os, smda; expected = os.path.abspath('src'); actual = os.path.abspath(smda.__file__); print('pr smda:', actual); assert actual.startswith(expected + os.sep), f'Expected PR smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
+
       - name: Decrypt Malpedia Samples
-        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
         run: |
           unzip -q -P "$MALPEDIA_ZIP_PASSWORD" .github/workflows/data/malpedia.zip -d malpedia_extracted
         env:
           MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
 
-      - name: Run Malpedia Benchmark
-        if: matrix.side == 'pr' || steps.basecache.outputs.cache-hit != 'true'
+      - name: Run counterbalanced benchmark passes
         run: |
-          PYTHONPATH=${{ matrix.pythonpath }} python -c "import os, smda; expected = os.path.abspath('${{ matrix.pythonpath }}'); actual = os.path.abspath(smda.__file__); print('${{ matrix.side }} smda:', actual); assert actual.startswith(expected + os.sep), f'Expected ${{ matrix.side }} smda from {expected}, got {actual} (editable install shadowing PYTHONPATH?)'"
-          for i in $(seq 0 $((RUNS - 1))); do
-            PYTHONPATH=${{ matrix.pythonpath }} python .github/workflows/scripts/process_malpedia.py \
-              malpedia_extracted/malpedia "runtime_measurements/${{ matrix.side }}_$i"
+          for spec in base:0 pr:0 pr:1 base:1 base:2 pr:2; do
+            side="${spec%%:*}"
+            index="${spec##*:}"
+            if [ "$side" = base ]; then tree=base-repo/src; else tree=src; fi
+            PYTHONPATH="$tree" python .github/workflows/scripts/process_malpedia.py \
+              malpedia_extracted/malpedia "runtime_measurements/${side}_${index}"
           done
 
-      - name: Upload run artifacts
+      - name: Upload base run artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: smda-${{ matrix.side }}
-          path: runtime_measurements/${{ matrix.side }}_*
+          name: smda-base
+          path: runtime_measurements/base_*
+          if-no-files-found: error
+
+      - name: Upload PR run artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smda-pr
+          path: runtime_measurements/pr_*
           if-no-files-found: error
 
   # Aggregate both sides, run the paired statistical evaluation, gate CI on
