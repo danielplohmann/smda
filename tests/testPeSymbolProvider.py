@@ -510,5 +510,46 @@ class TestPeCxxSymbolFixture(unittest.TestCase):
         self.assertIn("double) const", measure[0])
 
 
+class TestPeMsvcSymbolFixture(unittest.TestCase):
+    """The MSVC arm of the dispatch, on a PE that really carries decorated names.
+
+    tests/msvc_cxx_pe_xored is a small C++ translation unit built for
+    x86_64-pc-windows-msvc by clang-cl 22.1.7, exporting free functions, a namespace, a
+    class returned by value and one extern "C" name.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)), "msvc_cxx_pe_xored")
+        raw = Path(fixture).read_bytes()
+        binary = bytes(byte ^ (index % 256) for index, byte in enumerate(raw))
+        binary_info = BinaryInfo(binary)
+        binary_info.file_path = ""
+        binary_info.base_addr = 0x180000000
+        provider = PeSymbolProvider(None)
+        provider.update(binary_info)
+        cls.symbols = provider.getFunctionSymbols()
+
+    def test_no_exported_name_is_left_decorated(self):
+        self.assertEqual([name for name in self.symbols.values() if name.startswith("?")], [])
+
+    def test_a_namespaced_signature_is_expanded(self):
+        names = set(self.symbols.values())
+
+        self.assertIn("double __cdecl geometry::dot(struct Matrix const &, struct Matrix const &)", names)
+        self.assertIn("int __cdecl geometry::classify(struct Matrix const *, char, bool)", names)
+
+    def test_a_class_returned_by_value_keeps_its_return_type(self):
+        names = set(self.symbols.values())
+
+        self.assertIn(
+            "struct Matrix __cdecl geometry::combine(struct Matrix const &, double, unsigned int)",
+            names,
+        )
+
+    def test_an_undecorated_name_is_left_alone(self):
+        self.assertIn("c_linkage", set(self.symbols.values()))
+
+
 if __name__ == "__main__":
     unittest.main()
