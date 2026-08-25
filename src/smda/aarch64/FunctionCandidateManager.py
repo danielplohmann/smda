@@ -79,6 +79,13 @@ _ARM64_PDATA_SEED_ENTRIES = 4
 # _ARM64_PDATA_SAMPLE_STRIDE <= (MIN_ENTRIES - SEED_ENTRIES) * ENTRY_SIZE, pinned by a test
 _ARM64_PDATA_SAMPLE_STRIDE = 64
 
+# every BL encoding (0xFC000000 mask) has a top byte in 0x94..0x97 and every recognized
+# prologue pattern (PAC/BTI literals, STP/STR pre-index masks) has one in {0xA9, 0xD5,
+# 0xF8} — verified exhaustively over each pattern's free bits — so scanning the top-byte
+# lane with these tables skips non-matching words at C speed before any Python runs
+_BL_TOPBYTE_FILTER = bytes(1 if 0x94 <= b <= 0x97 else 0 for b in range(256))
+_PROLOGUE_TOPBYTE_FILTER = bytes(1 if b in (0xA9, 0xD5, 0xF8) else 0 for b in range(256))
+
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
@@ -681,21 +688,29 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # word-by-word, resolve each BL's PC-relative target and register it as a
         # call-reference candidate — the AArch64 analogue of the base 0xE8 scan.
         base = self.disassembly.binary_info.base_addr
-        for match_count, word in enumerate(self._wordsView()):
-            if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+        words = self._wordsView()
+        binary = self.disassembly.binary_info.binary
+        tops = binary[3 : len(words) * INSTRUCTION_SIZE : INSTRUCTION_SIZE].translate(_BL_TOPBYTE_FILTER)
+        num_words = len(tops)
+        for chunk_start in range(0, num_words, _TIMEOUT_POLL_INTERVAL):
+            if self._candidateTimeoutTripped():
                 return
-            if (word & BL_MASK) != BL_VALUE:
-                continue
-            source = base + match_count * INSTRUCTION_SIZE
-            if not self._passesCodeFilter(source):
-                continue
-            imm = word & BL_IMM_MASK
-            if imm & BL_IMM_SIGN_BIT:
-                imm -= BL_IMM_SIGN_BIT << 1  # sign-extend the 26-bit immediate
-            target = (source + imm * INSTRUCTION_SIZE) & self.getBitMask()
-            if self.disassembly.isAddrWithinMemoryImage(target):
-                self.addReferenceCandidate(target, source)
-                self.setInitialCandidate(target)
+            for match_count in range(chunk_start, min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)):
+                if not tops[match_count]:
+                    continue
+                word = words[match_count]
+                if (word & BL_MASK) != BL_VALUE:
+                    continue
+                source = base + match_count * INSTRUCTION_SIZE
+                if not self._passesCodeFilter(source):
+                    continue
+                imm = word & BL_IMM_MASK
+                if imm & BL_IMM_SIGN_BIT:
+                    imm -= BL_IMM_SIGN_BIT << 1  # sign-extend the 26-bit immediate
+                target = (source + imm * INSTRUCTION_SIZE) & self.getBitMask()
+                if self.disassembly.isAddrWithinMemoryImage(target):
+                    self.addReferenceCandidate(target, source)
+                    self.setInitialCandidate(target)
 
     def locatePrologueCandidates(self):
         # AArch64 lacks a single dominant byte prologue (no push ebp). Scan the
@@ -703,18 +718,26 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # (frame-record store, callee-saved pair save, link-register save, PAC/BTI);
         # see definitions.is_function_prologue for the exact encodings.
         base = self.disassembly.binary_info.base_addr
-        for match_count, word in enumerate(self._wordsView()):
-            if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+        words = self._wordsView()
+        binary = self.disassembly.binary_info.binary
+        tops = binary[3 : len(words) * INSTRUCTION_SIZE : INSTRUCTION_SIZE].translate(_PROLOGUE_TOPBYTE_FILTER)
+        num_words = len(tops)
+        for chunk_start in range(0, num_words, _TIMEOUT_POLL_INTERVAL):
+            if self._candidateTimeoutTripped():
                 return
-            if not is_function_prologue(word):
-                continue
-            addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
-                continue
-            if not self._passesCodeFilter(addr):
-                continue
-            self.addPrologueCandidate(addr)
-            self.setInitialCandidate(addr)
+            for match_count in range(chunk_start, min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)):
+                if not tops[match_count]:
+                    continue
+                word = words[match_count]
+                if not is_function_prologue(word):
+                    continue
+                addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
+                if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
+                    continue
+                if not self._passesCodeFilter(addr):
+                    continue
+                self.addPrologueCandidate(addr)
+                self.setInitialCandidate(addr)
 
     def addTailcallCandidate(self, addr, reference_source=None):
         if not self._passesCodeFilter(addr):
