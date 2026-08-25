@@ -2,6 +2,8 @@ import logging
 import re
 import struct
 
+from smda.utility.PeFileLoader import PeFileLoader
+
 from .definitions import COMMON_START_BYTES
 
 LOGGER = logging.getLogger(__name__)
@@ -33,6 +35,20 @@ REX_W_MAX_SAMPLES = 1 << 16
 
 
 class BitnessAnalyzer:
+    @staticmethod
+    def _declaredBitness(binary):
+        """Bitness a PE image in the buffer declares, or None when it declares none.
+
+        A memory dump of a mapped image still begins with its own headers, and the
+        COFF machine field is authoritative where the byte probe is only evidence.
+        Anything that is not an MZ image carrying a valid PE signature and a machine
+        value this loader knows falls through to the probe, which is what a headerless
+        dump or shellcode gets.
+        """
+        if not PeFileLoader.isCompatible(binary):
+            return None
+        return PeFileLoader.getBitness(binary) or None
+
     def determineBitnessFromFile(self, filepath):
         LOGGER.debug("Running Bitness test on %s", filepath)
         with open(filepath, "rb") as infile:
@@ -95,6 +111,10 @@ class BitnessAnalyzer:
         return 64 if score["32"] < score["64"] else 32
 
     def determineBitness(self, binary, regions=None):
+        declared = self._declaredBitness(binary)
+        if declared is not None:
+            LOGGER.debug("Bitness taken as %d from the image's own COFF machine field", declared)
+            return declared
         share, observed = self._rexWShare(binary, regions)
         if share is None and regions:
             # too little code named to decide on; the whole image is still better

@@ -808,7 +808,17 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not is_function_prologue(word):
                 continue
             addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
+            # #310's check runs first: it refuses `bti j` on the word alone, which is every
+            # pad in the ARM64 fixtures, and it costs an integer compare where the LSDA test
+            # below decodes .eh_frame. Both `continue`, so this is cost rather than arbitration.
             if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr, word):
+                continue
+            if self.config.USE_LSDA_LANDING_PADS and self.isDeclaredLandingPad(addr):
+                # A declared landing pad is interior by construction, so it is never a
+                # prologue however much it looks like one. The x86 scan needs no equivalent:
+                # an endbr64 is not one of its prologue shapes, so pads reach it only through
+                # the gap scan. Here `bti` is a recognized entry prologue, which puts every
+                # pad in front of this loop.
                 continue
             if not self._passesCodeFilter(addr):
                 continue
@@ -1038,6 +1048,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if word in (0, NOP):  # inter-function padding
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
+            # Same three declared-evidence rules as the intel gap scan, in the same order and
+            # for the same reason: `_pdata_ranges` is only ever filled from an ARM64 PE
+            # exception directory and both .eh_frame rules decode nothing unless lief reports
+            # an ELF, so they are format-disjoint and the order is cost and selectivity.
             if self._pdata_ranges and self.config.USE_PE_ARM64_PDATA_INTERIOR_GAPS:
                 # the emptiness test comes first: this runs once per scanned word, and on an
                 # ELF or Mach-O image there is no exception directory to consult at all
@@ -1050,7 +1064,30 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     # body rather than the one word, which is what the record describes.
                     self.gap_pointer = containing[1]
                     continue
+            if self.config.USE_LSDA_LANDING_PADS and self.isDeclaredLandingPad(self.gap_pointer):
+                # The image's own LSDA says the unwinder resumes here, so the address is
+                # interior by construction. This has to precede the shape test below rather
+                # than back it up: under -mbranch-protection every pad opens with a bti, and
+                # the shape test then reads the bti as evidence of a legitimate indirect-call
+                # target instead of as a pad. It also knows where the pad's function ends,
+                # where the shape test only knows where the run of pads ends.
+                skip = self.declaredLandingPadSkipTarget(self.gap_pointer)
+                self.gap_pointer = skip or self.gap_pointer + INSTRUCTION_SIZE
+                continue
+            if self.config.USE_ELF_FDE_INTERIOR_GAPS and not self.isInDeclaredPltSection(self.gap_pointer):
+                # A PLT is exempt: the whole table sits under one FDE, so the range test reads
+                # every stub after the first as interior to the first, and on a CET image the
+                # gap scan is what recovers them.
+                containing = self.declaredFdeRangeContaining(self.gap_pointer)
+                # Only a range whose own start the analysis recovered is evidence that the
+                # range is one function: an FDE can begin in the alignment padding ahead of
+                # its function, and then the real entry a few bytes in is interior to nothing.
+                if containing is not None and containing[0] in self.disassembly.functions:
+                    self.gap_pointer = containing[1]
+                    continue
             if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
+                # #310's resume target, not one instruction on: stepping a single word lands
+                # inside the pad the scan just refused and books that instead.
                 self.gap_pointer = self._endOfRefusedLandingPadRun(self.gap_pointer)
                 continue
             if is_trap(word):  # udf-space data words / trap filler, never an entry

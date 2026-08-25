@@ -109,6 +109,17 @@ class MappedFixtureBitnessTest(unittest.TestCase):
         mapped = PeFileLoader.mapBinary(_decode("cutwail_xored"))
         self.assertEqual(BitnessAnalyzer().determineBitness(mapped), 32)
 
+    def testTheProbeAloneStillReadsBothMappedFixturesCorrectly(self):
+        # these two now answer from the COFF machine field, so without this the byte
+        # probe would be untested on them and a regression in it would go unseen
+        analyzer = BitnessAnalyzer()
+        share64, observed64 = analyzer._rexWShare(PeFileLoader.mapBinary(_decode("rust_pe_gnu_xored")))
+        share32, observed32 = analyzer._rexWShare(PeFileLoader.mapBinary(_decode("cutwail_xored")))
+        self.assertGreaterEqual(observed64, REX_W_MIN_SAMPLES)
+        self.assertGreaterEqual(observed32, REX_W_MIN_SAMPLES)
+        self.assertGreater(share64, 0.5)
+        self.assertLess(share32, 0.5)
+
     def test32BitMemoryDumpIsRecognized(self):
         self.assertEqual(BitnessAnalyzer().determineBitness(_decode("asprox_0x008D0000_xored")), 32)
 
@@ -116,6 +127,59 @@ class MappedFixtureBitnessTest(unittest.TestCase):
         loader = FileLoader(str(FIXTURE_DIR / "bashlite_xored"), map_file=False)
         decoded = bytes(byte ^ (index % 256) for index, byte in enumerate(loader.getRawData()))
         self.assertEqual(BitnessAnalyzer().determineBitness(decoded), 64)
+
+
+class DeclaredBitnessTest(unittest.TestCase):
+    """A dump of a mapped image still carries its own headers, and the COFF machine
+    field settles what the byte probe can only guess at."""
+
+    #: 0x48 followed by a REX.W opcode: what the probe reads as 64-bit code
+    REX_W_DENSE = b"\x48\x89" * REX_W_MIN_SAMPLES
+
+    @staticmethod
+    def _pe(machine, body=b""):
+        header_offset = 0x80
+        image = bytearray(header_offset + 0x40 + len(body))
+        image[0:2] = b"MZ"
+        image[0x3C:0x40] = header_offset.to_bytes(4, "little")
+        image[header_offset : header_offset + 4] = b"PE\x00\x00"
+        image[header_offset + 4 : header_offset + 6] = machine.to_bytes(2, "little")
+        image[header_offset + 0x40 :] = body
+        return bytes(image)
+
+    def testA32BitImageFullOfRexWBytesIsStillRead32Bit(self):
+        # the shape that made the probe wrong on real 32-bit malware dumps: the byte
+        # evidence says 64, the image says 32, and the image is right
+        image = self._pe(0x14C, self.REX_W_DENSE)
+        share, observed = BitnessAnalyzer()._rexWShare(image)
+        self.assertGreaterEqual(observed, REX_W_MIN_SAMPLES)
+        self.assertGreater(share, 0.5, "control: the probe alone must get this one wrong")
+        self.assertEqual(BitnessAnalyzer().determineBitness(image), 32)
+
+    def testA64BitImageIsReadFromItsMachineField(self):
+        self.assertEqual(BitnessAnalyzer().determineBitness(self._pe(0x8664)), 64)
+
+    def testAnArm64ImageIsRead64Bit(self):
+        self.assertEqual(BitnessAnalyzer().determineBitness(self._pe(0xAA64)), 64)
+
+    def testAnUnknownMachineFallsThroughToTheProbe(self):
+        image = self._pe(0x1C0, self.REX_W_DENSE)
+        self.assertIsNone(BitnessAnalyzer()._declaredBitness(image))
+        self.assertEqual(BitnessAnalyzer().determineBitness(image), 64)
+
+    def testAnMzWithoutAPeSignatureFallsThroughToTheProbe(self):
+        image = bytearray(self._pe(0x14C, self.REX_W_DENSE))
+        image[0x80:0x84] = b"NE\x00\x00"
+        self.assertIsNone(BitnessAnalyzer()._declaredBitness(bytes(image)))
+        self.assertEqual(BitnessAnalyzer().determineBitness(bytes(image)), 64)
+
+    def testAHeaderlessDumpFallsThroughToTheProbe(self):
+        self.assertIsNone(BitnessAnalyzer()._declaredBitness(self.REX_W_DENSE))
+        self.assertEqual(BitnessAnalyzer().determineBitness(self.REX_W_DENSE), 64)
+
+    def testATruncatedHeaderFallsThroughToTheProbe(self):
+        self.assertIsNone(BitnessAnalyzer()._declaredBitness(b"MZ"))
+        self.assertIsNone(BitnessAnalyzer()._declaredBitness(b""))
 
 
 class MemoryDumpRecoveryTest(unittest.TestCase):

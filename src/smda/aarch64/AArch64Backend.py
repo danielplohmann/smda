@@ -22,6 +22,7 @@ from .definitions import (
     COND_BRANCH_PREFIXES,
     END_INS,
     EXCEPTION_RETURN_INS,
+    FRAME_RECORD_WINDOW,
     INDIRECT_JUMP_INS,
     INSTRUCTION_SIZE,
     LDR_UNSIGNED_64_MASK,
@@ -33,6 +34,7 @@ from .definitions import (
     is_bti_landing_pad,
     is_exception_record_entry,
     is_function_prologue,
+    opens_stack_frame,
     rd_field,
     rn_field,
 )
@@ -152,8 +154,22 @@ class AArch64Backend(ArchBackend):
         return is_function_prologue(word)
 
     @classmethod
+    def _opensStackFrameAt(cls, d, addr):
+        words = [cls._wordAt(d, addr + INSTRUCTION_SIZE * step) for step in range(1 + FRAME_RECORD_WINDOW)]
+        return opens_stack_frame(words)
+
+    @staticmethod
+    def _isKnownFunctionStart(d, addr):
+        """Whether `addr` is believed to start a function, by either record.
+
+        The candidate set is snapshotted before analysis and gap analysis never adds to
+        it, so asking it alone misses every function found after that point.
+        """
+        return addr in d.fc_manager.getFunctionStartCandidates() or addr in d.disassembly.functions
+
+    @classmethod
     def _callFallthroughFunctionStart(cls, d, addr):
-        if addr in d.fc_manager.getFunctionStartCandidates():
+        if cls._isKnownFunctionStart(d, addr):
             return addr
 
         cursor = addr
@@ -161,7 +177,7 @@ class AArch64Backend(ArchBackend):
         while cls._wordAt(d, cursor) == NOP:
             skipped_nop = True
             cursor += INSTRUCTION_SIZE
-        if skipped_nop and cursor in d.fc_manager.getFunctionStartCandidates():
+        if skipped_nop and cls._isKnownFunctionStart(d, cursor):
             return cursor
         if skipped_nop and cursor % 16 == 0:
             word = cls._wordAt(d, cursor)
@@ -176,6 +192,12 @@ class AArch64Backend(ArchBackend):
                 is_function_prologue(word) or is_bti_landing_pad(word)
             ):
                 return None
+            return cursor
+        # A callee that does not return leaves its caller without a `ret`, so decoding
+        # runs straight into whatever follows -- with no padding to notice and nothing
+        # having made the next entry a candidate, the cases above all decline and the
+        # two functions merge. A frame opening right here says the merge is wrong.
+        if cls._opensStackFrameAt(d, cursor):
             return cursor
         return None
 
@@ -363,7 +385,13 @@ class AArch64Backend(ArchBackend):
         if previous_instruction and previous_instruction[2] == "bl":
             boundary = self._callFallthroughFunctionStart(d, i_address)
             if boundary is not None:
-                d.fc_manager.addTailcallCandidate(boundary)
+                if d.config.RESOLVE_TAILCALLS:
+                    # the cut below is what recovers the next function: it ends the caller
+                    # here, and the ordinary candidate machinery then reaches the entry with
+                    # better extents than a tailcall-flagged candidate does. Seeding one as
+                    # well measured worse on both AArch64 corpora, so it follows the flag the
+                    # shared engine gates its own tailcall work behind.
+                    d.fc_manager.addTailcallCandidate(boundary)
                 self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
                 return True
 
