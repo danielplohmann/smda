@@ -457,8 +457,6 @@ class SmdaFunction:
             lower_addr = binary_info.base_addr
             upper_addr = lower_addr + binary_info.binary_size
             cache = _ESCAPE_CACHE
-            if len(cache) >= _ESCAPE_CACHE_LIMIT:
-                cache.clear()
             escaped_binary_seqs = []
             append = escaped_binary_seqs.append
             cache_get = cache.get
@@ -475,6 +473,10 @@ class SmdaFunction:
                     )
                     escaped = cache_get(cache_key)
                     if escaped is None:
+                        # enforce the cap at insertion so even one function with more
+                        # distinct instructions than the limit cannot grow past it
+                        if len(cache) >= _ESCAPE_CACHE_LIMIT:
+                            cache.clear()
                         escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
                         cache[cache_key] = escaped
                     append(escaped)

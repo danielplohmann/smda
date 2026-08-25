@@ -690,14 +690,18 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         base = self.disassembly.binary_info.base_addr
         words = self._wordsView()
         binary = self.disassembly.binary_info.binary
-        tops = binary[3 : len(words) * INSTRUCTION_SIZE : INSTRUCTION_SIZE].translate(_BL_TOPBYTE_FILTER)
-        num_words = len(tops)
+        num_words = len(words)
         for chunk_start in range(0, num_words, _TIMEOUT_POLL_INTERVAL):
             if self._candidateTimeoutTripped():
                 return
-            for match_count in range(chunk_start, min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)):
-                if not tops[match_count]:
+            # build the filter per polling chunk, so a configured timeout stops
+            # discovery at the same 4096-word boundaries as before the prefilter
+            chunk_end = min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)
+            tops = binary[4 * chunk_start + 3 : 4 * chunk_end : INSTRUCTION_SIZE].translate(_BL_TOPBYTE_FILTER)
+            for local_count, top in enumerate(tops):
+                if not top:
                     continue
+                match_count = chunk_start + local_count
                 word = words[match_count]
                 if (word & BL_MASK) != BL_VALUE:
                     continue
@@ -720,14 +724,18 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         base = self.disassembly.binary_info.base_addr
         words = self._wordsView()
         binary = self.disassembly.binary_info.binary
-        tops = binary[3 : len(words) * INSTRUCTION_SIZE : INSTRUCTION_SIZE].translate(_PROLOGUE_TOPBYTE_FILTER)
-        num_words = len(tops)
+        num_words = len(words)
         for chunk_start in range(0, num_words, _TIMEOUT_POLL_INTERVAL):
             if self._candidateTimeoutTripped():
                 return
-            for match_count in range(chunk_start, min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)):
-                if not tops[match_count]:
+            # build the filter per polling chunk, so a configured timeout stops
+            # discovery at the same 4096-word boundaries as before the prefilter
+            chunk_end = min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)
+            tops = binary[4 * chunk_start + 3 : 4 * chunk_end : INSTRUCTION_SIZE].translate(_PROLOGUE_TOPBYTE_FILTER)
+            for local_count, top in enumerate(tops):
+                if not top:
                     continue
+                match_count = chunk_start + local_count
                 word = words[match_count]
                 if not is_function_prologue(word):
                     continue
