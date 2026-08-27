@@ -37,20 +37,23 @@ class WinApiResolver(AbstractLabelProvider):
                 self._loadDbFile(os_name, db_filepath)
             else:
                 deferred_dbs.append((os_name, db_filepath))
-        if deferred_dbs:
-            # os-name selection must wait until every configured DB had its chance to
-            # load, otherwise a single cached DB pins the name prematurely
-            self._deferred_dbs = deferred_dbs
-        else:
+        # os-name selection must wait until every configured DB had its chance to
+        # load, otherwise a single cached DB pins the name prematurely
+        self._deferred_dbs = deferred_dbs
+        if not deferred_dbs:
             self._resolveOsName()
 
     def _resolveOsName(self):
+        # deferred loading runs after construction, so setOsName() may already have
+        # pinned a name; an explicit choice always outranks the inference below
+        if self._os_name is not None:
+            return
         loaded_os_names = [os_name for os_name in self._config.API_COLLECTION_FILES if os_name in self._api_map]
         if len(loaded_os_names) == 1:
             self._os_name = loaded_os_names[0]
 
     def _ensureDbsLoaded(self):
-        deferred_dbs = getattr(self, "_deferred_dbs", None)
+        deferred_dbs = self._deferred_dbs
         if not deferred_dbs:
             return
         self._deferred_dbs = None

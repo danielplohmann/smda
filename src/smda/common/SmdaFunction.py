@@ -604,10 +604,12 @@ class SmdaFunction:
 
             active_try_ranges.append({"start": range_start, "end": range_end, "targets": normalized_targets})
 
-        # without try_ranges the pass below reduces to re-sorting what getBlockRefs()
-        # already produced as sorted, deduplicated lists
+        # without try_ranges the pass below reduces to deduplicating and sorting the
+        # successors of each block, with no per-block try-range overlap test
         if not active_try_ranges:
-            result = {block_start: list(current_blockrefs.get(block_start, [])) for block_start in sorted(self.blocks)}
+            result = {
+                block_start: sorted(set(current_blockrefs.get(block_start, []))) for block_start in sorted(self.blocks)
+            }
             self._normalized_blockrefs = result
             return result
 

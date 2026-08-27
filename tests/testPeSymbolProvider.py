@@ -165,6 +165,32 @@ class TestPeSymbolProviderImports(unittest.TestCase):
             self.assertEqual(resolver._os_name, "testos")
             self.assertIsNone(resolver._deferred_dbs)
 
+    def test_win_api_resolver_keeps_an_explicit_os_name_across_deferred_loading(self):
+        api_db = {
+            "os_name": "present",
+            "dlls": {
+                "0000_test_presentdll.dll": {
+                    "bitness": 32,
+                    "base_address": 0x70000000,
+                    "exports": [{"name": "PresentApi", "address": 0x1000, "ordinal": 1}],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "apiscout_present.json")
+            with open(db_path, "w", encoding="utf-8") as f_json:
+                json.dump(api_db, f_json)
+            config = SimpleNamespace(
+                API_COLLECTION_FILES={"present": db_path, "absent": os.path.join(tmp_dir, "missing.json")}
+            )
+            resolver = WinApiResolver(config)
+            resolver.setOsName("absent")
+            resolver.update(SimpleNamespace(is_buffer=True))
+
+            # only one of the two databases loads, but the caller pinned the other one
+            self.assertEqual(resolver.getApi(0, 0x70001000), (None, None))
+            self.assertEqual(resolver._os_name, "absent")
+
     def test_parse_imports_uses_active_base_addr_not_imagebase(self):
         provider = PeSymbolProvider(None)
         pe_binary = _MockPeBinary(

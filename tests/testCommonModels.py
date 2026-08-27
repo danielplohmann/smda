@@ -595,6 +595,15 @@ class TestSmdaFunctionRobustness(unittest.TestCase):
 
         self.assertEqual(function.getNormalizedBlockRefs(), {0x100: []})
 
+    def test_blockrefs_without_try_ranges_are_deduplicated_and_sorted(self):
+        function = SmdaFunction()
+        function.offset = 0x100
+        function.blocks = {0x200: [], 0x100: []}
+        function.blockrefs = {0x100: [0x200, 0x200, 0x080]}
+        function.architecture_metadata = {}
+
+        self.assertEqual(function.getNormalizedBlockRefs(), {0x100: [0x080, 0x200], 0x200: []})
+
     def test_code_xrefs_skip_a_function_whose_offset_is_not_an_instruction(self):
         report = SmdaReport(None)
         report._offset2ins = {0x2000: object()}
