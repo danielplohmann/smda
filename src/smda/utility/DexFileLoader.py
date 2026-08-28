@@ -93,7 +93,7 @@ class DexFileLoader:
         return 0
 
     @staticmethod
-    def getBitness(data, parsed=None):
+    def getBitness(data, parsed=None) -> int:
         return 32
 
     @staticmethod
