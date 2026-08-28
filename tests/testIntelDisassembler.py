@@ -805,6 +805,52 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(manager.nextGapCandidate(), 0x1003)
 
+    def test_gap_scan_skips_multibyte_nop_instruction(self):
+        config = SmdaConfig()
+        binary_info = BinaryInfo(b"\x0f\x1f\x00\x55\xc3")
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = len(binary_info.binary)
+
+        manager = FunctionCandidateManager(config)
+        manager.disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            code_map={},
+            data_map={},
+            getRawBytes=lambda offset, size: binary_info.binary[offset : offset + size],
+        )
+        manager.bitness = 32
+        manager.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
+        manager.function_gaps = [[0x1000, 0x1005, 5]]
+        manager.gap_pointer = 0x1000
+
+        self.assertEqual(manager.nextGapCandidate(), 0x1003)
+
+    def test_gap_scan_does_not_disassemble_bytes_that_cannot_be_nop(self):
+        config = SmdaConfig()
+        binary_info = BinaryInfo(b"\xe8\x00\x00\x00\x00\xc3")
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = len(binary_info.binary)
+
+        manager = FunctionCandidateManager(config)
+        manager.disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            code_map={},
+            data_map={},
+            getRawBytes=lambda offset, size: binary_info.binary[offset : offset + size],
+        )
+        manager.bitness = 32
+
+        def boom(*_args, **_kwargs):
+            raise AssertionError("disasm_lite should not run for a non-nop first byte")
+
+        manager.capstone = SimpleNamespace(disasm_lite=boom)
+        manager.function_gaps = [[0x1000, 0x1006, 6]]
+        manager.gap_pointer = 0x1000
+
+        self.assertEqual(manager.nextGapCandidate(), 0x1000)
+
     def test_locate_prologue_candidates_seeds_extended_amd64_prologues(self):
         buf = bytes.fromhex(
             "f30f1efa554889e5"  # 0x1000: endbr64; push rbp; mov rbp, rsp
@@ -1313,6 +1359,14 @@ class StubChainCandidateTestSuite(unittest.TestCase):
 
     def test_jmp_stub_chain_yields_one_candidate_per_entry(self):
         chain = b"\xff\x25\x11\x22\x33\x44" + b"\xff\x25\x55\x66\x77\x88"
+
+        manager = self._locate(chain)
+
+        base = _StubChainCandidateManager.BASE_ADDR + len(self.PAD)
+        self.assertEqual([base, base + 6], manager.recovered)
+
+    def test_jmp_stub_chain_matches_a_displacement_containing_newline(self):
+        chain = b"\xff\x25\x0a\x22\x33\x44" + b"\xff\x25\x55\x66\x77\x88"
 
         manager = self._locate(chain)
 

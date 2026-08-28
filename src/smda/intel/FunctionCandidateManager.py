@@ -30,6 +30,10 @@ LOGGER = logging.getLogger(__name__)
 # bytes.lstrip() can skip long runs of one-byte padding in C instead of
 # crawling them byte-by-byte in the gap scanner.
 _PADDING_STRIP_BYTES = bytes(sorted(seq[0] for seq in GAP_SEQUENCES[1]))
+# first bytes of encodings capstone spells `nop` (0x90 is already consumed as
+# one-byte padding above). anything else cannot be a nop, so the 15-byte
+# disasm_lite probe is skippable.
+_NOP_START_BYTES = frozenset({0x0F, 0x26, 0x2E, 0x36, 0x3E, 0x64, 0x65, 0x66, 0x67, 0xF2, 0xF3})
 
 # The lowest score any multi-byte (length 3/4/5) COMMON_PROLOGUES entry carries, across
 # both bitnesses. Used as the "looks like a real function entry" floor for hasCommonPrologue:
@@ -62,14 +66,15 @@ _POINTER_TABLE_POLL_BYTES = 0x10000
 # Written as `A(BA)+B` rather than the equivalent `(AB){2,}` so the pattern starts with a literal:
 # only then does the regex engine emit a prefix fast-search instead of entering the matcher at
 # every offset of the mapped image.
-_RE_STUB_BLOCK = re.compile(b"\xff\x25(?:.{4}\xff\x25)+.{4}", re.DOTALL)
-_RE_STUB_ENTRY = re.compile(b"\xff\x25(?P<function>.{4})", re.DOTALL)
-_RE_PLT_BLOCK = re.compile(b"\xff\x25(?:.{4}\x68.{4}\xe9.{4}\xff\x25)+.{4}\x68.{4}\xe9.{4}", re.DOTALL)
-_RE_PLTSEC_BLOCK = re.compile(
-    b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?:.{4}\x0f\x1f\x44\x00\x00\xf3\x0f\x1e\xfa\xf2\xff\x25)+.{4}\x0f\x1f\x44\x00\x00",
-    re.DOTALL,
+_RE_STUB_BLOCK = re.compile(b"\xff\x25(?:[\x00-\xff]{4}\xff\x25)+[\x00-\xff]{4}")
+_RE_STUB_ENTRY = re.compile(b"\xff\x25(?P<function>[\x00-\xff]{4})")
+_RE_PLT_BLOCK = re.compile(
+    b"\xff\x25(?:[\x00-\xff]{4}\x68[\x00-\xff]{4}\xe9[\x00-\xff]{4}\xff\x25)+[\x00-\xff]{4}\x68[\x00-\xff]{4}\xe9[\x00-\xff]{4}"
 )
-_RE_PLTSEC_ENTRY = re.compile(b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?P<function>.{4})", re.DOTALL)
+_RE_PLTSEC_BLOCK = re.compile(
+    b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?:[\x00-\xff]{4}\x0f\x1f\x44\x00\x00\xf3\x0f\x1e\xfa\xf2\xff\x25)+[\x00-\xff]{4}\x0f\x1f\x44\x00\x00"
+)
+_RE_PLTSEC_ENTRY = re.compile(b"\xf3\x0f\x1e\xfa\xf2\xff\x25(?P<function>[\x00-\xff]{4})")
 
 _PDATA_ENTRY_SIZE = 12
 # items (candidates, matches or exception records) a scan steps over between budget polls, mirroring
@@ -245,20 +250,21 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.gap_pointer += run if run else 1
                 continue
             # try to find instructions that directly encode as NOP and skip them
-            ins_buf = list(self.capstone.disasm_lite(get_window_slice(gap_offset, 15), gap_offset))
-            if ins_buf:
-                i_address, i_size, i_mnemonic, i_op_str = ins_buf[0]
-                if i_mnemonic == "nop":
-                    nop_instruction = i_mnemonic + " " + i_op_str
-                    nop_length = i_size
-                    LOGGER.debug(
-                        "nextGapCandidate() found nop instruction (%s) - gap_ptr += %d: 0x%08x",
-                        nop_instruction,
-                        nop_length,
-                        self.gap_pointer,
-                    )
-                    self.gap_pointer += nop_length
-                    continue
+            if byte and byte[0] in _NOP_START_BYTES:
+                ins_buf = list(self.capstone.disasm_lite(get_window_slice(gap_offset, 15), gap_offset))
+                if ins_buf:
+                    i_address, i_size, i_mnemonic, i_op_str = ins_buf[0]
+                    if i_mnemonic == "nop":
+                        nop_instruction = i_mnemonic + " " + i_op_str
+                        nop_length = i_size
+                        LOGGER.debug(
+                            "nextGapCandidate() found nop instruction (%s) - gap_ptr += %d: 0x%08x",
+                            nop_instruction,
+                            nop_length,
+                            self.gap_pointer,
+                        )
+                        self.gap_pointer += nop_length
+                        continue
             # try to find effective NOPs and skip them.
             found_multi_byte_nop = False
             for gap_length in range(max(GAP_SEQUENCES.keys()), 1, -1):
