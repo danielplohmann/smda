@@ -322,7 +322,7 @@ class PeSynthesizer(BinarySynthesizer):
         header += b"\x00" * (size_of_headers - len(header))
         return header
 
-    def _synthesizeFromHeader(self, offsets, with_imports, with_strings):
+    def _synthesizeFromHeader(self, offsets, with_imports, with_strings) -> bytes:
         base = self.report.base_addr
         pe_src = safe_lief_parse(bytes(self.report.xheader))
         if not isinstance(pe_src, lief.PE.Binary):
@@ -451,7 +451,7 @@ class PeSynthesizer(BinarySynthesizer):
             return base
         return candidate
 
-    def _synthesizeMinimal(self, offsets, with_imports, with_strings):
+    def _synthesizeMinimal(self, offsets, with_imports, with_strings) -> bytes:
         bitness = self._getBitness()
         ptr_size = 8 if bitness == 64 else 4
         section_alignment = 0x1000
