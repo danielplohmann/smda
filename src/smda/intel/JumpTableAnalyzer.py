@@ -231,6 +231,11 @@ class JumpTableAnalyzer:
         redefine as before, as is a write to a memory cell: the step this recognizes ends in
         the register the branch reads, and a compare against a cell that has since been
         written back to is not a bound on what is loaded out of it afterwards.
+
+        Only the instruction the branch reads is asked. An `add <reg>, <reg>` further back is
+        index arithmetic - "add rax, rcx" before the table read makes the index a sum, and a
+        compare bounding one summand does not bound it - so carrying the tie across that one
+        would report a bound smaller than the table and truncate the scan.
         """
         if canonicalRegister(destination_key) is None:
             return False
@@ -251,7 +256,7 @@ class JumpTableAnalyzer:
         """
         tracked = set(index_keys) if index_keys else set()
         untied_size = 0
-        for instr in backtracked[::-1]:
+        for position, instr in enumerate(backtracked[::-1]):
             mnemonic = instr[2].split(" ")[-1]
             if mnemonic in RET_INS:
                 break
@@ -283,7 +288,7 @@ class JumpTableAnalyzer:
                 carried = self._dispatchIndexKeys(source) if destination_key in tracked else set()
                 tracked = self._invalidated(tracked, destination_key) | carried
                 continue
-            if destination_key in tracked and self._addsTableBase(mnemonic, destination_key, source):
+            if position == 0 and destination_key in tracked and self._addsTableBase(mnemonic, destination_key, source):
                 tracked = self._invalidated(tracked, destination_key) | {destination_key}
                 continue
             # Anything else redefines whatever it writes, and several x86 instructions write a

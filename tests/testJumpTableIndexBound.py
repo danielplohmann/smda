@@ -336,6 +336,22 @@ class RelativeDispatchBaseAddTestSuite(unittest.TestCase):
 
         self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x3E9)
 
+    def test_index_arithmetic_before_the_table_read_still_drops_the_tie(self):
+        """Only the instruction the branch reads is a base combine. `add rax, rcx` before the
+        table read makes the index a sum, and the compare against `[rbx]` bounds one summand
+        of it -- carrying the tie across that would report 4 where the table has more, and a
+        recovered bound is trusted as exact."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 6, "cmp", "dword ptr [rbx], 0x3"),
+            (0x1006, 2, "mov", "eax, dword ptr [rbx]"),
+            (0x1009, 3, "add", "rax, rcx"),
+            (0x100C, 4, "movsxd", "rax, dword ptr [rdi + rax*4]"),
+            (0x1010, 3, "add", "rax, rdi"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0)
+
     def test_an_add_back_into_a_tracked_cell_still_drops_the_tie(self):
         """The step this recognizes ends in the register the branch reads. A cell written back
         to holds a different value from here on, so the compare against it is not a bound on
@@ -344,10 +360,20 @@ class RelativeDispatchBaseAddTestSuite(unittest.TestCase):
         backtracked = [
             (0x1000, 6, "cmp", "dword ptr [rbx], 0x3ff"),
             (0x1006, 3, "add", "dword ptr [rbx], eax"),
-            (0x1009, 2, "mov", "ecx, dword ptr [rbx]"),
         ]
 
-        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 0)
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"dword ptr [rbx]"}), 0)
+
+    def test_the_same_cell_read_without_being_written_is_still_tied(self):
+        """Positive control for the rule above: with the write gone, the compare bounds what
+        the dispatch indexes with and the tie is made."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 6, "cmp", "dword ptr [rbx], 0x3ff"),
+            (0x1006, 3, "nop", ""),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"dword ptr [rbx]"}), 0x400)
 
     def test_an_immediate_added_to_the_index_still_drops_the_tie(self):
         """An immediate is index arithmetic, not a table base: the compare further back bounds
