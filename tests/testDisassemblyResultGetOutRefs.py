@@ -30,6 +30,19 @@ class TestDisassemblyResultGetOutRefs(unittest.TestCase):
         self.assertIn(ins_addr, out_refs)
         self.assertEqual(out_refs[ins_addr], [last_valid_addr])
 
+    def test_out_refs_are_sorted_and_exclude_in_function_destinations(self):
+        disassembly = DisassemblyResult()
+        disassembly.binary_info = SimpleNamespace(base_addr=0x1000, binary_size=0x200)
+        func_addr = 0x1000
+        call_addr = 0x1000
+        fallthrough = 0x1005
+        disassembly.functions[func_addr] = [
+            [(call_addr, 5, "call", "0x1100"), (fallthrough, 1, "ret", "")],
+        ]
+        disassembly.code_refs_from[call_addr] = {0x1180, 0x1100, fallthrough, func_addr}
+        out_refs = disassembly.getOutRefs(func_addr)
+        self.assertEqual(out_refs[call_addr], [func_addr, 0x1100, 0x1180])
+
 
 if __name__ == "__main__":
     unittest.main()
