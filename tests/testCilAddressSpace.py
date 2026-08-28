@@ -2,6 +2,7 @@ import os
 import unittest
 
 import dnfile
+import lief
 
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
@@ -51,6 +52,39 @@ class CilOffsetsAreFileOffsetsTest(unittest.TestCase):
         the architecture, and the language score map."""
         self.assertEqual(self.report.architecture, "cil")
         self.assertIn(".net", self.report.toDict()["metadata"]["language"])
+
+
+class DalvikOffsetsAreFileOffsetsTest(unittest.TestCase):
+    """The other managed backend, for a different reason: a DEX carries no load address, so a
+    code item's offset in the file is the only address there is. Pinned alongside CIL because
+    documenting one and not the other tells a consumer to read these as virtual addresses."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.binary = _decode("blockblast_classes_xored")
+        cls.report = Disassembler(SmdaConfig(), backend="dalvik").disassembleUnmappedBuffer(cls.binary)
+        cls.recovered = {function.offset for function in cls.report.getFunctions()}
+
+    def testEveryRecoveredMethodIsAtItsCodeItemsFileOffset(self):
+        """Cross-checked against a second parser rather than against the file's length -- with
+        `base_addr` at 0 an address inside the image proves nothing about which space it is
+        in, but matching the code-item offsets LIEF reads out of the DEX does."""
+        parsed = lief.DEX.parse(list(self.binary), "fixture.dex")
+        declared = {method.code_offset for method in parsed.methods if method.code_offset}
+
+        self.assertTrue(declared)
+        self.assertTrue(self.recovered)
+        self.assertEqual(self.recovered - declared, set())
+
+    def testEveryInstructionAddressIsAFileOffsetToo(self):
+        addresses = [
+            instruction.offset for function in self.report.getFunctions() for instruction in function.getInstructions()
+        ]
+        self.assertTrue(addresses)
+        self.assertLess(max(addresses), len(self.binary))
+
+    def testTheReportSaysWhichBackendProducedIt(self):
+        self.assertEqual(self.report.architecture, "dalvik")
 
 
 if __name__ == "__main__":
