@@ -698,13 +698,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # discovery at the same 4096-word boundaries as before the prefilter
             chunk_end = min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)
             tops = binary[4 * chunk_start + 3 : 4 * chunk_end : INSTRUCTION_SIZE].translate(_BL_TOPBYTE_FILTER)
-            for local_count, top in enumerate(tops):
-                if not top:
-                    continue
+            local_count = -1
+            while True:
+                local_count = tops.find(1, local_count + 1)
+                if local_count < 0:
+                    break
                 match_count = chunk_start + local_count
                 word = words[match_count]
-                if (word & BL_MASK) != BL_VALUE:
-                    continue
                 source = base + match_count * INSTRUCTION_SIZE
                 if not self._passesCodeFilter(source):
                     continue
@@ -732,9 +732,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # discovery at the same 4096-word boundaries as before the prefilter
             chunk_end = min(chunk_start + _TIMEOUT_POLL_INTERVAL, num_words)
             tops = binary[4 * chunk_start + 3 : 4 * chunk_end : INSTRUCTION_SIZE].translate(_PROLOGUE_TOPBYTE_FILTER)
-            for local_count, top in enumerate(tops):
-                if not top:
-                    continue
+            local_count = -1
+            while True:
+                local_count = tops.find(1, local_count + 1)
+                if local_count < 0:
+                    break
                 match_count = chunk_start + local_count
                 word = words[match_count]
                 if not is_function_prologue(word):
