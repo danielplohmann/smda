@@ -37,6 +37,11 @@ class TailcallSeedEvidenceTest(unittest.TestCase):
     """
 
     def _image(self):
+        """An image with three parts: the leaves and their caller, which give the alignment
+        floor something to infer 16 from; a victim, which is a 16-aligned routine holding a
+        merely 4-aligned word, opening on no prologue and called by nothing, so the gap scan
+        is what recovers it and that happens after every candidate booked in the first pass;
+        and a seeder, a routine ending in a backward branch into the victim's body."""
         words = {}
         leaves = [BASE + 0x1000 + index * 0x10 for index in range(LEAF_COUNT)]
         for leaf in leaves:
@@ -52,14 +57,10 @@ class TailcallSeedEvidenceTest(unittest.TestCase):
         words[address] = EPILOGUE
         words[address + 4] = RET
 
-        # A 16-aligned routine whose body holds a merely 4-aligned word. It opens on no
-        # prologue and nothing calls it, so the gap scan is what recovers it -- which is
-        # after every candidate booked in the first pass.
         victim = BASE + 0x2000
         interior = victim + 4
         words.update({victim: MOV_W1_2, interior: MOV_W0_1, victim + 8: MOV_W2_3, victim + 12: RET})
 
-        # the seeding site: a routine ending in a backward branch into that body
         seeder = BASE + 0x3000
         words.update({seeder: PROLOGUE, seeder + 4: EPILOGUE, seeder + 8: _b(seeder + 8, interior)})
 
