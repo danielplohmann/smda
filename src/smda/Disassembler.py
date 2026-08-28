@@ -295,7 +295,7 @@ class Disassembler:
             )
         return smda_report
 
-    def _disassemble(self, binary_info, timeout=0):
+    def _disassemble(self, binary_info, timeout=0) -> SmdaReport:
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
         self._last_timeout_log_second = -1
@@ -319,7 +319,7 @@ class Disassembler:
             raise RuntimeError(f"No disassembly backend available for architecture '{binary_info.architecture}'.")
         raise RuntimeError("Disassembler backend not initialized.")
 
-    def _createErrorReport(self, start, exception):
+    def _createErrorReport(self, start, exception) -> SmdaReport:
         report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
@@ -330,7 +330,7 @@ class Disassembler:
         report.timestamp = datetime.datetime.now(datetime.timezone.utc)
         return report
 
-    def _handleDisassemblyException(self, start, exception, log_message):
+    def _handleDisassemblyException(self, start, exception, log_message) -> SmdaReport:
         reraise_non_operational_exception(exception)
         LOGGER.error(log_message)
         return self._createErrorReport(start, exception)
