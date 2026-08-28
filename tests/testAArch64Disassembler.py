@@ -1402,7 +1402,7 @@ class TestAArch64AddressMaterialization(unittest.TestCase):
         self.assertEqual(adr_pc_value(0x10000000, 0x401000), 0x401000)
         self.assertEqual(_dataRefImmediatesFromWord((0x90000000).to_bytes(4, "little"), 0x401ABC), (0x401000,))
         self.assertEqual(_dataRefImmediatesFromWord((0x91000400).to_bytes(4, "little"), 0x401000), (1,))
-        self.assertIsNone(_dataRefImmediatesFromWord((0x91000000).to_bytes(4, "little"), 0x401000))
+        self.assertEqual(_dataRefImmediatesFromWord((0x91000000).to_bytes(4, "little"), 0x401000), (0,))
         self.assertIsNone(_dataRefImmediatesFromWord((0xD503201F).to_bytes(4, "little"), 0x401000))
         self.assertEqual(_dataRefImmediatesFromWord((0xD2800020).to_bytes(4, "little"), 0x401000), (1,))
         self.assertEqual(_dataRefImmediatesFromWord((0xF2800020).to_bytes(4, "little"), 0x401000), (1,))
@@ -1413,6 +1413,32 @@ class TestAArch64AddressMaterialization(unittest.TestCase):
         self.assertEqual(adr_pc_value(0x10800000, 0x401000), 0x301000)
         self.assertEqual(_dataRefImmediatesFromWord((0x10000000).to_bytes(4, "little"), 0x401000), (0x401000,))
         self.assertEqual(_dataRefImmediatesFromWord((0x12B00008).to_bytes(4, "little"), 0x401000), (0x7FFFFFFF,))
+
+    def test_data_ref_word_skips_register_relative_loads(self):
+        unsigned_ldr = 0xF9400820  # ldr x0, [x1, #0x10]
+        unsigned_str = 0xF9000000  # str x0, [x0]
+        ldur = 0xF8400000  # ldur x0, [x0]
+        ldr_reg = 0xF8616800  # ldr x0, [x0, x1]
+        ldr_pre = 0xF8408C20  # ldr x0, [x1, #8]!
+        ldtr = 0xF85F0820  # ldtr x0, [x1, #-0x10]
+        ldraa = 0xF8616C20  # ldraa x0, [x1, #-0xf50]!
+        ldp_signed = 0xA9400400  # ldp x0, x1, [x0]
+        ldp_pre = 0xA9C17BFD  # ldp x29, x30, [sp, #0x10]!
+        ldnp = 0xA8400400  # ldnp x0, x1, [x0]
+        ldp_post = 0xA8C17BFD  # ldp x29, x30, [sp], #0x10
+        str_post = 0xF8008409  # str x9, [x0], #8
+        self.assertEqual(_dataRefImmediatesFromWord(unsigned_ldr.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(unsigned_str.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldur.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldr_reg.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldr_pre.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldtr.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldraa.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldp_signed.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldp_pre.to_bytes(4, "little"), 0), ())
+        self.assertEqual(_dataRefImmediatesFromWord(ldnp.to_bytes(4, "little"), 0), ())
+        self.assertIsNone(_dataRefImmediatesFromWord(ldp_post.to_bytes(4, "little"), 0))
+        self.assertIsNone(_dataRefImmediatesFromWord(str_post.to_bytes(4, "little"), 0))
 
     def test_record_data_refs_capstone_fallback_handles_empty_decode_and_abs_mem(self):
         nop = (0xD503201F).to_bytes(4, "little")
@@ -1516,6 +1542,54 @@ class TestAArch64AddressMaterialization(unittest.TestCase):
         finally:
             ab_mod._dataRefImmediatesFromWord = original
         self.assertEqual(dup_state.refs, [(0, 0x3000)])
+
+        class _BoomCapstone:
+            def disasm(self, *_args, **_kwargs):
+                raise AssertionError("capstone detail should not run for a word-path encoding")
+
+        def _boom_disassembler(raw, size=0x4000, areas=None):
+            binary_info = BinaryInfo(raw)
+            binary_info.base_addr = 0
+            binary_info.binary_size = size
+            binary_info.code_areas = areas or [[0x1000, 0x2000]]
+            disassembly = SimpleNamespace(
+                binary_info=binary_info,
+                getBytes=lambda _addr, _size: raw,
+                isAddrWithinMemoryImage=lambda value: 0 <= value < size,
+            )
+            return SimpleNamespace(disassembly=disassembly, capstone=_BoomCapstone())
+
+        add0_state = _State()
+        add0 = (0x91000000).to_bytes(4, "little")
+        AArch64Backend._recordDataRefs(_boom_disassembler(add0), (0, 4, "add", "x0, x0, #0"), add0_state)
+        self.assertEqual(add0_state.refs, [(0, 0)])
+
+        unsigned_state = _State()
+        unsigned_ldr = (0xF9400820).to_bytes(4, "little")
+        AArch64Backend._recordDataRefs(
+            _boom_disassembler(unsigned_ldr),
+            (0, 4, "ldr", "x0, [x1, #0x10]"),
+            unsigned_state,
+        )
+        self.assertEqual(unsigned_state.refs, [])
+
+        pre_state = _State()
+        ldr_pre = (0xF8408C20).to_bytes(4, "little")
+        AArch64Backend._recordDataRefs(
+            _boom_disassembler(ldr_pre),
+            (0, 4, "ldr", "x0, [x1, #8]!"),
+            pre_state,
+        )
+        self.assertEqual(pre_state.refs, [])
+
+        pair_pre_state = _State()
+        ldp_pre = (0xA9C17BFD).to_bytes(4, "little")
+        AArch64Backend._recordDataRefs(
+            _boom_disassembler(ldp_pre),
+            (0, 4, "ldp", "x29, x30, [sp, #0x10]!"),
+            pair_pre_state,
+        )
+        self.assertEqual(pair_pre_state.refs, [])
 
     def test_adrp_ldr_ref_recovery(self):
         base = 0x400000

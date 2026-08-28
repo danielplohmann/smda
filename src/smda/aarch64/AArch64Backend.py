@@ -58,9 +58,14 @@ _WIDE_IMM_MASK = 0x7F800000
 _MOVZ_OPC = 0x52800000
 _MOVN_OPC = 0x12800000
 _MOVK_OPC = 0x72800000
+_LDST_IMM_MASK = 0x3B000000
+_LDST_UNSIGNED_VALUE = 0x39000000
+_LDST_REGIMM_VALUE = 0x38000000
 
 
 def _dataRefImmediatesFromWord(ins_bytes, i_address):
+    # None: unknown encoding, fall back to Capstone detail.
+    # (): known encoding with no IMM / absolute-MEM data-ref operands.
     if len(ins_bytes) != INSTRUCTION_SIZE:
         return None
     word = int.from_bytes(ins_bytes, "little")
@@ -69,10 +74,15 @@ def _dataRefImmediatesFromWord(ins_bytes, i_address):
     if (word & ADRP_MASK) == ADR_VALUE:
         return (adr_pc_value(word, i_address),)
     if ((word >> 23) & 0x3F) == 0x22:
-        imm12 = (word >> 10) & 0xFFF
-        if imm12 == 0:
-            return None
-        return (imm12,)
+        return (((word >> 10) & 0xFFF),)
+    if (word & _LDST_IMM_MASK) == _LDST_UNSIGNED_VALUE:
+        return ()
+    if ((word >> 27) & 0x7) == 0x5 and ((word >> 23) & 0x7) in (0, 2, 3):
+        return ()
+    if (word & _LDST_IMM_MASK) == _LDST_REGIMM_VALUE:
+        bits_11_10 = (word >> 10) & 3
+        if bits_11_10 != 1 or (word >> 21) & 1:
+            return ()
     opc = word & _WIDE_IMM_MASK
     if opc not in (_MOVZ_OPC, _MOVN_OPC, _MOVK_OPC):
         return None
