@@ -137,6 +137,12 @@ class TestPeSymbolProviderImports(unittest.TestCase):
         self.assertEqual(resolver.getApi(0, 0x1000), (None, None))
         self.assertEqual(resolver.getApi(0, 0x3000), ("second.dll", "SharedAddress"))
 
+    def test_resolve_os_name_keeps_an_already_pinned_name(self):
+        resolver = WinApiResolver(SimpleNamespace(API_COLLECTION_FILES={}))
+        resolver.setOsName("pinned")
+        resolver._resolveOsName()
+        self.assertEqual(resolver._os_name, "pinned")
+
     def test_win_api_resolver_defers_parsing_uncached_databases(self):
         api_db = {
             "os_name": "testos",

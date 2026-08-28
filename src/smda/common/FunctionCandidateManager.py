@@ -61,6 +61,7 @@ class FunctionCandidateManager:
         self._cb_analysis_timeout = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
+        self._code_area_index = None
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
@@ -76,9 +77,25 @@ class FunctionCandidateManager:
     def _passesCodeFilter(self, addr):
         if addr is None:
             return False
-        if self._code_areas:
-            return any(area[0] <= addr < area[1] for area in self._code_areas)
-        return True
+        areas = self._code_areas
+        if not areas:
+            return True
+        index = getattr(self, "_code_area_index", None)
+        if index is None or index[0] is not areas:
+            ordered = sorted((start, end) for start, end in areas)
+            merged = [list(ordered[0])]
+            for start, end in ordered[1:]:
+                if start <= merged[-1][1]:
+                    if end > merged[-1][1]:
+                        merged[-1][1] = end
+                else:
+                    merged.append([start, end])
+            starts = [start for start, _end in merged]
+            self._code_area_index = (areas, starts, merged)
+            index = self._code_area_index
+        _areas, starts, merged = index
+        pos = bisect.bisect_right(starts, addr) - 1
+        return pos >= 0 and addr < merged[pos][1]
 
     def getBitMask(self):
         if self.bitness == 64:
@@ -123,11 +140,8 @@ class FunctionCandidateManager:
                     candidate = self.candidates[candidate_addr]
                     if candidate.removeCallRefs(conflict):
                         dirty_candidates.append(candidate)
-                if isinstance(self.candidate_queue, BracketQueue):
-                    for candidate in dirty_candidates:
-                        self.candidate_queue.update(candidate)
-                elif dirty_candidates:
-                    self.candidate_queue.update()
+                for candidate in dirty_candidates:
+                    self.candidate_queue.update(candidate)
 
     def _addCappedCallRef(self, candidate, source_ref):
         """add an inbound call reference, honoring MAX_CALL_REFS_PER_CANDIDATE to bound set growth and rescoring."""
@@ -181,9 +195,39 @@ class FunctionCandidateManager:
         if self.disassembly is None:
             return
         gaps = []
-        prev_ins = 0
-        min_code = min(self.disassembly.code_map) if self.disassembly.code_map else self.getBitMask()
-        max_code = max(self.disassembly.code_map) if self.disassembly.code_map else 0
+        merged = []
+        functions = getattr(self.disassembly, "functions", None) or {}
+        if functions:
+            intervals = []
+            for blocks in functions.values():
+                for block in blocks:
+                    for ins in block:
+                        start = ins[0]
+                        intervals.append((start, start + ins[1]))
+            intervals.sort()
+            for start, end in intervals:
+                if merged and start <= merged[-1][1]:
+                    if end > merged[-1][1]:
+                        merged[-1][1] = end
+                else:
+                    merged.append([start, end])
+        if merged:
+            min_code = merged[0][0]
+            max_code = merged[-1][1] - 1
+        else:
+            code_map = getattr(self.disassembly, "code_map", None) or {}
+            if code_map:
+                keys = sorted(code_map)
+                min_code = keys[0]
+                max_code = keys[-1]
+                prev_ins = 0
+                for ins in keys:
+                    if prev_ins != 0 and ins - prev_ins > 1:
+                        gaps.append([prev_ins + 1, ins, ins - prev_ins])
+                    prev_ins = ins
+            else:
+                min_code = self.getBitMask()
+                max_code = 0
         # Raw memory dumps are loaded without section info, so self._code_areas is empty; fall back to
         # the full mapped image so the head (before the first instruction) and tail (after the last
         # instruction) still get gap-scanned. Without this, functions that lie entirely before the
@@ -209,10 +253,13 @@ class FunctionCandidateManager:
                 # region unscanned. Section-derived code areas keep the legacy start (behavior-neutral).
                 tail_start = max_code + 1 if using_synthetic_area else max_code
                 gaps.append([tail_start, code_area[1], code_area[1] - tail_start])
-        for ins in sorted(self.disassembly.code_map.keys()):
-            if prev_ins != 0 and ins - prev_ins > 1:
-                gaps.append([prev_ins + 1, ins, ins - prev_ins])
-            prev_ins = ins
+        for index in range(len(merged) - 1):
+            prev_end = merged[index][1]
+            next_start = merged[index + 1][0]
+            # the byte-key walk used prev_ins != 0 as "already started"; address 0 is a real
+            # covered byte, so a hole after it was never emitted. Keep that cut.
+            if next_start - prev_end > 0 and prev_end != 1:
+                gaps.append([prev_end, next_start, next_start - prev_end])
         self.function_gaps = sorted(gaps)
 
     def initGapSearch(self):

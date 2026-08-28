@@ -1,6 +1,7 @@
 import contextlib
 import hashlib
 import logging
+from bisect import bisect_right
 from typing import Optional
 
 import lief
@@ -265,14 +266,25 @@ class BinaryInfo:
                 yield lief_name(section), section_start, section_start + section_size
 
     def isInCodeAreas(self, address):
-        is_inside = False
-        # if no code areas found, assume the whole image is code and calculate according to base address and size
-        if self.code_areas is None or len(self.code_areas) == 0:
-            if self.base_addr <= address < self.base_addr + self.binary_size:
-                is_inside = True
-        else:
-            is_inside = any(a[0] <= address < a[1] for a in self.code_areas)
-        return is_inside
+        areas = self.code_areas
+        if not areas:
+            return self.base_addr <= address < self.base_addr + self.binary_size
+        index = getattr(self, "_code_area_index", None)
+        if index is None or index[0] is not areas:
+            ordered = sorted((start, end) for start, end in areas)
+            merged = [list(ordered[0])]
+            for start, end in ordered[1:]:
+                if start <= merged[-1][1]:
+                    if end > merged[-1][1]:
+                        merged[-1][1] = end
+                else:
+                    merged.append([start, end])
+            starts = [start for start, _end in merged]
+            self._code_area_index = (areas, starts, merged)
+            index = self._code_area_index
+        _areas, starts, merged = index
+        pos = bisect_right(starts, address) - 1
+        return pos >= 0 and address < merged[pos][1]
 
     HEADER_CAP_PE = 0x1000
     HEADER_CAP_ELF = 0x400

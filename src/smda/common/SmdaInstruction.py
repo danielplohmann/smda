@@ -31,6 +31,18 @@ class SmdaInstruction:
             self.mnemonic = ins_list[2]
             self.operands = ins_list[3]
 
+    @classmethod
+    def from_tuple(cls, ins, smda_function=None):
+        instruction = cls.__new__(cls)
+        instruction.smda_function = smda_function
+        instruction.offset = ins[0]
+        instruction.bytes = ins[4].hex()
+        mnemonic = ins[2]
+        instruction.mnemonic = mnemonic if mnemonic.__class__ is str else str(mnemonic)
+        operands = ins[3]
+        instruction.operands = operands if operands.__class__ is str else str(operands)
+        return instruction
+
     def getDataRefs(self):
         data_refs_cached = getattr(self, "_data_refs", None)
         if data_refs_cached is not None:

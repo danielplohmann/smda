@@ -552,6 +552,21 @@ class TestCommonModels(unittest.TestCase):
 
         self.assertTrue(function.isApiThunk())
 
+    def test_instruction_from_tuple_matches_list_constructor(self):
+        raw = (0x401000, 2, "mov", "eax, ebx", b"\x89\xc3")
+        from_list = SmdaInstruction([raw[0], raw[4].hex(), str(raw[2]), str(raw[3])])
+        from_tuple = SmdaInstruction.from_tuple(raw)
+        self.assertEqual(from_tuple.offset, from_list.offset)
+        self.assertEqual(from_tuple.bytes, from_list.bytes)
+        self.assertEqual(from_tuple.mnemonic, from_list.mnemonic)
+        self.assertEqual(from_tuple.operands, from_list.operands)
+
+    def test_instruction_from_tuple_stringifies_non_str_fields(self):
+        instruction = SmdaInstruction.from_tuple((0x10, 1, b"ret", None, b"\xc3"))
+        self.assertEqual(instruction.mnemonic, "b'ret'")
+        self.assertEqual(instruction.operands, "None")
+        self.assertEqual(instruction.bytes, "c3")
+
 
 class TestBinaryInfoCodeAreas(unittest.TestCase):
     def test_address_one_past_the_image_is_not_inside(self):
@@ -562,6 +577,27 @@ class TestBinaryInfoCodeAreas(unittest.TestCase):
         self.assertTrue(binary_info.isInCodeAreas(0x400000))
         self.assertTrue(binary_info.isInCodeAreas(0x4000FF))
         self.assertFalse(binary_info.isInCodeAreas(0x400100))
+
+    def test_overlapping_code_areas_are_merged_for_membership(self):
+        binary_info = BinaryInfo(b"\x90" * 0x200)
+        binary_info.base_addr = 0
+        binary_info.binary_size = 0x200
+        binary_info.code_areas = [[0, 100], [50, 60], [150, 180]]
+
+        self.assertTrue(binary_info.isInCodeAreas(70))
+        self.assertTrue(binary_info.isInCodeAreas(55))
+        self.assertFalse(binary_info.isInCodeAreas(120))
+        self.assertTrue(binary_info.isInCodeAreas(160))
+        self.assertFalse(binary_info.isInCodeAreas(180))
+
+    def test_overlapping_code_areas_extend_the_merged_end(self):
+        binary_info = BinaryInfo(b"\x90" * 0x200)
+        binary_info.base_addr = 0
+        binary_info.binary_size = 0x200
+        binary_info.code_areas = [[0, 100], [90, 150]]
+
+        self.assertTrue(binary_info.isInCodeAreas(120))
+        self.assertFalse(binary_info.isInCodeAreas(150))
 
 
 class TestBinaryInfoBinaryData(unittest.TestCase):

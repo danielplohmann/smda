@@ -214,21 +214,15 @@ class SmdaFunction:
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
             self.blockrefs = self.getNormalizedBlockRefs()
             self.function_name = disassembly.function_symbols.get(function_offset, "")
-            self.characteristics = (
-                disassembly.candidates[function_offset].getCharacteristics()
-                if function_offset in disassembly.candidates
-                else None
-            )
-            self.confidence = (
-                disassembly.candidates[function_offset].getConfidence()
-                if function_offset in disassembly.candidates
-                else None
-            )
-            self.tfidf = (
-                disassembly.candidates[function_offset].getTfIdf()
-                if function_offset in disassembly.candidates
-                else None
-            )
+            candidate = disassembly.candidates.get(function_offset)
+            if candidate is not None:
+                self.characteristics = candidate.getCharacteristics()
+                self.confidence = candidate.getConfidence()
+                self.tfidf = candidate.getTfIdf()
+            else:
+                self.characteristics = None
+                self.confidence = None
+                self.tfidf = None
             # DEX strings are part of the parsed file structure, so they're always
             # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
             # cost. For other architectures, honor WITH_STRINGS as usual.
@@ -510,9 +504,7 @@ class SmdaFunction:
         self.blocks = {}
         for block in disasm_blocks:
             block_start = block[0][0]
-            self.blocks[block_start] = [
-                SmdaInstruction([ins[0], ins[4].hex(), str(ins[2]), str(ins[3])], smda_function=self) for ins in block
-            ]
+            self.blocks[block_start] = [SmdaInstruction.from_tuple(ins, smda_function=self) for ins in block]
             # len(hex) == 2 * len(raw), so the per-instruction len(hex)/2 this replaces summed to
             # the raw byte count; binweight is serialized, so it must stay that value and a float
             self.binweight += float(sum(map(len, map(itemgetter(4), block))))
