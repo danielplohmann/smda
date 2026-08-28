@@ -1,16 +1,19 @@
 import hashlib
 import struct
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator, List, Optional
 
 from smda.common.SmdaInstruction import SmdaInstruction
+
+if TYPE_CHECKING:
+    from smda.common.SmdaFunction import SmdaFunction
 
 # sentinel distinguishing "hash not yet computed" from "hash computed as None (uncomputable)"
 _UNSET = object()
 
 
 class SmdaBasicBlock:
-    smda_function = None
-    instructions = None
+    smda_function: Optional["SmdaFunction"] = None
+    instructions: Optional[List[SmdaInstruction]] = None
     _picblockhash = _UNSET
     _opcblockhash = _UNSET
     offset = None
