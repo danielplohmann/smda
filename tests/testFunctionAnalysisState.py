@@ -379,7 +379,8 @@ class FunctionEntryIntegrityTestSuite(unittest.TestCase):
 
 
 class GapConstructionTestSuite(unittest.TestCase):
-    def test_interior_holes_match_the_covered_byte_walk(self):
+    @staticmethod
+    def _gapManager(code_map, functions):
         class _Manager(FunctionCandidateManager):
             CANDIDATE_CLASS = None
 
@@ -390,16 +391,31 @@ class GapConstructionTestSuite(unittest.TestCase):
         manager.bitness = 32
         manager._code_areas = [[0x1000, 0x2000]]
         manager.disassembly = SimpleNamespace(
-            functions={
-                0x1000: [[(0x1000, 4, "nop", "", b"\x90" * 4)]],
-                0x1010: [[(0x1010, 2, "ret", "", b"\xc3\x00")]],
-            },
+            functions=functions,
             binary_info=SimpleNamespace(base_addr=0x1000, binary_size=0x1000),
-            code_map={},
+            code_map=code_map,
         )
         manager.updateFunctionGaps()
+        return manager
+
+    def test_interior_holes_match_the_covered_byte_walk(self):
+        manager = self._gapManager(
+            code_map=dict.fromkeys(list(range(0x1000, 0x1004)) + [0x1010, 0x1011], 1),
+            functions={},
+        )
         interior = [gap for gap in manager.function_gaps if gap[0] == 0x1004]
-        self.assertEqual(interior, [[0x1004, 0x1010, 12]])
+        self.assertEqual(interior, [[0x1004, 0x1010, 13]])
+
+    def test_gaps_follow_code_map_coverage_not_recovered_function_extents(self):
+        """code_map covers every decoded byte; disassembly.functions covers only finalized
+        functions. Deriving gaps from the latter drops the decoded-but-unattributed region
+        from the scan, which silently costs function discovery on gap-dominated binaries."""
+        manager = self._gapManager(
+            code_map=dict.fromkeys(list(range(0x1000, 0x1004)) + [0x1010, 0x1011], 1),
+            functions={0x1000: [[(0x1000, 4, "nop", "", b"\x90" * 4)]]},
+        )
+        self.assertIn([0x1004, 0x1010, 13], manager.function_gaps)
+        self.assertEqual([gap for gap in manager.function_gaps if gap[0] == 0x1003], [])
 
     def test_overlapping_code_areas_extend_the_merged_end(self):
         class _Manager(FunctionCandidateManager):
