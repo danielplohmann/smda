@@ -557,6 +557,21 @@ class SynthesisLayoutTestSuite(unittest.TestCase):
         thunk_rvas = {entry.iat_address for imported in parsed.imports for entry in imported.entries}
         assert {slot - report.base_addr for slot in slots} <= thunk_rvas
 
+    def test_non_dict_imported_functions_do_not_crash_synthesis(self):
+        report = copy.deepcopy(self.pe_report)
+        report.xmetadata["imported_functions"] = "not-a-map"
+        synthesized = report.synthesizeBinary(output_format=FORMAT_PE, with_strings=False)
+        self.assertTrue(synthesized)
+        self.assertIsNotNone(lief.parse(synthesized))
+
+        report.xmetadata["imported_functions"] = {
+            0x401000: "ExitProcess",
+            "not-an-address": ("kernel32.dll", "CreateFileA"),
+        }
+        synthesized = report.synthesizeBinary(output_format=FORMAT_PE, with_strings=False)
+        self.assertTrue(synthesized)
+        self.assertIsNotNone(lief.parse(synthesized))
+
     def test_an_import_slot_below_the_image_base_places_no_negative_section(self):
         report = copy.deepcopy(self.pe_report)
         report.xheader = None
