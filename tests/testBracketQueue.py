@@ -255,6 +255,109 @@ class BracketQueueTestSuite(unittest.TestCase):
         self.assertIs(next(queue), high)
         self.assertIs(next(queue), low)
 
+    def test_priority_queue_add_does_not_duplicate_resident_candidate(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        low = FunctionCandidate(binary_info, 0x20)
+        high = FunctionCandidate(binary_info, 0x10)
+        high.addCallRef(0x100)
+
+        queue = PriorityQueue([low, high])
+        queue.add(high)
+        queue.add(low)
+
+        self.assertIs(next(queue), high)
+        self.assertIs(next(queue), low)
+        with self.assertRaises(StopIteration):
+            next(queue)
+
+    def test_priority_queue_update_reorders_existing_candidate(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        low = FunctionCandidate(binary_info, 0x20)
+        high = FunctionCandidate(binary_info, 0x10)
+        high.addCallRef(0x100)
+
+        queue = PriorityQueue([low, high])
+        low.addCallRef(0x200)
+        low.addCallRef(0x300)
+        queue.add(low)
+        queue.update(low)
+
+        self.assertIs(next(queue), low)
+        self.assertIs(next(queue), high)
+
+    def test_priority_queue_update_after_score_decrease(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        low = FunctionCandidate(binary_info, 0x20)
+        high = FunctionCandidate(binary_info, 0x10)
+        low.addCallRef(0x400)
+        high.addCallRef(0x100)
+        high.addCallRef(0x200)
+        high.addCallRef(0x300)
+
+        queue = PriorityQueue([low, high])
+        high.removeCallRefs([0x100, 0x200, 0x300])
+        queue.update(high)
+
+        self.assertIs(next(queue), low)
+        self.assertIs(next(queue), high)
+
+    def test_priority_queue_score_change_without_update_is_not_lost(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        low = FunctionCandidate(binary_info, 0x20)
+        high = FunctionCandidate(binary_info, 0x10)
+        high.addCallRef(0x100)
+
+        queue = PriorityQueue([low, high])
+        low.addCallRef(0x200)
+        low.addCallRef(0x300)
+
+        produced = [next(queue), next(queue)]
+        self.assertEqual(set(produced), {low, high})
+        with self.assertRaises(StopIteration):
+            next(queue)
+
+    def test_priority_queue_readd_after_pop(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        first = FunctionCandidate(binary_info, 0x10)
+        first.addCallRef(0x100)
+        second = FunctionCandidate(binary_info, 0x20)
+        second.addCallRef(0x100)
+
+        queue = PriorityQueue([first, second])
+        popped = next(queue)
+        self.assertIs(popped, first)
+        queue.add(popped)
+        self.assertIs(next(queue), first)
+        self.assertIs(next(queue), second)
+
+    def test_priority_queue_update_without_target_rebuilds_from_resident_set(self):
+        binary_info = BinaryInfo(b"\x90" * 0x40)
+        binary_info.base_addr = 0
+        binary_info.bitness = 32
+        low = FunctionCandidate(binary_info, 0x20)
+        high = FunctionCandidate(binary_info, 0x10)
+        high.addCallRef(0x100)
+        high.addCallRef(0x200)
+        high.addCallRef(0x300)
+
+        queue = PriorityQueue([low, high])
+        high.removeCallRefs([0x100, 0x200, 0x300])
+        low.addCallRef(0x400)
+        queue.update()
+
+        self.assertIs(next(queue), low)
+        self.assertIs(next(queue), high)
+
 
 class _ScoredCandidate:
     def __init__(self, addr, score, num_call_refs=0):
