@@ -8,6 +8,7 @@ import contextlib
 import logging
 import math
 import struct
+from bisect import bisect_right
 from collections import Counter
 from copy import deepcopy
 
@@ -28,6 +29,14 @@ from .dataflow import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _first_greater(sorted_addrs, after_addr):
+    index = bisect_right(sorted_addrs, after_addr)
+    if index < len(sorted_addrs):
+        return sorted_addrs[index]
+    return None
+
 
 # Bounded predecessor-block hops fed into gatherContextInstructions when the seed
 # block alone doesn't resolve a jump-table base/index (e.g. an adrp/add chain that
@@ -530,10 +539,18 @@ class AArch64JumpTableAnalyzer:
         d = self.disassembler
         candidates = getattr(getattr(d, "fc_manager", None), "candidates", None) or {}
         borders = getattr(d.disassembly, "function_borders", None) or {}
-        candidate_boundary = min((addr for addr in candidates if addr > after_addr), default=None)
-        border_boundary = min((fn_min for fn_min, _fn_max in borders.values() if fn_min > after_addr), default=None)
-        boundaries = [b for b in (candidate_boundary, border_boundary) if b is not None]
-        return min(boundaries) if boundaries else None
+        cache_key = (len(candidates), len(borders))
+        if getattr(self, "_boundary_cache_key", None) != cache_key:
+            self._sorted_candidate_starts = sorted(candidates)
+            self._sorted_border_starts = sorted(fn_min for fn_min, _fn_max in borders.values())
+            self._boundary_cache_key = cache_key
+        candidate_boundary = _first_greater(self._sorted_candidate_starts, after_addr)
+        border_boundary = _first_greater(self._sorted_border_starts, after_addr)
+        if candidate_boundary is None:
+            return border_boundary
+        if border_boundary is None or candidate_boundary <= border_boundary:
+            return candidate_boundary
+        return border_boundary
 
     def getJumpTargets(self, jump_instruction, state):
         jump_instruction_address = jump_instruction[0]

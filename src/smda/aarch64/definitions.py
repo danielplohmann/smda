@@ -133,6 +133,15 @@ def adrp_page_value(word, pc):
     return (pc & ~0xFFF) + (imm << 12)
 
 
+def adr_pc_value(word, pc):
+    immlo = (word >> 29) & 0x3
+    immhi = (word >> 5) & 0x7FFFF
+    imm = (immhi << 2) | immlo
+    if imm & (1 << 20):
+        imm -= 1 << 21
+    return pc + imm
+
+
 def rd_field(word):
     """Destination register index (bits [4:0]) of a raw AArch64 instruction word."""
     return word & 0x1F
