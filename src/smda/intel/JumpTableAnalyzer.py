@@ -140,9 +140,8 @@ class JumpTableAnalyzer:
     def _findJumpTables(self):
         jumptables = set()
         for match_offset in re.finditer(
-            b"(\x48|\x4c)\x8d.{5}(.\x63|\x77|.\x89..\x63)",
+            b"(\x48|\x4c)\x8d[\x00-\xff]{5}([\x00-\xff]\x63|\x77|[\x00-\xff]\x89[\x00-\xff]{2}\x63)",
             self.disassembly.binary_info.binary,
-            re.DOTALL,
         ):
             raw_offset_bytes = self.disassembly.getRawBytes(match_offset.start() + 3, 4)
             if len(raw_offset_bytes) < 4:
