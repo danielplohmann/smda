@@ -894,22 +894,96 @@ class TestAArch64PrologueDiscovery(unittest.TestCase):
         return {function.offset for function in report.getFunctions()}
 
     def test_a_jump_only_bti_pad_is_not_an_entry(self):
-        # `bti j` permits a target reached by `br`, never by `blr`, so a call cannot land here
-        self.assertNotIn(BASE + 0x8, self._btiPadOnly(0xD503249F))  # bti j
+        """`bti j` permits a target reached by `br`, never by `blr`, so a call cannot land here.
+
+        Asserted against the whole recovered set rather than the pad's absence. The first
+        version of this checked only that `BASE + 0x8` was gone, and passed while the false
+        positive moved four bytes to `BASE + 0xc` -- the scan refused the pad and then met its
+        first body instruction, which is ordinary code and passes every remaining guard.
+        """
+        self.assertEqual({BASE}, self._btiPadOnly(0xD503249F))  # bti j
 
     def test_a_call_target_bti_pad_in_the_same_place_is_an_entry(self):
         # the other arm, so the pair fails if the rule is widened to every BTI form: the only
         # difference from the case above is C for J
-        self.assertIn(BASE + 0x8, self._btiPadOnly(0xD503245F))  # bti c
+        self.assertEqual({BASE, BASE + 0x8}, self._btiPadOnly(0xD503245F))  # bti c
 
     def test_a_call_and_jump_bti_pad_is_still_an_entry(self):
         # `bti jc` permits a call as well as a jump, so it says nothing against an entry
-        self.assertIn(BASE + 0x8, self._btiPadOnly(0xD50324DF))  # bti jc
+        self.assertEqual({BASE, BASE + 0x8}, self._btiPadOnly(0xD50324DF))  # bti jc
 
     def test_the_jump_only_pad_is_booked_again_with_the_flag_off(self):
         # the flag is what refuses it, not some other guard reached along the way, so deleting
         # the check makes the first test above fail rather than silently passing
-        self.assertIn(BASE + 0x8, self._btiPadOnly(0xD503249F, USE_AARCH64_BTI_TARGET_TYPE=False))
+        self.assertEqual({BASE, BASE + 0x8}, self._btiPadOnly(0xD503249F, USE_AARCH64_BTI_TARGET_TYPE=False))
+
+    def test_the_body_of_a_refused_pad_is_not_promoted_in_its_place(self):
+        """Refusing a pad has to move the scan past the block it labels, not past the pad.
+
+        Pinned separately from the assertions above because it is the part that a
+        set-equality check happens to cover rather than states: the pad's body is ordinary
+        code, so one step past a refused pad puts the scan on an address every remaining
+        guard accepts.
+        """
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        manager = FunctionCandidateManager(config)
+        words = [
+            0xD503249F,  # 0x401000 bti j        -- the refused pad
+            0x52800020,  # 0x401004 mov w0, #1   -- its body, which must not be reconsidered
+            0x52800041,  # 0x401008 mov w1, #2
+            0xD65F03C0,  # 0x40100c ret          -- the block ends here
+            0xD503233F,  # 0x401010 paciasp      -- the next thing the scan may look at
+        ]
+        binary = b"".join(word.to_bytes(4, "little") for word in words)
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        binary_info.binary_size = len(binary)
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+        self.assertEqual(BASE + 0x10, manager._endOfRefusedLandingPadRun(BASE))
+
+    def test_a_trap_ends_the_pad_run_like_any_other_terminator(self):
+        """`brk`, `hlt` and `udf` end a function in the backend, so they end this walk.
+
+        Without them the skip reads past the trap to the next `ret` and swallows whatever
+        lies between -- and what lies after a trap is exactly the unreferenced, gap-only
+        routine this scan exists to reach, so the cost of getting it wrong is recall.
+        """
+        for name, trap in (("brk #1", 0xD4200020), ("hlt #1", 0xD4400020), ("udf #0x36", 0x00000036)):
+            with self.subTest(terminator=name):
+                config = SmdaConfig()
+                config.WITH_STRINGS = False
+                manager = FunctionCandidateManager(config)
+                words = [
+                    0xD503249F,  # 0x401000 bti j       -- the refused pad
+                    0x52800020,  # 0x401004 mov w0, #1
+                    trap,  # ......  0x401008 the trap, which ends the block
+                    0xD503233F,  # 0x40100c paciasp     -- a gap-only routine the scan must reach
+                    0x52800040,  # 0x401010 mov w0, #2
+                    0xD65F03C0,  # 0x401014 ret
+                ]
+                binary = b"".join(word.to_bytes(4, "little") for word in words)
+                binary_info = BinaryInfo(binary)
+                binary_info.base_addr = BASE
+                binary_info.binary_size = len(binary)
+                manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+                self.assertEqual(BASE + 0xC, manager._endOfRefusedLandingPadRun(BASE))
+
+    def test_a_pad_run_with_no_terminator_in_reach_falls_back_to_one_step(self):
+        # an unbounded skip on undecodable bytes would cost every function after it, which is
+        # the failure mode a bad extent had in the x64 exception-directory rule
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        manager = FunctionCandidateManager(config)
+        binary = b"".join((0x52800020).to_bytes(4, "little") for _ in range(0x200))
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        binary_info.binary_size = len(binary)
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+        self.assertEqual(BASE + 4, manager._endOfRefusedLandingPadRun(BASE))
 
     def test_both_passes_that_book_a_pad_consult_the_same_rule(self):
         """The gap scan reaches these addresses too, and refuses them for the same reason.
