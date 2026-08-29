@@ -99,6 +99,11 @@ class _LandingPadFixtureCase:
         # would refuse these pads with the rule under test switched off and the comparison
         # below would show nothing either way
         config.USE_ELF_FDE_INTERIOR_GAPS = False
+        # and so does the AArch64 target-type rule, for the same reason and more sharply: every
+        # pad in the ARM64 fixture opens with `bti j`, which that rule refuses on the word
+        # alone. It has to come off here too or the control is empty on that fixture -- which
+        # also records the overlap: on AArch64 the two rules meet on exactly this population.
+        config.USE_AARCH64_BTI_TARGET_TYPE = False
         # analysed through a file rather than a buffer so the ELF header picks the architecture.
         # The handle is closed before the path is handed on: Windows refuses a second open on a
         # file another handle still holds, and the loader reports that as an empty result rather

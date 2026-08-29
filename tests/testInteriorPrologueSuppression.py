@@ -41,6 +41,11 @@ class _BufferBinaryInfo:
         # and the rules built on it are inert here -- which is what a memory dump also sees.
         return None
 
+    def _getLiefType(self):
+        # what BinaryInfo answers when there is no container to identify: not PE, so the
+        # exception-directory walk does not read a section named `.pdata` as one
+        return "OTHER"
+
 
 def seededStarts(buffer, bitness=64):
     manager = FunctionCandidateManager(SmdaConfig())

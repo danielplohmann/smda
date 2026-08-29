@@ -58,7 +58,7 @@ class LateCandidateTestBase:
         self.assertIsNotNone(first)
 
         late_addr = 0x35E0
-        self.manager.addTailcallCandidate(late_addr, reference_source=0x5000)
+        self.manager.addTailcallCandidate(late_addr)
 
         produced = [c.addr for c in gen]
         self.assertIn(
@@ -78,7 +78,7 @@ class LateCandidateTestBase:
         # Another analysis path created the candidate earlier (in candidates only).
         self.manager.ensureCandidate(late_addr)
         # Now addTailcallCandidate fires — should re-add to queue.
-        self.manager.addTailcallCandidate(late_addr, reference_source=0x6000)
+        self.manager.addTailcallCandidate(late_addr)
 
         produced = [c.addr for c in self.manager.getNextFunctionStartCandidate()]
         self.assertIn(
@@ -98,7 +98,7 @@ class LateCandidateTestBase:
 
         late_addr = 0x45E0
         self.manager.ensureCandidate(late_addr)  # candidates only
-        self.manager.addTailcallCandidate(late_addr, reference_source=0x6000)  # re-adds to queue
+        self.manager.addTailcallCandidate(late_addr)  # re-adds to queue
 
         produced = [c.addr for c in gen]
         self.assertIn(
@@ -154,32 +154,33 @@ class LateCandidateTestBase:
 
         late_a = 0x75E0
         late_b = 0x85E0
-        self.manager.addTailcallCandidate(late_a, reference_source=0x8000)
-        self.manager.addTailcallCandidate(late_b, reference_source=0x9000)
+        self.manager.addTailcallCandidate(late_a)
+        self.manager.addTailcallCandidate(late_b)
 
         produced = [c.addr for c in gen]
         self.assertIn(late_a, produced)
         self.assertIn(late_b, produced)
 
     # ------------------------------------------------------------------
-    #   Scenario 7: tailcall with callRef has score > 0 (integration)
+    #   Scenario 7: an aligned tailcall scores above zero on its address alone
     # ------------------------------------------------------------------
-    def test_late_tailcall_with_callref_has_nonzero_score(self):
-        """addCallRef resets _score to None; getScore recalculates > 0."""
+    def test_late_tailcall_scores_on_alignment_alone(self):
+        """The contrast to scenario 5, and the reason a tailcall seed needs no call
+        reference of its own: an aligned address scores 1, which is enough to be produced."""
         late_addr = 0x95E0
-        self.manager.addTailcallCandidate(late_addr, reference_source=0xA000)
+        self.manager.addTailcallCandidate(late_addr)
 
         gen = self.manager.getNextFunctionStartCandidate()
         produced = [c.addr for c in gen]
         self.assertIn(
             late_addr,
             produced,
-            f"Candidate 0x{late_addr:x} with upcoming addCallRef should be produced [queue={self.queue_type}]",
+            f"Candidate 0x{late_addr:x} should be produced on its alignment [queue={self.queue_type}]",
         )
 
-    def test_new_scored_candidate_does_not_rebuild_queue(self):
+    def test_late_tailcall_does_not_rebuild_queue(self):
         with patch.object(self.manager.candidate_queue, "update", wraps=self.manager.candidate_queue.update) as update:
-            self.manager.addTailcallCandidate(0xA5E0, reference_source=0xB000)
+            self.manager.addTailcallCandidate(0xA5E0)
 
         update.assert_not_called()
 
@@ -187,7 +188,7 @@ class LateCandidateTestBase:
         rejected_addr = 0xB5E0
         self.config.MAX_FUNCTION_CANDIDATES = len(self.manager.candidates)
 
-        self.assertFalse(self.manager.addTailcallCandidate(rejected_addr, reference_source=0xC000))
+        self.assertFalse(self.manager.addTailcallCandidate(rejected_addr))
         self.assertNotIn(rejected_addr, self.manager.candidates)
         self.assertNotIn(rejected_addr, self.manager._candidate_offsets)
         if hasattr(self.manager.candidate_queue, "heap"):

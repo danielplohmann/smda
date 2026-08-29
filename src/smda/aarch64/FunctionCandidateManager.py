@@ -49,6 +49,7 @@ from .definitions import (
     BL_VALUE,
     BR_MASK,
     BR_VALUE,
+    BTI_J,
     INSTRUCTION_SIZE,
     LDR_UNSIGNED_64_MASK,
     LDR_UNSIGNED_64_VALUE,
@@ -716,26 +717,28 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 # the gap scan. Here `bti` is a recognized entry prologue, which puts every
                 # pad in front of this loop.
                 continue
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr, word):
                 continue
             if not self._passesCodeFilter(addr):
                 continue
             self.addPrologueCandidate(addr)
             self.setInitialCandidate(addr)
 
-    def addTailcallCandidate(self, addr, reference_source=None):
+    def addTailcallCandidate(self, addr):
+        """Book a tailcall target, and queue it - which the shared base leaves to its caller.
+
+        No inbound call reference is recorded for it. A branch is not a call, and scoring one
+        as if it were is the difference between admitting an address as a candidate and
+        pushing it past the functions that would otherwise absorb it.
+        """
         if not self._passesCodeFilter(addr):
             return False
-        is_new = self.ensureCandidate(addr)
+        self.ensureCandidate(addr)
         if addr not in self.candidates:
             return False
-        candidate = self.candidates[addr]
-        candidate.setIsTailcallCandidate(True)
-        score_changed = self._addCappedCallRef(candidate, reference_source) if reference_source is not None else False
+        self.candidates[addr].setIsTailcallCandidate(True)
         self._candidate_offsets.add(addr)
-        self.candidate_queue.add(candidate)
-        if score_changed and not is_new:
-            self.candidate_queue.update(candidate)
+        self.candidate_queue.add(self.candidates[addr])
         return True
 
     def _cachedExecutableSectionRanges(self):
@@ -809,11 +812,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             addr += INSTRUCTION_SIZE
         return False
 
-    def _isLikelyInteriorBtiCandidate(self, addr):
+    def _isLikelyInteriorBtiCandidate(self, addr, word):
         # BTI marks both real entries and indirect-branch landing pads. If the word
         # sits inside already claimed code, or immediately follows ordinary code
         # rather than padding / a terminator-like boundary, suppress it as an entry
         # candidate so switch targets and guarded blocks do not fragment functions.
+        if self.config.USE_AARCH64_BTI_TARGET_TYPE and word == BTI_J:
+            # `bti j` permits a target reached by `br` - an indirect jump - and never one
+            # reached by `blr`: a call landing on a J-only pad faults. The compiler that wrote
+            # J was naming an interior label, a switch case or a computed-goto target, and the
+            # pad says so about itself before anything around it is read. The checks below
+            # cannot say it: a case block is preceded by the previous case's terminating
+            # branch, which is exactly the boundary shape they read as an entry.
+            return True
         if (
             addr in self.disassembly.code_map
             and addr not in self.getFunctionStartCandidates()
@@ -916,7 +927,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if containing is not None and containing[0] in self.disassembly.functions:
                     self.gap_pointer = containing[1]
                     continue
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer):
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if is_conditional_branch(word):  # a function never opens with a cond branch
