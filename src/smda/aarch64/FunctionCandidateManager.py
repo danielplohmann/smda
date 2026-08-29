@@ -722,19 +722,21 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self.addPrologueCandidate(addr)
             self.setInitialCandidate(addr)
 
-    def addTailcallCandidate(self, addr, reference_source=None):
+    def addTailcallCandidate(self, addr):
+        """Book a tailcall target, and queue it - which the shared base leaves to its caller.
+
+        No inbound call reference is recorded for it. A branch is not a call, and scoring one
+        as if it were is the difference between admitting an address as a candidate and
+        pushing it past the functions that would otherwise absorb it.
+        """
         if not self._passesCodeFilter(addr):
             return False
-        is_new = self.ensureCandidate(addr)
+        self.ensureCandidate(addr)
         if addr not in self.candidates:
             return False
-        candidate = self.candidates[addr]
-        candidate.setIsTailcallCandidate(True)
-        score_changed = self._addCappedCallRef(candidate, reference_source) if reference_source is not None else False
+        self.candidates[addr].setIsTailcallCandidate(True)
         self._candidate_offsets.add(addr)
-        self.candidate_queue.add(candidate)
-        if score_changed and not is_new:
-            self.candidate_queue.update(candidate)
+        self.candidate_queue.add(self.candidates[addr])
         return True
 
     def _cachedExecutableSectionRanges(self):
