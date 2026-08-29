@@ -57,7 +57,9 @@ def declaredArchitecture(file_content: bytes) -> str:
     for is_compatible, read_architecture in _DECLARED_ARCHITECTURE_READERS:
         if not is_compatible(file_content):
             continue
-        architecture = read_architecture(file_content)
+        # str() rather than a bare return: the loaders' readers are untyped, so the value
+        # arrives as Unknown and only a subtype of str may be returned here
+        architecture = str(read_architecture(file_content))
         return architecture if architecture in _BACKEND_ARCHITECTURES else ""
     return ""
 
