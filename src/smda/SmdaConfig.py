@@ -68,9 +68,13 @@ class SmdaConfig:
     # covers the address.
     # Measured on 24 built Rust cells (33,836 truth functions), precision 75.915 to 79.477
     # and recall 97.496 to 97.584: 2,052 false positives removed, 48 real functions gained.
-    # On 47 built Go cells, 538 false positives removed with recall unchanged. ARM64 Mach-O
-    # is bit-identical, which is the control that this reaches only images carrying a PE
-    # exception directory.
+    # On 47 built Go cells, 538 false positives removed with recall unchanged; on 68 MSVC
+    # PE64 cells, 1,220 removed and 48 gained.
+    # The control that this reaches only images carrying the table is 140 x86-64 ELF cells,
+    # bit-identical - the same backend and the same gap scan, on a container that declares
+    # no exception directory. 68 32-bit PE cells are bit-identical for the same reason, and
+    # none of the 68 declares one. (An ARM64 corpus is not a control here: AArch64 has its
+    # own candidate manager and never reaches this code.)
     # Recall moves up because the interior candidate was not merely wrong: booking it began
     # an analysis that ran past the end of the routine the address sat inside and absorbed
     # the small aligned functions after it. On the cell examined, all eight functions

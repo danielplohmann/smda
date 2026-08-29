@@ -11,13 +11,16 @@ per the repo's PE fixture convention) with .text, .pdata and .xdata, so the rule
 driven end to end rather than only at the lookup.
 """
 
+import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
+import smda.intel.FunctionCandidateManager as intel_candidates
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
-from smda.intel.FunctionCandidateManager import FunctionCandidateManager
+from smda.intel.FunctionCandidateManager import _PDATA_MIN_ENTRIES, FunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.FileLoader import FileLoader
 
@@ -112,6 +115,28 @@ def _record(begin_rva, end_rva, unwind_rva):
     return struct.pack("<III", begin_rva, end_rva, unwind_rva)
 
 
+def _headerlessManager(records):
+    """A manager over a buffer with no container, the shape a memory dump arrives in.
+
+    The exception table has to be found in the bytes because there is no section header
+    naming it, which is the path this exercises. Bitness is stated rather than read, as
+    `disassembleBuffer` does for a dump, because nothing in the buffer declares it.
+    """
+    blob = bytearray(0x10000)
+    body = ENTRY_SHAPED + INT3 * (0x20 - len(ENTRY_SHAPED))
+    blob[TEXT_RVA : TEXT_RVA + 0x20 * _PDATA_MIN_ENTRIES] = body * _PDATA_MIN_ENTRIES
+    blob[UNWIND_PRIMARY_RVA] = UNWIND_PRIMARY
+    blob[0x5000 : 0x5000 + len(records)] = records
+    loader = FileLoader("/", map_file=True)
+    loader._loadFile(bytes(blob))
+    disassembly = DisassemblyResult()
+    disassembly.binary_info = Disassembler()._populateBinaryInfo(loader)
+    disassembly.binary_info.bitness = 64
+    manager = FunctionCandidateManager(SmdaConfig())
+    manager.init(disassembly)
+    return manager
+
+
 def _manager(blob, interior_gaps=True):
     loader = FileLoader("/", map_file=True)
     loader._loadFile(blob)
@@ -132,10 +157,13 @@ def _analyse(blob, interior_gaps=True):
     """
     config = SmdaConfig()
     config.USE_PE_X64_PDATA_INTERIOR_GAPS = interior_gaps
-    with tempfile.NamedTemporaryFile(suffix=".exe") as handle:
-        handle.write(blob)
-        handle.flush()
-        return Disassembler(config=config).disassembleFile(handle.name)
+    # written into a directory rather than through NamedTemporaryFile: Windows keeps that
+    # handle exclusive, so the analysis cannot open the path and reports nothing at all
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "fixture.exe")
+        with open(path, "wb") as handle:
+            handle.write(blob)
+        return Disassembler(config=config).disassembleFile(path)
 
 
 #: .text layout shared by the end-to-end cases. A real entry at +0x00 that returns after
@@ -185,12 +213,27 @@ class PdataInteriorGapEndToEndTestSuite(unittest.TestCase):
         self.assertNotIn(IMAGE_BASE + ISLAND_RVA, offsets)
 
     def test_a_primary_extent_whose_function_never_analysed_refuses_nothing(self):
-        # the record names an address in the .pdata section itself, which is not code, so
-        # nothing recovers a function there; the extent must then say nothing about the
-        # island and the gap scan keeps it
-        pdata = _record(PDATA_RVA, SECOND_RVA + 0x20, UNWIND_PRIMARY_RVA)
-        report = _analyse(_build_pe(pdata, SHATTERED_TEXT))
-        self.assertIn(IMAGE_BASE + ISLAND_RVA, {function.offset for function in report.getFunctions()})
+        """The recovered-function guard, exercised where the extent really does cover the island.
+
+        An earlier version of this pointed the record at the `.pdata` section itself, which
+        put End below Begin - so the extent was refused as untrustworthy and never recorded,
+        and the assertion held for a reason that had nothing to do with the guard. Deleting
+        the guard left it green.
+        """
+        manager = _manager(_build_pe(SHATTERED_PDATA, SHATTERED_TEXT))
+        manager._pdata_ranges = [(IMAGE_BASE + TEXT_RVA, IMAGE_BASE + SECOND_RVA, False)]
+        manager._pdata_range_starts = None
+        manager.gap_pointer = IMAGE_BASE + ISLAND_RVA
+        self.assertEqual(manager.nextGapCandidate(), IMAGE_BASE + ISLAND_RVA)
+
+    def test_a_primary_extent_refuses_once_its_function_is_recovered(self):
+        # the other arm of the same guard, so the pair fails if it is deleted
+        manager = _manager(_build_pe(SHATTERED_PDATA, SHATTERED_TEXT))
+        manager._pdata_ranges = [(IMAGE_BASE + TEXT_RVA, IMAGE_BASE + SECOND_RVA, False)]
+        manager._pdata_range_starts = None
+        manager.disassembly.functions = {IMAGE_BASE + TEXT_RVA: []}
+        manager.gap_pointer = IMAGE_BASE + ISLAND_RVA
+        self.assertNotEqual(manager.nextGapCandidate(), IMAGE_BASE + ISLAND_RVA)
 
     def test_the_flag_is_on_by_default(self):
         self.assertTrue(SmdaConfig().USE_PE_X64_PDATA_INTERIOR_GAPS)
@@ -219,6 +262,12 @@ class DeclaredExceptionRangeTestSuite(unittest.TestCase):
 
     def test_an_address_before_every_extent_does_not_answer(self):
         self.assertIsNone(self._lookup([(0x1000, 0x1040, False)], 0x800))
+
+    def test_an_enclosing_extent_two_short_ones_back_still_answers(self):
+        # sorting by start does not order the ends, so a test that only peeks at the record
+        # immediately before ends the walk on top of the extent that actually covers this
+        ranges = [(0x1000, 0x2000, False), (0x1010, 0x1020, False), (0x1030, 0x1040, False)]
+        self.assertEqual(self._lookup(ranges, 0x1050), (0x1000, 0x2000, False))
 
     def test_an_earlier_extent_still_reaching_the_address_answers(self):
         # unsorted and overlapping input is not what a linker emits, but the section path
@@ -270,6 +319,92 @@ class PdataRangeRecordingTestSuite(unittest.TestCase):
         # or inverted span in the table the walk back assumes is ordered
         pdata = _record(TEXT_RVA, TEXT_RVA, UNWIND_PRIMARY_RVA)
         manager = _manager(_build_pe(pdata, SHATTERED_TEXT))
+        self.assertEqual(manager._pdata_ranges, [])
+
+    def test_an_extent_running_past_the_image_contributes_nothing(self):
+        # the expensive direction: seeding a bad candidate costs one address, but skipping a
+        # region on a bad extent sends the gap pointer past the end of the image, which ends
+        # gap analysis rather than resuming it
+        pdata = _record(TEXT_RVA, 0x7FFFFFF0, UNWIND_PRIMARY_RVA)
+        manager = _manager(_build_pe(pdata, SHATTERED_TEXT))
+        self.assertEqual(manager._pdata_ranges, [])
+
+    def test_the_image_bound_is_what_refuses_an_extent_inside_the_size_cap(self):
+        # 0x7ffffff0 above is over the span cap as well, so it does not reach the image
+        # bound and would pass with that check deleted. This span is under the cap and still
+        # past the end of a 0x3200-byte image, which only the bound refuses.
+        manager = _manager(_build_pe(SHATTERED_PDATA, SHATTERED_TEXT))
+        self.assertLess(len(manager.disassembly.binary_info.binary), 0x5000)
+        self.assertFalse(manager._isTrustworthyExceptionExtent(TEXT_RVA, 0x5000, UNWIND_PRIMARY_RVA))
+
+    def test_an_unwind_pointer_that_is_not_dword_aligned_contributes_nothing(self):
+        # the carved path already requires this; a declared table is not more trustworthy
+        manager = _manager(_build_pe(SHATTERED_PDATA, SHATTERED_TEXT))
+        self.assertFalse(manager._isTrustworthyExceptionExtent(TEXT_RVA, TEXT_RVA + 0x20, UNWIND_PRIMARY_RVA + 1))
+
+    def test_the_sorted_index_is_rebuilt_after_a_later_append(self):
+        # every append happens before the gap scan reads the table, so this contract is not
+        # exercised in production; it is asserted here so that stops being true silently
+        beyond = IMAGE_BASE + SECOND_RVA + 0x30
+        manager = _manager(_build_pe(SHATTERED_PDATA, SHATTERED_TEXT))
+        self.assertIsNone(manager.declaredExceptionRangeContaining(beyond))
+        manager._admitExceptionRecord(IMAGE_BASE, SECOND_RVA + 0x20, SECOND_RVA + 0x40, UNWIND_PRIMARY_RVA, False)
+        self.assertIsNone(manager._pdata_range_starts)
+        self.assertEqual(
+            manager.declaredExceptionRangeContaining(beyond),
+            (IMAGE_BASE + SECOND_RVA + 0x20, IMAGE_BASE + SECOND_RVA + 0x40, False),
+        )
+
+    def test_a_record_with_an_unreadable_unwind_info_contributes_nothing(self):
+        pdata = _record(TEXT_RVA, TEXT_RVA + 0x20, 0x900000)
+        manager = _manager(_build_pe(pdata, SHATTERED_TEXT))
+        self.assertEqual(manager._pdata_ranges, [])
+
+    def test_a_record_whose_unwind_info_is_not_a_header_contributes_nothing(self):
+        # `.text` opens 0x55, which is not one of the eight legal UNWIND_INFO first bytes.
+        # This is the check that makes the chained flag worth trusting, and a chained
+        # extent is the one that suppresses without waiting for its function to be found.
+        pdata = _record(TEXT_RVA, TEXT_RVA + 0x20, TEXT_RVA)
+        manager = _manager(_build_pe(pdata, SHATTERED_TEXT))
+        self.assertEqual(manager._pdata_ranges, [])
+
+    def test_an_extent_longer_than_any_function_contributes_nothing(self):
+        # an extent both inside the image and over the cap needs an image larger than the
+        # cap, so the cap comes down rather than the fixture growing to a megabyte
+        manager = _manager(_build_pe(SHATTERED_PDATA, SHATTERED_TEXT))
+        self.assertTrue(manager._isTrustworthyExceptionExtent(TEXT_RVA, TEXT_RVA + 0x20, UNWIND_PRIMARY_RVA))
+        with mock.patch.object(intel_candidates, "_PDATA_MAX_FUNCTION_SIZE", 0x10):
+            self.assertFalse(manager._isTrustworthyExceptionExtent(TEXT_RVA, TEXT_RVA + 0x20, UNWIND_PRIMARY_RVA))
+
+    def test_a_refused_extent_does_not_end_the_gap_scan(self):
+        pdata = _record(TEXT_RVA, TEXT_RVA + 0x20, UNWIND_PRIMARY_RVA) + _record(
+            ISLAND_RVA, 0x7FFFFFF0, UNWIND_CHAINED_RVA
+        )
+        manager = _manager(_build_pe(pdata, SHATTERED_TEXT))
+        manager.gap_pointer = IMAGE_BASE + ISLAND_RVA
+        self.assertEqual(manager.nextGapCandidate(), IMAGE_BASE + ISLAND_RVA)
+
+    def test_the_record_is_still_seeded_when_its_extent_is_refused(self):
+        # refusing an extent narrows what the record speaks for; it does not discard it
+        pdata = _record(TEXT_RVA, 0x7FFFFFF0, UNWIND_PRIMARY_RVA)
+        manager = _manager(_build_pe(pdata, SHATTERED_TEXT))
+        booked = {addr for addr, candidate in manager.candidates.items() if candidate.is_exception_handler}
+        self.assertIn(IMAGE_BASE + TEXT_RVA, booked)
+
+    def test_a_carved_table_seeds_candidates_and_contributes_no_extent(self):
+        """A table found by searching the bytes may add candidates; it may not remove regions.
+
+        A memory dump keeps its mapped bytes and usually not a section header, so the table
+        has to be located in the bytes. A wrong entry then costs one bad candidate when it
+        seeds, and every gap-only function it covers when it suppresses.
+        """
+        records = b"".join(
+            _record(TEXT_RVA + index * 0x20, TEXT_RVA + index * 0x20 + 0x10, UNWIND_PRIMARY_RVA)
+            for index in range(_PDATA_MIN_ENTRIES)
+        )
+        manager = _headerlessManager(records)
+        booked = {addr for addr, candidate in manager.candidates.items() if candidate.is_exception_handler}
+        self.assertTrue(booked, "the carved table should still seed candidates")
         self.assertEqual(manager._pdata_ranges, [])
 
     def test_reinitialising_the_manager_drops_the_previous_images_extents(self):
