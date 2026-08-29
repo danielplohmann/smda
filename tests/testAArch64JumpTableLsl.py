@@ -1,5 +1,6 @@
 import struct
 import unittest
+from types import SimpleNamespace
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.DisassemblyResult import DisassemblyResult
@@ -208,6 +209,19 @@ class TestAArch64JumpTableLsl(unittest.TestCase):
         # anchor 0x411100 + (delta << 2): two entries resolve *before* the table, which is
         # exactly what the unsigned read cannot express.
         self.assertEqual(targets[:3], [0x411000, 0x410F00, 0x411200])
+
+    def test_next_known_boundary_prefers_the_closer_of_candidate_and_border(self):
+        from smda.aarch64.analyzers import AArch64JumpTableAnalyzer
+
+        class FakeDisassembler:
+            def __init__(self):
+                self.fc_manager = SimpleNamespace(candidates={0x2000: object()})
+                self.disassembly = SimpleNamespace(function_borders={0x100: (0x1500, 0x1600)})
+
+        analyzer = AArch64JumpTableAnalyzer(FakeDisassembler())
+        self.assertEqual(analyzer._nextKnownBoundary(0x1400), 0x1500)
+        self.assertEqual(analyzer._nextKnownBoundary(0x1500), 0x2000)
+        self.assertIsNone(analyzer._nextKnownBoundary(0x2000))
 
 
 if __name__ == "__main__":

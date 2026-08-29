@@ -1,6 +1,8 @@
 import contextlib
 import hashlib
 import logging
+from bisect import bisect_right
+from typing import Optional
 
 import lief
 
@@ -47,11 +49,11 @@ class BinaryInfo:
     """
 
     architecture = ""
-    base_addr = 0
-    binary = b""
-    raw_data = b""
+    base_addr: int = 0
+    binary: bytes = b""
+    raw_data: bytes = b""
     binary_size = 0
-    bitness = None
+    bitness: Optional[int] = None
     code_areas = None
     component = ""
     family = ""
@@ -70,7 +72,7 @@ class BinaryInfo:
     symbols = None
     oep = None
 
-    def __init__(self, binary):
+    def __init__(self, binary: bytes):
         self.binary = binary
         self.raw_data = binary
         self.binary_size = len(binary)
@@ -263,15 +265,46 @@ class BinaryInfo:
                 section_size = section.size
                 yield lief_name(section), section_start, section_start + section_size
 
+    def getExceptionDirectory(self):
+        """(start, end) of the PE exception table as the image's own directory names it.
+
+        The table's location is declared, not conventional: a linker is free to
+        place it in a section of any name, and the .NET ReadyToRun compiler puts it
+        in ``.data``. Addresses follow the same convention as ``getSections`` so a
+        caller can treat both the same way. Returns None when the image is not a PE
+        or names no exception table.
+        """
+        if self._getLiefType() != "PE":
+            return None
+        for directory in self.getLiefBinary().data_directories:
+            if "EXCEPTION" not in str(directory.type):
+                continue
+            if not directory.size or not directory.rva:
+                break
+            start = self.base_addr + directory.rva
+            return start, start + directory.size
+        return None
+
     def isInCodeAreas(self, address):
-        is_inside = False
-        # if no code areas found, assume the whole image is code and calculate according to base address and size
-        if self.code_areas is None or len(self.code_areas) == 0:
-            if self.base_addr <= address < self.base_addr + self.binary_size:
-                is_inside = True
-        else:
-            is_inside = any(a[0] <= address < a[1] for a in self.code_areas)
-        return is_inside
+        areas = self.code_areas
+        if not areas:
+            return self.base_addr <= address < self.base_addr + self.binary_size
+        index = getattr(self, "_code_area_index", None)
+        if index is None or index[0] is not areas:
+            ordered = sorted((start, end) for start, end in areas)
+            merged = [list(ordered[0])]
+            for start, end in ordered[1:]:
+                if start <= merged[-1][1]:
+                    if end > merged[-1][1]:
+                        merged[-1][1] = end
+                else:
+                    merged.append([start, end])
+            starts = [start for start, _end in merged]
+            self._code_area_index = (areas, starts, merged)
+            index = self._code_area_index
+        _areas, starts, merged = index
+        pos = bisect_right(starts, address) - 1
+        return pos >= 0 and address < merged[pos][1]
 
     HEADER_CAP_PE = 0x1000
     HEADER_CAP_ELF = 0x400

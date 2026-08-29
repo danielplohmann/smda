@@ -101,11 +101,27 @@ class MockBinaryInfo:
         self.code_areas = []
         self.pdata_size = pdata_size
 
+    def _getLiefType(self):
+        # what this double stands in for: a RUNTIME_FUNCTION table is a PE construct, and
+        # the walk asks so that a section merely named `.pdata` in some other container
+        # cannot be read as one
+        return "PE"
+
     def getSections(self):
         # yields name, start, end
         if self.pdata_size > 0:
             # .pdata at 0x1000
             yield ".pdata", self.base_addr + PDATA_OFFSET, self.base_addr + PDATA_OFFSET + self.pdata_size
+
+    def getExceptionDirectory(self):
+        # this fixture is bytes rather than a PE, so it declares no directory and the
+        # section name is the only evidence of where the table is
+        return None
+
+    def getLiefBinary(self):
+        # nor a parsed container, so the declared-range lookup finds no `.eh_frame` and the
+        # rules built on it are inert here
+        return None
 
 
 class PdataExtractionTestSuite(unittest.TestCase):

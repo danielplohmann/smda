@@ -26,6 +26,12 @@ from .SmdaInstruction import SmdaInstruction
 
 LOGGER = logging.getLogger(__name__)
 
+# escapeBinary() output is fully determined by (escaper, bytes, mnemonic, operands,
+# flag, bounds), so results may be reused across functions and runs; the cap bounds
+# retained strings when many distinct samples are analyzed in one process
+_ESCAPE_CACHE = {}
+_ESCAPE_CACHE_LIMIT = 1 << 17
+
 # AArch64 PIC hashing changed in 4.1.0 when control-flow opcode masking was unified,
 # and again in 4.2.0 when `escapeBinary` was made per-mnemonic immediate-aware
 # (nibble-keep-mask) so that relocated instructions produce the same pic_hash.
@@ -167,7 +173,7 @@ class SmdaFunction:
     is_exported = False
     architecture_metadata: Dict[str, Any] = {}
     # metadata
-    binweight = 0
+    binweight: float = 0.0
     characteristics: Optional[str] = ""
     confidence: Optional[float] = 0.0
     function_name = ""
@@ -177,6 +183,7 @@ class SmdaFunction:
     nesting_depth = 0
     strongly_connected_components = None
     tfidf = None
+    _basic_blocks: Optional[List["SmdaBasicBlock"]] = None
 
     def __init__(self, disassembly=None, function_offset=None, config=None, smda_report=None):
         self.smda_report = smda_report
@@ -207,21 +214,15 @@ class SmdaFunction:
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
             self.blockrefs = self.getNormalizedBlockRefs()
             self.function_name = disassembly.function_symbols.get(function_offset, "")
-            self.characteristics = (
-                disassembly.candidates[function_offset].getCharacteristics()
-                if function_offset in disassembly.candidates
-                else None
-            )
-            self.confidence = (
-                disassembly.candidates[function_offset].getConfidence()
-                if function_offset in disassembly.candidates
-                else None
-            )
-            self.tfidf = (
-                disassembly.candidates[function_offset].getTfIdf()
-                if function_offset in disassembly.candidates
-                else None
-            )
+            candidate = disassembly.candidates.get(function_offset)
+            if candidate is not None:
+                self.characteristics = candidate.getCharacteristics()
+                self.confidence = candidate.getConfidence()
+                self.tfidf = candidate.getTfIdf()
+            else:
+                self.characteristics = None
+                self.confidence = None
+                self.tfidf = None
             # DEX strings are part of the parsed file structure, so they're always
             # populated for Dalvik regardless of WITH_STRINGS — no extra extraction
             # cost. For other architectures, honor WITH_STRINGS as usual.
@@ -380,7 +381,7 @@ class SmdaFunction:
         for block in self.getBlocks():
             yield from block.getInstructions()
 
-    def getInstructionsForBlock(self, offset) -> List["SmdaInstruction"]:
+    def getInstructionsForBlock(self, offset):
         if offset is None:
             offset = self.offset
         if offset is None:
@@ -449,16 +450,30 @@ class SmdaFunction:
         else:
             lower_addr = binary_info.base_addr
             upper_addr = lower_addr + binary_info.binary_size
-            escaped_binary_seqs = [
-                escaper.escapeBinary(
-                    instruction,
-                    escape_intraprocedural_jumps=True,
-                    lower_addr=lower_addr,
-                    upper_addr=upper_addr,
-                )
-                for key in self._sorted_block_keys
-                for instruction in blocks[key]
-            ]
+            cache = _ESCAPE_CACHE
+            escaped_binary_seqs = []
+            append = escaped_binary_seqs.append
+            cache_get = cache.get
+            for key in self._sorted_block_keys:
+                for instruction in blocks[key]:
+                    cache_key = (
+                        escaper,
+                        instruction.bytes,
+                        instruction.mnemonic,
+                        instruction.operands,
+                        True,
+                        lower_addr,
+                        upper_addr,
+                    )
+                    escaped = cache_get(cache_key)
+                    if escaped is None:
+                        # enforce the cap at insertion so even one function with more
+                        # distinct instructions than the limit cannot grow past it
+                        if len(cache) >= _ESCAPE_CACHE_LIMIT:
+                            cache.clear()
+                        escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
+                        cache[cache_key] = escaped
+                    append(escaped)
         return "".join(escaped_binary_seqs).encode("ascii")
 
     def getOpcHash(self):
@@ -489,9 +504,7 @@ class SmdaFunction:
         self.blocks = {}
         for block in disasm_blocks:
             block_start = block[0][0]
-            self.blocks[block_start] = [
-                SmdaInstruction([ins[0], ins[4].hex(), str(ins[2]), str(ins[3])], smda_function=self) for ins in block
-            ]
+            self.blocks[block_start] = [SmdaInstruction.from_tuple(ins, smda_function=self) for ins in block]
             # len(hex) == 2 * len(raw), so the per-instruction len(hex)/2 this replaces summed to
             # the raw byte count; binweight is serialized, so it must stay that value and a float
             self.binweight += float(sum(map(len, map(itemgetter(4), block))))
@@ -582,6 +595,15 @@ class SmdaFunction:
                 normalized_targets.add(block_start)
 
             active_try_ranges.append({"start": range_start, "end": range_end, "targets": normalized_targets})
+
+        # without try_ranges the pass below reduces to deduplicating and sorting the
+        # successors of each block, with no per-block try-range overlap test
+        if not active_try_ranges:
+            result = {
+                block_start: sorted(set(current_blockrefs.get(block_start, []))) for block_start in sorted(self.blocks)
+            }
+            self._normalized_blockrefs = result
+            return result
 
         # 2. Iterate blocks once to build normalized_blockrefs and apply try_ranges
         for block_start, block in self.blocks.items():

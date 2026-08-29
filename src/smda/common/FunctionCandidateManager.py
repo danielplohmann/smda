@@ -20,7 +20,7 @@ from smda.utility.BracketQueue import BracketQueue
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 from smda.utility.PriorityQueue import PriorityQueue
 
-from .EhFrameDecoder import decodeEhFrameFdeRanges, decodeEhFrameHdrStarts
+from .EhFrameDecoder import decodeEhFrameFdeRanges, decodeEhFrameHdrStarts, decodeEhFrameLandingPads
 from .LanguageAnalyzer import LanguageAnalyzer
 
 LOGGER = logging.getLogger(__name__)
@@ -59,8 +59,17 @@ class FunctionCandidateManager:
         # backstop against memory usage explosion during candidate identification
         self._candidate_cap_logged = False
         self._cb_analysis_timeout = None
+        self._eh_frame_fde_ranges = None
+        self._eh_frame_fde_starts = []
+        self._declared_landing_pads = None
+        self._plt_ranges = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
+        self._code_area_index = None
+        self._eh_frame_fde_ranges = None
+        self._eh_frame_fde_starts = []
+        self._declared_landing_pads = None
+        self._plt_ranges = None
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
@@ -76,9 +85,25 @@ class FunctionCandidateManager:
     def _passesCodeFilter(self, addr):
         if addr is None:
             return False
-        if self._code_areas:
-            return any(area[0] <= addr < area[1] for area in self._code_areas)
-        return True
+        areas = self._code_areas
+        if not areas:
+            return True
+        index = getattr(self, "_code_area_index", None)
+        if index is None or index[0] is not areas:
+            ordered = sorted((start, end) for start, end in areas)
+            merged = [list(ordered[0])]
+            for start, end in ordered[1:]:
+                if start <= merged[-1][1]:
+                    if end > merged[-1][1]:
+                        merged[-1][1] = end
+                else:
+                    merged.append([start, end])
+            starts = [start for start, _end in merged]
+            self._code_area_index = (areas, starts, merged)
+            index = self._code_area_index
+        _areas, starts, merged = index
+        pos = bisect.bisect_right(starts, addr) - 1
+        return pos >= 0 and addr < merged[pos][1]
 
     def getBitMask(self):
         if self.bitness == 64:
@@ -123,11 +148,8 @@ class FunctionCandidateManager:
                     candidate = self.candidates[candidate_addr]
                     if candidate.removeCallRefs(conflict):
                         dirty_candidates.append(candidate)
-                if isinstance(self.candidate_queue, BracketQueue):
-                    for candidate in dirty_candidates:
-                        self.candidate_queue.update(candidate)
-                elif dirty_candidates:
-                    self.candidate_queue.update()
+                for candidate in dirty_candidates:
+                    self.candidate_queue.update(candidate)
 
     def _addCappedCallRef(self, candidate, source_ref):
         """add an inbound call reference, honoring MAX_CALL_REFS_PER_CANDIDATE to bound set growth and rescoring."""
@@ -518,22 +540,136 @@ class FunctionCandidateManager:
                 continue
             yield start
 
-    def _ehFrameFunctionStarts(self):
+    def ehFrameFdeRanges(self):
+        """(start, end) for every FDE the image's own `.eh_frame` section declares.
+
+        Only the section carries each record's length. `.eh_frame_hdr`'s search table names
+        starts alone, so an image reduced to its segments has no ranges here and callers that
+        need an extent are inert on it rather than wrong. Decoded once per binary because the
+        section is walked record by record in Python.
+        """
+        if getattr(self, "_eh_frame_fde_ranges", None) is not None:
+            return self._eh_frame_fde_ranges
+        ranges = []
         binary_info = self.disassembly.binary_info
-        pointer_size = 8 if binary_info.bitness == 64 else 4
-        section_starts = set()
         lief_binary = binary_info.getLiefBinary()
         if isinstance(lief_binary, lief.ELF.Binary):
             eh_frame = next((section for section in lief_binary.sections if section.name == ".eh_frame"), None)
             if eh_frame is not None and eh_frame.virtual_address and eh_frame.size:
                 section_bytes = self.disassembly.getBytes(eh_frame.virtual_address, eh_frame.size)
                 if section_bytes:
-                    section_starts = {
-                        fde_range[0]
-                        for fde_range in decodeEhFrameFdeRanges(
+                    pointer_size = 8 if binary_info.bitness == 64 else 4
+                    ranges = sorted(
+                        (start, start + length)
+                        for start, length in decodeEhFrameFdeRanges(
                             bytes(section_bytes), eh_frame.virtual_address, pointer_size=pointer_size
                         )
-                    }
+                        if length
+                    )
+        self._eh_frame_fde_ranges = ranges
+        self._eh_frame_fde_starts = [start for start, _ in ranges]
+        return ranges
+
+    def declaredLandingPads(self):
+        """Every exception landing pad the image's own LSDAs declare.
+
+        A landing pad is where the personality routine resumes, so it is interior to a function
+        by construction and is never a function start. Under `-fcf-protection` each carries an
+        `endbr64`, which is why a scan looking for entry shapes finds them at all. Decoded once
+        per binary; an image with no `.eh_frame`, or none carrying an 'L' augmentation, declares
+        none and every rule built on this is inert on it.
+        """
+        if getattr(self, "_declared_landing_pads", None) is not None:
+            return self._declared_landing_pads
+        pads = set()
+        binary_info = self.disassembly.binary_info
+        lief_binary = binary_info.getLiefBinary()
+        if isinstance(lief_binary, lief.ELF.Binary):
+            eh_frame = next((section for section in lief_binary.sections if section.name == ".eh_frame"), None)
+            if eh_frame is not None and eh_frame.virtual_address and eh_frame.size:
+                section_bytes = self.disassembly.getBytes(eh_frame.virtual_address, eh_frame.size)
+                if section_bytes:
+                    pointer_size = 8 if binary_info.bitness == 64 else 4
+                    pads = decodeEhFrameLandingPads(
+                        bytes(section_bytes),
+                        eh_frame.virtual_address,
+                        lambda addr, length: bytes(self.disassembly.getBytes(addr, length) or b""),
+                        pointer_size=pointer_size,
+                    )
+        self._declared_landing_pads = pads
+        return pads
+
+    def isDeclaredLandingPad(self, addr):
+        return addr in self.declaredLandingPads()
+
+    #: sections an ELF names as a procedure linkage table, in the order a linker emits them
+    PLT_SECTION_NAMES = (".plt", ".plt.sec", ".plt.got", ".iplt")
+
+    def declaredPltRanges(self):
+        """(start, end) for every section the image names as a procedure linkage table.
+
+        The whole table sits under a single FDE, so any test that reads an unwind range as one
+        function treats every stub after the first as interior to it. The section table is what
+        says otherwise. An image reduced to its segments names no sections, so this is empty
+        there and anything built on it is inert rather than wrong.
+        """
+        if getattr(self, "_plt_ranges", None) is not None:
+            return self._plt_ranges
+        ranges = []
+        lief_binary = self.disassembly.binary_info.getLiefBinary()
+        if isinstance(lief_binary, lief.ELF.Binary):
+            for section in lief_binary.sections:
+                if section.name in self.PLT_SECTION_NAMES and section.virtual_address and section.size:
+                    ranges.append((section.virtual_address, section.virtual_address + section.size))
+        self._plt_ranges = ranges
+        return ranges
+
+    def isInDeclaredPltSection(self, addr):
+        return any(start <= addr < end for start, end in self.declaredPltRanges())
+
+    def declaredLandingPadSkipTarget(self, addr):
+        """Where a gap scan should resume after refusing the declared landing pad at `addr`.
+
+        The end of the FDE that declares it, or None when the image declares no range around
+        it. Everything between a landing pad and the end of its own function is that
+        function's body, so resuming there skips interior addresses only. Resuming one
+        instruction on instead lands inside the pad, and the scan books that in the pad's
+        place -- a worse candidate than the one just refused, because it opens mid-body and
+        its analysis runs on through whatever follows.
+        """
+        containing = self.declaredFdeRangeContaining(addr)
+        return containing[1] if containing else None
+
+    def declaredFdeRangeContaining(self, addr):
+        """The declared FDE range `addr` falls inside, or None when it starts one or is outside.
+
+        The unwinder's own record says an interior address belongs to the routine the range
+        begins at, so it is not an entry. Ranges are deliberately not merged: consecutive
+        functions are laid out end-to-start, and merging adjacent ones collapses the text
+        section into a handful of spans where every address but the first looks interior.
+        """
+        ranges = self.ehFrameFdeRanges()
+        starts = self._eh_frame_fde_starts
+        index = bisect.bisect_right(starts, addr) - 1
+        while index >= 0:
+            start, end = ranges[index]
+            if start < addr < end:
+                return start, end
+            # Ranges are sorted by start and a preceding one can still cover `addr` only while
+            # its own end does; once one ends at or before it, no earlier one reaches further.
+            if end <= addr and index and ranges[index - 1][1] <= addr:
+                break
+            index -= 1
+        return None
+
+    def opensInsideDeclaredFdeRange(self, addr):
+        """Whether `addr` falls inside a declared FDE range without being that range's start."""
+        return self.declaredFdeRangeContaining(addr) is not None
+
+    def _ehFrameFunctionStarts(self):
+        binary_info = self.disassembly.binary_info
+        pointer_size = 8 if binary_info.bitness == 64 else 4
+        section_starts = {fde_range[0] for fde_range in self.ehFrameFdeRanges()}
         # The two sources are unioned rather than tried in order. A memory image keeps its
         # program headers but not its section table, so .eh_frame_hdr is the only route
         # there; and the section decoder skips records whose CIE it cannot read, so a

@@ -12,8 +12,8 @@ LOGGER = logging.getLogger(__name__)
 
 class SmdaInstruction:
     smda_function = None
-    offset = None
-    bytes = None
+    offset: Optional[int] = None
+    bytes: Optional[str] = None
     mnemonic = None
     operands = None
     detailed = None
@@ -30,6 +30,18 @@ class SmdaInstruction:
             self.bytes = ins_list[1]
             self.mnemonic = ins_list[2]
             self.operands = ins_list[3]
+
+    @classmethod
+    def from_tuple(cls, ins, smda_function=None):
+        instruction = cls.__new__(cls)
+        instruction.smda_function = smda_function
+        instruction.offset = ins[0]
+        instruction.bytes = ins[4].hex()
+        mnemonic = ins[2]
+        instruction.mnemonic = mnemonic if mnemonic.__class__ is str else str(mnemonic)
+        operands = ins[3]
+        instruction.operands = operands if operands.__class__ is str else str(operands)
+        return instruction
 
     def getDataRefs(self):
         data_refs_cached = getattr(self, "_data_refs", None)
@@ -186,7 +198,7 @@ class SmdaInstruction:
         return self.bytes
 
     @classmethod
-    def fromDict(cls, instruction_dict, smda_function=None) -> Optional["SmdaInstruction"]:
+    def fromDict(cls, instruction_dict, smda_function=None) -> "SmdaInstruction":
         smda_instruction = cls(None)
         smda_instruction.smda_function = smda_function
         smda_instruction.offset = instruction_dict[0]

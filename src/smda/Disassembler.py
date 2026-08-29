@@ -17,11 +17,51 @@ from smda.ida.IdaExporter import IdaExporter
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.DexFileLoader import DexFileLoader
+from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.FileLoader import FileLoader
+from smda.utility.MachoFileLoader import MachoFileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
+from smda.utility.PeFileLoader import PeFileLoader
 from smda.utility.StringExtractor import extract_strings
 
 LOGGER = logging.getLogger(__name__)
+
+#: instruction sets a container header can name that a backend exists for. A managed
+#: PE resolves to intel here rather than to cil: its CLR metadata is addressed by file
+#: offset, which a mapped image no longer has, so routing a dump there on the strength
+#: of the header alone would lose it.
+_BACKEND_ARCHITECTURES = ("intel", "aarch64")
+
+
+def _peDeclaredArchitecture(file_content: bytes) -> str:
+    return PeFileLoader.ARCHITECTURE_MAP.get(PeFileLoader.getMachineType(file_content), "")
+
+
+#: (does this buffer carry the container, what instruction set does it name)
+_DECLARED_ARCHITECTURE_READERS = (
+    (PeFileLoader.isCompatible, _peDeclaredArchitecture),
+    (ElfFileLoader.isCompatible, ElfFileLoader.getArchitecture),
+    (MachoFileLoader.isCompatible, MachoFileLoader.getArchitecture),
+)
+
+
+def declaredArchitecture(file_content: bytes) -> str:
+    """Instruction set the buffer's own container header names, or "".
+
+    A memory dump of a mapped image still begins with the headers it was mapped
+    from, and those name the instruction set outright. Reading them is not a
+    retreat from working without structural metadata: it decides only what the
+    bytes are, and every pass after it still runs the same way on a headerless
+    buffer, which is what an empty answer here selects.
+    """
+    for is_compatible, read_architecture in _DECLARED_ARCHITECTURE_READERS:
+        if not is_compatible(file_content):
+            continue
+        # str() rather than a bare return: the loaders' readers are untyped, so the value
+        # arrives as Unknown and only a subtype of str may be returned here
+        architecture = str(read_architecture(file_content))
+        return architecture if architecture in _BACKEND_ARCHITECTURES else ""
+    return ""
 
 
 class Disassembler:
@@ -250,10 +290,18 @@ class Disassembler:
         # from the bytes here.
         unsupported_instruction_set = None
         if not self._explicit_backend and not architecture:
+            declared = declaredArchitecture(file_content)
             if DexFileLoader.isCompatible(file_content):
                 architecture = "dalvik"
                 if bitness is None:
                     bitness = DexFileLoader.getBitness(file_content)
+            elif declared:
+                # the container names the instruction set, which settles what the
+                # byte heuristics below can only estimate from code density
+                LOGGER.debug("Buffer's container header names %s; disassembling as that.", declared)
+                architecture = declared
+                if bitness is None and architecture == "aarch64":
+                    bitness = 64
             elif looksLikeAArch64(file_content):
                 # A dump carries no container header to read the instruction set from, and
                 # decoding AArch64 as x86 produces a full report whose every block is wrong.
@@ -295,7 +343,7 @@ class Disassembler:
             )
         return smda_report
 
-    def _disassemble(self, binary_info, timeout=0):
+    def _disassemble(self, binary_info, timeout=0) -> SmdaReport:
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
         self._last_timeout_log_second = -1
@@ -319,7 +367,7 @@ class Disassembler:
             raise RuntimeError(f"No disassembly backend available for architecture '{binary_info.architecture}'.")
         raise RuntimeError("Disassembler backend not initialized.")
 
-    def _createErrorReport(self, start, exception):
+    def _createErrorReport(self, start, exception) -> SmdaReport:
         report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
@@ -330,7 +378,7 @@ class Disassembler:
         report.timestamp = datetime.datetime.now(datetime.timezone.utc)
         return report
 
-    def _handleDisassemblyException(self, start, exception, log_message):
+    def _handleDisassemblyException(self, start, exception, log_message) -> SmdaReport:
         reraise_non_operational_exception(exception)
         LOGGER.error(log_message)
         return self._createErrorReport(start, exception)

@@ -313,17 +313,18 @@ class DisassemblyResult:
         # reduce outrefs to addresses within the memory image
         base_addr = self.binary_info.base_addr
         max_addr = base_addr + self.binary_info.binary_size
-        for block in self.functions[func_addr]:
+        for block in blocks:
             for ins in block:
                 ins_addr = ins[0]
-                if ins_addr in code_refs_from:
-                    for to_addr in code_refs_from[ins_addr]:
-                        if base_addr <= to_addr < max_addr and to_addr not in ins_addrs:
-                            if ins_addr in out_refs:
-                                out_refs[ins_addr].append(to_addr)
-                            else:
-                                out_refs[ins_addr] = [to_addr]
-        return {src: sorted(dst) for src, dst in out_refs.items()}
+                dests = code_refs_from.get(ins_addr)
+                if dests is None:
+                    continue
+                external = [
+                    to_addr for to_addr in dests if base_addr <= to_addr < max_addr and to_addr not in ins_addrs
+                ]
+                if external:
+                    out_refs[ins_addr] = sorted(external)
+        return out_refs
 
     def isRecursiveFunction(self, func_addr):
         ins_addrs = set()

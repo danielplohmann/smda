@@ -133,6 +133,15 @@ def adrp_page_value(word, pc):
     return (pc & ~0xFFF) + (imm << 12)
 
 
+def adr_pc_value(word, pc):
+    immlo = (word >> 29) & 0x3
+    immhi = (word >> 5) & 0x7FFFF
+    imm = (immhi << 2) | immlo
+    if imm & (1 << 20):
+        imm -= 1 << 21
+    return pc + imm
+
+
 def rd_field(word):
     """Destination register index (bits [4:0]) of a raw AArch64 instruction word."""
     return word & 0x1F
@@ -193,6 +202,22 @@ STP_FP_LR_PREINDEX_VALUE = 0xA9807BFD
 STP_PREINDEX_MASK = 0xFFC00000
 STP_PREINDEX_VALUE = 0xA9800000
 STP_IMM7_NEGATIVE = 0x00200000  # imm7 sign bit (instr bit 21): stack-allocating
+
+#: `sub sp, sp, #imm` with no shift -- a stack allocation, on its own as common
+#: mid-function as at an entry, so never a prologue signal by itself
+SUB_SP_IMM_MASK = 0xFFC003FF
+SUB_SP_IMM_VALUE = 0xD10003FF
+
+#: `stp x29, x30, [sp, #imm]` in signed-offset form: the frame record written into
+#: a frame the previous instruction already allocated. The pre-indexed form above
+#: allocates and stores at once and is a prologue signal on its own.
+STP_FP_LR_OFFSET_MASK = 0xFFC07FFF
+STP_FP_LR_OFFSET_VALUE = 0xA9007BFD
+
+#: how far past a stack allocation the frame record may be written before the pair
+#: stops reading as one prologue
+FRAME_RECORD_WINDOW = 3
+
 # str <Xt>, [sp, #imm]!  — pre-index, 64-bit store (pre-index marker in bits 11:10)
 STR_PREINDEX_MASK = 0xFFE00C00
 STR_PREINDEX_VALUE = 0xF8000C00
@@ -219,6 +244,29 @@ _LINK_REGISTER = 30  # x30
 def is_bti_landing_pad(word):
     """Whether a word is a BTI landing-pad instruction."""
     return word in BTI_PROLOGUES
+
+
+def opens_stack_frame(words):
+    """Whether `words` opens a frame: a stack allocation, then the frame record.
+
+    `sub sp, sp, #imm` alone means nothing -- a function allocates a frame with it and
+    so does a mid-function alloca, which is why `is_function_prologue` does not
+    recognise it. Followed within a few instructions by `stp x29, x30, [sp, #imm]`,
+    storing the frame pointer and link register into the frame that allocation just
+    made, the pair is not ambiguous: nothing mid-function re-saves the incoming link
+    register into a frame it has just created.
+
+    `words` is the instruction word at the candidate address and the few after it; a
+    short or missing tail simply fails to match.
+    """
+    if not words or words[0] is None:
+        return False
+    if (words[0] & SUB_SP_IMM_MASK) != SUB_SP_IMM_VALUE:
+        return False
+    for word in words[1 : 1 + FRAME_RECORD_WINDOW]:
+        if word is not None and (word & STP_FP_LR_OFFSET_MASK) == STP_FP_LR_OFFSET_VALUE:
+            return True
+    return False
 
 
 def is_function_prologue(word):

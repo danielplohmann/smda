@@ -1,10 +1,13 @@
 import unittest
+from types import SimpleNamespace
 
 from smda.cil.FunctionAnalysisState import FunctionAnalysisState as CilFunctionAnalysisState
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.FunctionAnalysisState import FunctionAnalysisState
+from smda.common.FunctionCandidateManager import FunctionCandidateManager
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
 from smda.DisassemblyResult import DisassemblyResult
+from smda.SmdaConfig import SmdaConfig
 
 
 class _BareState(FunctionAnalysisState):
@@ -50,6 +53,16 @@ class FunctionAnalysisStateTestSuite(unittest.TestCase):
         starts = {block[0][0] for block in state.getBlocks()}
         self.assertNotIn(0x106, starts)
 
+    def test_code_refs_setter_rebuilds_from_and_to_maps(self):
+        state = _BareState(0x100)
+        state.addCodeRef(0x10, 0x99)
+        state.code_refs = {(0x10, 0x20), (0x10, 0x30)}
+        self.assertEqual(state.code_refs_from[0x10], {0x20, 0x30})
+        self.assertEqual(state.code_refs_to[0x20], {0x10})
+        self.assertEqual(state.code_refs_to[0x30], {0x10})
+        self.assertNotIn(0x99, state.code_refs_to)
+        self.assertEqual(state.code_refs, {(0x10, 0x20), (0x10, 0x30)})
+
 
 class CilFunctionAnalysisStateTestSuite(unittest.TestCase):
     """The CIL state carries its own copy of the edge book-keeping."""
@@ -73,6 +86,28 @@ class CilFunctionAnalysisStateTestSuite(unittest.TestCase):
 
         self.assertNotIn(0x106, state.jump_targets)
 
+    def test_code_refs_setter_rebuilds_from_and_to_maps(self):
+        state = CilFunctionAnalysisState(0x100, 0x100, None)
+        state.code_refs = {(0x10, 0x20), (0x10, 0x30)}
+        self.assertEqual(state.code_refs_from[0x10], {0x20, 0x30})
+        self.assertEqual(state.code_refs_to[0x20], {0x10})
+        self.assertEqual(state.code_refs, {(0x10, 0x20), (0x10, 0x30)})
+        state.code_refs = set()
+        self.assertEqual(state.code_refs_from, {})
+        self.assertEqual(state.code_refs_to, {})
+
+    def test_finalize_merges_into_existing_disassembly_refs(self):
+        disassembly = _RecordingDisassembly()
+        disassembly.code_refs_from[0x200] = {0x300}
+        disassembly.code_refs_to[0x300] = {0x100}
+        state = CilFunctionAnalysisState(0x200, 0x200, disassembly)
+        state.addInstruction(0x200, 1, "nop", "", b"\x00")
+        state.addCodeRef(0x200, 0x400)
+        state.finalizeAnalysis()
+        self.assertEqual(disassembly.code_refs_from[0x200], {0x300, 0x400, 0x201})
+        self.assertIn(0x200, disassembly.code_refs_to[0x400])
+        self.assertIn(0x100, disassembly.code_refs_to[0x300])
+
 
 class DalvikFunctionAnalysisStateTestSuite(unittest.TestCase):
     """The Dalvik state carries its own copy of the edge book-keeping."""
@@ -95,6 +130,31 @@ class DalvikFunctionAnalysisStateTestSuite(unittest.TestCase):
         state.removeCodeRef(0x100, 0x106)
 
         self.assertNotIn(0x106, state.jump_targets)
+
+    def test_code_refs_setter_rebuilds_from_and_to_maps(self):
+        state = DalvikFunctionAnalysisState(0x100, None)
+        state.code_refs = {(0x10, 0x20), (0x10, 0x30)}
+        self.assertEqual(state.code_refs_from[0x10], {0x20, 0x30})
+        self.assertEqual(state.code_refs_to[0x20], {0x10})
+        self.assertEqual(state.code_refs, {(0x10, 0x20), (0x10, 0x30)})
+        state.code_refs = set()
+        self.assertEqual(state.code_refs_from, {})
+        self.assertEqual(state.code_refs_to, {})
+
+    def test_finalize_merges_into_existing_disassembly_refs(self):
+        disassembly = _RecordingDisassembly()
+        disassembly.function_metadata = {}
+        disassembly.code_refs_from[0x200] = {0x300}
+        disassembly.code_refs_to[0x300] = {0x100}
+        state = DalvikFunctionAnalysisState(0x200, disassembly)
+        state.label = "Lfoo;->bar()V"
+        state.addInstruction(0x200, 2, "nop", "", b"\x00\x00")
+        state.addCodeRef(0x200, 0x400)
+        state.endBlock()
+        state._finalizeRegularAnalysis()
+        self.assertEqual(disassembly.code_refs_from[0x200], {0x300, 0x400, 0x202})
+        self.assertIn(0x200, disassembly.code_refs_to[0x400])
+        self.assertIn(0x100, disassembly.code_refs_to[0x300])
 
 
 class _RecordingDisassembly:
@@ -316,6 +376,60 @@ class FunctionEntryIntegrityTestSuite(unittest.TestCase):
         self.assertTrue(state.finalizeAnalysis())
         self.assertIn(0x100, disassembly.functions)
         self.assertIn(0x100, {block[0][0] for block in disassembly.functions[0x100]})
+
+
+class GapConstructionTestSuite(unittest.TestCase):
+    @staticmethod
+    def _gapManager(code_map, functions):
+        class _Manager(FunctionCandidateManager):
+            CANDIDATE_CLASS = None
+
+            def locateCandidates(self):
+                return
+
+        manager = _Manager(SmdaConfig())
+        manager.bitness = 32
+        manager._code_areas = [[0x1000, 0x2000]]
+        manager.disassembly = SimpleNamespace(
+            functions=functions,
+            binary_info=SimpleNamespace(base_addr=0x1000, binary_size=0x1000),
+            code_map=code_map,
+        )
+        manager.updateFunctionGaps()
+        return manager
+
+    def test_interior_holes_match_the_covered_byte_walk(self):
+        manager = self._gapManager(
+            code_map=dict.fromkeys(list(range(0x1000, 0x1004)) + [0x1010, 0x1011], 1),
+            functions={},
+        )
+        interior = [gap for gap in manager.function_gaps if gap[0] == 0x1004]
+        self.assertEqual(interior, [[0x1004, 0x1010, 13]])
+
+    def test_gaps_follow_code_map_coverage_not_recovered_function_extents(self):
+        """code_map covers every decoded byte; disassembly.functions covers only finalized
+        functions. Deriving gaps from the latter drops the decoded-but-unattributed region
+        from the scan, which silently costs function discovery on gap-dominated binaries."""
+        manager = self._gapManager(
+            code_map=dict.fromkeys(list(range(0x1000, 0x1004)) + [0x1010, 0x1011], 1),
+            functions={0x1000: [[(0x1000, 4, "nop", "", b"\x90" * 4)]]},
+        )
+        self.assertIn([0x1004, 0x1010, 13], manager.function_gaps)
+        self.assertEqual([gap for gap in manager.function_gaps if gap[0] == 0x1003], [])
+
+    def test_overlapping_code_areas_extend_the_merged_end(self):
+        class _Manager(FunctionCandidateManager):
+            CANDIDATE_CLASS = None
+
+            def locateCandidates(self):
+                return
+
+        manager = _Manager(SmdaConfig())
+        manager._code_areas = [[0, 100], [90, 150]]
+        self.assertTrue(manager._passesCodeFilter(120))
+        self.assertTrue(manager._passesCodeFilter(70))
+        self.assertFalse(manager._passesCodeFilter(150))
+        self.assertFalse(manager._passesCodeFilter(None))
 
 
 if __name__ == "__main__":

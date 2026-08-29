@@ -141,12 +141,18 @@ class BinarySynthesizer:
         return (pattern * (size // len(pattern) + 1))[:size]
 
     def _getImportMap(self):
-        imports = (self.report.xmetadata or {}).get("imported_functions") or {}
+        metadata = self.report.xmetadata
+        imports = metadata.get("imported_functions") if isinstance(metadata, dict) else None
+        if not isinstance(imports, dict):
+            return {}
         import_map = {}
         for key, value in imports.items():
-            if not value or len(value) < 2 or not value[1]:
+            if not isinstance(value, (list, tuple)) or len(value) < 2 or not value[1]:
                 continue
-            import_map[int(str(key))] = (value[0] or "", value[1])
+            try:
+                import_map[int(str(key))] = (value[0] or "", value[1])
+            except (TypeError, ValueError):
+                continue
         return import_map
 
     def _iterStringRefs(self):
