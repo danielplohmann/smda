@@ -81,6 +81,12 @@ _GAP_RUN_LIMIT = 0x400
 #: useless costs precision, skipping it when it is not costs recall.
 _METADATA_CALL_TARGET_COVERAGE = 0.95
 
+#: Fewest call targets the coverage above may be read from. Below this the ratio is a
+#: small-sample artifact and not evidence: one corpus image resolves four `bl` targets in
+#: the whole binary, and metadata naming all four says nothing about whether it also names
+#: the functions only a materialized address reaches.
+_METADATA_MIN_CALL_TARGETS = 512
+
 _ARM64_PDATA_ENTRY_SIZE = 8
 # items (words, matches or exception records) a scan steps over between budget polls, mirroring
 # _TIMEOUT_POLL_BLOCKS in the engine. A whole exception table is walked inside one call, so
@@ -608,11 +614,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
         `bl` targets are the denominator because they are the one population both kinds of
         image have, in proportion to how many functions they contain, and because they are
-        known at exactly this point -- the scan that resolves them has just finished.
+        known at exactly this point -- the scan that resolves them has just finished. A rate
+        needs a sample, though, so an image with few of them is left to the scan whatever
+        share of those few metadata named.
         """
-        if not self._call_targets:
-            # nothing calls anything: no evidence either way, and the scan is the only pass
-            # left that could reach an entry, so let it run
+        if len(self._call_targets) < _METADATA_MIN_CALL_TARGETS:
+            # too few calls to read a rate from, or none at all: no evidence either way, and
+            # the scan is the only pass left that could reach an entry, so let it run
             return False
         named = sum(1 for target in self._call_targets if target in self._metadata_candidates)
         return named / len(self._call_targets) >= _METADATA_CALL_TARGET_COVERAGE
