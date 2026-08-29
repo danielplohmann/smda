@@ -216,6 +216,34 @@ class JumpTableAnalyzer:
         """
         return self.disassembly.isAddrWithinMemoryImage(address) and self.disassembly.binary_info.isInCodeAreas(address)
 
+    @classmethod
+    def _addsTableBase(cls, mnemonic, destination_key, source):
+        """Whether this instruction adds a table base to the value it overwrites.
+
+        A relative dispatch ends by adding the table's base to the entry the table read
+        produced - "add rax, rdi", or "lea rcx, [r11 + rcx]" - so the register the branch
+        reads is that sum and not the switch index. A walk that treats the add as a
+        redefinition stops one instruction short of the table read, which is where the index
+        the bound was checked against is named. `lea` only does this when it reads the
+        register it writes: "lea rax, [rip + 0x2004]" loads a base and derives nothing from
+        rax. An immediate source is index arithmetic rather than a base, and is left to
+        redefine as before, as is a write to a memory cell: the step this recognizes ends in
+        the register the branch reads, and a compare against a cell that has since been
+        written back to is not a bound on what is loaded out of it afterwards.
+
+        Only the instruction the branch reads is asked. An `add <reg>, <reg>` further back is
+        index arithmetic - "add rax, rcx" before the table read makes the index a sum, and a
+        compare bounding one summand does not bound it - so carrying the tie across that one
+        would report a bound smaller than the table and truncate the scan.
+        """
+        if canonicalRegister(destination_key) is None:
+            return False
+        if mnemonic == "add":
+            return cls._operandKey(source) is not None
+        if mnemonic == "lea":
+            return destination_key in cls._keyRegisters(source.strip())
+        return False
+
     def _findJumpTableSize(self, backtracked, index_keys=None):
         """Recover the switch bound, preferring a compare against the dispatch's own index.
 
@@ -227,7 +255,7 @@ class JumpTableAnalyzer:
         """
         tracked = set(index_keys) if index_keys else set()
         untied_size = 0
-        for instr in backtracked[::-1]:
+        for position, instr in enumerate(backtracked[::-1]):
             mnemonic = instr[2].split(" ")[-1]
             if mnemonic in RET_INS:
                 break
@@ -258,6 +286,9 @@ class JumpTableAnalyzer:
             if mnemonic in _INDEX_COPY_MNEMONICS:
                 carried = self._dispatchIndexKeys(source) if destination_key in tracked else set()
                 tracked = self._invalidated(tracked, destination_key) | carried
+                continue
+            if position == 0 and destination_key in tracked and self._addsTableBase(mnemonic, destination_key, source):
+                tracked = self._invalidated(tracked, destination_key) | {destination_key}
                 continue
             # Anything else redefines whatever it writes, and several x86 instructions write a
             # register they do not name first - xchg and xadd write both operands, mul and div

@@ -47,6 +47,22 @@ class SmdaConfig:
     # system binaries (wermgr/ping/robocopy/bcrypt) show equal-or-better boundary accuracy
     # with the directory enabled, so it is on by default
     USE_PE_ARM64_PDATA_CANDIDATES = True
+    # do not read `bti j` as a function entry on AArch64. The four BTI forms are not
+    # interchangeable: J permits a target reached by `br` - an indirect jump, which is what a
+    # switch dispatch does to a case block - while C permits one reached by `blr`, which is how
+    # a function is reached indirectly. A compiler that wrote `bti j` was naming an interior
+    # label, and the hardware would fault a call landing on it. The prologue scan read all four
+    # as entries, so every jump pad in the image was booked.
+    # Measured on 72 built AArch64 ELF cells, attributing each prologue-sole booking to the arm
+    # of `is_function_prologue` that accepted it: `bti j` produced 803 false positives and 0 real
+    # functions, `bti c` produced 0 false positives and 505 real functions. The split is exact,
+    # not statistical, which is what distinguishes this from a threshold.
+    # The ARM64 Mach-O corpus is not a control: 11 cells book no BTI-opened prologue candidate at
+    # all, so the rule is inert there rather than confirmed. It reaches no other architecture -
+    # the intel scan has no BTI shape - and it is deliberately not applied to the PE ARM64
+    # exception-record reader, which accepts the same word through a different question and has
+    # no corpus to be measured on (see the ARM64 PE issue).
+    USE_AARCH64_BTI_TARGET_TYPE = True
     # force function-end splits at x64 PE .pdata RUNTIME_FUNCTION EndAddresses so that
     # SMDA functions align with the compiler's exception-table boundaries; off by default
     # because MSVC fragments single control-flow functions across many .pdata ranges
@@ -54,6 +70,32 @@ class SmdaConfig:
     # are only performed where the interior .pdata start has a non-fall-through inbound
     # jmp/call from another recovered function, never from candidate membership alone.
     USE_PE_X64_PDATA_ENDS = False
+    # Refuse a gap candidate that the image's own exception directory places inside a
+    # function, and resume at that function's end. A 64-bit PE carries one RUNTIME_FUNCTION
+    # record per function, each naming the extent the unwinder needs, so an interior address
+    # is declared to belong to a routine that starts earlier and cannot itself be an entry.
+    # Only the gap scan reaches these addresses: every one of them sits in a region no
+    # reference and no prologue claimed, which is exactly what the gap scan is for.
+    # Two conditions keep it from overreaching, and both matter. A chained record
+    # (UNW_FLAG_CHAININFO) describes a fragment of another function, so its first byte is
+    # interior too, while a primary record's first byte is the entry and stays bookable.
+    # And a primary range only suppresses once the analysis has actually recovered the
+    # function it names: a record whose function never analysed is not evidence about what
+    # covers the address.
+    # Measured on 24 built Rust cells (33,836 truth functions), precision 75.915 to 79.477
+    # and recall 97.496 to 97.584: 2,052 false positives removed, 48 real functions gained.
+    # On 47 built Go cells, 538 false positives removed with recall unchanged; on 68 MSVC
+    # PE64 cells, 1,220 removed and 48 gained.
+    # The control that this reaches only images carrying the table is 140 x86-64 ELF cells,
+    # bit-identical - the same backend and the same gap scan, on a container that declares
+    # no exception directory. 68 32-bit PE cells are bit-identical for the same reason, and
+    # none of the 68 declares one. (An ARM64 corpus is not a control here: AArch64 has its
+    # own candidate manager and never reaches this code.)
+    # Recall moves up because the interior candidate was not merely wrong: booking it began
+    # an analysis that ran past the end of the routine the address sat inside and absorbed
+    # the small aligned functions after it. On the cell examined, all eight functions
+    # recovered sit 11 to 79 bytes past a declared extent's end.
+    USE_PE_X64_PDATA_INTERIOR_GAPS = True
     # promote unclaimed ELF .eh_frame FDE starts as late candidates on both instruction sets
     # (after the primary pass, before gap analysis). Unwind ranges are not function starts by
     # definition - .eh_frame also covers ranges that are not independent functions. Measured
@@ -76,6 +118,48 @@ class SmdaConfig:
     # and 5 fewer functions that no symbol names. Off by default because it moves 5 of the 12
     # Mach-O corpus samples, all upwards - a deliberate baseline update, not a config edit
     USE_MACHO_FUNCTION_STARTS = False
+    # Refuse a candidate at an address the image's own .gcc_except_table declares as an
+    # exception landing pad, and resume the scan at the end of the FDE that declares it. A
+    # landing pad is where the personality routine resumes, so it is interior to a function by
+    # construction; it opens with the instruction set's indirect-branch marker (endbr64 under
+    # -fcf-protection, bti under -mbranch-protection) and sits in a gap because nothing in the
+    # function branches to it, which is exactly what a scan looking for entry shapes reads as
+    # an entry. The resume point is the whole decision: stepping one instruction on lands
+    # inside the pad, and the scan books that instead - a worse candidate than the one refused.
+    # Resuming at the declaring FDE's end passes over that function's body only; over the three
+    # corpora that carry pads, 0 of 41,215 have a declared function start between the pad and
+    # that end. Measured against compiler symbol tables, macro means:
+    #   260 built C/C++ cells    PPV 92.623 -> 94.109 at TPR 95.525 -> 95.595 (+193 recovered)
+    #   72 AArch64 ELF cells     PPV 76.676 -> 79.172 at TPR 95.939 -> 95.963 (+15 recovered)
+    #   24 Rust cells            PPV 78.951 -> 82.435 at TPR 97.493 -> 97.578 (+13 recovered)
+    # 12,453 false positives removed, 221 real functions gained, no corpus loses recall. Go,
+    # ARM64 Mach-O and .NET are bit-identical, which is the control that it reaches only ELF
+    # images carrying an LSDA. It also pays for itself: on the two cells with the most pads,
+    # analysis is 3.8% faster, because the candidates it refuses are ones nothing then analyses.
+    USE_LSDA_LANDING_PADS = True
+    # Refuse a gap candidate strictly inside a range the image's own .eh_frame declares, and
+    # resume at that range's end. Broader than USE_LSDA_LANDING_PADS, which refuses only the
+    # subset an LSDA names: this catches the jump-table case labels a switch emits under
+    # -fcf-protection, which carry an endbr64 each and are the single largest precision
+    # mechanism measured on this corpus.
+    # Two conditions make it safe, and both were found by measuring what it cost without them.
+    # A PLT is exempt: the whole table sits under one FDE, so the range test would read every
+    # stub after the first as interior, which costs 3,457 real functions. And the range's own
+    # start must be a recovered function, because an FDE can begin in the alignment padding
+    # ahead of its function - the remaining 35 losses were all of that shape, two per statically
+    # linked cell, one of them rt_sigreturn under a signal-frame CIE.
+    # Measured against compiler symbol tables, macro means:
+    #   260 built C/C++ cells    PPV 94.109 -> 94.725 at TPR 95.595 -> 95.596 (+4 recovered)
+    #   72 AArch64 ELF cells     PPV 79.172 -> 80.554 at TPR 95.963 -> 95.964 (+3 recovered)
+    #   24 Rust cells            PPV 82.435 -> 83.608 at TPR 97.578 -> 97.617 (+6 recovered)
+    #   4 .NET cells             PPV 93.589 -> 95.332 at TPR 99.461 -> 99.469 (+2 recovered)
+    # 4,088 false positives removed, 15 real functions gained, no corpus loses recall, Go and
+    # ARM64 Mach-O bit-identical, and analysis time is inside an off-vs-off control band.
+    # Enabling it moved two bundled fixtures, deliberately: elf_cet_landing_pads_x64 drops four
+    # endbr64 addresses that are jump-table case labels strictly inside the function the symbol
+    # table names `dispatch`, and aarch64_static drops two mid-function instructions. None of
+    # the six carries a symbol or is a declared start, so both baselines moved toward the truth.
+    USE_ELF_FDE_INTERIOR_GAPS = True
     RESOLVE_REGISTER_CALLS = True
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
     # record the API plus the slot it lives in; annotation only, it books no code refs
@@ -107,7 +191,10 @@ class SmdaConfig:
     # libstdc++.so.6 it adds 337 functions (8473 -> 8810) for 40-130% more analysis time
     # depending on the machine; on Go ELF and Mach-O memory images, 8 functions each for 20-26%.
     # A jump into an already-recovered function is still treated as a tailcall with the pass
-    # off - only the promotion of not-yet-known targets needs it.
+    # off - only the promotion of not-yet-known targets needs it. The AArch64 backend's
+    # bl fall-through path follows the same flag: it cuts the caller either way, and seeding
+    # the boundary as well measured worse on both AArch64 corpora (ARM64 Mach-O n=11: 12
+    # fewer functions and 28 more false positives; Go n=45: 430 more false positives).
     RESOLVE_TAILCALLS = False
     # optional metadata generation options; the largest built-in performance lever.
     # Measured on the cutwail fixture, as a share of all Python calls per run: hashing 10.0%,

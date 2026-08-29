@@ -852,11 +852,18 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertEqual(manager.nextGapCandidate(), 0x1000)
 
     def test_locate_prologue_candidates_seeds_extended_amd64_prologues(self):
+        # each pattern is separated by a ret and a byte of padding. Packed back to back they
+        # would describe one function's prologue followed by its own body, and a match that
+        # begins exactly where an earlier seeded match ends is refused as interior -- which is
+        # a different behaviour, pinned by its own test.
         buf = bytes.fromhex(
             "f30f1efa554889e5"  # 0x1000: endbr64; push rbp; mov rbp, rsp
-            "41574156"  # 0x1008: push r15; push r14
-            "40534883ec20"  # 0x100c: push rbx; sub rsp, imm8
-            "40554883ec18"  # 0x1012: push rbp; sub rsp, imm8
+            "c3cc"  # 0x1008: ret; int3
+            "41574156"  # 0x100a: push r15; push r14
+            "c3cc"  # 0x100e: ret; int3
+            "40534883ec20"  # 0x1010: push rbx; sub rsp, imm8
+            "c3cc"  # 0x1016: ret; int3
+            "40554883ec18"  # 0x1018: push rbp; sub rsp, imm8
         )
         binary_info = BinaryInfo(buf)
         binary_info.base_addr = 0x1000
@@ -869,7 +876,7 @@ class TestIntelDisassembler(unittest.TestCase):
 
         manager.locatePrologueCandidates()
 
-        expected = {0x1000, 0x1008, 0x100C, 0x1012}
+        expected = {0x1000, 0x100A, 0x1010, 0x1018}
         self.assertEqual(expected & manager.candidates.keys(), expected)
 
     def test_locate_prologue_candidates_does_not_seed_common_mid_function_idioms(self):
@@ -1392,6 +1399,21 @@ class StubChainCandidateTestSuite(unittest.TestCase):
         base = _StubChainCandidateManager.BASE_ADDR + len(self.PAD)
         self.assertEqual([base, base + 16], manager.recovered)
         self.assertTrue(set(range(base + 7, base + 12)).issubset(manager.disassembly.data_map))
+
+    def test_a_plt_sec_stub_outside_every_code_area_is_not_booked(self):
+        entry = b"\xf3\x0f\x1e\xfa\xf2\xff\x25\x11\x22\x33\x44\x0f\x1f\x44\x00\x00"
+        chain = entry + entry
+        base = _StubChainCandidateManager.BASE_ADDR + len(self.PAD)
+
+        # control: with no code areas declared the same chain books both entries, so the empty
+        # result below is the filter rather than the regex failing to match
+        self.assertEqual([base, base + 16], self._locate(chain).recovered)
+
+        manager = _StubChainCandidateManager(self.PAD + chain + self.PAD)
+        manager._code_areas = [(base + 0x1000, base + 0x2000)]
+        manager.locateStubChainCandidates()
+
+        self.assertEqual([], manager.recovered)
 
     def test_a_lone_stub_is_not_a_chain(self):
         manager = self._locate(b"\xff\x25\x11\x22\x33\x44")

@@ -8,7 +8,7 @@ from smda.aarch64.definitions import (
     RET_X30_BYTES,
     looksLikeAArch64,
 )
-from smda.Disassembler import Disassembler
+from smda.Disassembler import Disassembler, declaredArchitecture
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.FileLoader import FileLoader
 
@@ -67,9 +67,25 @@ class LooksLikeAArch64Test(unittest.TestCase):
         self.assertTrue(looksLikeAArch64(RET_X30_BYTES * 4096))
 
 
+def _headerless(name):
+    """The fixture with its container magic removed, so only the byte evidence is left."""
+    return b"\x00" * 4 + _mapped(name)[4:]
+
+
 class RawBufferArchitectureSelectionTest(unittest.TestCase):
     def testAArch64BufferIsNotDisassembledAsIntel(self):
         buffer = _mapped("aarch64_static_xored")
+        config = SmdaConfig()
+        config.TIMEOUT = 60
+        report = Disassembler(config).disassembleBuffer(buffer, 0x400000)
+        self.assertEqual(report.architecture, "aarch64")
+        self.assertEqual(report.bitness, 64)
+
+    def testAHeaderlessAArch64BufferIsStillCaughtByTheDensityProbe(self):
+        # the container is what decides above; this is the path that has to work when
+        # there is no container, and it warns because it is evidence rather than a fact
+        buffer = _headerless("aarch64_static_xored")
+        self.assertEqual(declaredArchitecture(buffer), "")
         config = SmdaConfig()
         config.TIMEOUT = 60
         # several test modules call logging.disable() at import, which would make assertLogs

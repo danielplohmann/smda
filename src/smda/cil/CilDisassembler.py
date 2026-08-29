@@ -140,6 +140,18 @@ class DnfileMethodBodyReader(CilMethodBodyReaderBase):
 
 
 class CilDisassembler:
+    """Recover managed method bodies from a .NET assembly.
+
+    Every address in the report this produces is a **file offset**, not a virtual address: a
+    method body is located through `get_offset_from_rva`, and the instruction offsets dncil
+    reports are relative to the file as well. The native backends report virtual addresses, so
+    these do not line up with `base_addr` plus an RVA and are not comparable with a native
+    report's. The Dalvik backend addresses by file offset too, for a different reason - a DEX
+    carries no load address, where a CIL method has an RVA this declines to use. The report
+    names the backend that produced it, in `architecture` and in the language score map, which
+    is what lets a consumer tell which rule applies.
+    """
+
     def __init__(self, config):
         self.config = config
         self._tfidf = None

@@ -7,6 +7,7 @@ prologue byte-pattern seeding, jmp/call-pointer and PLT stub-chain discovery,
 PE x64 ``.pdata`` exception-record seeding, and the NOP/padding-aware gap scan.
 """
 
+import bisect
 import logging
 import re
 import struct
@@ -104,10 +105,23 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         super().__init__(config)
         self.pdata_start_addresses = set()
         self.pdata_end_addresses = set()
+        self._seeded_prologues = ()
+        #: (start, end, is_chained) for every RUNTIME_FUNCTION record the image declares,
+        #: sorted lazily on first lookup because seeding appends in table order. Uncapped,
+        #: unlike the candidate registry: one tuple per record is about 145 bytes, so an
+        #: image with 200,000 functions holds ~29 MB here, and capping it would silently
+        #: stop suppressing on exactly the largest images rather than bounding anything
+        #: that matters.
+        self._pdata_ranges = []
+        self._pdata_range_starts = None
+        self._pdata_range_reach = []
         self._retained_pad = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._retained_pad = None
+        self._pdata_ranges = []
+        self._pdata_range_starts = None
+        self._pdata_range_reach = []
         # the gap scan decodes potential NOP instructions, so it needs an x86 capstone
         # matching the binary's bitness; build it before the base init runs discovery
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -308,6 +322,44 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 )
                 self.gap_pointer = self.getNextGap()
                 continue
+            if self.config.USE_LSDA_LANDING_PADS and self.isDeclaredLandingPad(self.gap_pointer):
+                # The image's own LSDA says the unwinder resumes here, which puts the address
+                # inside a function by construction. Under -fcf-protection it opens with an
+                # endbr64 and sits in a gap precisely because nothing in the function branches
+                # to it, so a byte scan reads it as an entry and nothing earlier contradicts.
+                LOGGER.debug(
+                    "nextGapCandidate() gap_ptr is a declared landing pad: 0x%08x",
+                    self.gap_pointer,
+                )
+                self.gap_pointer = self.declaredLandingPadSkipTarget(self.gap_pointer) or self.gap_pointer + 1
+                continue
+            if self.config.USE_ELF_FDE_INTERIOR_GAPS and not self.isInDeclaredPltSection(self.gap_pointer):
+                # A PLT is exempt: the whole table sits under one FDE, so the range test reads
+                # every stub after the first as interior to the first, and on a CET image the
+                # gap scan is what recovers them.
+                containing = self.declaredFdeRangeContaining(self.gap_pointer)
+                # Only a range whose own start the analysis recovered is evidence that the
+                # range is one function: an FDE can begin in the alignment padding ahead of
+                # its function, and then the real entry a few bytes in is interior to nothing.
+                if containing is not None and containing[0] in self.disassembly.functions:
+                    self.gap_pointer = containing[1]
+                    continue
+            if self._pdata_ranges and self.config.USE_PE_X64_PDATA_INTERIOR_GAPS:
+                # the emptiness test comes first: this runs once per scanned gap byte, and on
+                # a 32-bit or non-PE image there is no table to consult at all
+                containing = self.declaredExceptionRangeContaining(self.gap_pointer)
+                if containing is not None and (containing[2] or containing[0] in self.disassembly.functions):
+                    # A chained record is evidence on its own -- it says the whole extent is
+                    # part of another function. A primary record only speaks once the function
+                    # it names has actually been recovered; until then the record says nothing
+                    # about what covers this address. Resuming at the extent's end skips the
+                    # body rather than the one byte, which is what the record describes.
+                    LOGGER.debug(
+                        "nextGapCandidate() gap_ptr is inside a declared .pdata extent: 0x%08x",
+                        self.gap_pointer,
+                    )
+                    self.gap_pointer = containing[1]
+                    continue
             # we may have a candidate here
             LOGGER.debug("nextGapCandidate() using 0x%08x as candidate", self.gap_pointer)
             start_byte = byte[0] if byte else 0
@@ -583,10 +635,35 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 return True
         return False
 
-    def _seedPrologueMatches(self, pattern):
+    def _opensInsideAnEarlierPrologue(self, binary, offset, candidate_addr):
+        """Whether a seeded prologue ends exactly where this match begins.
+
+        A prologue is a function's opening instructions, so the address just past
+        one is inside that function's body rather than the start of another.
+        clang opens a frame with `push rbp; mov rbp, rsp` and follows it with the
+        callee-saved run `push r15; push r14`, which is on the seeded list too:
+        matched there it books the body of a function the scan already found.
+        Requiring the earlier match to be a candidate keeps this from firing on a
+        byte coincidence, and mirrors the hotpatch adjustment below.
+        """
+        for prologue in self._seeded_prologues:
+            length = len(prologue)
+            if offset < length or binary[offset - length : offset] != prologue:
+                continue
+            if ((candidate_addr - length) & self.getBitMask()) in self.candidates:
+                return True
+        return False
+
+    def _seedPrologueMatches(self, pattern, refuse_declared_interior=False):
         """returns True once the analysis timeout trips, so callers can stop scanning
-        further patterns instead of each one re-discovering the timeout on its own first match."""
+        further patterns instead of each one re-discovering the timeout on its own first match.
+
+        `refuse_declared_interior` declines a match that begins inside a range the image's own
+        `.eh_frame` declares; see `locatePrologueCandidates` for why only one pattern sets it."""
         binary = self.disassembly.binary_info.binary
+        # Resolved once rather than per match: an image with no readable `.eh_frame` declares no
+        # ranges, so the test below has no work to do on any of them and should cost nothing.
+        refuse_declared_interior = refuse_declared_interior and bool(self.ehFrameFdeRanges())
         for match_count, prologue_match in enumerate(re.finditer(pattern, binary)):
             if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return True
@@ -617,6 +694,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             candidate_addr = (self.disassembly.binary_info.base_addr + offset) & self.getBitMask()
             if not self._passesCodeFilter(candidate_addr):
                 continue
+            if self._opensInsideAnEarlierPrologue(binary, offset, candidate_addr):
+                continue
+            if refuse_declared_interior and self.opensInsideDeclaredFdeRange(candidate_addr):
+                continue
             # MSVC precedes `push ebp; mov ebp, esp` with a `mov edi, edi` hotpatch pad, and the
             # pad is the function's entry -- a bare prologue match two bytes into one names the
             # body, not a function start. The pad is itself a DEFAULT_PROLOGUES entry scanned
@@ -633,6 +714,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         return False
 
     def locatePrologueCandidates(self):
+        # the patterns this scan seeds, so a later match can tell whether it begins
+        # where an earlier one ends and is therefore inside that function's body
+        self._seeded_prologues = tuple(DEFAULT_PROLOGUES)
+        if self.bitness == 64:
+            self._seeded_prologues += tuple(DEFAULT_PROLOGUES_64)
         # next check for the default function prologue regardless of references
         for re_prologue in DEFAULT_PROLOGUES:
             if self._seedPrologueMatches(re.escape(re_prologue)):
@@ -640,7 +726,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if self.bitness == 64:
             # extended GCC/Clang/MSVC AMD64 prologue family: a CET landing pad (endbr64) that may
             # prefix the real prologue, plus exact stack-frame openers.
-            if self._seedPrologueMatches(re.escape(ENDBR64_BYTES)):
+            # A landing pad marks every indirect-branch target, not every function, so gcc emits
+            # one at each jump-table destination and each exception landing pad inside a body.
+            # The image says which is which: an FDE covers one routine, so a pad that is not its
+            # range's own start is inside that routine. This is the only seeded pattern that
+            # names a place a branch can arrive rather than a way a function opens, so it is the
+            # only one the interior test applies to.
+            if self._seedPrologueMatches(re.escape(ENDBR64_BYTES), refuse_declared_interior=True):
                 return
             for re_prologue in DEFAULT_PROLOGUES_64:
                 if self._seedPrologueMatches(re.escape(re_prologue)):
@@ -704,39 +796,74 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     self.disassembly.data_map.add(stub_addr + 7 + offset)
 
     def locateExceptionHandlerCandidates(self):
-        # 64bit only - if we have a .pdata section describing exception handlers, we extract entries of guaranteed function starts from it.
+        # 64bit only - a PE x64 exception table enumerates guaranteed function starts.
         if self.disassembly.binary_info.bitness == 64:
             self.pdata_start_addresses = set()
             self.pdata_end_addresses = set()
+            self._pdata_ranges = []
+            self._pdata_range_starts = None
+            # A RUNTIME_FUNCTION table is a PE construct. Nothing else in this walk says so -
+            # it looks for a section named `.pdata`, and `getSections` yields for ELF and
+            # Mach-O too, so a 64-bit ELF carrying a section of that name would otherwise
+            # have its regions removed on the strength of bytes that mean something else.
+            is_pe = self.disassembly.binary_info._getLiefType() == "PE"
             record_pdata_ends = self.config.USE_PE_X64_PDATA_ENDS
             base_addr = self.disassembly.binary_info.base_addr
+            # the image's own directory is where the table's address is declared; the
+            # section name is only the convention MSVC happens to follow, and a
+            # ReadyToRun image puts the same table in .data
+            table = self.disassembly.binary_info.getExceptionDirectory()
             has_sections = False
             for section_info in self.disassembly.binary_info.getSections():
                 has_sections = True
                 section_name, section_va_start, section_va_end = section_info
-                if section_name == ".pdata":
-                    rva_start = section_va_start - self.disassembly.binary_info.base_addr
-                    rva_end = section_va_end - self.disassembly.binary_info.base_addr
-                    # .pdata entries are 12 bytes long (3 DWORDs): BeginAddress, EndAddress, UnwindInfoAddress
-                    for offset in range(rva_start, rva_end - 11, 12):
-                        packed_entry = self.disassembly.getRawBytes(offset, 12)
-                        if len(packed_entry) < 12:
-                            break
-                        rva_function_candidate, _rva_function_end, rva_unwind_info = struct.unpack("<III", packed_entry)
-                        if rva_function_candidate == 0:
-                            break
-                        self._admitExceptionRecord(
-                            base_addr,
-                            rva_function_candidate,
-                            _rva_function_end,
-                            rva_unwind_info,
-                            record_pdata_ends,
-                        )
-            if not has_sections:
+                if table is None and is_pe and section_name == ".pdata":
+                    table = (section_va_start, section_va_end)
+            if table is not None:
+                self._readExceptionTable(base_addr, table[0], table[1], record_pdata_ends)
+            elif not has_sections:
                 self._carveExceptionRecords(base_addr, record_pdata_ends)
 
-    def _admitExceptionRecord(self, base_addr, rva_function_candidate, rva_function_end, rva_unwind_info, ends):
-        if self._isChainedUnwindInfo(rva_unwind_info):
+    def _readExceptionTable(self, base_addr, va_start, va_end, record_pdata_ends):
+        """Admit every RUNTIME_FUNCTION in a declared exception table.
+
+        The declared size is a 32-bit field an image is free to overstate, and a
+        section extent is rounded up past what a truncated dump holds; the walk
+        stops at the first read that comes back short, so neither can send it
+        past the bytes that exist. What is left is a table as long as the image,
+        which is why the walk polls the timeout rather than only bounding itself.
+        """
+        rva_start = va_start - base_addr
+        rva_end = va_end - base_addr
+        # entries are 12 bytes (3 DWORDs): BeginAddress, EndAddress, UnwindInfoAddress
+        for index, offset in enumerate(range(rva_start, rva_end - 11, 12)):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return
+            packed_entry = self.disassembly.getRawBytes(offset, 12)
+            if len(packed_entry) < 12:
+                break
+            rva_function_candidate, rva_function_end, rva_unwind_info = struct.unpack("<III", packed_entry)
+            if rva_function_candidate == 0:
+                break
+            self._admitExceptionRecord(
+                base_addr,
+                rva_function_candidate,
+                rva_function_end,
+                rva_unwind_info,
+                record_pdata_ends,
+            )
+
+    def _admitExceptionRecord(
+        self, base_addr, rva_function_candidate, rva_function_end, rva_unwind_info, ends, declared=True
+    ):
+        chained = self._isChainedUnwindInfo(rva_unwind_info)
+        if declared and self._isTrustworthyExceptionExtent(rva_function_candidate, rva_function_end, rva_unwind_info):
+            # Every record's extent is kept, chained or not: the unwinder is naming the bytes
+            # that belong to a routine, which is as true of a fragment as of a whole function.
+            # Only the first byte differs, and the flag is what says which case this is.
+            self._pdata_ranges.append((base_addr + rva_function_candidate, base_addr + rva_function_end, chained))
+            self._pdata_range_starts = None
+        if chained:
             # UNW_FLAG_CHAININFO: this entry is a secondary fragment (e.g. a
             # split-off cold/epilogue chunk) chained to another function's
             # primary RUNTIME_FUNCTION entry, not an independent function start.
@@ -747,6 +874,43 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # (EndAddress <= BeginAddress) entries and keep them as VAs.
             self.pdata_start_addresses.add(base_addr + rva_function_candidate)
             self.pdata_end_addresses.add(base_addr + rva_function_end)
+
+    def _isTrustworthyExceptionExtent(self, rva_function_candidate, rva_function_end, rva_unwind_info):
+        """Whether a record's extent may be used to skip a region of the image.
+
+        Seeding a candidate from a record costs one bad address when the record is wrong.
+        Skipping a region on one costs every gap-only function it covers, because a gap
+        pointer sent past the end of the image ends gap analysis rather than resuming it.
+        That asymmetry decides both of the things this function is.
+
+        Only records from a table the image declares reach it at all. A dump keeps its
+        mapped bytes but usually not a section header, so the table has to be found in the
+        bytes instead, and a table located by searching for one is a reconstruction: good
+        enough to add candidates, not good enough to remove regions. That is why `declared`
+        gates this rather than the checks below being made stricter.
+
+        A declared table still has to earn it. The section-table path reads twelve bytes
+        wherever the section header points with nothing checking that they describe a
+        function, and a truncated or deliberately malformed table is ordinary input for
+        this disassembler. These are the bounds `_readExceptionRecord` already applies when
+        the table has to be found in a headerless dump instead of being pointed at. The
+        unwind record is among them because `_isChainedUnwindInfo` reads its first byte,
+        and a chained record is the one case whose extent suppresses without the analysis
+        having recovered the function it names.
+
+        A record that fails this is still seeded as a candidate exactly as before. It only
+        stops speaking for the bytes around it.
+        """
+        if rva_function_end <= rva_function_candidate:
+            return False
+        if rva_function_end > len(self.disassembly.binary_info.binary):
+            return False
+        if rva_function_end - rva_function_candidate > _PDATA_MAX_FUNCTION_SIZE:
+            return False
+        if rva_unwind_info & 3:
+            return False
+        header_byte = self.disassembly.getRawBytes(rva_unwind_info, 1)
+        return bool(header_byte) and header_byte[0] in _UNWIND_INFO_FIRST_BYTES
 
     def _readExceptionRecord(self, binary, size, offset, previous_end):
         """returns a validated RUNTIME_FUNCTION triple at offset, or None."""
@@ -825,7 +989,41 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             rva_start, rva_end, rva_unwind_info = struct.unpack_from(
                 "<III", binary, table_offset + index * _PDATA_ENTRY_SIZE
             )
-            self._admitExceptionRecord(base_addr, rva_start, rva_end, rva_unwind_info, record_pdata_ends)
+            self._admitExceptionRecord(
+                base_addr, rva_start, rva_end, rva_unwind_info, record_pdata_ends, declared=False
+            )
+
+    def declaredExceptionRangeContaining(self, addr):
+        """The RUNTIME_FUNCTION extent `addr` sits inside without being an entry, or None.
+
+        `(start, end, is_chained)`. A primary record's own start is the function's entry, so
+        only a strictly interior address answers; a chained record describes a fragment of
+        some other function, so its first byte is interior too and answers as well.
+
+        Extents are deliberately not merged. Functions are laid out end-to-start, so merging
+        adjacent records would collapse the text section into a handful of spans in which
+        every address but the first reads as interior.
+        """
+        if self._pdata_range_starts is None:
+            self._pdata_ranges.sort()
+            self._pdata_range_starts = [start for start, _, _ in self._pdata_ranges]
+            # Sorting by start does not order the ends, so "the previous record ends before
+            # `addr`" says nothing about the one before that. Two short records in front of
+            # a long one would end the walk on top of the extent that actually covers the
+            # address. The running maximum is what can be tested in one step: once no record
+            # at or before this index reaches past `addr`, none of them contains it.
+            highest = 0
+            self._pdata_range_reach = []
+            for _, end, _chained in self._pdata_ranges:
+                highest = max(highest, end)
+                self._pdata_range_reach.append(highest)
+        index = bisect.bisect_right(self._pdata_range_starts, addr) - 1
+        while index >= 0 and self._pdata_range_reach[index] > addr:
+            start, end, chained = self._pdata_ranges[index]
+            if addr < end and (start < addr or chained):
+                return start, end, chained
+            index -= 1
+        return None
 
     def _isChainedUnwindInfo(self, rva_unwind_info):
         # x64 UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7);

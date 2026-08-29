@@ -868,6 +868,146 @@ class TestAArch64PrologueDiscovery(unittest.TestCase):
         self.assertEqual(report.status, "ok")
         self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0xC, BASE + 0x18})
 
+    def _btiPadOnly(self, pad, **overrides):
+        """A landing pad reached only by an unresolved `br`, which is the corpus shape.
+
+        A pad the engine can reach from inside a function is absorbed by the analysis whatever
+        the prologue scan did, so it cannot show this rule doing anything. The pads that became
+        false positives are the ones behind an indirect branch nothing resolves: no analysis
+        covers them, and both the prologue scan and the gap scan then get a turn at booking
+        them, which is why the rule lives in the predicate they share.
+        """
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        for name, value in overrides.items():
+            setattr(config, name, value)
+        words = [
+            0xD503233F,  # 0x401000 paciasp
+            0xD61F0020,  # 0x401004 br x1        -- target unresolved
+            pad,  # 0x401008 the landing pad under test
+            0x52800020,  # 0x40100c mov w0, #1
+            0xD65F03C0,  # 0x401010 ret
+        ]
+        code = b"".join(word.to_bytes(4, "little") for word in words)
+        report = Disassembler(config, backend="aarch64").disassembleBuffer(
+            code, base_addr=BASE, bitness=64, code_areas=[[BASE, BASE + len(code)]]
+        )
+        self.assertEqual(report.status, "ok")
+        return {function.offset for function in report.getFunctions()}
+
+    def test_a_jump_only_bti_pad_is_not_an_entry(self):
+        """`bti j` permits a target reached by `br`, never by `blr`, so a call cannot land here.
+
+        Asserted against the whole recovered set rather than the pad's absence. The first
+        version of this checked only that `BASE + 0x8` was gone, and passed while the false
+        positive moved four bytes to `BASE + 0xc` -- the scan refused the pad and then met its
+        first body instruction, which is ordinary code and passes every remaining guard.
+        """
+        self.assertEqual({BASE}, self._btiPadOnly(0xD503249F))  # bti j
+
+    def test_a_call_target_bti_pad_in_the_same_place_is_an_entry(self):
+        # the other arm, so the pair fails if the rule is widened to every BTI form: the only
+        # difference from the case above is C for J
+        self.assertEqual({BASE, BASE + 0x8}, self._btiPadOnly(0xD503245F))  # bti c
+
+    def test_a_call_and_jump_bti_pad_is_still_an_entry(self):
+        # `bti jc` permits a call as well as a jump, so it says nothing against an entry
+        self.assertEqual({BASE, BASE + 0x8}, self._btiPadOnly(0xD50324DF))  # bti jc
+
+    def test_the_jump_only_pad_is_booked_again_with_the_flag_off(self):
+        # the flag is what refuses it, not some other guard reached along the way, so deleting
+        # the check makes the first test above fail rather than silently passing
+        self.assertEqual({BASE, BASE + 0x8}, self._btiPadOnly(0xD503249F, USE_AARCH64_BTI_TARGET_TYPE=False))
+
+    def test_the_body_of_a_refused_pad_is_not_promoted_in_its_place(self):
+        """Refusing a pad has to move the scan past the block it labels, not past the pad.
+
+        Pinned separately from the assertions above because it is the part that a
+        set-equality check happens to cover rather than states: the pad's body is ordinary
+        code, so one step past a refused pad puts the scan on an address every remaining
+        guard accepts.
+        """
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        manager = FunctionCandidateManager(config)
+        words = [
+            0xD503249F,  # 0x401000 bti j        -- the refused pad
+            0x52800020,  # 0x401004 mov w0, #1   -- its body, which must not be reconsidered
+            0x52800041,  # 0x401008 mov w1, #2
+            0xD65F03C0,  # 0x40100c ret          -- the block ends here
+            0xD503233F,  # 0x401010 paciasp      -- the next thing the scan may look at
+        ]
+        binary = b"".join(word.to_bytes(4, "little") for word in words)
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        binary_info.binary_size = len(binary)
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+        self.assertEqual(BASE + 0x10, manager._endOfRefusedLandingPadRun(BASE))
+
+    def test_a_trap_ends_the_pad_run_like_any_other_terminator(self):
+        """`brk`, `hlt` and `udf` end a function in the backend, so they end this walk.
+
+        Without them the skip reads past the trap to the next `ret` and swallows whatever
+        lies between -- and what lies after a trap is exactly the unreferenced, gap-only
+        routine this scan exists to reach, so the cost of getting it wrong is recall.
+        """
+        for name, trap in (("brk #1", 0xD4200020), ("hlt #1", 0xD4400020), ("udf #0x36", 0x00000036)):
+            with self.subTest(terminator=name):
+                config = SmdaConfig()
+                config.WITH_STRINGS = False
+                manager = FunctionCandidateManager(config)
+                words = [
+                    0xD503249F,  # 0x401000 bti j       -- the refused pad
+                    0x52800020,  # 0x401004 mov w0, #1
+                    trap,  # ......  0x401008 the trap, which ends the block
+                    0xD503233F,  # 0x40100c paciasp     -- a gap-only routine the scan must reach
+                    0x52800040,  # 0x401010 mov w0, #2
+                    0xD65F03C0,  # 0x401014 ret
+                ]
+                binary = b"".join(word.to_bytes(4, "little") for word in words)
+                binary_info = BinaryInfo(binary)
+                binary_info.base_addr = BASE
+                binary_info.binary_size = len(binary)
+                manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+                self.assertEqual(BASE + 0xC, manager._endOfRefusedLandingPadRun(BASE))
+
+    def test_a_pad_run_with_no_terminator_in_reach_falls_back_to_one_step(self):
+        # an unbounded skip on undecodable bytes would cost every function after it, which is
+        # the failure mode a bad extent had in the x64 exception-directory rule
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        manager = FunctionCandidateManager(config)
+        binary = b"".join((0x52800020).to_bytes(4, "little") for _ in range(0x200))
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        binary_info.binary_size = len(binary)
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+        self.assertEqual(BASE + 4, manager._endOfRefusedLandingPadRun(BASE))
+
+    def test_both_passes_that_book_a_pad_consult_the_same_rule(self):
+        """The gap scan reaches these addresses too, and refuses them for the same reason.
+
+        Asserted on the predicate rather than through a second fixture because the two callers
+        differ only in which address they are standing on: a rule that lived in one of them
+        would leave the other booking exactly what the first refused.
+        """
+        binary = b"".join(word.to_bytes(4, "little") for word in [0xD65F03C0, 0xD503249F])
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+        manager._candidate_offsets = set()
+
+        # preceded by a `ret`, the boundary shape the surrounding checks read as an entry
+        self.assertTrue(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503249F))
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
+
+    def test_the_flag_is_on_by_default(self):
+        self.assertTrue(SmdaConfig().USE_AARCH64_BTI_TARGET_TYPE)
+
     def test_prologue_scan_skips_addresses_outside_code_areas(self):
         prologue = 0xA9BF7BFD.to_bytes(4, "little")
         binary_info = BinaryInfo(prologue * 2)
@@ -1709,7 +1849,7 @@ class TestAArch64GapScan(unittest.TestCase):
         manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
         manager._candidate_offsets = set()
 
-        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
 
     def test_bti_after_trap_is_not_suppressed_as_interior(self):
         # a trap (brk/udf/hlt) ends control flow like ret/b, so a BTI right after a
@@ -1728,7 +1868,7 @@ class TestAArch64GapScan(unittest.TestCase):
             manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
             manager._candidate_offsets = set()
 
-            self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+            self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
 
     def test_bti_after_drps_is_not_suppressed_as_interior(self):
         # drps (Debug Restore PState) transfers control to ELR_ELx like eret*, so a BTI
@@ -1746,7 +1886,7 @@ class TestAArch64GapScan(unittest.TestCase):
         manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
         manager._candidate_offsets = set()
 
-        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
 
     def test_prologue_scan_stops_when_the_analysis_timeout_is_already_tripped(self):
         binary_info = BinaryInfo(b"\x00" * 8)
@@ -1797,17 +1937,25 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x534)
-        self.assertEqual(len(self.report.xcfg), 278)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19881)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3497)
+        self.assertEqual(len(self.report.xcfg), 276)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19735)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3476)
         self.assertIsNotNone(self.report.getFunction(0x400534))
 
     def test_real_fixture_gap_scan_recovery(self):
         # Functions recovered only by the gap scan (#3): unreferenced / indirect-only
-        # routines that no BL, prologue, or stored pointer reaches. With the gap scan
-        # every Binary Ninja function start is now recovered.
-        for function_start in (0x40CFE0, 0x40DD78, 0x40DF34, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
+        # routines that no BL, prologue, or stored pointer reaches.
+        for function_start in (0x40CFE0, 0x40DD78, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
             self.assertIsNotNone(self.report.getFunction(function_start), f"missing 0x{function_start:x}")
+
+        # 0x40DF34 is the one Binary Ninja start this fixture no longer recovers, and it is a
+        # cost rather than a correction. USE_ELF_FDE_INTERIOR_GAPS refuses it because the FDE
+        # at 0x40DDC0 covers it, and that FDE really is one unwind range: 0x40DF34 repeats the
+        # range's opening minus its `prfm` prefetch, so it is an alternate entry sharing one
+        # frame rather than a routine of its own. The unwinder and Binary Ninja disagree about
+        # whether that counts as a function; the rule follows the unwinder. Asserted rather
+        # than dropped from the list so the disagreement stays visible.
+        self.assertIsNone(self.report.getFunction(0x40DF34))
 
     def test_real_fixture_data_pointer_recovery(self):
         # init_array / data pointer-table functions recovered by #2, none of which
@@ -1849,7 +1997,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
         self.assertEqual(roundtrip.oep, 0x534)
-        self.assertEqual(len(roundtrip.xcfg), 278)
+        self.assertEqual(len(roundtrip.xcfg), 276)
 
 
 class TestAArch64Analyzers(unittest.TestCase):
@@ -2624,7 +2772,7 @@ class TestAArch64Analyzers(unittest.TestCase):
 
         baseline = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(binary)
         self.assertEqual(baseline.confidence_threshold, 0.0)
-        self.assertEqual(baseline.num_functions, 278)
+        self.assertEqual(baseline.num_functions, 276)
         self.assertTrue(all(f.tfidf is not None for f in baseline.getFunctions()))
         self.assertTrue(any(f.tfidf < 0 for f in baseline.getFunctions()))
         self.assertTrue(any(f.confidence == 0.0 for f in baseline.getFunctions()))
