@@ -51,9 +51,10 @@ dev = [
     "ruff",
     # pinned: ty is pre-1.0 and adds lint rules in patch releases, so an unpinned
     # floating version reddens unrelated PRs on someone else's release schedule
-    # (0.0.69/0.0.70 added unsound-return-statement and unsound-yield, 35 errors
-    # against an unchanged tree). Bump deliberately, with the new rules addressed.
-    "ty==0.0.69",
+    # (0.0.69/0.0.70 added unsound-return-statement and unsound-yield; 0.0.74
+    # promotes those plus unsound-assignment). Bump deliberately, with the new
+    # rules addressed.
+    "ty==0.0.74",
     "tqdm",
     "twine",
 ]
@@ -208,7 +209,9 @@ rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
 
 [[tool.ty.overrides]]
 include = ["src/smda/cil/CilDisassembler.py"]
-rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore" }
+# dnfile/dncil expose heap lookups and PE reads as Any/Unknown; ty 0.0.74 treats
+# those as unsound against the local bytes/str annotations rather than as gradual Any.
+rules = { "invalid-assignment" = "ignore", "not-iterable" = "ignore", "unsound-assignment" = "ignore", "unsound-return-statement" = "ignore" }
 
 # LIEF's type stubs declare PE Section.name as bytes; the runtime returns str.
 [[tool.ty.overrides]]
