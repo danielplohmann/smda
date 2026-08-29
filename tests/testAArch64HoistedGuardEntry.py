@@ -1,13 +1,9 @@
 """A guard hoisted above the frame setup is a function's first instruction, not a stray tail.
 
 At -O2 a compiler emits an argument check ahead of the prologue, so the routine opens on a
-`cbz`/`cbnz` and its frame setup sits one instruction in. The gap scan used to refuse a
-leading conditional branch outright, on the claim that a function never opens with one, and
-so it walked past such an entry and booked the frame setup four bytes along instead -- a miss
-and a false positive from one routine. The tests below hold the scan to telling that shape
-apart from the one the claim is actually true of: a conditional branch that follows ordinary
-code inside a function, which the analysis has to keep out by having already claimed it
-rather than by refusing the word.
+`cbz`/`cbnz` and its frame setup sits one instruction in. What separates that from the shape
+the same word class really does take mid-function is position, not the word, so each case
+below is paired with the other.
 """
 
 import unittest
@@ -18,8 +14,7 @@ from smda.SmdaConfig import SmdaConfig
 
 BASE = 0x400000
 IMAGE_SIZE = 0x2100
-#: where every image below puts the routine under test: past the scaffold, 16-aligned, and
-#: reached by nothing the scaffold does
+#: past the scaffold, 16-aligned, and reached by nothing the scaffold does
 REGION = BASE + 0x2000
 
 NOP = 0xD503201F
@@ -32,12 +27,10 @@ MOV_W0_1 = 0x52800020  # mov w0, #1
 MOV_W1_2 = 0x52800041  # mov w1, #2
 MOV_W2_3 = 0x52800062  # mov w2, #3
 
-#: enough call-referenced entries, all 16-aligned, for the alignment floor to infer 16.
-#: The inference needs more than twenty candidates carrying more than one reference each.
+#: enough call-referenced 16-aligned entries, each carrying more than one reference, for the
+#: alignment floor to infer 16
 LEAF_COUNT = 22
 LEAVES = tuple(BASE + 0x1000 + index * 0x10 for index in range(LEAF_COUNT))
-#: everything the scaffold itself contributes to the recovered set, so a test can compare
-#: the whole rest of that set against what the region under test should produce
 SCAFFOLD_ENTRIES = frozenset({BASE, *LEAVES})
 
 
@@ -54,13 +47,10 @@ def _cbz(source, target):
 
 
 def _scaffold(words, called=()):
-    """The leaves and their caller, giving the alignment floor a population to infer 16 from.
-
-    Without it the floor is 0 and a routine is refused or admitted on its alignment rather
-    than on the word it opens with, which is not what any of these tests is asking about.
-    Each address in `called` is called from the same caller, which is how a routine in one of
-    these images is recovered by the first pass instead of by the gap scan.
-    """
+    """The leaves and their caller, so the alignment floor infers 16 rather than 0 and no
+    routine below is refused on its alignment instead of on the word it opens with. An address
+    in `called` is called twice from that caller, which is how a routine here reaches the first
+    pass instead of the gap scan."""
     for leaf in LEAVES:
         words.update({leaf: PROLOGUE, leaf + 4: MOV_W0_1, leaf + 8: EPILOGUE, leaf + 12: RET})
     address = BASE
@@ -91,15 +81,11 @@ def _disassemble(image):
 
 
 class HoistedGuardEntryTest(unittest.TestCase):
-    """The routine's first word is the guard the compiler hoisted above its frame setup.
-
-    Nothing calls it and its first word is no prologue, so the gap scan is the only pass that
-    can reach it. The frame setup one word in is 4-aligned and nothing calls it either, so the
-    alignment floor keeps it out of the first pass -- which is why refusing the entry did not
-    simply lose the routine: the start booked in its place came from the same gap scan, four
-    bytes past the entry it had just walked over, and the guard's own target became a second
-    one. Recovering the entry removes both.
-    """
+    """Nothing calls the routine and its first word is no prologue, so the gap scan is the only
+    pass that reaches it. The frame setup one word in is 4-aligned and uncalled, so the
+    alignment floor keeps it out of the first pass too -- which is why refusing the entry did
+    not simply lose the routine: the start booked in its place came from the same gap scan,
+    four bytes on, and the guard's own target became a second one."""
 
     def _image(self):
         words = {}
@@ -128,25 +114,19 @@ class HoistedGuardEntryTest(unittest.TestCase):
         self.assertIn(REGION, self.functions)
 
     def testTheRoutineIsRecoveredAsOneFunctionAndNothingElse(self):
-        # The whole set is compared rather than the frame setup's absence alone: refusing the
-        # entry booked both that word and the guard's own target, so an assertion naming one
-        # address would go on passing with the false positive moved along.
+        # the whole set, not the frame setup's absence alone: an assertion naming one address
+        # goes on passing with the false positive moved four bytes along
         self.assertEqual(self.functions - SCAFFOLD_ENTRIES, {REGION})
 
     def testTheScaffoldAroundTheRoutineIsRecovered(self):
-        """Control. An image that analysed into nothing at all would satisfy the assertion
-        above about what is absent for a reason that has nothing to do with guards."""
+        """Control: an image that analysed into nothing would satisfy the assertion above."""
         self.assertEqual(sorted(SCAFFOLD_ENTRIES - self.functions), [])
 
 
 class MidFunctionConditionalBranchTest(unittest.TestCase):
-    """Control for the case above: the shape the gap scan's guard is written for.
-
-    The same class of word, in the position where the claim behind the guard holds -- after
-    ordinary code, inside a routine the first pass already recovered from its call reference.
-    There it is a block tail and must not be booked as a function start, whatever the scan
-    decides about a conditional branch that opens a routine.
-    """
+    """Control for the case above: the same word class after ordinary code, inside a routine the
+    first pass already recovered from its call reference. There it is a block tail and must stay
+    out of the function set whatever the scan does with one that opens a routine."""
 
     def _image(self):
         words = {}
@@ -173,27 +153,20 @@ class MidFunctionConditionalBranchTest(unittest.TestCase):
         self.functions = {function.offset for function in report.getFunctions()}
 
     def testTheBlockTailIsNotBookedAsAFunctionStart(self):
-        # again the whole set, so that neither the branch nor either of the two arms it
-        # decides between can become a function under another address
+        # again the whole set: neither the branch nor either arm may become a function
         self.assertEqual(self.functions - SCAFFOLD_ENTRIES, {REGION})
 
     def testTheBranchIsTheSameWordClassAsTheOneOpeningAGuardedEntry(self):
-        """Control: the two cases are told apart by position and by nothing else. Both words
-        are what `is_conditional_branch` matches, so nothing about the word itself keeps this
-        one out -- it stays out because the routine around it was claimed first."""
+        """Control: both words are what `is_conditional_branch` matches, so what tells the two
+        cases apart is position -- this one stays out because its routine was claimed first."""
         self.assertTrue(is_conditional_branch(_cbz(REGION + 0x0C, REGION + 0x18)))
         self.assertTrue(is_conditional_branch(_cbz(REGION, REGION + 0x18)))
 
 
 class UnclaimedConditionalBranchWithoutAFrameSetupTest(unittest.TestCase):
-    """A conditional branch opening an unclaimed gap, with ordinary code behind it.
-
-    Nothing calls this block and no prologue follows the branch, so neither the hoisted-guard
-    reading nor the block-tail reading is confirmed by the words around it. This is the
-    population that decided how far the guard could go: refusing the word never kept the
-    region out of the function set, it only moved the start four bytes along, so there was no
-    reduction in false starts to weigh against the entries the refusal cost.
-    """
+    """A conditional branch opening an unclaimed gap, with ordinary code rather than a frame
+    setup behind it, so neither reading is confirmed by its surroundings. This is the population
+    that decided how far the guard could go."""
 
     def _image(self):
         words = {}
@@ -215,20 +188,13 @@ class UnclaimedConditionalBranchWithoutAFrameSetupTest(unittest.TestCase):
         self.functions = {function.offset for function in report.getFunctions()}
 
     def testTheScanBooksTheBlockAtItsFirstWord(self):
-        """One start either way; the guard only decided which word it sat on.
-
-        With the refusal in place this was `{REGION + 0x04}` -- a function beginning one
-        instruction into the block, because the scan stepped over the branch and booked the
-        next word. Without it the same single start lands on the block's real first word.
-        Narrowing the refusal to entries a frame setup vouches for would have put it back at
-        `+0x04`, which is why narrowing was not the cheaper half of the choice.
-        """
+        """One start either way; the refusal only decided which word it sat on -- `+0x04` with
+        it, the block's real first word without. Narrowing it to entries a frame setup vouches
+        for would have put it back at `+0x04`, which is why narrowing bought nothing here."""
         self.assertEqual(self.functions - SCAFFOLD_ENTRIES, {REGION})
 
     def testTheRegionIsOneFunctionStartUnderEitherRule(self):
-        """Control: the count did not move, only the address did. The refusal bought no
-        reduction in false starts over this shape, which is what made it the deciding
-        population rather than the guarded-entry one."""
+        """Control: the count did not move, only the address did."""
         starts = self.functions - SCAFFOLD_ENTRIES
         self.assertEqual(len(starts), 1)
         self.assertEqual([hex(start) for start in starts if not REGION <= start < REGION + 0x10], [])
