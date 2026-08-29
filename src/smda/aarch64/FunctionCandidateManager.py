@@ -138,9 +138,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self.locatePeExceptionCandidates()
         if self._candidateTimeoutTripped():
             return
-        # everything booked so far came from something the image says about itself, which is
-        # what the coverage test below compares its call targets against
-        self._metadata_candidates = set(self.candidates)
+        # what the coverage test below compares its call targets against: everything the image
+        # says about itself, which is not the same set as what has been booked by now
+        self._metadata_candidates = set(self.candidates) | self._languageMetadataStarts()
         self.locateReferenceCandidates()
         if self._candidateTimeoutTripped():
             return
@@ -594,6 +594,20 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     continue
                 self.addReferenceCandidate(target, pointer_va)
                 self.setInitialCandidate(target)
+
+    def _languageMetadataStarts(self):
+        """Function starts the image's own language metadata names, booked as candidates or not.
+
+        Two passes that read such metadata are not in self.candidates at this point:
+        locateLangSpecCandidates runs after the coverage test, and locateSymbolCandidates is
+        optional (USE_SYMBOLS_AS_CANDIDATES). Neither is a proxy for what the image declares,
+        and the test asks about the image rather than about the configuration -- reading it
+        here is what keeps a Go binary analysed without symbol candidates from being treated
+        as one that names nothing.
+        """
+        if not self.lang_analyzer.checkGo():
+            return set()
+        return set(self.lang_analyzer.getGoObjects())
 
     def _metadataNamedTheCallTargets(self):
         """Whether this image's metadata has already supplied the functions, leaving the

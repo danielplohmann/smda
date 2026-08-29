@@ -9,8 +9,11 @@ Instruction encodings below were verified against capstone 5.0.7 (CS_ARCH_ARM64)
 
 import struct
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from smda.aarch64.FunctionCandidateManager import _METADATA_MIN_CALL_TARGETS, FunctionCandidateManager
+from smda.common.LanguageAnalyzer import LanguageAnalyzer
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.SmdaConfig import SmdaConfig
@@ -366,6 +369,60 @@ class AddressScanIsSkippedWhenMetadataNamedTheCallsTest(unittest.TestCase):
 
         self.assertEqual(report.status, "ok")
         self.assertIn(table, functions)
+
+
+class LanguageMetadataDecidesIndependentlyOfSymbolCandidatesTest(unittest.TestCase):
+    """USE_SYMBOLS_AS_CANDIDATES turns off booking symbols as candidates, not the image's own
+    language metadata. A Go image's pclntab is read by locateLangSpecCandidates whatever that
+    option says, and that pass runs after this test -- so the test has to read the metadata
+    rather than the candidate set, or a fully mapped Go image is treated as naming nothing and
+    the scan it exists to suppress runs anyway.
+
+    Driven by forcing the Go answer on the real analyzer: what is under test is which pass the
+    coverage is read from, not whether a synthetic pclntab parses.
+    """
+
+    def _functionsWithGoMetadata(self, blob, go_objects, use_symbols):
+        class _GoAnalyzer(LanguageAnalyzer):
+            def checkGo(self):
+                return True
+
+            def getGoObjects(self):
+                return list(go_objects)
+
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        config.USE_SYMBOLS_AS_CANDIDATES = use_symbols
+        with patch("smda.common.FunctionCandidateManager.LanguageAnalyzer", _GoAnalyzer):
+            report = Disassembler(config).disassembleUnmappedBuffer(blob)
+        return report, {function.offset for function in report.getFunctions()}
+
+    def testTheScanIsSkippedWhetherOrNotSymbolsAreBooked(self):
+        blob, table = _tableImage(BASE, named=False)
+        go_objects = sorted(_callTargets(BASE + TEXT_OFFSET))
+
+        for use_symbols in (True, False):
+            with self.subTest(use_symbols=use_symbols):
+                report, functions = self._functionsWithGoMetadata(blob, go_objects, use_symbols)
+
+                self.assertEqual(report.status, "ok")
+                self.assertNotIn(table, functions)
+                self.assertIn(BASE + TEXT_OFFSET, functions)
+
+    def testTheSameImageWithoutTheGoMetadataStillBooksTheTable(self):
+        """Control on what decided it: the image is the one the scan books, and it is the
+        metadata reading and not the image that keeps the table out above."""
+        blob, table = _tableImage(BASE, named=False)
+        report, functions = _functions(blob)
+
+        self.assertEqual(report.status, "ok")
+        self.assertIn(table, functions)
+
+    def testAnImageOfNoRecognizedLanguageContributesNoMetadata(self):
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.lang_analyzer = SimpleNamespace(checkGo=lambda: False)
+
+        self.assertEqual(manager._languageMetadataStarts(), set())
 
 
 class ManagerReuseTest(unittest.TestCase):
