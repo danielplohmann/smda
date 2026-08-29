@@ -1177,7 +1177,15 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertIsNone(X86Backend._resolveImportSlot(disassembler, 0x1000))
 
-    def _analyzeCallAlignmentCut(self, tail_bytes, lief_type="PE", bitness=64, candidate_addrs=None):
+    def _analyzeCallAlignmentCut(
+        self,
+        tail_bytes,
+        lief_type="PE",
+        bitness=64,
+        candidate_addrs=None,
+        previous_mnemonic="call",
+        padding_fills_line=True,
+    ):
         # lays out: call rel32 @ call_addr; effective-NOP padding ("mov eax, eax" x5,
         # then a 1-byte "nop") up to the next 16-byte boundary (align_addr); tail_bytes
         # at align_addr. The padding must use a real-mnemonic effective NOP (not
@@ -1197,7 +1205,14 @@ class TestIntelDisassembler(unittest.TestCase):
         data[rel_call : rel_call + 5] = b"\xe8\x00\x00\x00\x00"
         pad_len = align_addr - pad_start
         rel_pad = pad_start - base_addr
-        padding = b"\x8b\xc0" * ((pad_len - 1) // 2) + b"\x90" * (pad_len - 2 * ((pad_len - 1) // 2))
+        if previous_mnemonic == "call":
+            padding = b"\x8b\xc0" * ((pad_len - 1) // 2) + b"\x90" * (pad_len - 2 * ((pad_len - 1) // 2))
+        elif padding_fills_line:
+            # a real GAP_SEQUENCES run: only these reach the cut when no call precedes it
+            padding = b"\x90" * pad_len
+        else:
+            # filler that stops short, with live code between it and the boundary
+            padding = b"\x90" * (pad_len - 3) + b"\x39\xd8\xc3"
         assert len(padding) == pad_len
         data[rel_pad : rel_pad + pad_len] = padding
         rel_tail = align_addr - base_addr
@@ -1221,8 +1236,10 @@ class TestIntelDisassembler(unittest.TestCase):
             _getDisasmWindowBuffer=_get_window,
         )
         state = FunctionAnalysisState(call_addr, SimpleNamespace())
-        previous_instruction = (call_addr, 5, "call", "0x407000")
-        current_instruction = (pad_start, 2, "mov", "eax, eax")
+        previous_instruction = (call_addr, 5, previous_mnemonic, "0x407000")
+        current_instruction = (
+            (pad_start, 2, "mov", "eax, eax") if previous_mnemonic == "call" else (pad_start, 1, "nop", "")
+        )
 
         backend = X86Backend()
         result = backend.analyzeInstruction(
@@ -1279,6 +1296,80 @@ class TestIntelDisassembler(unittest.TestCase):
         self.assertTrue(state.is_sanely_ending)
         self.assertTrue(state.is_block_ending_instruction)
         self.assertEqual(fc_manager.added_candidates, [align_addr])
+
+    def _paddingWindow(self, window_bytes):
+        d = SimpleNamespace(_getDisasmWindowBuffer=lambda addr: window_bytes)
+        return X86Backend._paddingFillsToAlignment(d, self.PADDING_ADDR)
+
+    #: five bytes short of the next 16-byte boundary, so a run has somewhere to fill
+    PADDING_ADDR = 0x40100B
+
+    #: "push rbx; sub rsp, 0x20" -- an entry at the boundary, so the run demonstrably ends there
+    ENTRY_TAIL = b"\x40\x53\x48\x83\xec\x20\x90\x90\x90\x90"
+
+    def test_padding_run_filling_the_line_is_recognized(self):
+        # 0f 1f 44 00 00 is the 5-byte nop, and 5 is exactly the distance to the boundary
+        self.assertTrue(self._paddingWindow(b"\x0f\x1f\x44\x00\x00" + self.ENTRY_TAIL))
+
+    def test_padding_run_assembled_from_several_encodings_is_recognized(self):
+        # a 3-byte nop then a 2-byte one: the run is read whole, not one encoding deep
+        self.assertTrue(self._paddingWindow(b"\x0f\x1f\x00\x66\x90" + self.ENTRY_TAIL))
+
+    def test_a_lone_nop_inside_real_code_is_not_padding(self):
+        # one nop and then an instruction: this is a scheduling slot or a patch point, not
+        # the run that separates two functions, and cutting here would split a live function
+        self.assertFalse(self._paddingWindow(b"\x90\x39\xd8\xc3\x90" + self.ENTRY_TAIL))
+
+    def test_a_run_that_carries_on_past_the_boundary_is_not_padding(self):
+        # the boundary sits inside the run, so it aligns nothing: cutting on it would seed an
+        # entry in the middle of the padding rather than at the function the padding precedes
+        self.assertFalse(self._paddingWindow(b"\x90" * 15))
+
+    def test_an_address_already_on_the_boundary_has_no_run_to_read(self):
+        d = SimpleNamespace(_getDisasmWindowBuffer=lambda addr: b"\x90" * 15)
+
+        self.assertFalse(X86Backend._paddingFillsToAlignment(d, 0x401000))
+
+    def test_a_window_truncated_at_the_boundary_is_not_padding(self):
+        # the image ends where the run does, so nothing shows the run stops rather than the
+        # readable bytes stopping
+        self.assertFalse(self._paddingWindow(b"\x90" * 5))
+
+    def test_the_cut_is_taken_after_a_non_call_when_padding_fills_the_line(self):
+        # the defect this covers: GCC pads between functions whatever the previous one ended with,
+        # so a predecessor ending in anything but a call left the padding decoded as code and
+        # the next function swallowed into it
+        tail = b"\x40\x53\x48\x83\xec\x20\x90\x90\x90"
+        result, state, fc_manager, align_addr = self._analyzeCallAlignmentCut(
+            tail, previous_mnemonic="jmp", padding_fills_line=True
+        )
+
+        self.assertTrue(result)
+        self.assertTrue(state.is_block_ending_instruction)
+        self.assertEqual(fc_manager.added_candidates, [align_addr])
+
+    def test_a_non_call_cut_needs_an_entry_shaped_seed_on_elf_too(self):
+        # GCC aligns loop heads with the same encodings it pads between functions with, and on
+        # ELF nothing else stands between the two: the call that exempts other formats from the
+        # entry-shape test is exactly the prior this path does not have
+        tail = b"\x39\xd8\xc3\x90\x90\x90\x90\x90\x90"
+        result, state, fc_manager, _align_addr = self._analyzeCallAlignmentCut(
+            tail, lief_type="ELF", previous_mnemonic="jmp"
+        )
+
+        self.assertFalse(result)
+        self.assertFalse(state.is_block_ending_instruction)
+        self.assertEqual(fc_manager.added_candidates, [])
+
+    def test_the_cut_is_not_taken_after_a_non_call_when_the_run_stops_short(self):
+        tail = b"\x40\x53\x48\x83\xec\x20\x90\x90\x90"
+        result, state, fc_manager, _align_addr = self._analyzeCallAlignmentCut(
+            tail, previous_mnemonic="jmp", padding_fills_line=False
+        )
+
+        self.assertFalse(result)
+        self.assertFalse(state.is_block_ending_instruction)
+        self.assertEqual(fc_manager.added_candidates, [])
 
 
 class _StubChainCandidateManager(FunctionCandidateManager):
