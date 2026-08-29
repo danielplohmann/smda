@@ -54,6 +54,18 @@ class SmdaConfig:
     # are only performed where the interior .pdata start has a non-fall-through inbound
     # jmp/call from another recovered function, never from candidate membership alone.
     USE_PE_X64_PDATA_ENDS = False
+    # Route a ReadyToRun assembly to the instruction set of its precompiled native body
+    # instead of to the CIL backend. Such an assembly ships both, and the CLR header is why
+    # the CIL half wins by default; the native half is then never analysed at all.
+    # Off by default because this changes what `disassembleFile` returns for a whole file
+    # format, and on by request because there is no way to have both: a CIL report
+    # addresses methods by file offset and a native report by virtual address, so merging
+    # them would put two address spaces in one `offset` field and make it uninterpretable.
+    # One address space per report, chosen by the caller, is the only version of this that
+    # does not break the report contract.
+    # Inert unless the image is a ReadyToRun assembly whose COFF machine field names an
+    # instruction set with a backend - there is nothing honest to route on otherwise.
+    USE_READYTORUN_NATIVE_ROUTING = False
     # promote unclaimed ELF .eh_frame FDE starts as late candidates on both instruction sets
     # (after the primary pass, before gap analysis). Unwind ranges are not function starts by
     # definition - .eh_frame also covers ranges that are not independent functions. Measured
