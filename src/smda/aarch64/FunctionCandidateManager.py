@@ -898,10 +898,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # AArch64 gap scan: a fixed-stride linear sweep of unanalyzed executable bytes
         # for functions that no prologue, call reference or stored pointer reached
         # (typically unreferenced / indirect-only routines). Guards keep each gap
-        # candidate at a plausible function entry: skip padding (nop / zero), a
-        # leading conditional branch or trap, constrain to genuine executable sections (the
-        # loader's code_areas can be a coarse segment covering data), and drop runs
-        # that flow into the interior of an already-mapped function.
+        # candidate at a plausible function entry: skip padding (nop / zero) and traps,
+        # constrain to genuine executable sections (the loader's code_areas can be a
+        # coarse segment covering data), and drop runs that flow into the interior of an
+        # already-mapped function.
         if self.gap_pointer is None:
             self.initGapSearch()
         # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
@@ -945,9 +945,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
                 self.gap_pointer = self._endOfRefusedLandingPadRun(self.gap_pointer)
-                continue
-            if is_conditional_branch(word):  # a function never opens with a cond branch
-                self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if is_trap(word):  # udf-space data words / trap filler, never an entry
                 self.gap_pointer += INSTRUCTION_SIZE
