@@ -74,6 +74,13 @@ LOGGER = logging.getLogger(__name__)
 #: about, so both stop rather than guess.
 _GAP_RUN_LIMIT = 0x400
 
+#: Share of an image's own call targets that metadata has to have named already before the
+#: address-materialization scan is judged to have nothing left to reach. The measured
+#: distribution is bimodal with a wide empty interval between the modes; this sits in its
+#: upper half because the two errors are not symmetric -- running the scan when it is
+#: useless costs precision, skipping it when it is not costs recall.
+_METADATA_CALL_TARGET_COVERAGE = 0.95
+
 _ARM64_PDATA_ENTRY_SIZE = 8
 # items (words, matches or exception records) a scan steps over between budget polls, mirroring
 # _TIMEOUT_POLL_BLOCKS in the engine. A whole exception table is walked inside one call, so
@@ -90,13 +97,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
     CANDIDATE_ALIGNMENT = INSTRUCTION_SIZE
 
+    def __init__(self, config):
+        super().__init__(config)
+        # init() resets these per binary, but a manager driven one pass at a time never
+        # reaches init(), and the reference scan writes to them from its first call
+        self._call_targets = set()
+        self._metadata_candidates = set()
+
     def init(self, disassembly, cbAnalysisTimeout=None):
-        # Reset the memoized executable-section ranges and Mach-O fixup state
-        # BEFORE base initialization: super().init() runs candidate discovery,
-        # so a reused manager instance would otherwise consume the previous
-        # binary's cached data during the scans.
+        # Reset the memoized executable-section ranges, the Mach-O fixup state and the
+        # two sets the metadata-coverage test reads BEFORE base initialization:
+        # super().init() runs candidate discovery, so a reused manager instance would
+        # otherwise consume the previous binary's cached data during the scans.
         self._exec_ranges = None
         self._macho_fixup_state = None
+        self._call_targets = set()
+        self._metadata_candidates = set()
         super().init(disassembly, cbAnalysisTimeout)
 
     def hasCommonPrologue(self, addr):
@@ -116,10 +132,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self.locatePeExceptionCandidates()
         if self._candidateTimeoutTripped():
             return
+        # everything booked so far came from something the image says about itself, which is
+        # what the coverage test below compares its call targets against
+        self._metadata_candidates = set(self.candidates)
         self.locateReferenceCandidates()
         if self._candidateTimeoutTripped():
             return
-        self.locateAddressRefCandidates()
+        if not self._metadataNamedTheCallTargets():
+            self.locateAddressRefCandidates()
         if self._candidateTimeoutTripped():
             return
         self.locateDataPointerCandidates()
@@ -569,6 +589,34 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.addReferenceCandidate(target, pointer_va)
                 self.setInitialCandidate(target)
 
+    def _metadataNamedTheCallTargets(self):
+        """Whether this image's metadata has already supplied the functions, leaving the
+        address-materialization scan nothing to find.
+
+        That scan exists to reach entries no call names -- a pointer handed to a callback,
+        a table walked at run time. An image that ships a full function map has none of
+        those left over: the symbol pass consumes the map, every entry is already a
+        candidate, and what the scan then produces is the addresses that are materialized
+        but are not entries. On a Go binary that is thousands of them for no recovered
+        function at all.
+
+        The question is asked of the image rather than of its container or its language,
+        both of which have been the wrong variable before: of the addresses this image's
+        own `bl` instructions call, how many did metadata name before this pass ran? A
+        stripped C or C++ object answers near zero however it was linked; one carrying a
+        complete map answers near one whoever compiled it.
+
+        `bl` targets are the denominator because they are the one population both kinds of
+        image have, in proportion to how many functions they contain, and because they are
+        known at exactly this point -- the scan that resolves them has just finished.
+        """
+        if not self._call_targets:
+            # nothing calls anything: no evidence either way, and the scan is the only pass
+            # left that could reach an entry, so let it run
+            return False
+        named = sum(1 for target in self._call_targets if target in self._metadata_candidates)
+        return named / len(self._call_targets) >= _METADATA_CALL_TARGET_COVERAGE
+
     def locateAddressRefCandidates(self):
         # Reference discovery for addresses materialized in code: adr Xd, #imm and the
         # adrp Xd, #page / add Xd, Xn, #lo12 pair. When the resulting address lands in
@@ -700,6 +748,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 imm -= BL_IMM_SIGN_BIT << 1  # sign-extend the 26-bit immediate
             target = (source + imm * INSTRUCTION_SIZE) & self.getBitMask()
             if self.disassembly.isAddrWithinMemoryImage(target):
+                self._call_targets.add(target)
                 self.addReferenceCandidate(target, source)
                 self.setInitialCandidate(target)
 
