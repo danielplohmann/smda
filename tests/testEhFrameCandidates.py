@@ -276,7 +276,7 @@ class EhFrameFixtureTestSuite(unittest.TestCase):
         config.USE_ELF_EH_FRAME_CANDIDATES = True
         report = Disassembler(config).disassembleUnmappedBuffer(_load_xored_fixture(AARCH64_STATIC_FIXTURE))
         self.assertEqual(report.status, "ok")
-        self.assertEqual(report.num_functions, 279)
+        self.assertEqual(report.num_functions, 277)
         self.assertIn(0x411F50, {function.offset for function in report.getFunctions()})
 
 

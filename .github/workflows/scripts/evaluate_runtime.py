@@ -625,11 +625,14 @@ def wilcoxon_signed_rank(base_times, pr_times, min_n=10):
 def compute_paired_stats(paired, noise_floor_pct=0.0):
     """Headline timing statistics for the paired comparison.
 
-    ``noise_floor_pct`` is the cross-runner/run-to-run timing noise band (derived
-    from the per-side timing CV). Because base and PR are timed on separate CI
-    runners, a systematic per-runner speed offset can make a tiny difference look
-    statistically "significant"; so a median speedup whose magnitude is within the
-    noise floor is reported as inconclusive regardless of the CI/p-value.
+    ``noise_floor_pct`` is the run-to-run timing noise band, derived from the
+    variation across each side's own repeated passes. It only describes the
+    comparison when both sides were measured together: repeated passes on one
+    machine cannot price a second one, so a band computed this way is meaningful
+    exactly because the workflow now times base and PR in one job. A median speedup
+    whose magnitude is within it is reported as inconclusive regardless of the
+    CI/p-value, since a paired test over this many files reaches significance on an
+    offset far smaller than the band.
     """
     speedups = paired["speedups"]
     m = len(speedups)
@@ -658,7 +661,7 @@ def compute_paired_stats(paired, noise_floor_pct=0.0):
 
     lo, hi = ci_median
     if abs(median_speedup) <= noise_floor_pct:
-        verdict = f"inconclusive — within cross-runner noise (±{noise_floor_pct:.1f}%)"
+        verdict = f"inconclusive — within run-to-run noise (±{noise_floor_pct:.1f}%)"
     elif lo > 0:
         verdict = "PR is faster"
     elif hi < 0:
@@ -828,10 +831,12 @@ def generate_markdown_report(model, output_path):
         f"| Std dev / IQR | {paired['stdev_speedup']:.2f}% / {paired['iqr_speedup']:.2f}% |",
         f"| Wilcoxon signed-rank p | {_fmt_p(wil)} |",
         "",
-        "> ℹ️ base and PR are timed on **separate** CI runners, so a small median "
-        "difference can reflect per-runner hardware variance rather than code. "
-        "Differences within the timing noise band above are reported as inconclusive; "
-        "correctness and determinism are unaffected (they are not timing-based).",
+        "> ℹ️ base and PR are timed in the **same job on the same runner**, with their passes "
+        "interleaved base/PR/PR/base/base/PR so that drift over the job cancels rather than "
+        "landing on whichever side ran last. The noise band above is therefore run-to-run "
+        "variation on one machine, which is what it is able to measure; a difference inside it "
+        "is reported as inconclusive. Correctness and determinism are not timing-based and are "
+        "unaffected either way.",
         "",
         "#### Determinism (self-check across repeated runs)",
         "| Side | Runs | Files | Deterministic | Median timing CV |",
@@ -1077,8 +1082,9 @@ def evaluate(runtime_path):
     classification = classify_regressions(
         paired["regressions"], run_folders[base_folders[0]], run_folders[pr_folders[0]]
     )
-    # Cross-runner/run-to-run noise band: base and PR are timed on separate CI
-    # runners, so treat a median speedup within the per-side timing CV as noise.
+    # Run-to-run noise band: both sides are timed in one job on one machine, so the
+    # variation across a side's own repeated passes is the right scale to judge the
+    # difference between them, and a median speedup within it is noise.
     noise_floor_pct = max(base_det["median_timing_cv"], pr_det["median_timing_cv"]) * 100.0
     paired_stats = compute_paired_stats(paired, noise_floor_pct=noise_floor_pct)
 

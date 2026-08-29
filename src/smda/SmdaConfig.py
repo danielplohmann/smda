@@ -118,6 +118,48 @@ class SmdaConfig:
     # and 5 fewer functions that no symbol names. Off by default because it moves 5 of the 12
     # Mach-O corpus samples, all upwards - a deliberate baseline update, not a config edit
     USE_MACHO_FUNCTION_STARTS = False
+    # Refuse a candidate at an address the image's own .gcc_except_table declares as an
+    # exception landing pad, and resume the scan at the end of the FDE that declares it. A
+    # landing pad is where the personality routine resumes, so it is interior to a function by
+    # construction; it opens with the instruction set's indirect-branch marker (endbr64 under
+    # -fcf-protection, bti under -mbranch-protection) and sits in a gap because nothing in the
+    # function branches to it, which is exactly what a scan looking for entry shapes reads as
+    # an entry. The resume point is the whole decision: stepping one instruction on lands
+    # inside the pad, and the scan books that instead - a worse candidate than the one refused.
+    # Resuming at the declaring FDE's end passes over that function's body only; over the three
+    # corpora that carry pads, 0 of 41,215 have a declared function start between the pad and
+    # that end. Measured against compiler symbol tables, macro means:
+    #   260 built C/C++ cells    PPV 92.623 -> 94.109 at TPR 95.525 -> 95.595 (+193 recovered)
+    #   72 AArch64 ELF cells     PPV 76.676 -> 79.172 at TPR 95.939 -> 95.963 (+15 recovered)
+    #   24 Rust cells            PPV 78.951 -> 82.435 at TPR 97.493 -> 97.578 (+13 recovered)
+    # 12,453 false positives removed, 221 real functions gained, no corpus loses recall. Go,
+    # ARM64 Mach-O and .NET are bit-identical, which is the control that it reaches only ELF
+    # images carrying an LSDA. It also pays for itself: on the two cells with the most pads,
+    # analysis is 3.8% faster, because the candidates it refuses are ones nothing then analyses.
+    USE_LSDA_LANDING_PADS = True
+    # Refuse a gap candidate strictly inside a range the image's own .eh_frame declares, and
+    # resume at that range's end. Broader than USE_LSDA_LANDING_PADS, which refuses only the
+    # subset an LSDA names: this catches the jump-table case labels a switch emits under
+    # -fcf-protection, which carry an endbr64 each and are the single largest precision
+    # mechanism measured on this corpus.
+    # Two conditions make it safe, and both were found by measuring what it cost without them.
+    # A PLT is exempt: the whole table sits under one FDE, so the range test would read every
+    # stub after the first as interior, which costs 3,457 real functions. And the range's own
+    # start must be a recovered function, because an FDE can begin in the alignment padding
+    # ahead of its function - the remaining 35 losses were all of that shape, two per statically
+    # linked cell, one of them rt_sigreturn under a signal-frame CIE.
+    # Measured against compiler symbol tables, macro means:
+    #   260 built C/C++ cells    PPV 94.109 -> 94.725 at TPR 95.595 -> 95.596 (+4 recovered)
+    #   72 AArch64 ELF cells     PPV 79.172 -> 80.554 at TPR 95.963 -> 95.964 (+3 recovered)
+    #   24 Rust cells            PPV 82.435 -> 83.608 at TPR 97.578 -> 97.617 (+6 recovered)
+    #   4 .NET cells             PPV 93.589 -> 95.332 at TPR 99.461 -> 99.469 (+2 recovered)
+    # 4,088 false positives removed, 15 real functions gained, no corpus loses recall, Go and
+    # ARM64 Mach-O bit-identical, and analysis time is inside an off-vs-off control band.
+    # Enabling it moved two bundled fixtures, deliberately: elf_cet_landing_pads_x64 drops four
+    # endbr64 addresses that are jump-table case labels strictly inside the function the symbol
+    # table names `dispatch`, and aarch64_static drops two mid-function instructions. None of
+    # the six carries a symbol or is a declared start, so both baselines moved toward the truth.
+    USE_ELF_FDE_INTERIOR_GAPS = True
     RESOLVE_REGISTER_CALLS = True
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
     # record the API plus the slot it lives in; annotation only, it books no code refs
@@ -149,7 +191,10 @@ class SmdaConfig:
     # libstdc++.so.6 it adds 337 functions (8473 -> 8810) for 40-130% more analysis time
     # depending on the machine; on Go ELF and Mach-O memory images, 8 functions each for 20-26%.
     # A jump into an already-recovered function is still treated as a tailcall with the pass
-    # off - only the promotion of not-yet-known targets needs it.
+    # off - only the promotion of not-yet-known targets needs it. The AArch64 backend's
+    # bl fall-through path follows the same flag: it cuts the caller either way, and seeding
+    # the boundary as well measured worse on both AArch64 corpora (ARM64 Mach-O n=11: 12
+    # fewer functions and 28 more false positives; Go n=45: 430 more false positives).
     RESOLVE_TAILCALLS = False
     # optional metadata generation options; the largest built-in performance lever.
     # Measured on the cutwail fixture, as a share of all Python calls per run: hashing 10.0%,
