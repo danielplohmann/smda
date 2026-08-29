@@ -231,9 +231,12 @@ class PeFileLoader:
         if len(field) < 8:
             return b""
         rva, size = struct.unpack("<II", field)
-        if not rva or not size:
+        # the declared size has to cover the signature the caller is about to read: a header
+        # that says it is one byte long does not become a ReadyToRun header because the three
+        # bytes after it happen to spell the rest of `RTR\0`
+        if not rva or size < len(PeFileLoader.READY_TO_RUN_SIGNATURE):
             return b""
-        return bytes(pefile.get_content_from_virtual_address(rva, 4))
+        return bytes(pefile.get_content_from_virtual_address(rva, len(PeFileLoader.READY_TO_RUN_SIGNATURE)))
 
     @staticmethod
     def getHasBackend(binary, parsed=_NOT_PROVIDED):

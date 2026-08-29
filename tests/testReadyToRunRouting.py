@@ -173,6 +173,25 @@ class ReadyToRunDetectionTestSuite(unittest.TestCase):
         blob = _buildPe(_clrHeader(RTR_RVA), clr_size=0x40)
         self.assertEqual(PeFileLoader.getReadyToRunArchitecture(blob), "")
 
+    def test_a_managed_native_header_too_small_for_the_signature_names_nothing(self):
+        """A declared size of three does not become a ReadyToRun header on the fourth byte.
+
+        The signature read is four bytes wide and the size field says how many the header
+        actually has, so a header declaring fewer is claiming not to contain one. Without the
+        bound the read runs past the declared end and a `RTR\\0` that happens to be there --
+        as it is in this fixture, which is otherwise a valid ReadyToRun image -- routes a
+        malformed assembly to the native backend.
+        """
+        for declared in (1, 2, 3):
+            with self.subTest(managed_native_size=declared):
+                blob = _buildPe(_clrHeader(RTR_RVA, managed_native_size=declared))
+                self.assertEqual(PeFileLoader.getReadyToRunArchitecture(blob), "")
+
+    def test_a_managed_native_header_exactly_the_signature_is_enough(self):
+        # the other side of the bound, so the pair fails if it is set one too high
+        blob = _buildPe(_clrHeader(RTR_RVA, managed_native_size=4))
+        self.assertEqual(PeFileLoader.getReadyToRunArchitecture(blob), "intel")
+
     def test_a_managed_native_header_outside_the_image_names_nothing(self):
         blob = _buildPe(_clrHeader(0x900000))
         self.assertEqual(PeFileLoader.getReadyToRunArchitecture(blob), "")
