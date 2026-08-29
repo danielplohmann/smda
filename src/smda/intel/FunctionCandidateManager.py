@@ -7,7 +7,6 @@ prologue byte-pattern seeding, jmp/call-pointer and PLT stub-chain discovery,
 PE x64 ``.pdata`` exception-record seeding, and the NOP/padding-aware gap scan.
 """
 
-import bisect
 import logging
 import re
 import struct
@@ -101,21 +100,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self.pdata_start_addresses = set()
         self.pdata_end_addresses = set()
         #: (start, end, is_chained) for every RUNTIME_FUNCTION record the image declares,
-        #: sorted lazily on first lookup because seeding appends in table order. Uncapped,
-        #: unlike the candidate registry: one tuple per record is about 145 bytes, so an
-        #: image with 200,000 functions holds ~29 MB here, and capping it would silently
-        #: stop suppressing on exactly the largest images rather than bounding anything
-        #: that matters.
-        self._pdata_ranges = []
-        self._pdata_range_starts = None
-        self._pdata_range_reach = []
         self._retained_pad = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._retained_pad = None
-        self._pdata_ranges = []
-        self._pdata_range_starts = None
-        self._pdata_range_reach = []
         # the gap scan decodes potential NOP instructions, so it needs an x86 capstone
         # matching the binary's bitness; build it before the base init runs discovery
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -904,38 +892,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self._admitExceptionRecord(
                 base_addr, rva_start, rva_end, rva_unwind_info, record_pdata_ends, declared=False
             )
-
-    def declaredExceptionRangeContaining(self, addr):
-        """The RUNTIME_FUNCTION extent `addr` sits inside without being an entry, or None.
-
-        `(start, end, is_chained)`. A primary record's own start is the function's entry, so
-        only a strictly interior address answers; a chained record describes a fragment of
-        some other function, so its first byte is interior too and answers as well.
-
-        Extents are deliberately not merged. Functions are laid out end-to-start, so merging
-        adjacent records would collapse the text section into a handful of spans in which
-        every address but the first reads as interior.
-        """
-        if self._pdata_range_starts is None:
-            self._pdata_ranges.sort()
-            self._pdata_range_starts = [start for start, _, _ in self._pdata_ranges]
-            # Sorting by start does not order the ends, so "the previous record ends before
-            # `addr`" says nothing about the one before that. Two short records in front of
-            # a long one would end the walk on top of the extent that actually covers the
-            # address. The running maximum is what can be tested in one step: once no record
-            # at or before this index reaches past `addr`, none of them contains it.
-            highest = 0
-            self._pdata_range_reach = []
-            for _, end, _chained in self._pdata_ranges:
-                highest = max(highest, end)
-                self._pdata_range_reach.append(highest)
-        index = bisect.bisect_right(self._pdata_range_starts, addr) - 1
-        while index >= 0 and self._pdata_range_reach[index] > addr:
-            start, end, chained = self._pdata_ranges[index]
-            if addr < end and (start < addr or chained):
-                return start, end, chained
-            index -= 1
-        return None
 
     def _isChainedUnwindInfo(self, rva_unwind_info):
         # x64 UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7);

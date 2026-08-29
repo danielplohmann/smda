@@ -185,16 +185,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 ranges.append((section_start, section_start + section_size))
         return ranges
 
-    def _isValidArm64UnwindInfo(self, xdata_rva):
+    def _arm64UnwindHeaderWord(self, xdata_rva):
+        """First word of the .xdata record at `xdata_rva`, or None when it cannot be read.
+
+        It carries both the validity of the record and the length of the function it
+        describes, so the callers that need either read it through here rather than twice.
+        """
         # ARM64 .xdata header word: FunctionLength[17:0] (in words, must be nonzero),
         # Vers[19:18] (only version 0 is defined), X[20], E[21], EpilogCount[26:22],
-        # CodeWords[31:27]. Records are 4-byte aligned and must lie inside the image.
-        if xdata_rva == 0 or xdata_rva % 4 != 0:
-            return False
-        header = self.disassembly.getRawBytes(xdata_rva, 4)
-        if header is None or len(header) < 4:
-            return False
-        return self._isValidArm64UnwindHeader(int.from_bytes(header, "little"))
+        # CodeWords[31:27]. The pointer needs no alignment test: it is only read when the
+        # flag in its own low two bits is zero, which is what makes it word-aligned.
+        if not xdata_rva:
+            return None
+        header = self.disassembly.getRawBytes(xdata_rva, INSTRUCTION_SIZE)
+        if header is None or len(header) < INSTRUCTION_SIZE:
+            return None
+        return int.from_bytes(header, "little")
 
     @staticmethod
     def _isValidArm64UnwindHeader(header_word):
@@ -249,17 +255,33 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if begin_rva == 0:
                 break
             flag = unwind_data & 0x3
-            if flag == 0:
-                # UnwindData is the RVA of a full .xdata record; validate its header
-                if not self._isValidArm64UnwindInfo(unwind_data):
-                    continue
-            elif flag != 1:
-                # flag 2: packed fragment of another function's body; flag 3: reserved
+            if flag == 3:  # reserved
                 continue
             if begin_rva % INSTRUCTION_SIZE != 0:
                 continue
             addr = base_addr + begin_rva
             if not any(start <= addr < end for start, end in exec_ranges):
+                continue
+            # An ARM64 RUNTIME_FUNCTION carries no EndAddress, unlike its x64 counterpart. A
+            # packed record spells the length in bits 2-12 of UnwindData; a full record puts
+            # it in bits 0-17 of the .xdata header, the same word that says whether the record
+            # is valid at all. Both count instructions, so both scale by the word size.
+            if flag == 0:
+                header_word = self._arm64UnwindHeaderWord(unwind_data)
+                if header_word is None or not self._isValidArm64UnwindHeader(header_word):
+                    continue
+                length = (header_word & 0x3FFFF) * INSTRUCTION_SIZE
+            else:
+                length = ((unwind_data >> 2) & 0x7FF) * INSTRUCTION_SIZE
+            # the extent is recorded for every accepted record, fragments included: what the
+            # unwinder names is the bytes belonging to a routine, and that is as true of a
+            # fragment as of a whole function
+            if length:
+                self._pdata_ranges.append((addr, addr + length, flag == 2))
+                self._pdata_range_starts = None
+            if flag == 2:
+                # a packed fragment of another function's body: its begin word continues that
+                # function rather than starting one, so it names no candidate
                 continue
             # Exception records also name funclets and function fragments, whose
             # begin address is a mid-body word continuing the enclosing function;
@@ -1014,6 +1036,18 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if word in (0, NOP):  # inter-function padding
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
+            if self._pdata_ranges and self.config.USE_PE_ARM64_PDATA_INTERIOR_GAPS:
+                # the emptiness test comes first: this runs once per scanned word, and on an
+                # ELF or Mach-O image there is no exception directory to consult at all
+                containing = self.declaredExceptionRangeContaining(self.gap_pointer)
+                if containing is not None and (containing[2] or containing[0] in self.disassembly.functions):
+                    # A fragment record is evidence on its own -- it says the whole extent is
+                    # part of another function. A primary record only speaks once the function
+                    # it names has actually been recovered; until then the record says nothing
+                    # about what covers this address. Resuming at the extent's end skips the
+                    # body rather than the one word, which is what the record describes.
+                    self.gap_pointer = containing[1]
+                    continue
             if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
                 self.gap_pointer = self._endOfRefusedLandingPadRun(self.gap_pointer)
                 continue
