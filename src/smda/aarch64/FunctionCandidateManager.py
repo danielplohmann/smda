@@ -49,6 +49,7 @@ from .definitions import (
     BL_VALUE,
     BR_MASK,
     BR_VALUE,
+    BTI_J,
     INSTRUCTION_SIZE,
     LDR_UNSIGNED_64_MASK,
     LDR_UNSIGNED_64_VALUE,
@@ -709,7 +710,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not is_function_prologue(word):
                 continue
             addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr, word):
                 continue
             if not self._passesCodeFilter(addr):
                 continue
@@ -796,11 +797,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             addr += INSTRUCTION_SIZE
         return False
 
-    def _isLikelyInteriorBtiCandidate(self, addr):
+    def _isLikelyInteriorBtiCandidate(self, addr, word):
         # BTI marks both real entries and indirect-branch landing pads. If the word
         # sits inside already claimed code, or immediately follows ordinary code
         # rather than padding / a terminator-like boundary, suppress it as an entry
         # candidate so switch targets and guarded blocks do not fragment functions.
+        if self.config.USE_AARCH64_BTI_TARGET_TYPE and word == BTI_J:
+            # `bti j` permits a target reached by `br` - an indirect jump - and never one
+            # reached by `blr`: a call landing on a J-only pad faults. The compiler that wrote
+            # J was naming an interior label, a switch case or a computed-goto target, and the
+            # pad says so about itself before anything around it is read. The checks below
+            # cannot say it: a case block is preceded by the previous case's terminating
+            # branch, which is exactly the boundary shape they read as an entry.
+            return True
         if addr in self.disassembly.code_map and addr not in self.getFunctionStartCandidates():
             return True
 
@@ -879,7 +888,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if word in (0, NOP):  # inter-function padding
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer):
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if is_conditional_branch(word):  # a function never opens with a cond branch
