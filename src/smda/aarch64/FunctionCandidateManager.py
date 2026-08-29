@@ -784,30 +784,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # ends in an unconditional `b` into the interior of already-mapped code (a
         # known instruction that is not itself a function-start candidate), the run is
         # a mid-function tail rather than a new function — so suppress it.
-        #
-        # The terminator set is `ret` and `br`, and deliberately NOT the trap words
-        # _endOfRefusedLandingPadRun stops at as well. The two walks share _GAP_RUN_LIMIT
-        # but answer different questions. That one decides how far to SKIP, where reading
-        # one instruction too far steps over a real entry and loses it outright, so it has
-        # to stop at the earliest boundary it can defend. This one decides whether to
-        # SUPPRESS: nothing is skipped either way, and reading further only gathers more
-        # evidence about the same candidate. And a trap is not a boundary the image
-        # declares — `brk`/`hlt`/`udf` mid-body is a bounds check or a __builtin_trap
-        # block, ending a function only by AArch64Backend.analyzeInstruction's own END_INS
-        # convention. The words behind it still belong to the enclosing function, so a `b`
-        # out of them into that function's interior is a true statement about `start`.
-        #
-        # Measured by re-running this walk with is_trap in its terminator set and diffing
-        # the candidates that stop being suppressed:
-        #   ARM64 Mach-O corpus: 2 sites released (0x100014b80 and 0x100025f30 in
-        #     osx.gimmick_e0e9d940be95, 12 candidate addresses between them, each swept
-        #     one instruction at a time), both strictly interior to a function the ground
-        #     truth declares — 0x1d8 and 0x15c past its start — and 0 true starts among
-        #     them, i.e. 12 suppressions traded for 2 false positives and nothing gained.
-        #   Built C/C++ AArch64 ELF, 72 cells: of 5,353 runs this walk decided, and 1,445
-        #     it suppressed, 0 pass a trap at all — the change is not a trade there, it is
-        #     unreachable, so that corpus cannot vouch for it either.
-        # Pinned by tests/testAArch64GapRunTerminators.py; do not add is_trap here.
+        # The terminator set omits the trap words _endOfRefusedLandingPadRun stops at, and
+        # that is deliberate: skipping and suppressing cannot stop in the same places. A
+        # skip that reads one instruction too far steps over a real entry and loses it; a
+        # suppression that reads further only learns more about the same candidate. Nor is
+        # a trap a boundary the image declares - mid-body it is a bounds check, and it ends
+        # a function only by the backend's own END_INS convention - so the words behind it
+        # still belong to the enclosing routine. Pinned by
+        # tests/testAArch64GapRunTerminators.py.
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size
         words = self._wordsView()
@@ -845,8 +829,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         of undecodable bytes cannot make this skip an arbitrary distance.
 
         A trap ends the block here, unlike in _gapRunFlowsIntoInterior next door, which
-        shares this walk's bound but not that terminator; the comment there says why a
-        walk that skips and a walk that suppresses cannot stop in the same places.
+        shares this walk's bound but not that terminator.
         """
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size
