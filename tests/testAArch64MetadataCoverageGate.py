@@ -10,18 +10,23 @@ Instruction encodings below were verified against capstone 5.0.7 (CS_ARCH_ARM64)
 import struct
 import unittest
 
-from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
+from smda.aarch64.FunctionCandidateManager import _METADATA_MIN_CALL_TARGETS, FunctionCandidateManager
 from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.FileLoader import FileLoader
 
 BASE = 0x400000
+#: call targets the predicate tests divide, chosen above the floor and so that the cutoff
+#: ratio is exact rather than a rounding of one
+SAMPLE = 800
+AT_CUTOFF = 760
+
 #: the reuse test needs a second image whose addresses cannot be confused with the first's
 REUSE_BASE = 0x800000
 #: the single PT_LOAD maps file offset 0 at the base, so .text is at base + its file offset
 TEXT_OFFSET = 0x1000
-TEXT_SIZE = 0x5000
+TEXT_SIZE = 0x9000
 
 NOP = 0xD503201F
 RET = 0xD65F03C0
@@ -32,13 +37,15 @@ MOV_W1_2 = 0x52800041  # mov w1, #2
 MOV_W2_3 = 0x52800062  # mov w2, #3
 BTI_C = 0xD503245F  # bti c
 
-#: enough call-referenced 16-aligned entries, each carrying more than one reference, for the
-#: alignment floor to infer 16
-LEAF_COUNT = 22
-LEAF_BLOCK = 0x1000
+#: 16-aligned entries each carrying more than one call reference, which does two jobs: it
+#: gives the alignment floor a population to infer 16 from, and it puts the image over
+#: `_METADATA_MIN_CALL_TARGETS` so the coverage test reads a rate rather than declining for
+#: want of a sample
+LEAF_COUNT = _METADATA_MIN_CALL_TARGETS + 8
+LEAF_BLOCK = 0x2000
 LEAF_STRIDE = 0x10
-TARGET_BLOCK = 0x2000
-SEEDER_BLOCK = 0x3000
+TARGET_BLOCK = 0x6000
+SEEDER_BLOCK = 0x7000
 #: jump-table entries: small offsets, which occupy the udf encoding space, so the gap scan reads
 #: them as data and only the address scan can book the table
 TABLE_WORDS = (0x00000008, 0x00000010, 0x00000018, 0x00000020)
@@ -262,16 +269,27 @@ class MetadataCoverageTest(unittest.TestCase):
         return manager
 
     def testCoverageBelowTheCutoffLeavesTheScanRunning(self):
-        # 18 of 20 is 0.9
-        self.assertFalse(self._manager(20, 18)._metadataNamedTheCallTargets())
+        # 760 of 800 is 0.95; one fewer is not
+        self.assertFalse(self._manager(SAMPLE, AT_CUTOFF - 1)._metadataNamedTheCallTargets())
 
     def testCoverageAtTheCutoffSkipsTheScan(self):
-        # 19 of 20 computes to the same double the cutoff is written as, so the comparison
+        # 760 of 800 computes to the same double the cutoff is written as, so the comparison
         # decides the boundary and not which way a division rounded
-        self.assertTrue(self._manager(20, 19)._metadataNamedTheCallTargets())
+        self.assertTrue(self._manager(SAMPLE, AT_CUTOFF)._metadataNamedTheCallTargets())
 
     def testCoverageAboveTheCutoffSkipsTheScan(self):
-        self.assertTrue(self._manager(20, 20)._metadataNamedTheCallTargets())
+        self.assertTrue(self._manager(SAMPLE, SAMPLE)._metadataNamedTheCallTargets())
+
+    def testEveryCallTargetNamedIsStillNotEnoughFromTooSmallASample(self):
+        """A rate needs a sample. One image in the corpus resolves four `bl` targets in total,
+        and metadata naming all four says nothing about the functions only a materialized
+        address reaches -- so below the floor the scan runs however the few came out."""
+        self.assertFalse(
+            self._manager(_METADATA_MIN_CALL_TARGETS - 1, _METADATA_MIN_CALL_TARGETS - 1)._metadataNamedTheCallTargets()
+        )
+        self.assertTrue(
+            self._manager(_METADATA_MIN_CALL_TARGETS, _METADATA_MIN_CALL_TARGETS)._metadataNamedTheCallTargets()
+        )
 
     def testAnImageWhoseCallsResolvedToNothingLeavesTheScanRunning(self):
         """No call targets is no evidence either way, and the scan is the last pass that could
@@ -281,8 +299,8 @@ class MetadataCoverageTest(unittest.TestCase):
     def testOnlyTheNamedAddressesThatAreCallTargetsCount(self):
         """Control on the denominator: metadata that names addresses nothing calls says nothing
         about the addresses something does call, so it cannot lift an image over the cutoff."""
-        manager = self._manager(20, 18)
-        manager._metadata_candidates |= {BASE + 0x8000 + index * 0x10 for index in range(20)}
+        manager = self._manager(SAMPLE, AT_CUTOFF - 1)
+        manager._metadata_candidates |= {BASE + 0x80000 + index * 0x10 for index in range(SAMPLE)}
 
         self.assertFalse(manager._metadataNamedTheCallTargets())
 
