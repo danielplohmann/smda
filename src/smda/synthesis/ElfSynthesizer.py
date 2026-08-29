@@ -1,7 +1,6 @@
 import struct
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
-from smda.common.SmdaReport import MAX_ADDRESS_VALUE
 from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
@@ -387,15 +386,20 @@ class ElfSynthesizer(BinarySynthesizer):
             ehdr[7:16] = self.report.xheader[7:16]
         e_type = struct.unpack("<H", self.report.xheader[16:18])[0] if self._hasElfHeader(18) else ET_EXEC
         machine = self._getMachine()
-        entry = 0
-        if self.report.oep:
-            entry = (
-                self.report.oep if self.report.oep >= self.report.base_addr else self.report.base_addr + self.report.oep
-            )
-        else:
-            entry = min((s["va_start"] for s in sections if s["executable"]), default=0)
-        if not 0 <= entry < MAX_ADDRESS_VALUE:
+        default_entry = min((s["va_start"] for s in sections if s["executable"]), default=0)
+        entry = self._resolveEntryPoint()
+        if entry is None:
+            entry = default_entry
+        elif not self._fitsUnsigned(entry, 64):
+            # an address no 64-bit space can hold describes no image at all, so there is nothing
+            # to approximate here; base_addr and oep can each pass deserialization and still sum
+            # past the end of the space, which only this derivation sees
             raise ValueError(f"synthesized entry point 0x{entry:x} does not fit a 64-bit address space")
+        elif not is_64 and not self._fitsUnsigned(entry, 32):
+            # e_entry is half as wide in an ELF32 image, and packing truncates rather than
+            # refuses, which would silently aim the entry at an unrelated address
+            self._warn("entry point 0x%x does not fit an ELF32 e_entry; .text used instead", entry)
+            entry = default_entry
         if is_64:
             struct.pack_into(
                 "<HHIQQQIHHHHHH",
