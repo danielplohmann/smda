@@ -1,6 +1,7 @@
 import contextlib
 import hashlib
 import logging
+from typing import Optional
 
 import lief
 
@@ -47,11 +48,11 @@ class BinaryInfo:
     """
 
     architecture = ""
-    base_addr = 0
-    binary = b""
-    raw_data = b""
+    base_addr: int = 0
+    binary: bytes = b""
+    raw_data: bytes = b""
     binary_size = 0
-    bitness = None
+    bitness: Optional[int] = None
     code_areas = None
     component = ""
     family = ""
@@ -70,7 +71,7 @@ class BinaryInfo:
     symbols = None
     oep = None
 
-    def __init__(self, binary):
+    def __init__(self, binary: bytes):
         self.binary = binary
         self.raw_data = binary
         self.binary_size = len(binary)
@@ -262,6 +263,26 @@ class BinaryInfo:
                 section_start = section.virtual_address + adjustment
                 section_size = section.size
                 yield lief_name(section), section_start, section_start + section_size
+
+    def getExceptionDirectory(self):
+        """(start, end) of the PE exception table as the image's own directory names it.
+
+        The table's location is declared, not conventional: a linker is free to
+        place it in a section of any name, and the .NET ReadyToRun compiler puts it
+        in ``.data``. Addresses follow the same convention as ``getSections`` so a
+        caller can treat both the same way. Returns None when the image is not a PE
+        or names no exception table.
+        """
+        if self._getLiefType() != "PE":
+            return None
+        for directory in self.getLiefBinary().data_directories:
+            if "EXCEPTION" not in str(directory.type):
+                continue
+            if not directory.size or not directory.rva:
+                break
+            start = self.base_addr + directory.rva
+            return start, start + directory.size
+        return None
 
     def isInCodeAreas(self, address):
         is_inside = False

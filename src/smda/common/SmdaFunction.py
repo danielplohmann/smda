@@ -167,7 +167,7 @@ class SmdaFunction:
     is_exported = False
     architecture_metadata: Dict[str, Any] = {}
     # metadata
-    binweight = 0
+    binweight: float = 0.0
     characteristics: Optional[str] = ""
     confidence: Optional[float] = 0.0
     function_name = ""
@@ -177,6 +177,7 @@ class SmdaFunction:
     nesting_depth = 0
     strongly_connected_components = None
     tfidf = None
+    _basic_blocks: Optional[List["SmdaBasicBlock"]] = None
 
     def __init__(self, disassembly=None, function_offset=None, config=None, smda_report=None):
         self.smda_report = smda_report
@@ -380,7 +381,7 @@ class SmdaFunction:
         for block in self.getBlocks():
             yield from block.getInstructions()
 
-    def getInstructionsForBlock(self, offset) -> List["SmdaInstruction"]:
+    def getInstructionsForBlock(self, offset):
         if offset is None:
             offset = self.offset
         if offset is None:

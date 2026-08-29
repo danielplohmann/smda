@@ -49,6 +49,7 @@ from .definitions import (
     BL_VALUE,
     BR_MASK,
     BR_VALUE,
+    BTI_J,
     INSTRUCTION_SIZE,
     LDR_UNSIGNED_64_MASK,
     LDR_UNSIGNED_64_VALUE,
@@ -709,26 +710,35 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not is_function_prologue(word):
                 continue
             addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
+            if self.config.USE_LSDA_LANDING_PADS and self.isDeclaredLandingPad(addr):
+                # A declared landing pad is interior by construction, so it is never a
+                # prologue however much it looks like one. The x86 scan needs no equivalent:
+                # an endbr64 is not one of its prologue shapes, so pads reach it only through
+                # the gap scan. Here `bti` is a recognized entry prologue, which puts every
+                # pad in front of this loop.
+                continue
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr, word):
                 continue
             if not self._passesCodeFilter(addr):
                 continue
             self.addPrologueCandidate(addr)
             self.setInitialCandidate(addr)
 
-    def addTailcallCandidate(self, addr, reference_source=None):
+    def addTailcallCandidate(self, addr):
+        """Book a tailcall target, and queue it - which the shared base leaves to its caller.
+
+        No inbound call reference is recorded for it. A branch is not a call, and scoring one
+        as if it were is the difference between admitting an address as a candidate and
+        pushing it past the functions that would otherwise absorb it.
+        """
         if not self._passesCodeFilter(addr):
             return False
-        is_new = self.ensureCandidate(addr)
+        self.ensureCandidate(addr)
         if addr not in self.candidates:
             return False
-        candidate = self.candidates[addr]
-        candidate.setIsTailcallCandidate(True)
-        score_changed = self._addCappedCallRef(candidate, reference_source) if reference_source is not None else False
+        self.candidates[addr].setIsTailcallCandidate(True)
         self._candidate_offsets.add(addr)
-        self.candidate_queue.add(candidate)
-        if score_changed and not is_new:
-            self.candidate_queue.update(candidate)
+        self.candidate_queue.add(self.candidates[addr])
         return True
 
     def _cachedExecutableSectionRanges(self):
@@ -790,18 +800,36 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if imm & 0x02000000:
                     imm -= 0x04000000
                 target = addr + imm * INSTRUCTION_SIZE
+                # getFunctionStartCandidates() is a snapshot taken before analysis begins, and
+                # gap analysis never adds to it, so a function it discovered is code_map'd but
+                # absent from the set -- indistinguishable here from somebody's interior. Ask
+                # the live function set too, or a branch to a real entry reads as a tail.
+                if target in self.disassembly.functions:
+                    return False
                 return target in self.disassembly.code_map and target not in self.getFunctionStartCandidates()
             if (word & RET_MASK) == RET_VALUE or (word & BR_MASK) == BR_VALUE:
                 return False
             addr += INSTRUCTION_SIZE
         return False
 
-    def _isLikelyInteriorBtiCandidate(self, addr):
+    def _isLikelyInteriorBtiCandidate(self, addr, word):
         # BTI marks both real entries and indirect-branch landing pads. If the word
         # sits inside already claimed code, or immediately follows ordinary code
         # rather than padding / a terminator-like boundary, suppress it as an entry
         # candidate so switch targets and guarded blocks do not fragment functions.
-        if addr in self.disassembly.code_map and addr not in self.getFunctionStartCandidates():
+        if self.config.USE_AARCH64_BTI_TARGET_TYPE and word == BTI_J:
+            # `bti j` permits a target reached by `br` - an indirect jump - and never one
+            # reached by `blr`: a call landing on a J-only pad faults. The compiler that wrote
+            # J was naming an interior label, a switch case or a computed-goto target, and the
+            # pad says so about itself before anything around it is read. The checks below
+            # cannot say it: a case block is preceded by the previous case's terminating
+            # branch, which is exactly the boundary shape they read as an entry.
+            return True
+        if (
+            addr in self.disassembly.code_map
+            and addr not in self.getFunctionStartCandidates()
+            and addr not in self.disassembly.functions
+        ):
             return True
 
         base = self.disassembly.binary_info.base_addr
@@ -879,7 +907,27 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if word in (0, NOP):  # inter-function padding
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer):
+            if self.config.USE_LSDA_LANDING_PADS and self.isDeclaredLandingPad(self.gap_pointer):
+                # The image's own LSDA says the unwinder resumes here, so the address is
+                # interior by construction. This has to precede the shape test below rather
+                # than back it up: under -mbranch-protection every pad opens with a bti, and
+                # the shape test then reads the bti as evidence of a legitimate indirect-call
+                # target instead of as a pad.
+                skip = self.declaredLandingPadSkipTarget(self.gap_pointer)
+                self.gap_pointer = skip or self.gap_pointer + INSTRUCTION_SIZE
+                continue
+            if self.config.USE_ELF_FDE_INTERIOR_GAPS and not self.isInDeclaredPltSection(self.gap_pointer):
+                # A PLT is exempt: the whole table sits under one FDE, so the range test reads
+                # every stub after the first as interior to the first, and on a CET image the
+                # gap scan is what recovers them.
+                containing = self.declaredFdeRangeContaining(self.gap_pointer)
+                # Only a range whose own start the analysis recovered is evidence that the
+                # range is one function: an FDE can begin in the alignment padding ahead of
+                # its function, and then the real entry a few bytes in is interior to nothing.
+                if containing is not None and containing[0] in self.disassembly.functions:
+                    self.gap_pointer = containing[1]
+                    continue
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if is_conditional_branch(word):  # a function never opens with a cond branch
