@@ -821,7 +821,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         limit = start + _GAP_RUN_LIMIT
         while addr + INSTRUCTION_SIZE <= base + size and addr < limit:
             word = words[(addr - base) // INSTRUCTION_SIZE]
-            if (word & RET_MASK) == RET_VALUE or (word & BR_MASK) == BR_VALUE or (word & B_MASK) == B_VALUE:
+            if (
+                (word & RET_MASK) == RET_VALUE
+                or (word & BR_MASK) == BR_VALUE
+                or (word & B_MASK) == B_VALUE
+                or is_trap(word)
+            ):
                 return addr + INSTRUCTION_SIZE
             addr += INSTRUCTION_SIZE
         return start + INSTRUCTION_SIZE
