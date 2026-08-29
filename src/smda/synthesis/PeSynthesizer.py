@@ -559,9 +559,6 @@ class PeSynthesizer(BinarySynthesizer):
         entry_rva = text_vaddr
         oep = self._resolveEntryPoint()
         if oep is not None:
-            # AddressOfEntryPoint is a 32-bit RVA. An oep further than that above the image base
-            # is not merely large, it is unrepresentable, so drop it for the same .text default a
-            # report carrying no oep at all gets rather than losing the whole image to it
             candidate = oep - base
             if self._fitsUnsigned(candidate, 32):
                 entry_rva = candidate
