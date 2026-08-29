@@ -866,6 +866,72 @@ class TestAArch64PrologueDiscovery(unittest.TestCase):
         self.assertEqual(report.status, "ok")
         self.assertEqual({f.offset for f in report.getFunctions()}, {BASE, BASE + 0xC, BASE + 0x18})
 
+    def _btiPadOnly(self, pad, **overrides):
+        """A landing pad reached only by an unresolved `br`, which is the corpus shape.
+
+        A pad the engine can reach from inside a function is absorbed by the analysis whatever
+        the prologue scan did, so it cannot show this rule doing anything. The pads that became
+        false positives are the ones behind an indirect branch nothing resolves: no analysis
+        covers them, and both the prologue scan and the gap scan then get a turn at booking
+        them, which is why the rule lives in the predicate they share.
+        """
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        for name, value in overrides.items():
+            setattr(config, name, value)
+        words = [
+            0xD503233F,  # 0x401000 paciasp
+            0xD61F0020,  # 0x401004 br x1        -- target unresolved
+            pad,  # 0x401008 the landing pad under test
+            0x52800020,  # 0x40100c mov w0, #1
+            0xD65F03C0,  # 0x401010 ret
+        ]
+        code = b"".join(word.to_bytes(4, "little") for word in words)
+        report = Disassembler(config, backend="aarch64").disassembleBuffer(
+            code, base_addr=BASE, bitness=64, code_areas=[[BASE, BASE + len(code)]]
+        )
+        self.assertEqual(report.status, "ok")
+        return {function.offset for function in report.getFunctions()}
+
+    def test_a_jump_only_bti_pad_is_not_an_entry(self):
+        # `bti j` permits a target reached by `br`, never by `blr`, so a call cannot land here
+        self.assertNotIn(BASE + 0x8, self._btiPadOnly(0xD503249F))  # bti j
+
+    def test_a_call_target_bti_pad_in_the_same_place_is_an_entry(self):
+        # the other arm, so the pair fails if the rule is widened to every BTI form: the only
+        # difference from the case above is C for J
+        self.assertIn(BASE + 0x8, self._btiPadOnly(0xD503245F))  # bti c
+
+    def test_a_call_and_jump_bti_pad_is_still_an_entry(self):
+        # `bti jc` permits a call as well as a jump, so it says nothing against an entry
+        self.assertIn(BASE + 0x8, self._btiPadOnly(0xD50324DF))  # bti jc
+
+    def test_the_jump_only_pad_is_booked_again_with_the_flag_off(self):
+        # the flag is what refuses it, not some other guard reached along the way, so deleting
+        # the check makes the first test above fail rather than silently passing
+        self.assertIn(BASE + 0x8, self._btiPadOnly(0xD503249F, USE_AARCH64_BTI_TARGET_TYPE=False))
+
+    def test_both_passes_that_book_a_pad_consult_the_same_rule(self):
+        """The gap scan reaches these addresses too, and refuses them for the same reason.
+
+        Asserted on the predicate rather than through a second fixture because the two callers
+        differ only in which address they are standing on: a rule that lived in one of them
+        would leave the other booking exactly what the first refused.
+        """
+        binary = b"".join(word.to_bytes(4, "little") for word in [0xD65F03C0, 0xD503249F])
+        binary_info = BinaryInfo(binary)
+        binary_info.base_addr = BASE
+        manager = FunctionCandidateManager(SmdaConfig())
+        manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+        manager._candidate_offsets = set()
+
+        # preceded by a `ret`, the boundary shape the surrounding checks read as an entry
+        self.assertTrue(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503249F))
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
+
+    def test_the_flag_is_on_by_default(self):
+        self.assertTrue(SmdaConfig().USE_AARCH64_BTI_TARGET_TYPE)
+
 
 class TestAArch64FunctionBoundaries(unittest.TestCase):
     def _disassemble_words(self, words, oep=None):
@@ -1498,7 +1564,7 @@ class TestAArch64GapScan(unittest.TestCase):
         manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
         manager._candidate_offsets = set()
 
-        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
 
     def test_bti_after_trap_is_not_suppressed_as_interior(self):
         # a trap (brk/udf/hlt) ends control flow like ret/b, so a BTI right after a
@@ -1517,7 +1583,7 @@ class TestAArch64GapScan(unittest.TestCase):
             manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
             manager._candidate_offsets = set()
 
-            self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+            self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
 
     def test_bti_after_drps_is_not_suppressed_as_interior(self):
         # drps (Debug Restore PState) transfers control to ELR_ELx like eret*, so a BTI
@@ -1535,7 +1601,7 @@ class TestAArch64GapScan(unittest.TestCase):
         manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={})
         manager._candidate_offsets = set()
 
-        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4))
+        self.assertFalse(manager._isLikelyInteriorBtiCandidate(BASE + 4, 0xD503245F))
 
 
 class TestAArch64StaticFixture(unittest.TestCase):
