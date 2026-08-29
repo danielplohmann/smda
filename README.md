@@ -49,6 +49,30 @@ There is also a demo script:
 
 * analyze.py -- example usage: perform disassembly on a file or memory dump and optionally store results in JSON to a given output path.
 
+#### What an offset in a report means
+
+`SmdaFunction.offset`, the basic-block keys and `SmdaInstruction.offset` are **virtual addresses** on
+the native backends, `intel` and `aarch64`. On the two managed ones they are **file offsets**:
+
+| `report.architecture` | what an offset is |
+|---|---|
+| `intel`, `aarch64` | a virtual address - `base_addr` plus an RVA |
+| `cil` | the offset of the method body in the assembly file |
+| `dalvik` | the offset of the code item in the DEX file |
+
+The two are not the same kind of number, so correlating a managed report with a native one - or
+either with another tool's output - compares two different address spaces. A report names the backend
+that produced it in two places, `report.architecture` and `metadata.language` in `toDict()`, so a
+consumer can tell which rule applies before treating an offset as an address.
+
+The two managed cases differ in why. A CIL method has an RVA, and reporting the file offset instead
+is a choice; a DEX carries no load address at all, so the file offset is the only address there is.
+Either way, adding `base_addr` to one of them produces a number that means nothing.
+
+This is recorded rather than corrected: the offsets are a public compatibility surface that
+downstream consumers index on, so changing which space they are in is a deliberate decision and not a
+bug fix.
+
 #### Raw buffers and the instruction set
 
 `disassembleFile` reads the instruction set from the container header. `disassembleBuffer` has no
