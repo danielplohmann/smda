@@ -943,6 +943,34 @@ class TestAArch64PrologueDiscovery(unittest.TestCase):
 
         self.assertEqual(BASE + 0x10, manager._endOfRefusedLandingPadRun(BASE))
 
+    def test_a_trap_ends_the_pad_run_like_any_other_terminator(self):
+        """`brk`, `hlt` and `udf` end a function in the backend, so they end this walk.
+
+        Without them the skip reads past the trap to the next `ret` and swallows whatever
+        lies between -- and what lies after a trap is exactly the unreferenced, gap-only
+        routine this scan exists to reach, so the cost of getting it wrong is recall.
+        """
+        for name, trap in (("brk #1", 0xD4200020), ("hlt #1", 0xD4400020), ("udf #0x36", 0x00000036)):
+            with self.subTest(terminator=name):
+                config = SmdaConfig()
+                config.WITH_STRINGS = False
+                manager = FunctionCandidateManager(config)
+                words = [
+                    0xD503249F,  # 0x401000 bti j       -- the refused pad
+                    0x52800020,  # 0x401004 mov w0, #1
+                    trap,  # ......  0x401008 the trap, which ends the block
+                    0xD503233F,  # 0x40100c paciasp     -- a gap-only routine the scan must reach
+                    0x52800040,  # 0x401010 mov w0, #2
+                    0xD65F03C0,  # 0x401014 ret
+                ]
+                binary = b"".join(word.to_bytes(4, "little") for word in words)
+                binary_info = BinaryInfo(binary)
+                binary_info.base_addr = BASE
+                binary_info.binary_size = len(binary)
+                manager.disassembly = SimpleNamespace(binary_info=binary_info, code_map={}, functions={})
+
+                self.assertEqual(BASE + 0xC, manager._endOfRefusedLandingPadRun(BASE))
+
     def test_a_pad_run_with_no_terminator_in_reach_falls_back_to_one_step(self):
         # an unbounded skip on undecodable bytes would cost every function after it, which is
         # the failure mode a bad extent had in the x64 exception-directory rule
