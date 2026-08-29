@@ -54,6 +54,28 @@ class SmdaConfig:
     # are only performed where the interior .pdata start has a non-fall-through inbound
     # jmp/call from another recovered function, never from candidate membership alone.
     USE_PE_X64_PDATA_ENDS = False
+    # Refuse a gap candidate that the image's own exception directory places inside a
+    # function, and resume at that function's end. A 64-bit PE carries one RUNTIME_FUNCTION
+    # record per function, each naming the extent the unwinder needs, so an interior address
+    # is declared to belong to a routine that starts earlier and cannot itself be an entry.
+    # Only the gap scan reaches these addresses: every one of them sits in a region no
+    # reference and no prologue claimed, which is exactly what the gap scan is for.
+    # Two conditions keep it from overreaching, and both matter. A chained record
+    # (UNW_FLAG_CHAININFO) describes a fragment of another function, so its first byte is
+    # interior too, while a primary record's first byte is the entry and stays bookable.
+    # And a primary range only suppresses once the analysis has actually recovered the
+    # function it names: a record whose function never analysed is not evidence about what
+    # covers the address.
+    # Measured on 24 built Rust cells (33,836 truth functions), precision 75.915 to 79.477
+    # and recall 97.496 to 97.584: 2,052 false positives removed, 48 real functions gained.
+    # On 47 built Go cells, 538 false positives removed with recall unchanged. ARM64 Mach-O
+    # is bit-identical, which is the control that this reaches only images carrying a PE
+    # exception directory.
+    # Recall moves up because the interior candidate was not merely wrong: booking it began
+    # an analysis that ran past the end of the routine the address sat inside and absorbed
+    # the small aligned functions after it. On the cell examined, all eight functions
+    # recovered sit 11 to 79 bytes past a declared extent's end.
+    USE_PE_X64_PDATA_INTERIOR_GAPS = True
     # promote unclaimed ELF .eh_frame FDE starts as late candidates on both instruction sets
     # (after the primary pass, before gap analysis). Unwind ranges are not function starts by
     # definition - .eh_frame also covers ranges that are not independent functions. Measured

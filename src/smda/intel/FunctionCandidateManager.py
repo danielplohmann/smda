@@ -7,6 +7,7 @@ prologue byte-pattern seeding, jmp/call-pointer and PLT stub-chain discovery,
 PE x64 ``.pdata`` exception-record seeding, and the NOP/padding-aware gap scan.
 """
 
+import bisect
 import logging
 import re
 import struct
@@ -99,10 +100,16 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         super().__init__(config)
         self.pdata_start_addresses = set()
         self.pdata_end_addresses = set()
+        #: (start, end, is_chained) for every RUNTIME_FUNCTION record the image declares,
+        #: sorted lazily on first lookup because seeding appends in table order
+        self._pdata_ranges = []
+        self._pdata_range_starts = None
         self._retained_pad = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._retained_pad = None
+        self._pdata_ranges = []
+        self._pdata_range_starts = None
         # the gap scan decodes potential NOP instructions, so it needs an x86 capstone
         # matching the binary's bitness; build it before the base init runs discovery
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -302,6 +309,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 )
                 self.gap_pointer = self.getNextGap()
                 continue
+            if self._pdata_ranges and self.config.USE_PE_X64_PDATA_INTERIOR_GAPS:
+                # the emptiness test comes first: this runs once per scanned gap byte, and on
+                # a 32-bit or non-PE image there is no table to consult at all
+                containing = self.declaredExceptionRangeContaining(self.gap_pointer)
+                if containing is not None and (containing[2] or containing[0] in self.disassembly.functions):
+                    # A chained record is evidence on its own -- it says the whole extent is
+                    # part of another function. A primary record only speaks once the function
+                    # it names has actually been recovered; until then the record says nothing
+                    # about what covers this address. Resuming at the extent's end skips the
+                    # body rather than the one byte, which is what the record describes.
+                    LOGGER.debug(
+                        "nextGapCandidate() gap_ptr is inside a declared .pdata extent: 0x%08x",
+                        self.gap_pointer,
+                    )
+                    self.gap_pointer = containing[1]
+                    continue
             # we may have a candidate here
             LOGGER.debug("nextGapCandidate() using 0x%08x as candidate", self.gap_pointer)
             start_byte = byte[0] if byte else 0
@@ -702,6 +725,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if self.disassembly.binary_info.bitness == 64:
             self.pdata_start_addresses = set()
             self.pdata_end_addresses = set()
+            self._pdata_ranges = []
+            self._pdata_range_starts = None
             record_pdata_ends = self.config.USE_PE_X64_PDATA_ENDS
             base_addr = self.disassembly.binary_info.base_addr
             has_sections = False
@@ -730,7 +755,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self._carveExceptionRecords(base_addr, record_pdata_ends)
 
     def _admitExceptionRecord(self, base_addr, rva_function_candidate, rva_function_end, rva_unwind_info, ends):
-        if self._isChainedUnwindInfo(rva_unwind_info):
+        chained = self._isChainedUnwindInfo(rva_unwind_info)
+        if rva_function_end > rva_function_candidate:
+            # Every record's extent is kept, chained or not: the unwinder is naming the bytes
+            # that belong to a routine, which is as true of a fragment as of a whole function.
+            # Only the first byte differs, and the flag is what says which case this is.
+            self._pdata_ranges.append((base_addr + rva_function_candidate, base_addr + rva_function_end, chained))
+            self._pdata_range_starts = None
+        if chained:
             # UNW_FLAG_CHAININFO: this entry is a secondary fragment (e.g. a
             # split-off cold/epilogue chunk) chained to another function's
             # primary RUNTIME_FUNCTION entry, not an independent function start.
@@ -820,6 +852,34 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 "<III", binary, table_offset + index * _PDATA_ENTRY_SIZE
             )
             self._admitExceptionRecord(base_addr, rva_start, rva_end, rva_unwind_info, record_pdata_ends)
+
+    def declaredExceptionRangeContaining(self, addr):
+        """The RUNTIME_FUNCTION extent `addr` sits inside without being an entry, or None.
+
+        `(start, end, is_chained)`. A primary record's own start is the function's entry, so
+        only a strictly interior address answers; a chained record describes a fragment of
+        some other function, so its first byte is interior too and answers as well.
+
+        Extents are deliberately not merged. Functions are laid out end-to-start, so merging
+        adjacent records would collapse the text section into a handful of spans in which
+        every address but the first reads as interior.
+        """
+        if self._pdata_range_starts is None:
+            self._pdata_ranges.sort()
+            self._pdata_range_starts = [start for start, _, _ in self._pdata_ranges]
+        index = bisect.bisect_right(self._pdata_range_starts, addr) - 1
+        while index >= 0:
+            start, end, chained = self._pdata_ranges[index]
+            if addr < end and (start < addr or chained):
+                return start, end, chained
+            # Records are sorted by start, so an earlier one can still cover `addr` only
+            # while its own end does; once one ends at or before it, no earlier one reaches
+            # further. The table is normally non-overlapping, and this costs one comparison
+            # on the images where it is.
+            if end <= addr and index and self._pdata_ranges[index - 1][1] <= addr:
+                break
+            index -= 1
+        return None
 
     def _isChainedUnwindInfo(self, rva_unwind_info):
         # x64 UNWIND_INFO header byte 0 packs Version (bits 0-2) and Flags (bits 3-7);
