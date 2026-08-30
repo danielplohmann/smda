@@ -55,12 +55,18 @@ class MachoFunctionStartFixtureTestSuite(unittest.TestCase):
         on = _report(buffer, True)
         self.assertEqual(off.status, "ok")
         self.assertEqual(on.status, "ok")
-        self.assertEqual(off.num_functions, 246)
+        # eight more than the primary pass used to find: a run of branch veneers whose
+        # targets gap analysis itself discovered, which the interior test refused while it
+        # could only see the candidate set snapshotted before analysis. All eight are
+        # addresses LC_FUNCTION_STARTS declares, which is why the table intersection moves
+        # by the same amount, and the total with the table pass on does not move at all --
+        # the primary pass now finds by itself what the table was compensating for.
+        self.assertEqual(off.num_functions, 254)
         self.assertEqual(on.num_functions, 275)
         table = _table_addresses(buffer)
         off_starts = {function.offset for function in off.getFunctions()}
         on_starts = {function.offset for function in on.getFunctions()}
-        self.assertEqual(len(table & off_starts), 117)
+        self.assertEqual(len(table & off_starts), 125)
         self.assertEqual(len(table & on_starts), 146)
         # a candidate source may only add starts, never drop one the primary pass found
         self.assertEqual(off_starts - on_starts, set())
