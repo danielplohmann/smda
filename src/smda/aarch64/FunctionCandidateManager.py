@@ -796,6 +796,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if imm & 0x02000000:
                     imm -= 0x04000000
                 target = addr + imm * INSTRUCTION_SIZE
+                # getFunctionStartCandidates() is a snapshot taken before analysis begins, and
+                # gap analysis never adds to it, so a function it discovered is code_map'd but
+                # absent from the set -- indistinguishable here from somebody's interior. Ask
+                # the live function set too, or a branch to a real entry reads as a tail.
+                if target in self.disassembly.functions:
+                    return False
                 return target in self.disassembly.code_map and target not in self.getFunctionStartCandidates()
             if (word & RET_MASK) == RET_VALUE or (word & BR_MASK) == BR_VALUE:
                 return False
@@ -844,7 +850,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # cannot say it: a case block is preceded by the previous case's terminating
             # branch, which is exactly the boundary shape they read as an entry.
             return True
-        if addr in self.disassembly.code_map and addr not in self.getFunctionStartCandidates():
+        if (
+            addr in self.disassembly.code_map
+            and addr not in self.getFunctionStartCandidates()
+            and addr not in self.disassembly.functions
+        ):
             return True
 
         base = self.disassembly.binary_info.base_addr
