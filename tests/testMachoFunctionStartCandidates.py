@@ -55,18 +55,23 @@ class MachoFunctionStartFixtureTestSuite(unittest.TestCase):
         on = _report(buffer, True)
         self.assertEqual(off.status, "ok")
         self.assertEqual(on.status, "ok")
-        # eight more than the primary pass used to find: a run of branch veneers whose
-        # targets gap analysis itself discovered, which the interior test refused while it
-        # could only see the candidate set snapshotted before analysis. All eight are
-        # addresses LC_FUNCTION_STARTS declares, which is why the table intersection moves
-        # by the same amount, and the total with the table pass on does not move at all --
-        # the primary pass now finds by itself what the table was compensating for.
-        self.assertEqual(off.num_functions, 254)
-        self.assertEqual(on.num_functions, 275)
+        # eleven more of the linker's own entries than the primary pass used to find. Eight
+        # are a run of branch veneers whose targets gap analysis itself discovered, which the
+        # interior test refused while it could only see the candidate set snapshotted before
+        # analysis; one is a routine opening on a hoisted argument check, which the gap scan
+        # used to refuse for being a conditional branch; the other two the adr/adrp scan
+        # reaches now that it runs on Mach-O. Every one of the eleven is an address
+        # LC_FUNCTION_STARTS declares, which is what says they are the linker's own starts
+        # and not ones a scan invented.
+        # The function count rises by ten rather than eleven because 0x100004c48 stops being
+        # reported, from both sides. It is not in the table, so that is a false positive
+        # going, and it is the whole of the movement in the total with the table pass on.
+        self.assertEqual(off.num_functions, 256)
+        self.assertEqual(on.num_functions, 274)
         table = _table_addresses(buffer)
         off_starts = {function.offset for function in off.getFunctions()}
         on_starts = {function.offset for function in on.getFunctions()}
-        self.assertEqual(len(table & off_starts), 125)
+        self.assertEqual(len(table & off_starts), 128)
         self.assertEqual(len(table & on_starts), 146)
         # a candidate source may only add starts, never drop one the primary pass found
         self.assertEqual(off_starts - on_starts, set())
