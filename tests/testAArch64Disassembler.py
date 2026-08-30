@@ -1714,15 +1714,21 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x534)
         self.assertEqual(len(self.report.xcfg), 278)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19881)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3497)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19882)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3499)
         self.assertIsNotNone(self.report.getFunction(0x400534))
 
     def test_real_fixture_gap_scan_recovery(self):
         # Functions recovered only by the gap scan (#3): unreferenced / indirect-only
         # routines that no BL, prologue, or stored pointer reaches. With the gap scan
         # every Binary Ninja function start is now recovered.
-        for function_start in (0x40CFE0, 0x40DD78, 0x40DF34, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
+        # 0x40DF30 rather than 0x40DF34: the routine opens on a hoisted `cbz x14`, which the
+        # gap scan used to step over on the theory that a function never begins with a
+        # conditional branch. 0x40DF30 is the 16-aligned word directly after the previous
+        # function's `ret` and its padding nop; 0x40DF34 is 4-aligned and mid-line. Neither
+        # carries an inbound direct branch, so the two readings differ by one instruction of
+        # the same routine, and the recovered function count is unchanged at 278.
+        for function_start in (0x40CFE0, 0x40DD78, 0x40DF30, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
             self.assertIsNotNone(self.report.getFunction(function_start), f"missing 0x{function_start:x}")
 
     def test_real_fixture_data_pointer_recovery(self):
