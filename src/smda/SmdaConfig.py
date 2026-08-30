@@ -43,9 +43,19 @@ class SmdaConfig:
     USE_ALIGNMENT = True
     USE_SYMBOLS_AS_CANDIDATES = True
     # seed AArch64 function candidates from the PE ARM64 exception directory (classic 0xAA64
-    # images only); funclet/fragment records are filtered at seeding, and IDA-labeled ARM64
+    # images only); packed fragment records are dropped at seeding, and IDA-labeled ARM64
     # system binaries (wermgr/ping/robocopy/bcrypt) show equal-or-better boundary accuracy
-    # with the directory enabled, so it is on by default
+    # with the directory enabled, so it is on by default.
+    #
+    # What survives seeding is not only whole functions. An MSVC-built image gives a separated
+    # chunk of a routine its own record, and the chunk sets up its own frame, so the entry-shape
+    # filter reads it as an entry: on ping/robocopy/bcrypt that is 78 seeded starts inside a
+    # function IDA labels, 73 beginning exactly where another record's extent ends with nothing
+    # referencing them. Microsoft's own public PDBs name 88.5% of the addresses IDA calls
+    # functions but only 6.4% of those 78, so they are chunks rather than entries and this seeding
+    # over-reports on such images. Refusing them by that shape costs 13 addresses the PDBs do name;
+    # the exact test is whether the parent's .xdata scope table points at the address, which is
+    # not parsed yet. clang/llvm-mingw does not split them, so a from-source ARM64 PE is unaffected.
     USE_PE_ARM64_PDATA_CANDIDATES = True
     # do not read `bti j` as a function entry on AArch64. The four BTI forms are not
     # interchangeable: J permits a target reached by `br` - an indirect jump, which is what a
