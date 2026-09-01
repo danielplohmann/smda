@@ -71,7 +71,7 @@ class Ident:
         self.out_len = 0
 
     def try_small_punycode_decode(self) -> Optional[bool]:
-        def f(inp):
+        def f(inp) -> bool:
             inp = "".join(inp)
             self.disp += inp
             return True
@@ -495,9 +495,9 @@ class Printer:
     # self-referential backref chain raises RecursionError before this guard.
     RUST_MAX_RECURSION_COUNT = 256
 
-    def __init__(self, parser, out, bound, recursion=0):
+    def __init__(self, parser, out: str, bound, recursion=0):
         self.parser = parser
-        self.out = out
+        self.out: str = out
         self.bound_lifetime_depth = bound
         self.recursion = recursion
 
@@ -692,8 +692,8 @@ class Printer:
         try:
             p = self.parser_mut()
             tag = p.next_func()
-            if basic_type(tag):
-                ty = basic_type(tag)
+            ty = basic_type(tag)
+            if ty:
                 self.out += ty
                 return
 

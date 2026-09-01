@@ -16,6 +16,7 @@ from .definitions import (
     GAP_SEQUENCES,
     JMP_INS,
     LOOP_INS,
+    MAX_GAP_SEQUENCE_LENGTH,
     REGS_32BIT,
     REGS_64BIT,
     RET_INS,
@@ -287,6 +288,41 @@ class X86Backend(ArchBackend):
         elif i_op_str.startswith("qword ptr ["):
             # case = "QWORD-PTR-REG"
             self._collectMemRegSlot(state, i_address, i_op_str)
+
+    @staticmethod
+    def _paddingFillsToAlignment(d, addr):
+        """Whether the bytes from `addr` to the next 16-byte boundary are all alignment filler.
+
+        Padding that separates two functions runs from wherever the previous one ended up to
+        the boundary the next one is aligned to, and stops there. Two things disqualify a run:
+        anything that is not filler before the boundary -- a nop inside a function, a
+        scheduling slot or a patch point, does not fill the rest of the line -- and filler that
+        carries on past it, which means the boundary is in the middle of the run rather than
+        the entry it aligns.
+
+        Reading the whole run rather than its first encoding is what carries this: of the
+        addresses it refuses that a bare "not on a boundary" test would have cut, 1,598 of
+        1,778 are not functions, and on Go the split is 1,364 of 1,365.
+        """
+        distance = -addr % 16
+        if not distance:
+            return False
+        window = d._getDisasmWindowBuffer(addr)
+        if len(window) <= distance or window[:1] not in GAP_SEQUENCE_FIRST_BYTES:
+            return False
+        # more filler at the boundary means the run did not end there, so the boundary aligns
+        # nothing and cutting on it would seed an entry in the middle of the padding
+        if window[distance : distance + 1] in GAP_SEQUENCE_FIRST_BYTES:
+            return False
+        offset = 0
+        while offset < distance:
+            for size in range(min(MAX_GAP_SEQUENCE_LENGTH, distance - offset), 0, -1):
+                if window[offset : offset + size] in GAP_SEQUENCES[size]:
+                    offset += size
+                    break
+            else:
+                return False
+        return True
 
     @staticmethod
     def _recordAbsoluteDataRefs(d, i_address, i_op_str, state):
@@ -654,7 +690,15 @@ class X86Backend(ArchBackend):
                         "  analyzeFunction() found program ending instruction @0x%08x",
                         i_address,
                     )
-        elif previous_address is not None and i_address != start_addr and previous_mnemonic == "call":
+        elif (
+            previous_address is not None
+            and i_address != start_addr
+            # a call used to be the only way in, on the theory that padding follows a function
+            # that ended in a noreturn call; GCC pads between functions whatever the previous
+            # one ended with, and those were swallowed into their predecessor
+            and (previous_mnemonic == "call" or self._paddingFillsToAlignment(d, i_address))
+        ):
+            reached_by_call = previous_mnemonic == "call"
             instruction_bytes = d._getDisasmWindowBuffer(i_address)
             # isAlignmentSequence can only return True when the FIRST decoded instruction's bytes
             # are in GAP_SEQUENCES (otherwise it breaks with instructions_analyzed == 0, and the
@@ -672,7 +716,10 @@ class X86Backend(ArchBackend):
                         break
             is_alignment_evidence = getattr(d.disassembly, "language_guess", None) != "go" and has_alignment_sequence
             is_candidate_evidence = d.fc_manager.isFunctionCandidate(i_address)
-            if is_alignment_evidence and not is_candidate_evidence and d.disassembly.binary_info._getLiefType() == "PE":
+            # padding reached by falling through carries no prior that the function ended, so it
+            # is gated on every format, not only on PE
+            needs_entry_shape = d.disassembly.binary_info._getLiefType() == "PE" or not reached_by_call
+            if is_alignment_evidence and not is_candidate_evidence and needs_entry_shape:
                 if d.fc_manager.isHotpatchPrologue(instruction_bytes[:5]):
                     seed_address = i_address
                 else:
@@ -681,8 +728,10 @@ class X86Backend(ArchBackend):
                 # alignment) on PE images, so alignment-only evidence (no candidate hit at
                 # i_address) needs its seed to actually decode as a function entry before
                 # cutting -- real PE starts are seeded by exports/pdata/candidates anyway.
-                # Other formats keep the plain alignment cut: clang/GCC/Go pad between
-                # real functions with prologue-less entries.
+                # GCC aligns loop heads with the encodings it pads between functions with, so
+                # a fall-through cut needs the same on any format; after a call the other
+                # formats stay exempt, where clang/GCC/Go pad between real functions with
+                # prologue-less entries the cut would lose.
                 if not d.fc_manager.hasCommonPrologue(seed_address):
                     if LOGGER.isEnabledFor(logging.DEBUG):
                         LOGGER.debug(

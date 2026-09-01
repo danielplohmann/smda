@@ -29,6 +29,25 @@ class TestDefinitionsExpansion(unittest.TestCase):
                 seq, GAP_SEQUENCES[length], f"Sequence {seq.hex()} of length {length} not found in GAP_SEQUENCES"
             )
 
+    def test_cs_prefixed_gcc_nops_are_present_and_mode_agnostic(self):
+        # GCC/binutils spell their wider nops with a CS segment override. Unlike the REX forms
+        # below, 0x2e means the same thing in both modes, so these belong in the shared dict --
+        # but only if they really do decode as one no-op instruction of the stated length in
+        # each, which is the property the shared dict exists to guarantee.
+        from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
+
+        sequences = [b"\x2e\x8d\x74\x26\x00", b"\x2e\x8d\xb4\x26\x00\x00\x00\x00"]
+        for sequence in sequences:
+            self.assertIn(sequence, GAP_SEQUENCES[len(sequence)])
+            for mode in (CS_MODE_32, CS_MODE_64):
+                decoded = list(Cs(CS_ARCH_X86, mode).disasm_lite(sequence, 0x1000))
+                self.assertEqual(len(decoded), 1, f"{sequence.hex()} is not one instruction in mode {mode}")
+                _address, size, mnemonic, _op_str = decoded[0]
+                self.assertEqual(size, len(sequence))
+                # lea writes a register from an address computation that names the register
+                # itself with no displacement, which is the whole point of the encoding
+                self.assertEqual(mnemonic, "lea")
+
     def test_no_rex_sequences_in_shared_dict(self):
         # REX-prefixed (0x48) sequences must not be in the shared dict:
         # in 32-bit mode 0x48 is "dec eax", making these non-NOP sequences.
