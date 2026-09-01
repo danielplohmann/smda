@@ -12,8 +12,8 @@ LOGGER = logging.getLogger(__name__)
 
 class SmdaInstruction:
     smda_function = None
-    offset = None
-    bytes = None
+    offset: Optional[int] = None
+    bytes: Optional[str] = None
     mnemonic = None
     operands = None
     detailed = None
@@ -186,7 +186,7 @@ class SmdaInstruction:
         return self.bytes
 
     @classmethod
-    def fromDict(cls, instruction_dict, smda_function=None) -> Optional["SmdaInstruction"]:
+    def fromDict(cls, instruction_dict, smda_function=None) -> "SmdaInstruction":
         smda_instruction = cls(None)
         smda_instruction.smda_function = smda_function
         smda_instruction.offset = instruction_dict[0]

@@ -505,7 +505,7 @@ class MachoSynthesizer(BinarySynthesizer):
         libs = sorted({lib for lib, _ in import_map.values() if lib})
         return strtab, symtab, indirect_blob, libs, len(indirect)
 
-    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings):
+    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings) -> bytes:
         is_64 = self._is64()
         segments = self._prepareSections(sections, offsets, with_strings)
         sections = [section for segment in segments for section in segment["sections"]]
@@ -737,7 +737,7 @@ class MachoSynthesizer(BinarySynthesizer):
             flags,
         )
 
-    def _synthesizeMinimal(self, offsets):
+    def _synthesizeMinimal(self, offsets) -> bytes:
         va_start, va_end = self._syntheticSpan(offsets, PAGE_SIZE)
         section = {"name": "__text", "va_start": va_start, "va_end": va_end}
         return self._synthesizeFromSections([section], offsets, False, False)
