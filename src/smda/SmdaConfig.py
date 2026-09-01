@@ -47,6 +47,22 @@ class SmdaConfig:
     # system binaries (wermgr/ping/robocopy/bcrypt) show equal-or-better boundary accuracy
     # with the directory enabled, so it is on by default
     USE_PE_ARM64_PDATA_CANDIDATES = True
+    # do not read `bti j` as a function entry on AArch64. The four BTI forms are not
+    # interchangeable: J permits a target reached by `br` - an indirect jump, which is what a
+    # switch dispatch does to a case block - while C permits one reached by `blr`, which is how
+    # a function is reached indirectly. A compiler that wrote `bti j` was naming an interior
+    # label, and the hardware would fault a call landing on it. The prologue scan read all four
+    # as entries, so every jump pad in the image was booked.
+    # Measured on 72 built AArch64 ELF cells, attributing each prologue-sole booking to the arm
+    # of `is_function_prologue` that accepted it: `bti j` produced 803 false positives and 0 real
+    # functions, `bti c` produced 0 false positives and 505 real functions. The split is exact,
+    # not statistical, which is what distinguishes this from a threshold.
+    # The ARM64 Mach-O corpus is not a control: 11 cells book no BTI-opened prologue candidate at
+    # all, so the rule is inert there rather than confirmed. It reaches no other architecture -
+    # the intel scan has no BTI shape - and it is deliberately not applied to the PE ARM64
+    # exception-record reader, which accepts the same word through a different question and has
+    # no corpus to be measured on - there is no ARM64 PE among the samples available here.
+    USE_AARCH64_BTI_TARGET_TYPE = True
     # force function-end splits at x64 PE .pdata RUNTIME_FUNCTION EndAddresses so that
     # SMDA functions align with the compiler's exception-table boundaries; off by default
     # because MSVC fragments single control-flow functions across many .pdata ranges
