@@ -1,7 +1,7 @@
 import re
 import string
 import struct
-from typing import Iterator, Tuple
+from typing import Any, Iterator, Tuple
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaFunction import SmdaFunction
@@ -20,14 +20,15 @@ def read_bytes(smda_report, va, num_bytes=None):
     """
 
     rva = va - smda_report.base_addr
-    if smda_report.buffer is None:
+    buffer = smda_report.buffer
+    if buffer is None:
         raise ValueError("buffer is empty")
-    buffer_end = len(smda_report.buffer)
+    buffer_end = len(buffer)
     max_bytes = num_bytes if num_bytes is not None else 0x100
     if rva + max_bytes > buffer_end:
-        return smda_report.buffer[rva:]
+        return buffer[rva:]
     else:
-        return smda_report.buffer[rva : rva + max_bytes]
+        return buffer[rva : rva + max_bytes]
 
 
 def derefs(smda_report, p):
@@ -166,7 +167,7 @@ def read_string(smda_report, offset, maxlen=None):
     return res
 
 
-def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, int, int, str]]:
+def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, Any, Any, str]]:
     """parse string features from the given instruction."""
     if mode == "go":
         # we address stack assigned strings and String structs

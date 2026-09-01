@@ -377,5 +377,136 @@ class AArch64CondBranchExceptionBoundaryTestSuite(unittest.TestCase):
         )
 
 
+class AArch64PdataExtentTestSuite(unittest.TestCase):
+    """An ARM64 RUNTIME_FUNCTION has no EndAddress, so the extent the record declares has to be
+    reconstructed before anything can be called interior to it. The length lives in one of two
+    places depending on the flag, and both count instructions rather than bytes."""
+
+    def _ranges(self, records, xdata_bytes=VALID_XDATA):
+        return _candidates_for(_build_arm64_pe(records, xdata_bytes=xdata_bytes))._pdata_ranges
+
+    def test_a_packed_record_spells_its_length_in_the_unwind_word(self):
+        # flag 1, FunctionLength 0x10 in bits 2-12: 16 instructions, so 0x40 bytes
+        ranges = self._ranges(_record(TEXT_RVA, (0x10 << 2) | 1))
+
+        self.assertEqual(ranges, [(IMAGE_BASE + TEXT_RVA, IMAGE_BASE + TEXT_RVA + 0x40, False)])
+
+    def test_a_full_record_takes_its_length_from_the_xdata_it_points_at(self):
+        # VALID_XDATA carries FunctionLength 0x10 in bits 0-17 of the first word
+        ranges = self._ranges(_record(TEXT_RVA, XDATA_RVA))
+
+        self.assertEqual(ranges, [(IMAGE_BASE + TEXT_RVA, IMAGE_BASE + TEXT_RVA + 0x40, False)])
+
+    def test_a_fragment_record_declares_an_extent_and_seeds_no_candidate(self):
+        # flag 2 describes part of another function: the extent is still what the unwinder says
+        # belongs to a routine, and the fragment's own first word is interior to it as well
+        fcm = _candidates_for(_build_arm64_pe(_record(TEXT_RVA + 8, (0x4 << 2) | 2)))
+
+        self.assertEqual(fcm._pdata_ranges, [(IMAGE_BASE + TEXT_RVA + 8, IMAGE_BASE + TEXT_RVA + 0x18, True)])
+        self.assertNotIn(IMAGE_BASE + TEXT_RVA + 8, _exception_candidates(fcm))
+
+    def test_a_reserved_record_declares_nothing(self):
+        self.assertEqual(self._ranges(_record(TEXT_RVA, (0x10 << 2) | 3)), [])
+
+    def test_an_unreadable_xdata_length_declares_no_extent(self):
+        # the record points past the image, so there is no length to read and nothing to declare
+        ranges = self._ranges(_record(TEXT_RVA, 0x900000))
+
+        self.assertEqual(ranges, [])
+
+    def test_an_absent_xdata_pointer_declares_no_extent(self):
+        # flag 0 with no pointer at all: nothing to read a length from, so nothing is declared
+        self.assertEqual(self._ranges(_record(TEXT_RVA, 0)), [])
+
+    def test_a_declared_extent_answers_for_its_interior_but_not_its_start(self):
+        fcm = _candidates_for(_build_arm64_pe(_record(TEXT_RVA, (0x10 << 2) | 1)))
+
+        self.assertIsNone(fcm.declaredExceptionRangeContaining(IMAGE_BASE + TEXT_RVA))
+        self.assertEqual(
+            fcm.declaredExceptionRangeContaining(IMAGE_BASE + TEXT_RVA + 4),
+            (IMAGE_BASE + TEXT_RVA, IMAGE_BASE + TEXT_RVA + 0x40, False),
+        )
+        self.assertIsNone(fcm.declaredExceptionRangeContaining(IMAGE_BASE + TEXT_RVA + 0x40))
+
+    def test_a_fragment_extent_answers_for_its_own_start_too(self):
+        fcm = _candidates_for(_build_arm64_pe(_record(TEXT_RVA + 8, (0x4 << 2) | 2)))
+
+        self.assertEqual(
+            fcm.declaredExceptionRangeContaining(IMAGE_BASE + TEXT_RVA + 8),
+            (IMAGE_BASE + TEXT_RVA + 8, IMAGE_BASE + TEXT_RVA + 0x18, True),
+        )
+
+
+class AArch64PdataInteriorGapTestSuite(unittest.TestCase):
+    """The gap scan is what reaches an address nothing references. On an ARM64 PE the exception
+    directory already says which addresses are inside a routine, and until now that was read for
+    seeding and never for refusing."""
+
+    STP_PROLOGUE = 0xA9BF7BFD  # stp x29, x30, [sp, #-16]!
+    RET = 0xD65F03C0
+    NOP = 0xD503201F
+    MOV_W0_1 = 0x52800020
+
+    #: a word the gap scan books when nothing forbids it. Deliberately not a prologue shape:
+    #: the prologue sweep runs before the gap scan and this rule does not constrain it, so a
+    #: prologue here would be booked either way and prove nothing about the rule.
+    INTERIOR_ENTRY_SHAPE = MOV_W0_1
+
+    def _words(self):
+        # the declared function ends at +0x08, so +0x0C onwards is never reached by decoding it
+        # and falls to the gap scan -- which is the pass this rule constrains
+        return [
+            self.STP_PROLOGUE,  # +0x00  the function .pdata declares
+            self.MOV_W0_1,  # +0x04
+            self.RET,  # +0x08  decoding stops here
+            self.INTERIOR_ENTRY_SHAPE,  # +0x0C  in a gap, but interior to the declared extent
+            self.RET,  # +0x10
+            self.NOP,  # +0x14
+            self.NOP,  # +0x18
+            self.NOP,  # +0x1C
+        ]
+
+    def _starts(self, records, interior_gaps=True):
+        code = b"".join(word.to_bytes(4, "little") for word in self._words())
+        blob = _build_arm64_pe(records, text_bytes=code)
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        config.USE_PE_ARM64_PDATA_INTERIOR_GAPS = interior_gaps
+        report = Disassembler(config).disassembleUnmappedBuffer(blob)
+        self.assertEqual(report.status, "ok")
+        return {function.offset for function in report.getFunctions()}
+
+    def test_a_gap_candidate_inside_a_declared_extent_is_refused(self):
+        # the record covers +0x00..+0x18, so the entry-shaped word at +0x0C is interior to a
+        # routine the image itself declares
+        records = _record(TEXT_RVA, (0x6 << 2) | 1)
+
+        starts = self._starts(records)
+
+        self.assertIn(IMAGE_BASE + TEXT_RVA, starts)
+        self.assertNotIn(IMAGE_BASE + TEXT_RVA + 0x0C, starts)
+
+    def test_the_same_image_books_it_with_the_rule_off(self):
+        """Control on what decided it: the word is entry-shaped and unreferenced either way, so
+        it is the declared extent and not the image that keeps it out above."""
+        records = _record(TEXT_RVA, (0x6 << 2) | 1)
+
+        starts = self._starts(records, interior_gaps=False)
+
+        self.assertIn(IMAGE_BASE + TEXT_RVA + 0x0C, starts)
+
+    def test_an_extent_whose_function_was_not_recovered_suppresses_nothing(self):
+        """A record can name an address the analysis never recovered -- a fragment start it
+        declined, or a begin that is not an entry. Until the function it names exists, the
+        record says nothing about what covers an address inside it."""
+        # the record begins at +0x04, a mid-instruction word no pass books as a function
+        records = _record(TEXT_RVA + 4, (0x5 << 2) | 1)
+
+        starts = self._starts(records)
+
+        self.assertNotIn(IMAGE_BASE + TEXT_RVA + 4, starts)
+        self.assertIn(IMAGE_BASE + TEXT_RVA + 0x0C, starts)
+
+
 if __name__ == "__main__":
     unittest.main()

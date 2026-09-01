@@ -43,10 +43,39 @@ class SmdaConfig:
     USE_ALIGNMENT = True
     USE_SYMBOLS_AS_CANDIDATES = True
     # seed AArch64 function candidates from the PE ARM64 exception directory (classic 0xAA64
-    # images only); funclet/fragment records are filtered at seeding, and IDA-labeled ARM64
+    # images only); packed fragment records are dropped at seeding, and IDA-labeled ARM64
     # system binaries (wermgr/ping/robocopy/bcrypt) show equal-or-better boundary accuracy
-    # with the directory enabled, so it is on by default
+    # with the directory enabled, so it is on by default.
+    #
+    # What survives seeding is not only whole functions. An MSVC-built image gives a separated
+    # chunk of a routine its own record, and the chunk sets up its own frame, so the entry-shape
+    # filter reads it as an entry: on ping/robocopy/bcrypt that is 78 seeded starts inside a
+    # function IDA labels, 73 beginning exactly where another record's extent ends with nothing
+    # referencing them. Microsoft's own public PDBs name 88.5% of the addresses IDA calls
+    # functions but only 6.4% of those 78, so they are chunks rather than entries and this seeding
+    # over-reports on such images. Refusing them by that shape costs 13 addresses the PDBs do name,
+    # and no exact test is in reach: the parent's .xdata handler data names its exception funclets,
+    # but only 25 of the 145 chunks here have a parent carrying any -- the other 120 continue a
+    # record with the X bit clear or no .xdata at all, so they are not exception funclets and
+    # nothing in the unwind data distinguishes them. clang/llvm-mingw emits one record per function
+    # symbol and does not split them, so a from-source ARM64 PE is unaffected either way.
     USE_PE_ARM64_PDATA_CANDIDATES = True
+    # do not read `bti j` as a function entry on AArch64. The four BTI forms are not
+    # interchangeable: J permits a target reached by `br` - an indirect jump, which is what a
+    # switch dispatch does to a case block - while C permits one reached by `blr`, which is how
+    # a function is reached indirectly. A compiler that wrote `bti j` was naming an interior
+    # label, and the hardware would fault a call landing on it. The prologue scan read all four
+    # as entries, so every jump pad in the image was booked.
+    # Measured on 72 built AArch64 ELF cells, attributing each prologue-sole booking to the arm
+    # of `is_function_prologue` that accepted it: `bti j` produced 803 false positives and 0 real
+    # functions, `bti c` produced 0 false positives and 505 real functions. The split is exact,
+    # not statistical, which is what distinguishes this from a threshold.
+    # The ARM64 Mach-O corpus is not a control: 11 cells book no BTI-opened prologue candidate at
+    # all, so the rule is inert there rather than confirmed. It reaches no other architecture -
+    # the intel scan has no BTI shape - and it is deliberately not applied to the PE ARM64
+    # exception-record reader, which accepts the same word through a different question and has
+    # no corpus to be measured on - there is no ARM64 PE among the samples available here.
+    USE_AARCH64_BTI_TARGET_TYPE = True
     # force function-end splits at x64 PE .pdata RUNTIME_FUNCTION EndAddresses so that
     # SMDA functions align with the compiler's exception-table boundaries; off by default
     # because MSVC fragments single control-flow functions across many .pdata ranges
@@ -54,6 +83,37 @@ class SmdaConfig:
     # are only performed where the interior .pdata start has a non-fall-through inbound
     # jmp/call from another recovered function, never from candidate membership alone.
     USE_PE_X64_PDATA_ENDS = False
+    # Refuse a gap candidate that the image's own exception directory places inside a
+    # function, and resume at that function's end. A 64-bit PE carries one RUNTIME_FUNCTION
+    # record per function, each naming the extent the unwinder needs, so an interior address
+    # is declared to belong to a routine that starts earlier and cannot itself be an entry.
+    # Only the gap scan reaches these addresses: every one of them sits in a region no
+    # reference and no prologue claimed, which is exactly what the gap scan is for.
+    # Two conditions keep it from overreaching, and both matter. A chained record
+    # (UNW_FLAG_CHAININFO) describes a fragment of another function, so its first byte is
+    # interior too, while a primary record's first byte is the entry and stays bookable.
+    # And a primary range only suppresses once the analysis has actually recovered the
+    # function it names: a record whose function never analysed is not evidence about what
+    # covers the address.
+    # Measured on 24 built Rust cells (33,836 truth functions), precision 75.915 to 79.477
+    # and recall 97.496 to 97.584: 2,052 false positives removed, 48 real functions gained.
+    # On 47 built Go cells, 538 false positives removed with recall unchanged; on 68 MSVC
+    # PE64 cells, 1,220 removed and 48 gained.
+    # The control that this reaches only images carrying the table is 140 x86-64 ELF cells,
+    # bit-identical - the same backend and the same gap scan, on a container that declares
+    # no exception directory. 68 32-bit PE cells are bit-identical for the same reason, and
+    # none of the 68 declares one. (An ARM64 corpus is not a control here: AArch64 has its
+    # own candidate manager and never reaches this code.)
+    # Recall moves up because the interior candidate was not merely wrong: booking it began
+    # an analysis that ran past the end of the routine the address sat inside and absorbed
+    # the small aligned functions after it. On the cell examined, all eight functions
+    # recovered sit 11 to 79 bytes past a declared extent's end.
+    USE_PE_X64_PDATA_INTERIOR_GAPS = True
+    # Refuse a gap candidate that an ARM64 PE image's own exception directory places inside a
+    # routine. The same evidence and the same rule as the x64 flag above, reached differently:
+    # an ARM64 RUNTIME_FUNCTION has no EndAddress, so the extent is reconstructed from packed
+    # unwind data or from the .xdata record it points at.
+    USE_PE_ARM64_PDATA_INTERIOR_GAPS = True
     # promote unclaimed ELF .eh_frame FDE starts as late candidates on both instruction sets
     # (after the primary pass, before gap analysis). Unwind ranges are not function starts by
     # definition - .eh_frame also covers ranges that are not independent functions. Measured
@@ -64,9 +124,11 @@ class SmdaConfig:
     # fixture changes - so enabling it belongs with a corpus run, not with a config edit
     USE_ELF_EH_FRAME_CANDIDATES = False
     # extend the AArch64 adr/adrp address-materialization scan to Mach-O instruction sections,
-    # recording targets as weak address evidence; off until validated with exact-address ground
-    # truth for the Mach-O corpus
-    USE_MACHO_ADDRESS_REF_CANDIDATES = False
+    # recording targets as weak address evidence. On since the metadata-coverage test that
+    # guards the scan landed: the validation this waited for is +21 true starts against 5
+    # fewer false ones on the ARM64 Mach-O corpus, and the images that made it unsafe before
+    # -- Go, whose pclntab already names every function -- no longer reach the scan at all
+    USE_MACHO_ADDRESS_REF_CANDIDATES = True
     # promote unclaimed Mach-O LC_FUNCTION_STARTS entries as late candidates (after the primary
     # pass, before gap analysis). The linker writes the table and stripping keeps it, and segment
     # file offsets and VM offsets coincide in Mach-O, so it also reads correctly out of a mapped

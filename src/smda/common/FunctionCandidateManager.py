@@ -59,8 +59,20 @@ class FunctionCandidateManager:
         # backstop against memory usage explosion during candidate identification
         self._candidate_cap_logged = False
         self._cb_analysis_timeout = None
+        #: (start, end, is_fragment) per exception-directory record, filled by whichever
+        #: backend reads that directory. Sorted lazily on first lookup because seeding
+        #: appends in table order. Uncapped, unlike the candidate registry: one tuple per
+        #: record is about 145 bytes, so an image with 200,000 functions holds ~29 MB here,
+        #: and capping it would silently stop suppressing on exactly the largest images
+        #: rather than bounding anything that matters.
+        self._pdata_ranges = []
+        self._pdata_range_starts = None
+        self._pdata_range_reach = []
 
     def init(self, disassembly, cbAnalysisTimeout=None):
+        self._pdata_ranges = []
+        self._pdata_range_starts = None
+        self._pdata_range_reach = []
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
@@ -517,6 +529,42 @@ class FunctionCandidateManager:
             if self.disassembly.isCode(start):
                 continue
             yield start
+
+    def declaredExceptionRangeContaining(self, addr):
+        """The RUNTIME_FUNCTION extent `addr` sits inside without being an entry, or None.
+
+        `(start, end, is_fragment)`. A primary record's own start is the function's entry, so
+        only a strictly interior address answers; a fragment record describes part of some
+        other function, so its first byte is interior too and answers as well.
+
+        The extents come from whichever backend read the exception directory -- x64 reads an
+        EndAddress field, ARM64 reconstructs the length from packed or .xdata unwind data --
+        but what to do with a range once it is known does not differ between them.
+
+        Extents are deliberately not merged. Functions are laid out end-to-start, so merging
+        adjacent records would collapse the text section into a handful of spans in which
+        every address but the first reads as interior.
+        """
+        if self._pdata_range_starts is None:
+            self._pdata_ranges.sort()
+            self._pdata_range_starts = [start for start, _, _ in self._pdata_ranges]
+            # Sorting by start does not order the ends, so "the previous record ends before
+            # `addr`" says nothing about the one before that. Two short records in front of
+            # a long one would end the walk on top of the extent that actually covers the
+            # address. The running maximum is what can be tested in one step: once no record
+            # at or before this index reaches past `addr`, none of them contains it.
+            highest = 0
+            self._pdata_range_reach = []
+            for _, end, _fragment in self._pdata_ranges:
+                highest = max(highest, end)
+                self._pdata_range_reach.append(highest)
+        index = bisect.bisect_right(self._pdata_range_starts, addr) - 1
+        while index >= 0 and self._pdata_range_reach[index] > addr:
+            start, end, fragment = self._pdata_ranges[index]
+            if addr < end and (start < addr or fragment):
+                return start, end, fragment
+            index -= 1
+        return None
 
     def _ehFrameFunctionStarts(self):
         binary_info = self.disassembly.binary_info
