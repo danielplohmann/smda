@@ -19,6 +19,12 @@ class PeFileLoader:
     BITNESS_MAP = {0x14C: 32, 0x8664: 64, 0xAA64: 64}
     ARCHITECTURE_MAP = {0x14C: "intel", 0x8664: "intel", 0xAA64: "aarch64"}
 
+    #: IMAGE_COR20_HEADER.ManagedNativeHeader, 64 bytes into the CLR header. A pure-IL
+    #: assembly leaves it zero; a ReadyToRun assembly points it at a header whose first
+    #: four bytes are this signature, and ships precompiled native code beside its CIL.
+    CLR_MANAGED_NATIVE_HEADER_OFFSET = 0x40
+    READY_TO_RUN_SIGNATURE = b"RTR\x00"
+
     @staticmethod
     def isCompatible(data):
         return data[:2] == b"MZ"
@@ -179,6 +185,58 @@ class PeFileLoader:
                 if d.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER and d.size > 0:
                     architecture = "cil"
         return architecture
+
+    @staticmethod
+    def getReadyToRunArchitecture(binary, parsed=_NOT_PROVIDED):
+        """Instruction set of a ReadyToRun assembly's precompiled body, or "".
+
+        Empty for everything that is not one: a pure-IL assembly, a native PE, a damaged
+        header. Also empty for a ReadyToRun image whose COFF machine field names no
+        instruction set SMDA has a backend for -- there is no honest answer to route on
+        when the image does not say what its native code is.
+
+        `getArchitecture` reports such an image as `cil` because that is what its CLR
+        header makes it, and that stays the default. This is the second fact needed to
+        offer a caller the other half of the image.
+        """
+        pefile = safe_lief_parse(binary) if parsed is _NOT_PROVIDED else parsed
+        if not pefile:
+            return ""
+        if PeFileLoader._clrManagedNativeHeader(pefile) != PeFileLoader.READY_TO_RUN_SIGNATURE:
+            return ""
+        return PeFileLoader.ARCHITECTURE_MAP.get(PeFileLoader.getMachineType(binary), "")
+
+    @staticmethod
+    def _clrManagedNativeHeader(pefile):
+        """First four bytes of whatever the CLR header's ManagedNativeHeader points at.
+
+        Empty when the image declares no CLR header, when the header is too short to carry
+        the field, when the field is empty, or when either read falls outside the image --
+        lief answers an unmapped range with no bytes rather than raising.
+        """
+        directory = next(
+            (
+                candidate
+                for candidate in pefile.data_directories
+                if candidate.type == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER
+                and candidate.rva
+                and candidate.size >= PeFileLoader.CLR_MANAGED_NATIVE_HEADER_OFFSET + 8
+            ),
+            None,
+        )
+        if directory is None:
+            return b""
+        offset = directory.rva + PeFileLoader.CLR_MANAGED_NATIVE_HEADER_OFFSET
+        field = bytes(pefile.get_content_from_virtual_address(offset, 8))
+        if len(field) < 8:
+            return b""
+        rva, size = struct.unpack("<II", field)
+        # the declared size has to cover the signature the caller is about to read: a header
+        # that says it is one byte long does not become a ReadyToRun header because the three
+        # bytes after it happen to spell the rest of `RTR\0`
+        if not rva or size < len(PeFileLoader.READY_TO_RUN_SIGNATURE):
+            return b""
+        return bytes(pefile.get_content_from_virtual_address(rva, len(PeFileLoader.READY_TO_RUN_SIGNATURE)))
 
     @staticmethod
     def getHasBackend(binary, parsed=_NOT_PROVIDED):

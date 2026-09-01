@@ -167,6 +167,10 @@ class Disassembler:
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.architecture = loader.getArchitecture()
+        if self.config.USE_READYTORUN_NATIVE_ROUTING and binary_info.architecture == "cil":
+            # the loader answers "" for anything that is not a ReadyToRun assembly it can
+            # name an instruction set for, so this is a no-op on every other .NET image
+            binary_info.architecture = loader.getReadyToRunArchitecture() or binary_info.architecture
         binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.has_backend = loader.getHasBackend()
@@ -295,7 +299,7 @@ class Disassembler:
             )
         return smda_report
 
-    def _disassemble(self, binary_info, timeout=0):
+    def _disassemble(self, binary_info, timeout=0) -> SmdaReport:
         self._start_time = datetime.datetime.now(datetime.timezone.utc)
         self._timeout = timeout
         self._last_timeout_log_second = -1
@@ -319,7 +323,7 @@ class Disassembler:
             raise RuntimeError(f"No disassembly backend available for architecture '{binary_info.architecture}'.")
         raise RuntimeError("Disassembler backend not initialized.")
 
-    def _createErrorReport(self, start, exception):
+    def _createErrorReport(self, start, exception) -> SmdaReport:
         report = SmdaReport(config=self.config)
         report.smda_version = self.config.VERSION
         report.status = "error"
@@ -330,7 +334,7 @@ class Disassembler:
         report.timestamp = datetime.datetime.now(datetime.timezone.utc)
         return report
 
-    def _handleDisassemblyException(self, start, exception, log_message):
+    def _handleDisassemblyException(self, start, exception, log_message) -> SmdaReport:
         reraise_non_operational_exception(exception)
         LOGGER.error(log_message)
         return self._createErrorReport(start, exception)

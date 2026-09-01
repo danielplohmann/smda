@@ -19,6 +19,7 @@ class FileLoader:
     _bitness = 0
     _abi = ""
     _architecture = ""
+    _readytorun_architecture = ""
     _has_backend = False
     _format_recognized = False
     _code_areas = None
@@ -49,6 +50,7 @@ class FileLoader:
         self._bitness = 0
         self._abi = ""
         self._architecture = ""
+        self._readytorun_architecture = ""
         self._has_backend = False
         self._format_recognized = False
         self._code_areas = []
@@ -75,6 +77,8 @@ class FileLoader:
                     self._bitness = loader.getBitness(self._raw_data, **kw)
                     self._code_areas = loader.getCodeAreas(self._raw_data, **kw)
                     self._architecture = loader.getArchitecture(self._raw_data, **kw)
+                    if hasattr(loader, "getReadyToRunArchitecture"):
+                        self._readytorun_architecture = loader.getReadyToRunArchitecture(self._raw_data, **kw)
                     self._abi = loader.getAbi(self._raw_data, **kw)
                     if hasattr(loader, "getHasBackend"):
                         self._has_backend = loader.getHasBackend(self._raw_data, **kw)
@@ -105,6 +109,14 @@ class FileLoader:
 
     def getArchitecture(self):
         return self._architecture
+
+    def getReadyToRunArchitecture(self):
+        """Instruction set of a ReadyToRun assembly's precompiled native body, or "".
+
+        Empty for every other input, including a ReadyToRun image whose COFF machine
+        field names no instruction set SMDA has a backend for.
+        """
+        return self._readytorun_architecture
 
     def getHasBackend(self):
         return self._has_backend
