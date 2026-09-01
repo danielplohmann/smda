@@ -49,6 +49,7 @@ from .definitions import (
     BL_VALUE,
     BR_MASK,
     BR_VALUE,
+    BTI_J,
     INSTRUCTION_SIZE,
     LDR_UNSIGNED_64_MASK,
     LDR_UNSIGNED_64_VALUE,
@@ -68,6 +69,24 @@ from .FunctionCandidate import FunctionCandidate
 
 LOGGER = logging.getLogger(__name__)
 
+#: How far either straight-line walk over a gap run will read before giving up. A run that
+#: has not reached a terminator in this many bytes is not a block either walk can reason
+#: about, so both stop rather than guess.
+_GAP_RUN_LIMIT = 0x400
+
+#: Share of an image's own call targets that metadata has to have named already before the
+#: address-materialization scan is judged to have nothing left to reach. The measured
+#: distribution is bimodal with a wide empty interval between the modes; this sits in its
+#: upper half because the two errors are not symmetric -- running the scan when it is
+#: useless costs precision, skipping it when it is not costs recall.
+_METADATA_CALL_TARGET_COVERAGE = 0.95
+
+#: Fewest call targets the coverage above may be read from. Below this the ratio is a
+#: small-sample artifact and not evidence: one corpus image resolves four `bl` targets in
+#: the whole binary, and metadata naming all four says nothing about whether it also names
+#: the functions only a materialized address reaches.
+_METADATA_MIN_CALL_TARGETS = 512
+
 _ARM64_PDATA_ENTRY_SIZE = 8
 # items (words, matches or exception records) a scan steps over between budget polls, mirroring
 # _TIMEOUT_POLL_BLOCKS in the engine. A whole exception table is walked inside one call, so
@@ -84,13 +103,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
     CANDIDATE_ALIGNMENT = INSTRUCTION_SIZE
 
+    def __init__(self, config):
+        super().__init__(config)
+        # init() resets these per binary, but a manager driven one pass at a time never
+        # reaches init(), and the reference scan writes to them from its first call
+        self._call_targets = set()
+        self._metadata_candidates = set()
+
     def init(self, disassembly, cbAnalysisTimeout=None):
-        # Reset the memoized executable-section ranges and Mach-O fixup state
-        # BEFORE base initialization: super().init() runs candidate discovery,
-        # so a reused manager instance would otherwise consume the previous
-        # binary's cached data during the scans.
+        # Reset the memoized executable-section ranges, the Mach-O fixup state and the
+        # two sets the metadata-coverage test reads BEFORE base initialization:
+        # super().init() runs candidate discovery, so a reused manager instance would
+        # otherwise consume the previous binary's cached data during the scans.
         self._exec_ranges = None
         self._macho_fixup_state = None
+        self._call_targets = set()
+        self._metadata_candidates = set()
         super().init(disassembly, cbAnalysisTimeout)
 
     def hasCommonPrologue(self, addr):
@@ -110,10 +138,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self.locatePeExceptionCandidates()
         if self._candidateTimeoutTripped():
             return
+        # what the coverage test below compares its call targets against: everything the image
+        # says about itself, which is not the same set as what has been booked by now
+        self._metadata_candidates = set(self.candidates) | self._languageMetadataStarts()
         self.locateReferenceCandidates()
         if self._candidateTimeoutTripped():
             return
-        self.locateAddressRefCandidates()
+        if not self._metadataNamedTheCallTargets():
+            self.locateAddressRefCandidates()
         if self._candidateTimeoutTripped():
             return
         self.locateDataPointerCandidates()
@@ -563,6 +595,50 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.addReferenceCandidate(target, pointer_va)
                 self.setInitialCandidate(target)
 
+    def _languageMetadataStarts(self):
+        """Function starts the image's own language metadata names, booked as candidates or not.
+
+        Two passes that read such metadata are not in self.candidates at this point:
+        locateLangSpecCandidates runs after the coverage test, and locateSymbolCandidates is
+        optional (USE_SYMBOLS_AS_CANDIDATES). Neither is a proxy for what the image declares,
+        and the test asks about the image rather than about the configuration -- reading it
+        here is what keeps a Go binary analysed without symbol candidates from being treated
+        as one that names nothing.
+        """
+        if not self.lang_analyzer.checkGo():
+            return set()
+        return set(self.lang_analyzer.getGoObjects())
+
+    def _metadataNamedTheCallTargets(self):
+        """Whether this image's metadata has already supplied the functions, leaving the
+        address-materialization scan nothing to find.
+
+        That scan exists to reach entries no call names -- a pointer handed to a callback,
+        a table walked at run time. An image that ships a full function map has none of
+        those left over: the symbol pass consumes the map, every entry is already a
+        candidate, and what the scan then produces is the addresses that are materialized
+        but are not entries. On a Go binary that is thousands of them for no recovered
+        function at all.
+
+        The question is asked of the image rather than of its container or its language,
+        both of which have been the wrong variable before: of the addresses this image's
+        own `bl` instructions call, how many did metadata name before this pass ran? A
+        stripped C or C++ object answers near zero however it was linked; one carrying a
+        complete map answers near one whoever compiled it.
+
+        `bl` targets are the denominator because they are the one population both kinds of
+        image have, in proportion to how many functions they contain, and because they are
+        known at exactly this point -- the scan that resolves them has just finished. A rate
+        needs a sample, though, so an image with few of them is left to the scan whatever
+        share of those few metadata named.
+        """
+        if len(self._call_targets) < _METADATA_MIN_CALL_TARGETS:
+            # too few calls to read a rate from, or none at all: no evidence either way, and
+            # the scan is the only pass left that could reach an entry, so let it run
+            return False
+        named = sum(1 for target in self._call_targets if target in self._metadata_candidates)
+        return named / len(self._call_targets) >= _METADATA_CALL_TARGET_COVERAGE
+
     def locateAddressRefCandidates(self):
         # Reference discovery for addresses materialized in code: adr Xd, #imm and the
         # adrp Xd, #page / add Xd, Xn, #lo12 pair. When the resulting address lands in
@@ -694,6 +770,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 imm -= BL_IMM_SIGN_BIT << 1  # sign-extend the 26-bit immediate
             target = (source + imm * INSTRUCTION_SIZE) & self.getBitMask()
             if self.disassembly.isAddrWithinMemoryImage(target):
+                self._call_targets.add(target)
                 self.addReferenceCandidate(target, source)
                 self.setInitialCandidate(target)
 
@@ -709,7 +786,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not is_function_prologue(word):
                 continue
             addr = (base + match_count * INSTRUCTION_SIZE) & self.getBitMask()
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr):
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(addr, word):
                 continue
             if not self._passesCodeFilter(addr):
                 continue
@@ -778,11 +855,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # ends in an unconditional `b` into the interior of already-mapped code (a
         # known instruction that is not itself a function-start candidate), the run is
         # a mid-function tail rather than a new function — so suppress it.
+        # The terminator set omits the trap words _endOfRefusedLandingPadRun stops at, and
+        # that is deliberate: skipping and suppressing cannot stop in the same places. A
+        # skip that reads one instruction too far steps over a real entry and loses it; a
+        # suppression that reads further only learns more about the same candidate. Nor is
+        # a trap a boundary the image declares - mid-body it is a bounds check, and it ends
+        # a function only by the backend's own END_INS convention - so the words behind it
+        # still belong to the enclosing routine. Pinned by
+        # tests/testAArch64GapRunTerminators.py.
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size
         words = self._wordsView()
         addr = start
-        limit = start + 0x400
+        limit = start + _GAP_RUN_LIMIT
         while addr + INSTRUCTION_SIZE <= base + size and addr < limit:
             word = words[(addr - base) // INSTRUCTION_SIZE]
             if (word & B_MASK) == B_VALUE:
@@ -790,18 +875,68 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if imm & 0x02000000:
                     imm -= 0x04000000
                 target = addr + imm * INSTRUCTION_SIZE
+                # getFunctionStartCandidates() is a snapshot taken before analysis begins, and
+                # gap analysis never adds to it, so a function it discovered is code_map'd but
+                # absent from the set -- indistinguishable here from somebody's interior. Ask
+                # the live function set too, or a branch to a real entry reads as a tail.
+                if target in self.disassembly.functions:
+                    return False
                 return target in self.disassembly.code_map and target not in self.getFunctionStartCandidates()
             if (word & RET_MASK) == RET_VALUE or (word & BR_MASK) == BR_VALUE:
                 return False
             addr += INSTRUCTION_SIZE
         return False
 
-    def _isLikelyInteriorBtiCandidate(self, addr):
+    def _endOfRefusedLandingPadRun(self, start):
+        """Where the scan may resume after refusing a landing pad, without meeting its body.
+
+        Advancing one instruction from a refused pad lands on the pad's own first body
+        instruction. That word is ordinary code, so it passes every remaining guard and is
+        promoted in the pad's place four bytes along - the false positive moves rather than
+        going. The block a pad labels ends at its first terminator, and past that is the
+        first address the scan has not already decided against.
+
+        Falls back to the single-instruction step when no terminator is in reach, so a run
+        of undecodable bytes cannot make this skip an arbitrary distance.
+
+        A trap ends the block here, unlike in _gapRunFlowsIntoInterior next door, which
+        shares this walk's bound but not that terminator.
+        """
+        base = self.disassembly.binary_info.base_addr
+        size = self.disassembly.binary_info.binary_size
+        words = self._wordsView()
+        addr = start + INSTRUCTION_SIZE
+        limit = start + _GAP_RUN_LIMIT
+        while addr + INSTRUCTION_SIZE <= base + size and addr < limit:
+            word = words[(addr - base) // INSTRUCTION_SIZE]
+            if (
+                (word & RET_MASK) == RET_VALUE
+                or (word & BR_MASK) == BR_VALUE
+                or (word & B_MASK) == B_VALUE
+                or is_trap(word)
+            ):
+                return addr + INSTRUCTION_SIZE
+            addr += INSTRUCTION_SIZE
+        return start + INSTRUCTION_SIZE
+
+    def _isLikelyInteriorBtiCandidate(self, addr, word):
         # BTI marks both real entries and indirect-branch landing pads. If the word
         # sits inside already claimed code, or immediately follows ordinary code
         # rather than padding / a terminator-like boundary, suppress it as an entry
         # candidate so switch targets and guarded blocks do not fragment functions.
-        if addr in self.disassembly.code_map and addr not in self.getFunctionStartCandidates():
+        if self.config.USE_AARCH64_BTI_TARGET_TYPE and word == BTI_J:
+            # `bti j` permits a target reached by `br` - an indirect jump - and never one
+            # reached by `blr`: a call landing on a J-only pad faults. The compiler that wrote
+            # J was naming an interior label, a switch case or a computed-goto target, and the
+            # pad says so about itself before anything around it is read. The checks below
+            # cannot say it: a case block is preceded by the previous case's terminating
+            # branch, which is exactly the boundary shape they read as an entry.
+            return True
+        if (
+            addr in self.disassembly.code_map
+            and addr not in self.getFunctionStartCandidates()
+            and addr not in self.disassembly.functions
+        ):
             return True
 
         base = self.disassembly.binary_info.base_addr
@@ -834,10 +969,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # AArch64 gap scan: a fixed-stride linear sweep of unanalyzed executable bytes
         # for functions that no prologue, call reference or stored pointer reached
         # (typically unreferenced / indirect-only routines). Guards keep each gap
-        # candidate at a plausible function entry: skip padding (nop / zero), a
-        # leading conditional branch or trap, constrain to genuine executable sections (the
-        # loader's code_areas can be a coarse segment covering data), and drop runs
-        # that flow into the interior of an already-mapped function.
+        # candidate at a plausible function entry: skip padding (nop / zero) and traps,
+        # constrain to genuine executable sections (the loader's code_areas can be a
+        # coarse segment covering data), and drop runs that flow into the interior of an
+        # already-mapped function.
         if self.gap_pointer is None:
             self.initGapSearch()
         # Explicit None test: a gap start at VA 0x0 (valid for a base-0 buffer) is a
@@ -879,11 +1014,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if word in (0, NOP):  # inter-function padding
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
-            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer):
-                self.gap_pointer += INSTRUCTION_SIZE
-                continue
-            if is_conditional_branch(word):  # a function never opens with a cond branch
-                self.gap_pointer += INSTRUCTION_SIZE
+            if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
+                self.gap_pointer = self._endOfRefusedLandingPadRun(self.gap_pointer)
                 continue
             if is_trap(word):  # udf-space data words / trap filler, never an entry
                 self.gap_pointer += INSTRUCTION_SIZE
