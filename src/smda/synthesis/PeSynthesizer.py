@@ -322,7 +322,7 @@ class PeSynthesizer(BinarySynthesizer):
         header += b"\x00" * (size_of_headers - len(header))
         return header
 
-    def _synthesizeFromHeader(self, offsets, with_imports, with_strings):
+    def _synthesizeFromHeader(self, offsets, with_imports, with_strings) -> bytes:
         base = self.report.base_addr
         pe_src = safe_lief_parse(bytes(self.report.xheader))
         if not isinstance(pe_src, lief.PE.Binary):
@@ -451,7 +451,7 @@ class PeSynthesizer(BinarySynthesizer):
             return base
         return candidate
 
-    def _synthesizeMinimal(self, offsets, with_imports, with_strings):
+    def _synthesizeMinimal(self, offsets, with_imports, with_strings) -> bytes:
         bitness = self._getBitness()
         ptr_size = 8 if bitness == 64 else 4
         section_alignment = 0x1000
@@ -557,12 +557,13 @@ class PeSynthesizer(BinarySynthesizer):
         size_of_headers = align_up(0x40 + 4 + 20 + size_opt + 40 * len(regions), file_alignment)
         image_end = align_up(max(r["vaddr"] + r["vsize"] for r in regions), section_alignment)
         entry_rva = text_vaddr
-        if self.report.oep:
-            # oep is relative to the report's own base, which the synthetic base may sit below,
-            # so resolve it to an absolute address before turning it back into an RVA
-            report_base = self.report.base_addr
-            oep = self.report.oep if self.report.oep >= report_base else report_base + self.report.oep
-            entry_rva = oep - base
+        oep = self._resolveEntryPoint()
+        if oep is not None:
+            candidate = oep - base
+            if self._fitsUnsigned(candidate, 32):
+                entry_rva = candidate
+            else:
+                self._warn("entry point 0x%x does not fit a 32-bit RVA; .text used instead", oep)
 
         optional_header = self._buildMinimalOptionalHeader(
             regions, bitness, size_of_headers, image_end, entry_rva, import_dir, base

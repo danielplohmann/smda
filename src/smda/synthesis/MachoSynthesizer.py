@@ -505,7 +505,7 @@ class MachoSynthesizer(BinarySynthesizer):
         libs = sorted({lib for lib, _ in import_map.values() if lib})
         return strtab, symtab, indirect_blob, libs, len(indirect)
 
-    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings):
+    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings) -> bytes:
         is_64 = self._is64()
         segments = self._prepareSections(sections, offsets, with_strings)
         sections = [section for segment in segments for section in segment["sections"]]
@@ -521,11 +521,8 @@ class MachoSynthesizer(BinarySynthesizer):
         ncmds = len(segments)
         if import_map:
             ncmds += 2 + len(libs)
-        entry_va = None
-        if self.report.oep:
-            entry_va = (
-                self.report.oep if self.report.oep >= self.report.base_addr else self.report.base_addr + self.report.oep
-            )
+        entry_va = self._resolveEntryPoint()
+        if entry_va is not None:
             text_segment = next((segment for segment in segments if segment["perms"] & VM_PROT_EXECUTE), None)
             if text_segment and text_segment["va_start"] <= entry_va < text_segment["page_end"]:
                 ncmds += 1
@@ -737,7 +734,7 @@ class MachoSynthesizer(BinarySynthesizer):
             flags,
         )
 
-    def _synthesizeMinimal(self, offsets):
+    def _synthesizeMinimal(self, offsets) -> bytes:
         va_start, va_end = self._syntheticSpan(offsets, PAGE_SIZE)
         section = {"name": "__text", "va_start": va_start, "va_end": va_end}
         return self._synthesizeFromSections([section], offsets, False, False)

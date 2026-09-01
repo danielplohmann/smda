@@ -1,7 +1,6 @@
 import struct
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
-from smda.common.SmdaReport import MAX_ADDRESS_VALUE
 from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer, align_down, align_up
 
@@ -323,7 +322,7 @@ class ElfSynthesizer(BinarySynthesizer):
                 )
         return segments
 
-    def _assembleFile(self, sections, segments, bitness, dynamic_range=None):
+    def _assembleFile(self, sections, segments, bitness, dynamic_range=None) -> bytes:
         is_64 = bitness == 64
         ehdr_size = 64 if is_64 else 52
         phent_size = 56 if is_64 else 32
@@ -387,15 +386,15 @@ class ElfSynthesizer(BinarySynthesizer):
             ehdr[7:16] = self.report.xheader[7:16]
         e_type = struct.unpack("<H", self.report.xheader[16:18])[0] if self._hasElfHeader(18) else ET_EXEC
         machine = self._getMachine()
-        entry = 0
-        if self.report.oep:
-            entry = (
-                self.report.oep if self.report.oep >= self.report.base_addr else self.report.base_addr + self.report.oep
-            )
-        else:
-            entry = min((s["va_start"] for s in sections if s["executable"]), default=0)
-        if not 0 <= entry < MAX_ADDRESS_VALUE:
+        default_entry = min((s["va_start"] for s in sections if s["executable"]), default=0)
+        entry = self._resolveEntryPoint()
+        if entry is None:
+            entry = default_entry
+        elif not self._fitsUnsigned(entry, 64):
             raise ValueError(f"synthesized entry point 0x{entry:x} does not fit a 64-bit address space")
+        elif not is_64 and not self._fitsUnsigned(entry, 32):
+            self._warn("entry point 0x%x does not fit an ELF32 e_entry; .text used instead", entry)
+            entry = default_entry
         if is_64:
             struct.pack_into(
                 "<HHIQQQIHHHHHH",
@@ -553,7 +552,7 @@ class ElfSynthesizer(BinarySynthesizer):
             )
         return bytes(output)
 
-    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings):
+    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings) -> bytes:
         bitness = self._getBitness()
         sections = self._prepareSections(sections, offsets, with_strings)
         import_map = self._getImportMap() if with_imports else {}
@@ -563,7 +562,7 @@ class ElfSynthesizer(BinarySynthesizer):
         segments = self._mergeSegments(sections)
         return self._assembleFile(sections, segments, bitness, dynamic_range)
 
-    def _synthesizeMinimal(self, offsets):
+    def _synthesizeMinimal(self, offsets) -> bytes:
         bitness = self._getBitness()
         va_start, va_end = self._syntheticSpan(offsets, PAGE_SIZE)
         section = {
