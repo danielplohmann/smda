@@ -1,6 +1,7 @@
 import contextlib
 import hashlib
 import logging
+from typing import Optional
 
 import lief
 
@@ -47,11 +48,11 @@ class BinaryInfo:
     """
 
     architecture = ""
-    base_addr = 0
-    binary = b""
-    raw_data = b""
+    base_addr: int = 0
+    binary: bytes = b""
+    raw_data: bytes = b""
     binary_size = 0
-    bitness = None
+    bitness: Optional[int] = None
     code_areas = None
     component = ""
     family = ""
@@ -70,7 +71,7 @@ class BinaryInfo:
     symbols = None
     oep = None
 
-    def __init__(self, binary):
+    def __init__(self, binary: bytes):
         self.binary = binary
         self.raw_data = binary
         self.binary_size = len(binary)

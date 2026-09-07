@@ -1,7 +1,9 @@
+from typing import Dict, Union
+
 from .rust import RustDemangler
 
 _DEMANGLER = RustDemangler()
-_DEMANGLE_CACHE = {}
+_DEMANGLE_CACHE: Dict[str, Union[str, Exception]] = {}
 # the cache is process-lifetime and keyed by every mangled name ever seen; bound it so a
 # long-running batch cannot grow it without limit (the sibling demanglers use
 # lru_cache(maxsize=4096)). Results and exception objects are both cached, which lru_cache

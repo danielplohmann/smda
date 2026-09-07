@@ -111,7 +111,7 @@ def normalize_capstone_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
-def smda_instruction_matches_capstone(smda_instruction, capstone_instruction) -> bool:
+def smda_instruction_matches_capstone(smda_instruction, capstone_instruction):
     if smda_instruction.mnemonic != capstone_instruction.mnemonic:
         return False
     if normalize_capstone_text(smda_instruction.operands) != normalize_capstone_text(capstone_instruction.op_str):

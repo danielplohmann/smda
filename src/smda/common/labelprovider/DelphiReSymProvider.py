@@ -227,11 +227,11 @@ class DelphiReSymProvider(AbstractLabelProvider):
     def __init__(self, config):
         self._config = config
         self._func_symbols = {}
-        self._binary = b""
-        self._base_addr = 0
+        self._binary: bytes = b""
+        self._base_addr: int = 0
         self._bitness = 32
-        self._code_start = 0
-        self._code_end = 0
+        self._code_start: int = 0
+        self._code_end: int = 0
         self._settings = None
 
     def update(self, binary_info):

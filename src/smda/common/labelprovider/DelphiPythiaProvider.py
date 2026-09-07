@@ -136,8 +136,8 @@ class DelphiPythiaProvider(AbstractLabelProvider):
     def __init__(self, config):
         self._config = config
         self._binary_info = None
-        self._binary = b""
-        self._base_addr = 0
+        self._binary: bytes = b""
+        self._base_addr: int = 0
         self._bitness = 0
         self._scan_ranges: List[Tuple[int, int]] = []
         self._func_symbols: Dict[int, str] = {}

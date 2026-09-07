@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import zipfile
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
 
@@ -67,10 +67,11 @@ class SmdaReport:
     abi = None
     base_addr = None
     binary_size = None
-    binweight = 0
+    binweight: float = 0.0
     bitness = None
-    block_locator = None
-    buffer = None
+    block_locator: Optional[BlockLocator] = None
+    buffer: Optional[bytes] = None
+    _sorted_functions: Optional[List["SmdaFunction"]] = None
     code_areas = None
     # immutable-by-convention sentinel: __init__ always rebinds this to a fresh list
     code_sections: List[Any] = []
@@ -99,19 +100,20 @@ class SmdaReport:
     xcfg: Dict[int, "SmdaFunction"] = {}
     xheader = None
     pe_header_hash = None
-    data_refs_from = None
+    data_refs_from: Optional[Dict[int, List[int]]] = None
     data_refs_to = None
+    _string_cache: Dict[Any, Optional[Tuple[str, str]]]
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False
     # in case we need to re-disassemble with more detail, we hold an initialized capstone instance as singleton
     capstone = None
 
-    def __init__(self, disassembly=None, config=None, buffer=None):
+    def __init__(self, disassembly=None, config=None, buffer: Optional[bytes] = None):
         # caches owned by SmdaReport but populated lazily by StringExtractor; declared here so
         # their lifecycle is explicit and every construction path (incl. fromDict via cls(None))
         # starts with empty caches rather than relying on monkey-patched attributes.
-        self._string_cache = {}
+        self._string_cache: Dict[Any, Optional[Tuple[str, str]]] = {}
         self._derefs_cache = {}
         # start every construction path with an empty CFG so accessors like
         # num_functions/getFunction work on reports without a disassembly
@@ -128,7 +130,7 @@ class SmdaReport:
             self.abi = disassembly.binary_info.abi
             self.base_addr = disassembly.binary_info.base_addr
             self.binary_size = disassembly.binary_info.binary_size
-            self.binweight = 0
+            self.binweight = 0.0
             self.bitness = disassembly.binary_info.bitness
             self.buffer = buffer
             self.code_areas = disassembly.binary_info.code_areas
@@ -227,10 +229,10 @@ class SmdaReport:
         return self.xcfg.get(function_addr, None)
 
     def getFunctions(self) -> Iterator["SmdaFunction"]:
-        if getattr(self, "_sorted_functions", None) is None:
-            self._sorted_functions = []
-            if self.xcfg:
-                self._sorted_functions = [smda_function for _, smda_function in sorted(self.xcfg.items())]
+        if self._sorted_functions is None:
+            self._sorted_functions = (
+                [smda_function for _, smda_function in sorted(self.xcfg.items())] if self.xcfg else []
+            )
         yield from self._sorted_functions
 
     def getExportedFunctions(self):

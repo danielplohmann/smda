@@ -323,7 +323,7 @@ class ElfSynthesizer(BinarySynthesizer):
                 )
         return segments
 
-    def _assembleFile(self, sections, segments, bitness, dynamic_range=None):
+    def _assembleFile(self, sections, segments, bitness, dynamic_range=None) -> bytes:
         is_64 = bitness == 64
         ehdr_size = 64 if is_64 else 52
         phent_size = 56 if is_64 else 32
@@ -553,7 +553,7 @@ class ElfSynthesizer(BinarySynthesizer):
             )
         return bytes(output)
 
-    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings):
+    def _synthesizeFromSections(self, sections, offsets, with_imports, with_strings) -> bytes:
         bitness = self._getBitness()
         sections = self._prepareSections(sections, offsets, with_strings)
         import_map = self._getImportMap() if with_imports else {}
@@ -563,7 +563,7 @@ class ElfSynthesizer(BinarySynthesizer):
         segments = self._mergeSegments(sections)
         return self._assembleFile(sections, segments, bitness, dynamic_range)
 
-    def _synthesizeMinimal(self, offsets):
+    def _synthesizeMinimal(self, offsets) -> bytes:
         bitness = self._getBitness()
         va_start, va_end = self._syntheticSpan(offsets, PAGE_SIZE)
         section = {

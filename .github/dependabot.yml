@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      # ty is pinned in pyproject.toml and ships new error rules in patch releases;
+      # bump it in a dedicated change that addresses those rules, not via Dependabot.
+      - dependency-name: "ty"
 
   - package-ecosystem: "github-actions"
     directory: "/"

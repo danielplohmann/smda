@@ -1,5 +1,8 @@
 import bisect
 import itertools
+from typing import Any, Dict, List, Optional
+
+from smda.common.SmdaBasicBlock import SmdaBasicBlock
 
 
 class BlockLocator:
@@ -7,8 +10,8 @@ class BlockLocator:
     When instantiated, creates the required data structures.
     """
 
-    sorted_blocks_addresses = None
-    blocks_dict = None
+    sorted_blocks_addresses: Optional[List[Any]] = None
+    blocks_dict: Optional[Dict[Any, SmdaBasicBlock]] = None
 
     def __init__(self, functions):
         # Instantiate the datastructures required :
@@ -23,7 +26,7 @@ class BlockLocator:
         last_ins = block.instructions[-1]
         return last_ins.offset + len(last_ins.bytes) // 2  # bytes is actuall a hex string
 
-    def findBlockByContainedAddress(self, inner_address):
+    def findBlockByContainedAddress(self, inner_address) -> Optional[SmdaBasicBlock]:
         sorted_addresses = self.sorted_blocks_addresses
         if sorted_addresses is None:
             return None
