@@ -111,12 +111,14 @@ def normalize_capstone_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
-def smda_instruction_matches_capstone(smda_instruction, capstone_instruction):
+def smda_instruction_matches_capstone(smda_instruction, capstone_instruction) -> bool:
     if smda_instruction.mnemonic != capstone_instruction.mnemonic:
         return False
     if normalize_capstone_text(smda_instruction.operands) != normalize_capstone_text(capstone_instruction.op_str):
         return False
-    return capstone_instruction.size * 2 == len(smda_instruction.bytes)
+    # capstone_instruction is untyped, so `.size` is Unknown and the comparison infers Unknown;
+    # bool() is what makes the declared return type true rather than dropping the annotation
+    return bool(capstone_instruction.size * 2 == len(smda_instruction.bytes))
 
 
 def escape_capstone_operand(operand) -> str:

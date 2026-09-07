@@ -364,6 +364,10 @@ GAP_SEQUENCES = {
     15: frozenset({b"\x66\x66\x66\x66\x66\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00"}),
 }
 
+# Read well beyond the alignment cut: intel/FunctionCandidateManager consults this table in
+# five places (the exact-length and any-length filler tests, the candidate scan, and the
+# gap-length walk) and X86Backend in two. Adding an encoding here sharpens every one of them,
+# so a change to this table is a change to all padding-aware discovery, not to one caller.
 GAP_SEQUENCE_FIRST_BYTES = frozenset(sequence[:1] for sequences in GAP_SEQUENCES.values() for sequence in sequences)
 #: Longest entry in the table, so a scan over a bounded window does not re-derive it per step.
 MAX_GAP_SEQUENCE_LENGTH = max(GAP_SEQUENCES)

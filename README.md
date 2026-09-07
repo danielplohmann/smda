@@ -61,9 +61,13 @@ the native backends, `intel` and `aarch64`. On the two managed ones they are **f
 | `dalvik` | the offset of the code item in the DEX file |
 
 The two are not the same kind of number, so correlating a managed report with a native one - or
-either with another tool's output - compares two different address spaces. A report names the backend
-that produced it in two places, `report.architecture` and `metadata.language` in `toDict()`, so a
-consumer can tell which rule applies before treating an offset as an address.
+either with another tool's output - compares two different address spaces. `report.architecture` is
+what says which rule applies, and it is the field to branch on before treating an offset as an
+address. Do not read `metadata.language` as the backend: it is a source-language score map, and while
+it happens to carry a single decisive entry on the two managed backends (`{'.net': 1.0}`,
+`{'dalvik': 1.0}`), on a native one it is a distribution that includes a `.net` score - so branching
+on `.net` appearing in it can read a native report as managed, which is the exact mistake this
+section exists to prevent.
 
 The two managed cases differ in why. A CIL method has an RVA, and reporting the file offset instead
 is a choice; a DEX carries no load address at all, so the file offset is the only address there is.

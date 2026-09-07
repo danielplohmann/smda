@@ -179,6 +179,14 @@ class LateCandidateTestBase:
         )
 
     def test_late_tailcall_does_not_rebuild_queue(self):
+        """Guards against reintroducing scoring into addTailcallCandidate.
+
+        This assertion is trivially true today: the AArch64 override no longer records an
+        inbound call reference, so it has no score to change and cannot reach
+        candidate_queue.update at all. It is kept rather than deleted because the queue
+        rebuild is what the removed bookkeeping used to trigger, and a future change that
+        scores a tailcall seed again would want to be told.
+        """
         with patch.object(self.manager.candidate_queue, "update", wraps=self.manager.candidate_queue.update) as update:
             self.manager.addTailcallCandidate(0xA5E0)
 
