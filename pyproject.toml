@@ -48,7 +48,13 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cov",
-    "ruff",
+    # pinned, and kept equal to the ruff-pre-commit rev in .pre-commit-config.yaml:
+    # this pin governs the Code Quality job and `make lint`, that rev governs
+    # `pre-commit run`, and pre-commit resolves it in its own isolated env. Left
+    # floating, the two drift apart on astral's release schedule and a hook that
+    # passes locally reddens CI on a rule the other version does not have yet.
+    # Move both in one change.
+    "ruff==0.16.6",
     # pinned: ty is pre-1.0 and adds lint rules in patch releases, so an unpinned
     # floating version reddens unrelated PRs on someone else's release schedule
     # (0.0.69/0.0.70 added unsound-return-statement and unsound-yield; 0.0.74
