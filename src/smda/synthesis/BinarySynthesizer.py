@@ -56,6 +56,28 @@ class BinarySynthesizer:
                 )
         return resolved
 
+    def _resolveEntryPoint(self):
+        """The report's entry point as an absolute address, or None when it has none.
+
+        ``oep`` is stored absolute by some producers and relative to the report's own base by
+        others; both forms reach us, so read it as relative only when the absolute reading
+        would fall below the base.
+
+        The result is unbounded, and every caller has to say so itself: _resolveFunctionOffsets
+        caps how far apart the *functions* may sit, which is what keeps the RVAs derived from
+        them inside a header field, but the entry point is not a function offset and that cap
+        never sees it. A report may name one arbitrarily far from the image being rebuilt.
+        """
+        if not self.report.oep:
+            return None
+        base = self.report.base_addr
+        return self.report.oep if self.report.oep >= base else base + self.report.oep
+
+    @staticmethod
+    def _fitsUnsigned(value, width_bits):
+        """Whether ``value`` survives being packed into an unsigned field of that width."""
+        return 0 <= value < (1 << width_bits)
+
     @staticmethod
     def _iterFunctionChunks(smda_function):
         """Yields (block_offset, block_bytes) per basic block.

@@ -915,3 +915,93 @@ class SynthesisLowRvaTestSuite(unittest.TestCase):
         synthesizer.report = types.SimpleNamespace(base_addr=0)
 
         self.assertEqual(synthesizer._imageBaseFor([0x40], 0x1000), 0)
+
+
+def _lowestExecutableSectionVa(synthesized_elf):
+    """Where an ELF with no usable entry point of its own has to aim instead."""
+    parsed = lief.parse(list(synthesized_elf))
+    return min(
+        section.virtual_address for section in parsed.sections if lief.ELF.Section.FLAGS.EXECINSTR in section.flags_list
+    )
+
+
+class SynthesisEntryPointTestSuite(unittest.TestCase):
+    """``oep`` is the one image field no span check bounds.
+
+    _resolveFunctionOffsets caps how far apart the *functions* may sit, which keeps every RVA
+    derived from them inside the format's header fields. The entry point is not a function
+    offset, so a report may name one arbitrarily far from the image being rebuilt, and it
+    reaches the header packers unchecked.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_load_xored_fixture("mirai_x64_xored"))
+
+    def _reportWithEntryPoint(self, oep, bitness=None):
+        report_dict = json.loads(json.dumps(self.report.toDict()))
+        report_dict["oep"] = oep
+        if bitness is not None:
+            report_dict["bitness"] = bitness
+        return SmdaReport.fromDict(report_dict)
+
+    def test_a_pe_entry_point_beyond_the_rva_space_falls_back_to_text(self):
+        # AddressOfEntryPoint is a 32-bit RVA; an oep more than 4 GiB above the image base
+        # used to reach struct.pack_into and abort the whole synthesis
+        report = self._reportWithEntryPoint(self.report.base_addr + (1 << 32))
+
+        parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=FORMAT_PE))))
+        text = next(section for section in parsed.sections if section.name == ".text")
+
+        self.assertEqual(parsed.optional_header.addressof_entrypoint, text.virtual_address)
+
+    def test_a_pe_entry_point_inside_the_rva_space_is_still_kept(self):
+        report = self._reportWithEntryPoint(self.report.base_addr + 0x40)
+
+        parsed = lief.parse(list(bytes(report.synthesizeBinary(output_format=FORMAT_PE))))
+        absolute = parsed.optional_header.imagebase + parsed.optional_header.addressof_entrypoint
+
+        self.assertEqual(absolute, report.base_addr + 0x40)
+
+    def test_an_elf32_entry_point_beyond_the_32_bit_field_falls_back_to_text(self):
+        # e_entry is half as wide in an ELF32 image, and struct truncates the high half rather
+        # than refusing it, which silently aimed the entry at an unrelated address
+        report = self._reportWithEntryPoint(self.report.base_addr + (1 << 32), bitness=32)
+
+        synthesized = bytes(report.synthesizeBinary(output_format=FORMAT_ELF))
+        entry = struct.unpack_from("<I", synthesized, 24)[0]
+
+        self.assertNotEqual(entry, (report.base_addr + (1 << 32)) & 0xFFFFFFFF)
+        self.assertEqual(entry, _lowestExecutableSectionVa(synthesized))
+
+    def test_an_elf64_entry_point_beyond_the_32_bit_field_is_kept(self):
+        oep = self.report.base_addr + (1 << 32)
+        report = self._reportWithEntryPoint(oep)
+
+        synthesized = bytes(report.synthesizeBinary(output_format=FORMAT_ELF))
+
+        self.assertEqual(struct.unpack_from("<Q", synthesized, 24)[0], oep)
+
+    def test_a_report_without_an_entry_point_uses_the_first_executable_section(self):
+        report = self._reportWithEntryPoint(0)
+
+        synthesized = bytes(report.synthesizeBinary(output_format=FORMAT_ELF))
+
+        self.assertEqual(struct.unpack_from("<Q", synthesized, 24)[0], _lowestExecutableSectionVa(synthesized))
+
+    def test_an_oep_below_the_base_is_read_as_an_offset_from_it(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.report = types.SimpleNamespace(base_addr=0x400000, oep=0x1000)
+
+        self.assertEqual(synthesizer._resolveEntryPoint(), 0x401000)
+
+    def test_an_oep_at_or_above_the_base_is_read_as_absolute(self):
+        from smda.synthesis.PeSynthesizer import PeSynthesizer
+
+        synthesizer = PeSynthesizer.__new__(PeSynthesizer)
+        synthesizer.report = types.SimpleNamespace(base_addr=0x400000, oep=0x401000)
+
+        self.assertEqual(synthesizer._resolveEntryPoint(), 0x401000)

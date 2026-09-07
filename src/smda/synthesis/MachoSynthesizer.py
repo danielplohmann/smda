@@ -521,11 +521,8 @@ class MachoSynthesizer(BinarySynthesizer):
         ncmds = len(segments)
         if import_map:
             ncmds += 2 + len(libs)
-        entry_va = None
-        if self.report.oep:
-            entry_va = (
-                self.report.oep if self.report.oep >= self.report.base_addr else self.report.base_addr + self.report.oep
-            )
+        entry_va = self._resolveEntryPoint()
+        if entry_va is not None:
             text_segment = next((segment for segment in segments if segment["perms"] & VM_PROT_EXECUTE), None)
             if text_segment and text_segment["va_start"] <= entry_va < text_segment["page_end"]:
                 ncmds += 1
