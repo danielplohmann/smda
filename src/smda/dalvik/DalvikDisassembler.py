@@ -588,6 +588,15 @@ class DexReferenceResolver:
 
 
 class DalvikDisassembler:
+    """Recover method bodies from a raw DEX.
+
+    Every address in the report this produces is an **offset into the DEX file**: a method
+    starts at its code item's offset and each instruction address is that plus its position in
+    the bytecode. A DEX carries no load address, so there is no virtual address to report -
+    but the native backends do report one, and adding `base_addr` to an offset from here
+    produces a number that means nothing.
+    """
+
     MAX_SWITCH_TARGETS_FOR_HEURISTIC = 32
 
     def __init__(self, config):
