@@ -167,6 +167,10 @@ class Disassembler:
         binary_info.base_addr = loader.getBaseAddress()
         binary_info.bitness = loader.getBitness()
         binary_info.architecture = loader.getArchitecture()
+        if self.config.USE_READYTORUN_NATIVE_ROUTING and binary_info.architecture == "cil":
+            # the loader answers "" for anything that is not a ReadyToRun assembly it can
+            # name an instruction set for, so this is a no-op on every other .NET image
+            binary_info.architecture = loader.getReadyToRunArchitecture() or binary_info.architecture
         binary_info.abi = loader.getAbi()
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.has_backend = loader.getHasBackend()
