@@ -65,10 +65,10 @@ REQUIRED_STATISTICS_FIELDS = frozenset(
 class SmdaReport:
     architecture = None
     abi = None
-    base_addr = None
+    base_addr: Optional[int] = None
     binary_size = None
     binweight: float = 0.0
-    bitness = None
+    bitness: Optional[int] = None
     block_locator: Optional[BlockLocator] = None
     buffer: Optional[bytes] = None
     _sorted_functions: Optional[List["SmdaFunction"]] = None
@@ -103,6 +103,7 @@ class SmdaReport:
     data_refs_from: Optional[Dict[int, List[int]]] = None
     data_refs_to = None
     _string_cache: Dict[Any, Optional[Tuple[str, str]]]
+    _derefs_cache: Dict[int, List[int]]
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False
@@ -114,7 +115,7 @@ class SmdaReport:
         # their lifecycle is explicit and every construction path (incl. fromDict via cls(None))
         # starts with empty caches rather than relying on monkey-patched attributes.
         self._string_cache: Dict[Any, Optional[Tuple[str, str]]] = {}
-        self._derefs_cache = {}
+        self._derefs_cache: Dict[int, List[int]] = {}
         # start every construction path with an empty CFG so accessors like
         # num_functions/getFunction work on reports without a disassembly
         # (e.g. controlled error reports for unsupported architectures);
