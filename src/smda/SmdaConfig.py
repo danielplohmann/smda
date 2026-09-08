@@ -118,9 +118,11 @@ class SmdaConfig:
     # fixture changes - so enabling it belongs with a corpus run, not with a config edit
     USE_ELF_EH_FRAME_CANDIDATES = False
     # extend the AArch64 adr/adrp address-materialization scan to Mach-O instruction sections,
-    # recording targets as weak address evidence; off until validated with exact-address ground
-    # truth for the Mach-O corpus
-    USE_MACHO_ADDRESS_REF_CANDIDATES = False
+    # recording targets as weak address evidence. On since the metadata-coverage test that
+    # guards the scan landed: the validation this waited for is +21 true starts against 5
+    # fewer false ones on the ARM64 Mach-O corpus, and the images that made it unsafe before
+    # -- Go, whose pclntab already names every function -- no longer reach the scan at all
+    USE_MACHO_ADDRESS_REF_CANDIDATES = True
     # promote unclaimed Mach-O LC_FUNCTION_STARTS entries as late candidates (after the primary
     # pass, before gap analysis). The linker writes the table and stripping keeps it, and segment
     # file offsets and VM offsets coincide in Mach-O, so it also reads correctly out of a mapped
