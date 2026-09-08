@@ -33,6 +33,11 @@ class _BufferBinaryInfo:
     def getSections(self):
         return iter(())
 
+    def _getLiefType(self):
+        # "OTHER" is what BinaryInfo answers for a buffer lief cannot parse, which is what
+        # the PE-only branches of the exception walk test against
+        return "OTHER"
+
     def getExceptionDirectory(self):
         return None
 

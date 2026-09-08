@@ -64,6 +64,9 @@ class _LandingPadFixtureCase:
     #: recovered functions with the rule off, below which the run has failed rather than
     #: the rule worked
     MIN_FUNCTIONS = 0
+    #: other refusals that reach the same addresses on this fixture, switched off so the
+    #: comparison below measures the rule under test rather than whichever runs first
+    OVERLAPPING_RULES = ()
 
     @classmethod
     def setUpClass(cls):
@@ -99,6 +102,8 @@ class _LandingPadFixtureCase:
         # would refuse these pads with the rule under test switched off and the comparison
         # below would show nothing either way
         config.USE_ELF_FDE_INTERIOR_GAPS = False
+        for name in self.OVERLAPPING_RULES:
+            setattr(config, name, False)
         # analysed through a file rather than a buffer so the ELF header picks the architecture.
         # The handle is closed before the path is handed on: Windows refuses a second open on a
         # file another handle still holds, and the loader reports that as an empty result rather
@@ -172,6 +177,12 @@ class LsdaLandingPadArm64Test(_LandingPadFixtureCase, unittest.TestCase):
     PAD_MARKER = BTI_J
     EXPECTED_PADS = 5
     MIN_FUNCTIONS = 20
+    # Every pad this fixture declares opens with `bti j`, and USE_AARCH64_BTI_TARGET_TYPE
+    # refuses a `bti j` on the word alone -- so with it on, switching the LSDA rule off
+    # would show no difference and the control below would assert against an empty set.
+    # Turning it off is what makes the LSDA rule the only thing standing between the scan
+    # and these five addresses; with both on, either one alone is enough to refuse them.
+    OVERLAPPING_RULES = ("USE_AARCH64_BTI_TARGET_TYPE",)
 
 
 class LsdaDecoderContractTest(unittest.TestCase):
