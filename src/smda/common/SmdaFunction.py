@@ -5,7 +5,7 @@ import logging
 import re
 import struct
 from operator import itemgetter
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, NoReturn, Optional
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
 from smda.aarch64.definitions import CALL_INS as AARCH64_CALL_INS
@@ -23,6 +23,9 @@ from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 from .SmdaInstruction import SmdaInstruction
+
+if TYPE_CHECKING:
+    from smda.common.SmdaReport import SmdaReport
 
 LOGGER = logging.getLogger(__name__)
 
@@ -147,13 +150,13 @@ class LazyIntKeyDict(dict):
 
 
 class SmdaFunction:
-    smda_report = None
+    smda_report: Optional["SmdaReport"] = None
     offset: Optional[int] = None
     # Class-level defaults are immutable sentinels only; every real instance rebinds
     # these to fresh containers in __init__ (a mutable class default would be shared
     # by every SmdaFunction). They stay declared here because tests build instances
     # via __new__, bypassing __init__.
-    blocks: Dict[int, List[Any]] = {}
+    blocks: Dict[int, List["SmdaInstruction"]] = {}
     _sorted_block_keys: List[int] = []
     apirefs: Dict[int, Any] = {}
     stringrefs: Dict[int, Any] = {}
@@ -281,7 +284,9 @@ class SmdaFunction:
     def num_calls(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
-            return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("invoke-"))
+            return sum(
+                1 for block in self.blocks.values() for ins in block if (ins.mnemonic or "").startswith("invoke-")
+            )
         if architecture == "aarch64":
             call_mnemonics = AARCH64_CALL_INS
         elif architecture == "cil":
@@ -296,7 +301,9 @@ class SmdaFunction:
     def num_returns(self):
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "dalvik":
-            return sum(1 for block in self.blocks.values() for ins in block if ins.mnemonic.startswith("return"))
+            return sum(
+                1 for block in self.blocks.values() for ins in block if (ins.mnemonic or "").startswith("return")
+            )
         if architecture == "aarch64":
             return_mnemonics = AARCH64_RET_INS | AARCH64_EXCEPTION_RETURN_INS
         else:
@@ -337,7 +344,7 @@ class SmdaFunction:
             return False
         first_ins = block[0]
         if architecture == "dalvik":
-            return first_ins.mnemonic.startswith("invoke-")
+            return (first_ins.mnemonic or "").startswith("invoke-")
         mnemonic = self._baseMnemonic(first_ins.mnemonic)
         if architecture == "cil":
             return mnemonic in ("call", "calli", "callvirt", "jmp")
@@ -377,11 +384,11 @@ class SmdaFunction:
             return None
         return struct.pack("<Q", self.pic_hash).hex()
 
-    def getInstructions(self):
+    def getInstructions(self) -> Iterator["SmdaInstruction"]:
         for block in self.getBlocks():
             yield from block.getInstructions()
 
-    def getInstructionsForBlock(self, offset):
+    def getInstructionsForBlock(self, offset: Optional[int]) -> List["SmdaInstruction"]:
         if offset is None:
             offset = self.offset
         if offset is None:
@@ -439,6 +446,20 @@ class SmdaFunction:
             reraise_non_operational_exception(exc)
         return nesting_depth
 
+    @staticmethod
+    def _refuseInstructionWithoutBytes(instruction: "SmdaInstruction") -> NoReturn:
+        """Raise rather than hash an instruction that carries no bytes.
+
+        `SmdaInstruction.bytes` is `Optional[str]` because the class default is None and
+        `fromDict` copies whatever the report holds; every instruction SMDA itself puts in a
+        block is given `ins[4].hex()`, so this is unreachable on a report we produced. It is a
+        refusal rather than the `or ""` used elsewhere in this file because those sites are
+        formatting and length arithmetic, where a blank is harmless, while here it would
+        silently hash a different instruction sequence and the result would still look like a
+        valid PIC/OPC hash to everything that consumes one.
+        """
+        raise ValueError(f"instruction at offset {instruction.offset} carries no bytes and cannot be hashed")
+
     def getPicHash(self, binary_info):
         return struct.unpack("<Q", hashlib.sha256(self.getPicHashSequence(binary_info)).digest()[:8])[0]
 
@@ -446,7 +467,11 @@ class SmdaFunction:
         escaper = self._escaper
         blocks = self.blocks
         if escaper is None:
-            escaped_binary_seqs = [instruction.bytes for key in self._sorted_block_keys for instruction in blocks[key]]
+            escaped_binary_seqs = [
+                instruction.bytes if instruction.bytes is not None else self._refuseInstructionWithoutBytes(instruction)
+                for key in self._sorted_block_keys
+                for instruction in blocks[key]
+            ]
         else:
             lower_addr = binary_info.base_addr
             upper_addr = lower_addr + binary_info.binary_size
@@ -469,7 +494,11 @@ class SmdaFunction:
         escaper = self._escaper
         blocks = self.blocks
         if escaper is None:
-            escaped_binary_seqs = [instruction.bytes for key in self._sorted_block_keys for instruction in blocks[key]]
+            escaped_binary_seqs = [
+                instruction.bytes if instruction.bytes is not None else self._refuseInstructionWithoutBytes(instruction)
+                for key in self._sorted_block_keys
+                for instruction in blocks[key]
+            ]
         else:
             escaped_binary_seqs = [
                 escaper.escapeToOpcodeOnly(instruction)

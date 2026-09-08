@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Iterator, List, Optional
 
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
@@ -14,10 +14,10 @@ class SmdaInstruction:
     smda_function = None
     offset: Optional[int] = None
     bytes: Optional[str] = None
-    mnemonic = None
-    operands = None
+    mnemonic: Optional[str] = None
+    operands: Optional[str] = None
     detailed = None
-    _data_refs = None
+    _data_refs: Optional[List[int]] = None
     # x87 instructions have explicit-WAIT and no-WAIT encodings (e.g. FSTCW vs FNSTCW).
     # For the WAIT-prefixed form Capstone decodes the 0x9b prefix as a standalone
     # `wait`/`fwait` instruction, so it must be skipped when picking the operation detail.
@@ -31,13 +31,16 @@ class SmdaInstruction:
             self.mnemonic = ins_list[2]
             self.operands = ins_list[3]
 
-    def getDataRefs(self):
-        data_refs_cached = getattr(self, "_data_refs", None)
+    def getDataRefs(self) -> Iterator[int]:
+        # direct read rather than getattr(): the class-level default covers the unpickled
+        # case the getattr guarded, and it keeps the declared Optional[List[int]] instead
+        # of widening to Any
+        data_refs_cached = self._data_refs
         if data_refs_cached is not None:
             yield from data_refs_cached
             return
 
-        data_refs = []
+        data_refs: List[int] = []
         emitted = set()
         smda_function = self.smda_function
         if smda_function is None:
