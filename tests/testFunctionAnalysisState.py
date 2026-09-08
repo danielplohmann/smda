@@ -399,6 +399,14 @@ class GapConstructionTestSuite(unittest.TestCase):
         return manager
 
     def test_interior_holes_match_the_covered_byte_walk(self):
+        """A hole between decoded bytes is a gap, and `code_map` is what says a byte was decoded.
+
+        The `code_map` here is populated on purpose. An earlier version of this test passed an
+        empty one and asserted a length derived from `disassembly.functions` instead, which
+        pinned the behaviour of the change under review under a name describing the contract it
+        broke -- so the suite could not object to it. Both sources have to carry something for
+        the assertion to be about which of them the gap scan reads.
+        """
         manager = self._gapManager(
             code_map=dict.fromkeys(list(range(0x1000, 0x1004)) + [0x1010, 0x1011], 1),
             functions={},
