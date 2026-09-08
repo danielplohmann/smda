@@ -248,13 +248,17 @@ class MachoAddressRefCandidateTestSuite(unittest.TestCase):
         ]
         return _build_arm64_macho([], text_words=words + [RET] * 4)
 
-    def test_default_off_records_no_address_refs(self):
-        self.assertFalse(SmdaConfig().USE_MACHO_ADDRESS_REF_CANDIDATES)
+    def test_the_scan_is_on_by_default_for_macho(self):
+        self.assertTrue(SmdaConfig().USE_MACHO_ADDRESS_REF_CANDIDATES)
+
+    def test_opting_out_records_no_address_refs(self):
+        """Control on the pair below: the two targets are reached by this scan and by nothing
+        else in the image, so switching it off has to lose them."""
         fcm = _manager_for(self._adr_blob(), use_address_refs=False)
         self.assertNotIn(TEXT_VA + 0x40, fcm.candidates)
         self.assertNotIn(TEXT_VA + 0x50, fcm.candidates)
 
-    def test_opt_in_records_targets_as_weak_evidence(self):
+    def test_the_scan_records_targets_as_weak_evidence(self):
         fcm = _manager_for(self._adr_blob(), use_address_refs=True)
         for target in (TEXT_VA + 0x40, TEXT_VA + 0x50):
             self.assertIn(target, fcm.candidates)

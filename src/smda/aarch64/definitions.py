@@ -147,10 +147,10 @@ def is_conditional_branch(word):
     """True for cbz/cbnz, tbz/tbnz, b.<cond> and FEAT_HBC's bc.<cond>
     (compare/test/condition branches, hinted or not).
 
-    A function never opens with one of these, so the gap scan treats a leading
-    conditional branch as a stray block tail (not an entry) and skips it. b.al/b.nv/
-    bc.al/bc.nv also match the b.<cond>/bc.<cond> mask; they are never valid entries,
-    so skipping is benign.
+    A decode question, not a judgement about entries: a compiler hoists an argument
+    guard above the frame setup routinely at -O2, so a function may well open with one
+    of these. b.al/b.nv/bc.al/bc.nv match too -- they occupy the b.<cond>/bc.<cond>
+    encoding whatever the condition field says.
     """
     return (
         (word & CBZ_CBNZ_MASK) == CBZ_CBNZ_VALUE

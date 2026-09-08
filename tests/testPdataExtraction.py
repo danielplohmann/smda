@@ -101,6 +101,12 @@ class MockBinaryInfo:
         self.code_areas = []
         self.pdata_size = pdata_size
 
+    def _getLiefType(self):
+        # what this double stands in for: a RUNTIME_FUNCTION table is a PE construct, and
+        # the walk asks so that a section merely named `.pdata` in some other container
+        # cannot be read as one
+        return "PE"
+
     def getSections(self):
         # yields name, start, end
         if self.pdata_size > 0:
