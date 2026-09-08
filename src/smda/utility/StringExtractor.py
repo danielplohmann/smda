@@ -1,10 +1,11 @@
 import re
 import string
 import struct
-from typing import Any, Iterator, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaFunction import SmdaFunction
+from smda.common.SmdaReport import SmdaReport
 
 _IS_PRINTABLE_CHAR_CODE = tuple(chr(char) in string.printable for char in range(256))
 _ASCII_RE = re.compile(b"[\x09-\x0d\x20-\x7e]*")
@@ -14,15 +15,18 @@ _UNICODE_RE = re.compile(b"(?:[\x09-\x0d\x20-\x7e]\x00)*")
 # https://github.com/mandiant/capa/blob/v4.0.0/capa/features/extractors/smda/insn.py
 
 
-def read_bytes(smda_report, va, num_bytes=None):
+def read_bytes(smda_report: SmdaReport, va: int, num_bytes: Optional[int] = None) -> bytes:
     """
     read up to MAX_BYTES_FEATURE_SIZE from the given address.
     """
 
-    rva = va - smda_report.base_addr
     buffer = smda_report.buffer
-    if buffer is None:
+    base_addr = smda_report.base_addr
+    # base_addr joins the existing buffer check rather than getting its own: a report with no
+    # base address cannot turn a VA into an offset at all, which is the same unusable state
+    if buffer is None or base_addr is None:
         raise ValueError("buffer is empty")
+    rva = va - base_addr
     buffer_end = len(buffer)
     max_bytes = num_bytes if num_bytes is not None else 0x100
     if rva + max_bytes > buffer_end:
@@ -31,7 +35,7 @@ def read_bytes(smda_report, va, num_bytes=None):
         return buffer[rva : rva + max_bytes]
 
 
-def derefs(smda_report, p):
+def derefs(smda_report: SmdaReport, p: int) -> Iterator[int]:
     """
     recursively follow the given pointer, yielding the valid memory addresses along the way.
     useful when you may have a pointer to string, or pointer to pointer to string, etc.
@@ -45,7 +49,7 @@ def derefs(smda_report, p):
         yield from cache[p]
         return
 
-    chain = []
+    chain: List[int] = []
     current = p
     depth = 0
     word_size = 8 if smda_report.bitness == 64 else 4
@@ -75,12 +79,13 @@ def derefs(smda_report, p):
     yield from chain
 
 
-def detect_ascii_len(smda_report, offset, maxlen=None):
-    if smda_report.buffer is None:
-        return 0
+def detect_ascii_len(smda_report: SmdaReport, offset: int, maxlen: Optional[int] = None) -> int:
     buffer = smda_report.buffer
+    base_addr = smda_report.base_addr
+    if buffer is None or base_addr is None:
+        return 0
     buffer_len = len(buffer)
-    rva = offset - smda_report.base_addr
+    rva = offset - base_addr
     if not 0 <= rva < buffer_len:
         return 0
 
@@ -95,12 +100,13 @@ def detect_ascii_len(smda_report, offset, maxlen=None):
     return 0
 
 
-def detect_unicode_len(smda_report, offset, maxlen=None):
-    if smda_report.buffer is None:
-        return 0
+def detect_unicode_len(smda_report: SmdaReport, offset: int, maxlen: Optional[int] = None) -> int:
     buffer = smda_report.buffer
+    base_addr = smda_report.base_addr
+    if buffer is None or base_addr is None:
+        return 0
     buffer_len = len(buffer)
-    rva = offset - smda_report.base_addr
+    rva = offset - base_addr
     if not 0 <= rva < buffer_len - 1:
         return 0
 
@@ -117,7 +123,7 @@ def detect_unicode_len(smda_report, offset, maxlen=None):
     return 0
 
 
-def read_go_string(smda_report, offset):
+def read_go_string(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str]]:
     # for Go strings, we need to deref once to get to the String struct (string pointer and len) and then
     # deref again for the actual string
     if smda_report.isAddrWithinMemoryImage(offset):
@@ -133,21 +139,23 @@ def read_go_string(smda_report, offset):
             return read_string(smda_report, string_pointer, length)
 
 
-def read_string(smda_report, offset, maxlen=None):
+def read_string(smda_report: SmdaReport, offset: int, maxlen: Optional[int] = None) -> Optional[Tuple[str, str]]:
     # in case we are dealing with Go/Rust, we need to dereference the pointer and extract the expected length of the string
     # TODO handle Go/Rust
-    if smda_report.buffer is None:
+    buffer = smda_report.buffer
+    base_addr = smda_report.base_addr
+    if buffer is None or base_addr is None:
         return None
     cache = smda_report._string_cache
     cache_key = (offset, maxlen)
     if cache_key in cache:
         return cache[cache_key]
 
-    rva = offset - smda_report.base_addr
-    if not 0 <= rva < len(smda_report.buffer):
+    rva = offset - base_addr
+    if not 0 <= rva < len(buffer):
         res = None
     else:
-        first_byte = smda_report.buffer[rva]
+        first_byte = buffer[rva]
         if not _IS_PRINTABLE_CHAR_CODE[first_byte]:
             res = None
         else:
@@ -167,8 +175,13 @@ def read_string(smda_report, offset, maxlen=None):
     return res
 
 
-def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, Any, Any, str]]:
+def extract_strings(f: SmdaFunction, mode: Optional[str] = None) -> Iterator[Tuple[str, Optional[int], int, str]]:
     """parse string features from the given instruction."""
+    smda_report = f.smda_report
+    if smda_report is None:
+        # every helper below reads the buffer, base address and caches off the report, so a
+        # function detached from one has nothing to search rather than an empty result
+        return
     if mode == "go":
         # we address stack assigned strings and String structs
         # as detailed in https://cloud.google.com/blog/topics/threat-intelligence/extracting-strings-go-rust-executables/
@@ -185,13 +198,13 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, Any, Any,
                     and instructions[index + 1].mnemonic == "mov"
                     and instructions[index + 2].mnemonic == "mov"
                 ):
-                    operands = instructions[index + 2].operands.split(",")
+                    operands = (instructions[index + 2].operands or "").split(",")
                     if len(operands) == 2:
                         # check if the second instruction has an immediate value as second operand
                         try:
                             potential_string_len = int(operands[1], 0)
                             if potential_string_len > 0:
-                                string_result = read_string(f.smda_report, data_ref, potential_string_len)
+                                string_result = read_string(smda_report, data_ref, potential_string_len)
                                 if string_result:
                                     string_read, string_type = string_result
                                     found_string = True
@@ -204,7 +217,7 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, Any, Any,
                         except Exception as exc:
                             reraise_non_operational_exception(exc)
                 if not found_string:
-                    string_result = read_go_string(f.smda_report, data_ref)
+                    string_result = read_go_string(smda_report, data_ref)
                     if string_result:
                         string_read, string_type = string_result
                         yield (
@@ -216,8 +229,8 @@ def extract_strings(f: SmdaFunction, mode=None) -> Iterator[Tuple[str, Any, Any,
     else:
         for insn in f.getInstructions():
             for data_ref in insn.getDataRefs():
-                for v in derefs(f.smda_report, data_ref):
-                    string_result = read_string(f.smda_report, v)
+                for v in derefs(smda_report, data_ref):
+                    string_result = read_string(smda_report, v)
                     if string_result:
                         string_read, string_type = string_result
                         yield string_read.rstrip("\x00"), insn.offset, v, string_type
