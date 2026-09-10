@@ -114,7 +114,7 @@ When a change warrants a version bump, update **all three** in one commit:
 
 1. `src/smda/__init__.py` → `__version__`
 2. `src/smda/SmdaConfig.py` → `SmdaConfig.VERSION`
-3. Add a dated entry at the top of `CHANGELOG.md` (format: ` * YYYY-MM-DD: vX.Y.Z - <summary>`).
+3. Add a dated entry at the top of `CHANGELOG.md`. The header line is ` * YYYY-MM-DD: vX.Y.Z - <summary>`, and what changed goes under it as a nested list of `**Topic:**` bullets — see v4.5.1 and later. Entries before that are one long paragraph; do not take them as the model.
 
 Keep the two version strings in sync. Do not bump versions unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
 
