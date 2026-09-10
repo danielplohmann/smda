@@ -160,14 +160,16 @@ class SmdaConfig:
     # inside the pad, and the scan books that instead - a worse candidate than the one refused.
     # Resuming at the declaring FDE's end passes over that function's body only; over the three
     # corpora that carry pads, 0 of 41,215 have a declared function start between the pad and
-    # that end. Measured against compiler symbol tables, macro means:
-    #   260 built C/C++ cells    PPV 92.623 -> 94.109 at TPR 95.525 -> 95.595 (+193 recovered)
-    #   72 AArch64 ELF cells     PPV 76.676 -> 79.172 at TPR 95.939 -> 95.963 (+15 recovered)
-    #   24 Rust cells            PPV 78.951 -> 82.435 at TPR 97.493 -> 97.578 (+13 recovered)
-    # 12,453 false positives removed, 221 real functions gained, no corpus loses recall. Go,
-    # ARM64 Mach-O and .NET are bit-identical, which is the control that it reaches only ELF
-    # images carrying an LSDA. It also pays for itself: on the two cells with the most pads,
-    # analysis is 3.8% faster, because the candidates it refuses are ones nothing then analyses.
+    # that end. Measured against compiler symbol tables on the tree #300 landed on, everything
+    # else in that PR on and this rule the only thing switched, macro means:
+    #   72 AArch64 ELF cells   PPV 91.554 -> 93.176 at TPR 98.045 -> 98.067  -1,732 FP, +18 TP
+    #   24 Rust cells          PPV 82.805 -> 86.303 at TPR 98.237 -> 98.321    -654 FP, +13 TP
+    # No corpus loses recall. Go, ARM64 Mach-O and .NET are bit-identical, which is the control
+    # that it reaches only ELF images carrying an LSDA. The 260-cell C/C++ matrix was rebuilt
+    # and re-measured at branch level only (PPV 94.038 -> 96.908 over 213,706 truth functions),
+    # so this rule has no per-rule row on it. It also pays for itself: on the two cells with the
+    # most pads, analysis is 3.8% faster, because the candidates it refuses are ones nothing
+    # then analyses.
     USE_LSDA_LANDING_PADS = True
     # Refuse a gap candidate strictly inside a range the image's own .eh_frame declares, and
     # resume at that range's end. Broader than USE_LSDA_LANDING_PADS, which refuses only the
@@ -180,17 +182,18 @@ class SmdaConfig:
     # start must be a recovered function, because an FDE can begin in the alignment padding
     # ahead of its function - the remaining 35 losses were all of that shape, two per statically
     # linked cell, one of them rt_sigreturn under a signal-frame CIE.
-    # Measured against compiler symbol tables, macro means:
-    #   260 built C/C++ cells    PPV 94.109 -> 94.725 at TPR 95.595 -> 95.596 (+4 recovered)
-    #   72 AArch64 ELF cells     PPV 79.172 -> 80.554 at TPR 95.963 -> 95.964 (+3 recovered)
-    #   24 Rust cells            PPV 82.435 -> 83.608 at TPR 97.578 -> 97.617 (+6 recovered)
-    #   4 .NET cells             PPV 93.589 -> 95.332 at TPR 99.461 -> 99.469 (+2 recovered)
-    # 4,088 false positives removed, 15 real functions gained, no corpus loses recall, Go and
-    # ARM64 Mach-O bit-identical, and analysis time is inside an off-vs-off control band.
+    # Measured against compiler symbol tables on the tree #300 landed on, everything else in
+    # that PR on including USE_LSDA_LANDING_PADS, so these are what this rule adds on top of
+    # it. Macro means:
+    #   72 AArch64 ELF cells   PPV 93.176 -> 94.947 at TPR 98.067 -> 98.069  -1,846 FP,  +3 TP
+    #   24 Rust cells          PPV 86.303 -> 87.480 at TPR 98.321 -> 98.361    -197 FP,  +6 TP
+    # No corpus loses recall, Go and ARM64 Mach-O are bit-identical, and analysis time is
+    # inside an off-vs-off control band.
     # Enabling it moved two bundled fixtures, deliberately: elf_cet_landing_pads_x64 drops four
     # endbr64 addresses that are jump-table case labels strictly inside the function the symbol
-    # table names `dispatch`, and aarch64_static drops two mid-function instructions. None of
-    # the six carries a symbol or is a declared start, so both baselines moved toward the truth.
+    # table names `dispatch`, and aarch64_static drops 0x400350 and 0x40DF30, both mid-function
+    # instructions inside a declared FDE. None of the six carries a symbol or is a declared
+    # start, so both baselines moved toward the truth.
     USE_ELF_FDE_INTERIOR_GAPS = True
     RESOLVE_REGISTER_CALLS = True
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and
@@ -225,8 +228,17 @@ class SmdaConfig:
     # A jump into an already-recovered function is still treated as a tailcall with the pass
     # off - only the promotion of not-yet-known targets needs it. The AArch64 backend's
     # bl fall-through path follows the same flag: it cuts the caller either way, and seeding
-    # the boundary as well measured worse on both AArch64 corpora (ARM64 Mach-O n=11: 12
-    # fewer functions and 28 more false positives; Go n=45: 430 more false positives).
+    # the boundary as well measures worse. Gate off -> gate on, everything else in #300 on,
+    # against the tree it landed on:
+    #   Go, n=47                  -408 FP at identical TP
+    #   ARM64 Mach-O, n=11         -27 FP,  +11 TP
+    #   Built C/C++ AArch64 ELF, n=72   -580 FP,  -53 TP
+    # That last row is the one trade in it, and it is a reject by the per-change rule the
+    # branch set itself. It survives because the 53 are all .eh_frame FDE starts the deferred
+    # FDE pass would claim if a wrong tailcall seed did not veto them first: with
+    # USE_ELF_EH_FRAME_CANDIDATES on, the gate costs 13 and gains 24 - net +11 against -583
+    # false positives. Gating it is also what makes the seeding switchable at all; before
+    # #300 the AArch64 backend seeded these regardless of this flag.
     RESOLVE_TAILCALLS = False
     # optional metadata generation options; the largest built-in performance lever.
     # Measured on the cutwail fixture, as a share of all Python calls per run: hashing 10.0%,
