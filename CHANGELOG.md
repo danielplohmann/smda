@@ -2,6 +2,158 @@
 
 Newest first. Entries carry the release date, the version, and what changed.
 
+ * 2026-09-10: v4.6.0 - Function-boundary accuracy taken from what the image declares rather than guessed from the
+   bytes, plus an analysis hot-path pass that leaves report output unchanged. Each topic below links the PR that
+   carries the full mechanism, the measurements and the approaches that were tried and rejected.
+   * **Recovery -- believe the binary over the bytes**
+     ([#300](https://github.com/danielplohmann/smda/pull/300)): compilers write down a lot the engine was not
+     reading. An ELF says in `.eh_frame` which address range belongs to which routine and in `.gcc_except_table`
+     which addresses are landing pads; a PE declares where its exception table lives; a COFF header states the
+     bitness and the instruction set outright. Each was previously ignored or re-derived from a byte heuristic that
+     is wrong on a predictable class of binaries. Nothing here is a new heuristic: every rule refuses a candidate
+     because a structure the compiler emitted says the address is inside a function rather than at the start of one.
+     * *Read the header when there is one.* `Disassembler.declaredArchitecture()` and
+       `BitnessAnalyzer._declaredBitness()` believe a buffer that parses as PE, ELF or Mach-O and names an
+       instruction set a backend exists for, instead of scoring REX.W density and running a byte probe. A headerless
+       dump or a shellcode blob falls through to the same probes as before, so this narrows where the guessing
+       happens rather than replacing it. A managed PE still routes to `intel`, because CLR metadata is addressed by
+       file offset and a mapped dump has none. 93 functions recovered and 64 false positives removed on the malpedia
+       dump corpus with bitness withheld.
+     * *The PE exception table's address is declared, not conventional.* The x64 table is read from the data
+       directory through a new `BinaryInfo.getExceptionDirectory()`, falling back to a section named `.pdata` only
+       when the image declares no directory entry -- `.pdata` is the name MSVC happens to use, and the .NET
+       ReadyToRun compiler puts the table in `.data`. On a ReadyToRun image: 419 to 626 functions, which is every
+       start the directory declares and nothing it does not name. The walk now also polls the analysis budget every
+       4,096 records, since reading from the directory is what widened the range it covers.
+     * *A prologue that begins exactly where an earlier prologue ends is not a function* (intel). clang follows
+       `push rbp; mov rbp, rsp` with the callee-saved run `push r15; push r14`, and both are on the seeded prologue
+       list, so the scan booked a second "function" four bytes into the same body. Refused when the earlier address
+       is already a candidate, which is what keeps it off byte coincidences. Across ten corpora: 912 false positives
+       removed, 0 true positives lost.
+     * *`endbr64` is an indirect-branch marker, not a function marker.* Under `-fcf-protection` it sits at every
+       address an indirect branch can land on, jump-table case labels and landing pads included. An FDE covers
+       exactly one routine, so an `endbr64` that is not its own range's start is inside that routine. Applied to
+       this one seeded pattern deliberately: it is the only one naming a place a branch can arrive rather than a way
+       a function opens.
+     * *A call that never returns is a function boundary* (AArch64). With no `ret` after a call to `abort` or a
+       panic handler, decoding runs into the next function and the two merge; the existing checks all look for a
+       reason to stop and decline when the next function is packed right up against this one.
+       `_callFallthroughFunctionStart` now also asks whether the next instruction opens a stack frame -- `sub sp, sp,
+       #imm` followed within three instructions by `stp x29, x30, [sp, #imm]`. Neither half is conclusive alone; the
+       pair is, because nothing mid-function re-saves the incoming link register into a frame it just created.
+     * *The candidate snapshot predates analysis, so it cannot be the whole answer* (AArch64). Checks asking whether
+       an address is in `getFunctionStartCandidates()` could not see a function gap analysis had discovered, since
+       that set is snapshotted before analysis and never added to; they ask the live function set as well now. On
+       the bundled ARM64 Mach-O corpus: 8 recovered, 0 new false positives, and the fixture's primary pass moves
+       from 246 to 269 functions.
+     * *After a `bl` fall-through the cut recovers the function and the seed makes it worse* (AArch64). The backend
+       cut the caller short **and** seeded the boundary as a tailcall candidate, where the seed re-books the address
+       with worse extents than the ordinary machinery would. The seed now sits behind `RESOLVE_TAILCALLS` (default
+       off); the cut still happens either way. Gate off to on: Go n=47, -408 false positives at identical TP; ARM64
+       Mach-O n=11, -27 false positives and +11 functions; built C/C++ AArch64 ELF n=72, **-580 false positives
+       against -53 functions**. That last row is a reject by the strict per-change rule and is kept anyway, because
+       before this release nothing turned the AArch64 seeding off at all, so the gate is what makes both behaviours
+       reachable; with `USE_ELF_EH_FRAME_CANDIDATES` on it costs 13 and gains 24 instead.
+   * **New (default on)** ([#300](https://github.com/danielplohmann/smda/pull/300)): two rules refusing a gap
+     candidate the image declares interior, each with the guard that makes it safe.
+     * `USE_LSDA_LANDING_PADS` -- `.gcc_except_table` tells the unwinder where to resume when an exception escapes a
+       call site, which is by definition inside a function. These addresses are the perfect storm for a byte scan:
+       they open with the indirect-branch marker (`endbr64`, or `bti` on AArch64) and sit in gaps precisely because
+       nothing branches to them. Where the scan resumes is the whole decision -- one instruction past a refused pad
+       lands *inside* it, so it resumes at the end of the declaring FDE. Across the three corpora carrying pads, 0
+       of 41,215 pads have a declared function start between the pad and that resume point. On AArch64 the rule also
+       runs in `locatePrologueCandidates`, because `bti` is a recognised prologue there.
+     * `USE_ELF_FDE_INTERIOR_GAPS` -- the same idea with a wider net: any gap candidate strictly inside a declared
+       `.eh_frame` range, which catches the jump-table case labels a switch emits under `-fcf-protection`. Two
+       guards, both found by measuring what it cost without them: the PLT is exempt, since the whole PLT sits under
+       one FDE and without it every stub after the first reads as interior to the first (3,457 real functions); and
+       the range's own start must already be a recovered function, since an FDE can begin in the padding ahead of it
+       (the remaining 35 losses). Reached only from the gap scan -- widening where it is consulted is #324.
+     * Over six representative C/C++ cells, `endbr64` seeded as a function start accounted for **822 false
+       positives** before these rules and the prologue refusal, and **zero** after, with true positives on the same
+       cells up from 5,695 to 5,718.
+   * **Measured** against compiler symbol tables on corpora built from source, both trees run back to back on the
+     same machine, arithmetic macro mean, `6240b74` to this release. Full table, per-rule attribution and the five
+     proposals that were measured and left out are in
+     [#300](https://github.com/danielplohmann/smda/pull/300):
+
+     | corpus | n | PPV | TPR | FP change | TP change |
+     |---|---|---|---|---|---|
+     | Built C/C++ AArch64 ELF (gcc cross) | 72 | 91.497 to 94.947 | 97.705 to 98.069 | -3,645 | +151 |
+     | Built Rust (gnu targets) | 24 | 79.659 to 87.480 | 98.237 to 98.361 | -1,641 | +19 |
+     | Built Go (pclntab truth) | 47 | 95.361 to 95.626 | 99.367 to 99.367 | -408 | 0 |
+     | ARM64 Mach-O (`LC_FUNCTION_STARTS`) | 11 | 94.281 to 94.499 | 96.402 to 97.207 | -27 | +38 |
+     | Malpedia dumps (`.fnmap` truth) | 57 | 92.645 to 92.648 | 98.552 to 98.552 | -1 | 0 |
+
+     The 260-cell C/C++ matrix rebuilt from source (213,706 truth functions): PPV 94.038 to 96.908, TPR 97.001 to
+     97.074, FP -12,853, TP +210. **No corpus loses recall.** Three further corpora are bit-identical -- 120 MinGW
+     PE cells and both ByteWeight msvc10-64 sets -- and that is the control rather than filler: Go carries no
+     landing pads and Mach-O no `.eh_frame`, so movement there would have meant a rule firing where it had no
+     business firing. The malpedia row is level because those are packed Windows dumps that carry no ELF unwind
+     data; on the three files that do move, the benchmark gate's own artifact reads 143 likely false positives
+     removed against 5 addresses that read as a lost function. Figures are the contributor's own except the ARM64
+     Mach-O row and the ReadyToRun result, which were reproduced here.
+   * **Robustness** ([#300](https://github.com/danielplohmann/smda/pull/300)): both new decoders read structures the
+     analysed file controls. A 205 KB `.eh_frame` whose records each named a 64 KB LSDA took 155 seconds to decode;
+     each LSDA is memoised once and a per-section budget bounds the call-site bytes decoded, taking the same input
+     to 0.047s. A pad falling outside its own FDE is refused, because the format guarantees it cannot: on one
+     NativeAOT image, LSDA pointers led into arbitrary data that parsed cleanly and produced 4,826 fabricated pads,
+     and across four corpora and three system libraries all 43,881 genuine pads are inside their own FDE while all
+     4,828 spurious ones are outside.
+   * **Performance** ([#299](https://github.com/danielplohmann/smda/pull/299)): six changes cutting overhead with
+     report output unchanged -- per-instruction lookups hoisted to locals in `analyzeFunction`'s loop, PIC-hash
+     escaping memoised behind a size-capped cache (real binaries repeat 30-50% of their instructions, a DEX classes
+     dump 98%), a `getNormalizedBlockRefs` fast path plus a duplicate `fix_graph()` dropped, AArch64 candidate scans
+     prefiltered by top byte via one `bytes.translate` (prologue scan 4.14ms to 0.74ms, BL 1.17ms to 0.59ms),
+     `hasUnprocessedBlocks()` trusting the queue instead of allocating a set difference per call, the Dalvik
+     resolver closure hoisted, and ApiScout database parsing deferred to the first API lookup. Interleaved median
+     wall-clock against master: aarch64_static -9 to -10%, komplex -6 to -7%, blockblast/asprox -2 to -4%,
+     cutwail/njrat neutral within noise. Serialized reports hash byte-for-byte equal to master across ten fixtures
+     spanning all four backends.
+   * **Three defects a report-identity check could not see**
+     ([#299](https://github.com/danielplohmann/smda/pull/299)), fixed before merge, each with a regression test that
+     fails on the pre-fix source. An explicit `setOsName()` was silently discarded once the os-name inference moved
+     into the deferred load. The `getNormalizedBlockRefs()` fast path stopped normalizing on the `fromDict()` path,
+     where blockrefs come from a report this code did not write, so duplicates reached the SCC and dominator-tree
+     passes. And `updateFunctionGaps()` had been re-keyed from a walk over `code_map` byte keys to a merge of
+     `disassembly.functions` intervals, which are not interchangeable -- `code_map` records every decoded byte,
+     `functions` only finalized ones -- dropping the decoded-but-unattributed regions out of the gap scan: on a
+     32-bit MSVC PE, **6,249 functions to 5,247**, a 16% loss, for a pass that also got slower. Only that hunk is
+     reverted. The lesson generalises: a report-identity comparison is evidence about the fixtures, not about the
+     change, and the first two live on paths no bundled fixture reaches while the third lives on one they
+     under-represent.
+   * **Two bundled fixture baselines moved,** both stated in the tests.
+     `elf_cet_landing_pads_x64` drops four `endbr64` addresses, all jump-table case labels strictly inside the
+     function the symbol table names `dispatch` -- a correction. `aarch64_static` drops `0x400350` and `0x40DF30`,
+     both mid-function instructions inside a range the image declares. Separately `0x40DF34` is refused and is a
+     Binary Ninja function start, though it was not recovered before this release either: it repeats its FDE's
+     opening minus a `prfm` prefetch, i.e. an alternate entry sharing one frame, and these rules follow the unwinder
+     where the two disagree. All three are asserted absent rather than deleted from the expected list, so the
+     disagreement stays visible in the source.
+   * **Compatibility:** no escaper output changed. The only escaping-related edit memoises `escapeBinary` results
+     behind a cache keyed on its complete input tuple and no escaper module is touched, so
+     `ESCAPER_DOWNWARD_COMPATIBILITY` stays at `4.4.5` and `INTEL_PIC_HASH_ESCAPE_VERSION` at `4.3.5`, and no report
+     needs reprocessing. Three intentional nuances, none of which moves a report: an uncached ApiScout database is
+     parsed at the first `getApi()` call rather than at resolver construction, an explicit `setOsName()` outranks
+     the inference regardless of when the deferred load fires, and `getNormalizedBlockRefs()` still deduplicates and
+     sorts on the `fromDict()` path.
+   * **New fixtures,** built from source and XORed like the rest: `elf_cxx_landing_pads_x64_xored` (g++ 13.3.0,
+     `-O2 -fcf-protection=full`), `elf_cxx_landing_pads_arm64_xored` (aarch64 cross-g++ 13.3.0,
+     `-O2 -mbranch-protection=standard`, 5 pads all `bti j`) and `elf_cet_landing_pads_x64_xored`, with seven new
+     test files behind the rules above.
+   * **Housekeeping:**
+     * The perf benchmark workflow was comparing two machines -- base on one runner, PR on another, an hour apart --
+       and once reported a branch 13.18% slower at p = 0.0000 when its only source change was AArch64-only code
+       measured on an x86 corpus. Both sides are now timed interleaved in one job with the leading side rotated per
+       pass ([#300](https://github.com/danielplohmann/smda/pull/300)).
+     * The per-rule figures in `SmdaConfig.py` for `USE_LSDA_LANDING_PADS`, `USE_ELF_FDE_INTERIOR_GAPS` and
+       `RESOLVE_TAILCALLS` are the re-measured ones; the first two had shipped with attribution measured before
+       #304/#307/#309/#310/#311 landed, against a baseline whose AArch64 PPV had since moved from 76.676 to 91.497.
+       A PR description records a conversation; a config comment is what the next reader has. Also here:
+       `getExceptionDirectory` matches the typed `lief.PE.DataDirectory.TYPES.EXCEPTION_TABLE` rather than a
+       substring of the enum's repr, and a comment #312 left dangling is removed
+       ([#325](https://github.com/danielplohmann/smda/pull/325)).
+   * (THX: @r0ny123)
  * 2026-09-08: v4.5.1 - Function-recovery fixes across intel and AArch64, a fuzz-found synthesis crash, and the
    report's address-space contract written down.
    * **Recovery (intel):**
