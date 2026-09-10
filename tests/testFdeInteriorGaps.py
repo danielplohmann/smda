@@ -15,6 +15,7 @@ import unittest
 import lief
 
 from smda.common.EhFrameDecoder import decodeEhFrameFdeRanges
+from smda.common.FunctionCandidateManager import FunctionCandidateManager
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 
@@ -86,10 +87,6 @@ class FdeInteriorGapRuleTest(unittest.TestCase):
         self.assertEqual((off & named) - on, set())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FdeInteriorGapRuleAArch64Test(unittest.TestCase):
     """The rule lives in the shared candidate manager and both gap scans consult it.
 
@@ -138,3 +135,114 @@ class FdeInteriorGapRuleAArch64Test(unittest.TestCase):
             self.assertIsNotNone(owner, f"0x{address:x} was refused but is inside no declared range")
             # the condition that keeps an FDE opening in padding from refusing its own function
             self.assertIn(owner[0], on, f"0x{address:x} was refused by a range whose start is not a function")
+
+    def analysedFixture(self, claim=None):
+        """Run the fixture, optionally having the rule claim one address, and keep the manager."""
+        config = SmdaConfig()
+        config.CALCULATE_SCC = False
+        config.CALCULATE_NESTING = False
+        config.CALCULATE_HASHING = False
+        original = FunctionCandidateManager.declaredInteriorOwner
+        if claim is not None:
+            address, owner = claim
+
+            def claiming(manager, candidate_address):
+                if candidate_address == address:
+                    return owner
+                return original(manager, candidate_address)
+
+            FunctionCandidateManager.declaredInteriorOwner = claiming
+        with tempfile.NamedTemporaryFile(suffix=".elf", delete=False) as handle:
+            handle.write(self.data)
+            temp_path = handle.name
+        disassembler = Disassembler(config)
+        try:
+            report = disassembler.disassembleFile(temp_path)
+        finally:
+            os.unlink(temp_path)
+            FunctionCandidateManager.declaredInteriorOwner = original
+        return disassembler.disassembler, {function.offset for function in report.getFunctions()}
+
+    def testAnalysisItselfDeclinesWhatTheRuleClaims(self):
+        """The refusal is wired into analysis, not only into the gap scan.
+
+        On this fixture every address the rule would claim is one the gap scan already
+        refused or the collision check already caught, so asserting over what it happens to
+        drop here would assert nothing. Claiming one address the fixture does recover is what
+        shows analysis consults the rule at all, and that it declines rather than reports.
+        """
+        _, baseline = self.analysedFixture()
+        self.assertGreater(len(baseline), 200)
+        owner, target = sorted(baseline)[0], sorted(baseline)[1]
+
+        backend, recovered = self.analysedFixture(claim=(target, owner))
+        self.assertNotIn(target, recovered, "analysis reported an address the rule claimed")
+        self.assertEqual(baseline - recovered, {target}, "the claim moved more than the address it named")
+        # the reason is not asserted: a refused address is offered again as a gap candidate,
+        # and that pass records its own outcome over this one
+        self.assertTrue(backend.fc_manager.candidates[target].analysis_aborted)
+
+
+class _RecoveredDisassembly:
+    """The two things `declaredInteriorOwner` reads about what analysis has recovered."""
+
+    def __init__(self, functions, borders):
+        self.functions = functions
+        self.function_borders = borders
+
+
+def declaredOwnerOf(address, ranges, functions, borders, plt=(), enabled=True):
+    manager = FunctionCandidateManager(SmdaConfig())
+    manager.config.USE_ELF_FDE_INTERIOR_GAPS = enabled
+    manager.disassembly = _RecoveredDisassembly(dict.fromkeys(functions), dict(borders))
+    manager._eh_frame_fde_ranges = list(ranges)
+    manager._eh_frame_fde_starts = [start for start, _ in ranges]
+    manager._plt_ranges = list(plt)
+    return manager.declaredInteriorOwner(address)
+
+
+class DeclaredInteriorOwnerTest(unittest.TestCase):
+    """The conditions the analysis-time refusal requires, one at a time.
+
+    The gap scan reaches a candidate only where its pointer walks; this answers the same
+    question for a candidate from any source, so each condition needs a case of its own
+    rather than whatever a corpus happens to exercise.
+    """
+
+    RANGES = [(0x1000, 0x2000)]
+    FUNCTIONS = [0x1000]
+    BORDERS = {0x1000: (0x1000, 0x1F00)}
+
+    def testAnAddressItsOwnerSurroundsIsRefused(self):
+        self.assertEqual(declaredOwnerOf(0x1500, self.RANGES, self.FUNCTIONS, self.BORDERS), 0x1000)
+
+    def testARangeStartIsNotInteriorToItself(self):
+        self.assertIsNone(declaredOwnerOf(0x1000, self.RANGES, self.FUNCTIONS, self.BORDERS))
+
+    def testAnAddressOutsideEveryRangeIsKept(self):
+        self.assertIsNone(declaredOwnerOf(0x2500, self.RANGES, self.FUNCTIONS, self.BORDERS))
+
+    def testARangeWhoseStartWasNotRecoveredRefusesNothing(self):
+        # an FDE can begin in the alignment padding ahead of its function, and then the real
+        # entry a few bytes in is interior to nothing
+        self.assertIsNone(declaredOwnerOf(0x1500, self.RANGES, [], self.BORDERS))
+
+    def testAnAddressPastTheOwnersRecoveredExtentIsKept(self):
+        # the declared range reaches further than the owner's control flow arrived; refusing
+        # out there discards bytes nothing else claims, and any reference only they carry
+        short = {0x1000: (0x1000, 0x1100)}
+        self.assertIsNone(declaredOwnerOf(0x1500, self.RANGES, self.FUNCTIONS, short))
+
+    def testAnOwnerWithNoRecordedExtentRefusesNothing(self):
+        self.assertIsNone(declaredOwnerOf(0x1500, self.RANGES, self.FUNCTIONS, {}))
+
+    def testAStubInADeclaredPltIsExempt(self):
+        # the whole table sits under one FDE, so every stub after the first reads as interior
+        self.assertIsNone(declaredOwnerOf(0x1500, self.RANGES, self.FUNCTIONS, self.BORDERS, plt=[(0x1400, 0x1600)]))
+
+    def testTheFlagTurnsTheRefusalOff(self):
+        self.assertIsNone(declaredOwnerOf(0x1500, self.RANGES, self.FUNCTIONS, self.BORDERS, enabled=False))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -261,6 +261,13 @@ class RecursiveDisassembler:
             # state.getBlocks(); this collision path is unreachable from the gap pass today, so
             # the change is behavior-neutral (output stays byte-for-byte identical).
             return state
+        declared_owner = self.fc_manager.declaredInteriorOwner(start_addr)
+        if declared_owner is not None:
+            self.fc_manager.updateAnalysisAborted(
+                start_addr,
+                f"inside the declared range of function 0x{declared_owner:08x}",
+            )
+            return state
         blocks_processed = 0
         while state.hasUnprocessedBlocks():
             blocks_processed += 1
