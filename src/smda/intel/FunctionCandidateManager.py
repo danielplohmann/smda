@@ -99,8 +99,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         super().__init__(config)
         self.pdata_start_addresses = set()
         self.pdata_end_addresses = set()
+        #: the prologue byte strings this scan seeds, so a later match can tell whether it
+        #: begins where an earlier one ends and is therefore inside that function's body
         self._seeded_prologues = ()
-        #: (start, end, is_chained) for every RUNTIME_FUNCTION record the image declares,
         self._retained_pad = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):

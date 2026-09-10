@@ -275,14 +275,14 @@ class BinaryInfo:
         """
         if self._getLiefType() != "PE":
             return None
-        for directory in self.getLiefBinary().data_directories:
-            if "EXCEPTION" not in str(directory.type):
-                continue
-            if not directory.size or not directory.rva:
-                break
-            start = self.base_addr + directory.rva
-            return start, start + directory.size
-        return None
+        # the typed lookup rather than a substring of the enum's repr: it is what the AArch64
+        # directory walk already uses for this same directory, and a match on "EXCEPTION" also
+        # claims any future type whose name happens to contain it
+        directory = self.getLiefBinary().data_directory(lief.PE.DataDirectory.TYPES.EXCEPTION_TABLE)
+        if directory is None or not directory.size or not directory.rva:
+            return None
+        start = self.base_addr + directory.rva
+        return start, start + directory.size
 
     def isInCodeAreas(self, address):
         is_inside = False

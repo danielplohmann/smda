@@ -1724,17 +1724,21 @@ class TestAArch64StaticFixture(unittest.TestCase):
         for function_start in (0x40CFE0, 0x40DD78, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
             self.assertIsNotNone(self.report.getFunction(function_start), f"missing 0x{function_start:x}")
 
-        # The one Binary Ninja start this fixture no longer recovers, and it is a cost rather
-        # than a correction. Both readings of it are refused: 0x40DF34 is where Binary Ninja
-        # puts the routine, and 0x40DF30 is where the gap scan puts it since #311 stopped
-        # skipping a word that opens on a conditional branch -- the 16-aligned word after the
-        # previous function's `ret` and its padding nop, against Binary Ninja's 4-aligned,
-        # mid-line reading. USE_ELF_FDE_INTERIOR_GAPS refuses both because the FDE at 0x40DDC0
-        # covers them, and that FDE really is one unwind range: 0x40DF34 repeats the range's
-        # opening minus its `prfm` prefetch, so it is an alternate entry sharing one frame
-        # rather than a routine of its own. The unwinder and Binary Ninja disagree about
-        # whether that counts as a function; the rule follows the unwinder. Asserted rather
-        # than dropped from the list so the disagreement stays visible.
+        # The two starts #300 costs this fixture, which is the whole of its 278 -> 276. Both
+        # are refused by USE_ELF_FDE_INTERIOR_GAPS, and both are mid-function instructions
+        # rather than anything that reads as an entry:
+        #   0x400350 is `ldr w3, [sp, #0x90]`, inside the FDE at [0x400180, 0x400534)
+        #   0x40DF30 is `cbz x14, ...`,        inside the FDE at [0x40DDC0, 0x40DFCC)
+        # 0x40DF30 is where the gap scan puts a routine Binary Ninja puts one instruction on
+        # at 0x40DF34, since #311 stopped skipping a word that opens on a conditional branch.
+        # That reading is refused too and is asserted below, but it is not one of the two the
+        # fixture lost: 0x40DF34 was never recovered here in the first place. The FDE really
+        # is one unwind range -- 0x40DF34 repeats its opening minus the `prfm` prefetch, so it
+        # is an alternate entry sharing one frame rather than a routine of its own. The
+        # unwinder and Binary Ninja disagree about whether that counts as a function and the
+        # rule follows the unwinder. Asserted rather than dropped from the list above so the
+        # disagreement stays visible.
+        self.assertIsNone(self.report.getFunction(0x400350))
         self.assertIsNone(self.report.getFunction(0x40DF30))
         self.assertIsNone(self.report.getFunction(0x40DF34))
 
