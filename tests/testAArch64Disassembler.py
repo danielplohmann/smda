@@ -1713,23 +1713,30 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(self.report.bitness, 64)
         self.assertEqual(self.report.base_addr, 0x400000)
         self.assertEqual(self.report.oep, 0x534)
-        self.assertEqual(len(self.report.xcfg), 278)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19882)
-        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3499)
+        self.assertEqual(len(self.report.xcfg), 276)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getInstructions()), 19735)
+        self.assertEqual(sum(1 for f in self.report.getFunctions() for _ in f.getBlocks()), 3476)
         self.assertIsNotNone(self.report.getFunction(0x400534))
 
     def test_real_fixture_gap_scan_recovery(self):
         # Functions recovered only by the gap scan (#3): unreferenced / indirect-only
-        # routines that no BL, prologue, or stored pointer reaches. With the gap scan
-        # every Binary Ninja function start is now recovered.
-        # 0x40DF30 rather than 0x40DF34: the routine opens on a hoisted `cbz x14`, which the
-        # gap scan used to step over on the theory that a function never begins with a
-        # conditional branch. 0x40DF30 is the 16-aligned word directly after the previous
-        # function's `ret` and its padding nop; 0x40DF34 is 4-aligned and mid-line. Neither
-        # carries an inbound direct branch, so the two readings differ by one instruction of
-        # the same routine, and the recovered function count is unchanged at 278.
-        for function_start in (0x40CFE0, 0x40DD78, 0x40DF30, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
+        # routines that no BL, prologue, or stored pointer reaches.
+        for function_start in (0x40CFE0, 0x40DD78, 0x40F370, 0x410B24, 0x41150C, 0x411590, 0x4134D0):
             self.assertIsNotNone(self.report.getFunction(function_start), f"missing 0x{function_start:x}")
+
+        # The one Binary Ninja start this fixture no longer recovers, and it is a cost rather
+        # than a correction. Both readings of it are refused: 0x40DF34 is where Binary Ninja
+        # puts the routine, and 0x40DF30 is where the gap scan puts it since #311 stopped
+        # skipping a word that opens on a conditional branch -- the 16-aligned word after the
+        # previous function's `ret` and its padding nop, against Binary Ninja's 4-aligned,
+        # mid-line reading. USE_ELF_FDE_INTERIOR_GAPS refuses both because the FDE at 0x40DDC0
+        # covers them, and that FDE really is one unwind range: 0x40DF34 repeats the range's
+        # opening minus its `prfm` prefetch, so it is an alternate entry sharing one frame
+        # rather than a routine of its own. The unwinder and Binary Ninja disagree about
+        # whether that counts as a function; the rule follows the unwinder. Asserted rather
+        # than dropped from the list so the disagreement stays visible.
+        self.assertIsNone(self.report.getFunction(0x40DF30))
+        self.assertIsNone(self.report.getFunction(0x40DF34))
 
     def test_real_fixture_data_pointer_recovery(self):
         # init_array / data pointer-table functions recovered by #2, none of which
@@ -1771,7 +1778,7 @@ class TestAArch64StaticFixture(unittest.TestCase):
         self.assertEqual(roundtrip.architecture, "aarch64")
         self.assertEqual(roundtrip.bitness, 64)
         self.assertEqual(roundtrip.oep, 0x534)
-        self.assertEqual(len(roundtrip.xcfg), 278)
+        self.assertEqual(len(roundtrip.xcfg), 276)
 
 
 class TestAArch64Analyzers(unittest.TestCase):
@@ -2546,7 +2553,7 @@ class TestAArch64Analyzers(unittest.TestCase):
 
         baseline = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(binary)
         self.assertEqual(baseline.confidence_threshold, 0.0)
-        self.assertEqual(baseline.num_functions, 278)
+        self.assertEqual(baseline.num_functions, 276)
         self.assertTrue(all(f.tfidf is not None for f in baseline.getFunctions()))
         self.assertTrue(any(f.tfidf < 0 for f in baseline.getFunctions()))
         self.assertTrue(any(f.confidence == 0.0 for f in baseline.getFunctions()))
