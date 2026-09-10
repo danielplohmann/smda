@@ -6,6 +6,7 @@ import unittest
 import lief
 
 from smda.common.EhFrameDecoder import (
+    MAX_LSDA_FAILED_READ_BYTES,
     MAX_LSDA_TABLE_BYTES,
     _decodeLsdaLandingPads,
     decodeEhFrameFdeRanges,
@@ -432,6 +433,58 @@ class EhFrameLandingPadWalkTest(unittest.TestCase):
         budget = [10]
         self.assertEqual(_decodeLsdaLandingPads(blob, 0x1000, 0x2000, 8, budget), {0x2020})
         self.assertEqual(budget[0], 10 - (len(table) - 2))
+
+    def testAnLsdaThatDecodesIsNotChargedToTheFailedReadBudget(self):
+        """The condition that keeps this bound off working images.
+
+        A real image asks for far more than it decodes -- the heaviest cell measured reads
+        92 MB to decode 26 KB of tables -- so a bound charged for every read would have to be
+        enormous to be safe. Charging only the reads that lead nowhere is what lets it be
+        small enough to matter.
+        """
+        section = self.sectionWith(*[self.fdeBody(self.LSDA_VA + step, 0x2000 + step) for step in (0, 0x40, 0x80)])
+
+        def read_va(addr, length):
+            return self.LSDA_BYTES
+
+        # a budget smaller than a single read still reaches every table, because none fails
+        pads = decodeEhFrameLandingPads(section, 0x1000, read_va, max_failed_read_bytes=1)
+        self.assertEqual(pads, {0x2020, 0x2060, 0x20A0})
+
+    def testAnExhaustedFailedReadBudgetStopsCallingTheReader(self):
+        # the shape the bound exists for: distinct pointers that each cost a read of up to
+        # MAX_LSDA_BYTES and decode to nothing, which the table budget never sees
+        reads = []
+        #: an LSDA whose call-site table length runs past the bytes it arrived in, so the
+        #: decode declines before the table budget is charged anything
+        undecodable = bytes([0xFF, 0xFF, 0x01, 0xFF, 0x7F])
+
+        def counting_read(addr, length):
+            reads.append(addr)
+            return undecodable
+
+        section = self.sectionWith(*[self.fdeBody(self.LSDA_VA + step, 0x2000 + step) for step in (0, 0x40, 0x80)])
+        # control: with room, every distinct pointer is read and none of them declares a pad
+        self.assertEqual(decodeEhFrameLandingPads(section, 0x1000, counting_read), set())
+        self.assertEqual(len(reads), 3)
+
+        reads.clear()
+        self.assertEqual(decodeEhFrameLandingPads(section, 0x1000, counting_read, max_failed_read_bytes=0), set())
+        self.assertEqual(reads, [], "the reader was called with the failed-read budget already spent")
+
+        reads.clear()
+        # one read's worth admits exactly one, then the bound stops the walk
+        self.assertEqual(
+            decodeEhFrameLandingPads(section, 0x1000, counting_read, max_failed_read_bytes=len(undecodable)),
+            set(),
+        )
+        self.assertEqual(len(reads), 1)
+
+    def testTheFailedReadBudgetClearsTheHeaviestRealImageMeasured(self):
+        # a bound sized below real input would drop pads on the images this rule is for; the
+        # worst measured across the built ELF corpora spends 29.75 MB on reads that decode to
+        # nothing, on a cell making 476 of them
+        self.assertGreater(MAX_LSDA_FAILED_READ_BYTES, 8 * 29_753_856)
 
     def testTheBudgetClearsTheHeaviestShapeThisDecoderIsBuiltFor(self):
         # a bound sized below real input would silently drop pads, which is how the first

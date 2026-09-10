@@ -260,6 +260,23 @@ MAX_LSDA_BYTES = 0x10000
 #: two orders of magnitude of headroom while capping a section built to be hostile at about a
 #: second.
 MAX_LSDA_TABLE_BYTES = 8 * 1024 * 1024
+#: bytes read for LSDAs that then decode to nothing, across one section. The table budget above
+#: cannot bound these: it is charged where a table's length field is parsed, so an LSDA failing
+#: before that point - an unsupported LPStart mode, a short buffer, a TType offset that will not
+#: read - costs a read of up to MAX_LSDA_BYTES and charges nothing. A section naming MAX_RECORDS
+#: distinct pointers that all fail early therefore reads about 12 GB while spending none of it.
+#: Charging those reads to the table budget instead is not the fix: read_va is asked for
+#: MAX_LSDA_BYTES and returns whatever the section holds, so a real image asks for far more than
+#: it decodes - 92 MB against 26 KB of tables on the heaviest cell measured - and the 8 MB above
+#: would be gone within about 128 reads of the 1,473 that cell makes. Only the failures need a
+#: bound, and they separate the two cases: the heaviest real image spends 29.75 MB on them
+#: (476 reads), the corpora's Rust cells spend none, and a section naming MAX_RECORDS distinct
+#: pointers that fail this early spends 12.2 GB over 199,999 reads. This bound holds that to
+#: 256 MB over 4,096, leaving 8.6x headroom over the heaviest real image measured. Note the
+#: failure has to come before the table's length field to reach here at all: one that fails
+#: after it is already charged, which is why the same shape built with a too-long length runs
+#: 512 reads rather than 200,000.
+MAX_LSDA_FAILED_READ_BYTES = 256 * 1024 * 1024
 
 
 def _isSupportedApplication(encoding):
@@ -343,7 +360,13 @@ def _decodeLsdaLandingPads(data, lsda_va, function_start, pointer_size, budget=N
 
 
 def decodeEhFrameLandingPads(
-    data, section_va, read_va, pointer_size=8, max_records=MAX_RECORDS, max_table_bytes=MAX_LSDA_TABLE_BYTES
+    data,
+    section_va,
+    read_va,
+    pointer_size=8,
+    max_records=MAX_RECORDS,
+    max_table_bytes=MAX_LSDA_TABLE_BYTES,
+    max_failed_read_bytes=MAX_LSDA_FAILED_READ_BYTES,
 ):
     """Every exception landing pad the image's own LSDAs declare.
 
@@ -356,9 +379,11 @@ def decodeEhFrameLandingPads(
     string carries 'L'. The LSDA lives in another section, so ``read_va(va, length)`` supplies
     the bytes; it may return fewer than asked for, or nothing.
 
-    ``max_table_bytes`` bounds the call-site table bytes decoded across the whole section, and
-    with them how often ``read_va`` is called at all. It is a parameter rather than only a
-    constant so a test can exhaust it without building a section large enough to.
+    ``max_table_bytes`` bounds the call-site table bytes decoded across the whole section.
+    ``max_failed_read_bytes`` bounds the bytes read for LSDAs that then decode to nothing, which
+    the first cannot reach because it is charged only once a table's length field is parsed.
+    Both are parameters rather than only constants so a test can exhaust them without building a
+    section large enough to.
     """
     pads = set()
     # keyed by LSDA address: one LSDA legitimately serves one function, but nothing stops a
@@ -366,13 +391,16 @@ def decodeEhFrameLandingPads(
     # FDE is the difference between milliseconds and minutes
     decoded = {}
     budget = [max_table_bytes]
+    read_budget = [max_failed_read_bytes]
     for cie, pos, record_end in _walkEhFrameFdes(data, pointer_size, max_records):
         if cie.lsda_encoding != DW_EH_PE_omit:
-            pads |= _fdeLandingPads(data, pos, record_end, section_va, cie, read_va, pointer_size, decoded, budget)
+            pads |= _fdeLandingPads(
+                data, pos, record_end, section_va, cie, read_va, pointer_size, decoded, budget, read_budget
+            )
     return pads
 
 
-def _fdeLandingPads(data, pos, record_end, section_va, cie, read_va, pointer_size, decoded, budget):
+def _fdeLandingPads(data, pos, record_end, section_va, cie, read_va, pointer_size, decoded, budget, read_budget):
     field_pos = pos
     initial_location, pos = _read_encoded_value(data, pos, record_end, cie.fde_encoding, pointer_size)
     address_range, pos = _read_encoded_value(data, pos, record_end, cie.fde_encoding & 0x0F, pointer_size)
@@ -394,17 +422,20 @@ def _fdeLandingPads(data, pos, record_end, section_va, cie, read_va, pointer_siz
     # memo is keyed by both rather than by the table alone
     key = (lsda_va, initial_location)
     if key not in decoded:
-        # the budget gates the read as well as the decode: the reader is asked for
-        # MAX_LSDA_BYTES and a section naming a distinct LSDA per record would otherwise copy
-        # that much per record before the decode declines it
-        if budget[0] <= 0:
+        # either budget gates the read: the table one once enough tables have been decoded, the
+        # failed-read one once enough reads have led nowhere. Without the second, an LSDA that
+        # fails before its length field is reached costs MAX_LSDA_BYTES and charges nothing
+        if budget[0] <= 0 or read_budget[0] <= 0:
             return set()
         lsda_bytes = read_va(lsda_va, MAX_LSDA_BYTES)
         if not lsda_bytes:
             return set()
         # an exhausted budget reads as "declares nothing" from here on, which costs recall on
         # a section built to exhaust it and never invents a pad
-        decoded[key] = _decodeLsdaLandingPads(lsda_bytes, lsda_va, initial_location, pointer_size, budget) or set()
+        pads = _decodeLsdaLandingPads(lsda_bytes, lsda_va, initial_location, pointer_size, budget) or set()
+        if not pads:
+            read_budget[0] -= len(lsda_bytes)
+        decoded[key] = pads
     # A landing pad is interior to the function its own FDE names; the format says so, and over
     # 43,881 pads across four corpora and three system libraries not one falls outside. That
     # makes this the check separating a real table from an LSDA pointer that led into arbitrary
