@@ -137,6 +137,18 @@ class SmdaConfig:
     # an analysis that ran past the end of the routine the address sat inside and absorbed
     # the small aligned functions after it. On the cell examined, all eight functions
     # recovered sit 11 to 79 bytes past a declared extent's end.
+    # The same extents also answer for a candidate from any other source, at the point analysis
+    # would begin on it, under the guards the .eh_frame arm carries: the record's own function
+    # has to be recovered and its recovered extent has to surround the address. A fragment is
+    # not the shortcut it is in the gap scan - its start is not the function covering the
+    # address, so it declines here rather than refusing.
+    # Worth much less than the .eh_frame arm, and the numbers are why it is a change of its own:
+    #   120 MinGW PE x64 cells   -47 FP at identical TP and FN, 109 of 120 bit-identical
+    #   2 Rust windows-gnu-x64    -2 FP at identical TP and FN
+    # Nothing else moves at all. The 140 x86-64 ELF cells, 72 AArch64 ELF cells, 23 Go cells,
+    # 11 ARM64 Mach-O cells, the 32-bit and ELF Rust cells and all 57 malpedia dumps are
+    # bit-identical. The dumps are the reading worth keeping: none of the 57 declares an
+    # exception directory at all, so this evidence does not reach a mapped image.
     USE_PE_X64_PDATA_INTERIOR_GAPS = True
     # Refuse a gap candidate that an ARM64 PE image's own exception directory places inside a
     # routine. The same evidence and the same rule as the x64 flag above, reached differently:

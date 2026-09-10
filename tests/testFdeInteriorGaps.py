@@ -196,13 +196,16 @@ class _RecoveredDisassembly:
         self.function_borders = borders
 
 
-def declaredOwnerOf(address, ranges, functions, borders, plt=(), enabled=True):
+def declaredOwnerOf(address, ranges, functions, borders, plt=(), enabled=True, pdata=(), pe_enabled=True):
     manager = FunctionCandidateManager(SmdaConfig())
     manager.config.USE_ELF_FDE_INTERIOR_GAPS = enabled
+    manager.config.USE_PE_X64_PDATA_INTERIOR_GAPS = pe_enabled
     manager.disassembly = _RecoveredDisassembly(dict.fromkeys(functions), dict(borders))
     manager._eh_frame_fde_ranges = list(ranges)
     manager._eh_frame_fde_starts = [start for start, _ in ranges]
     manager._plt_ranges = list(plt)
+    manager._pdata_ranges = list(pdata)
+    manager._pdata_range_starts = None
     return manager.declaredInteriorOwner(address)
 
 
@@ -247,6 +250,52 @@ class DeclaredInteriorOwnerTest(unittest.TestCase):
 
     def testTheFlagTurnsTheRefusalOff(self):
         self.assertIsNone(declaredOwnerOf(0x1500, self.RANGES, self.FUNCTIONS, self.BORDERS, enabled=False))
+
+
+class DeclaredInteriorOwnerPeTest(unittest.TestCase):
+    """The same question asked of a PE exception directory rather than an `.eh_frame`.
+
+    The two structures never describe the same image, so the arms are exercised apart: an
+    ELF names no `RUNTIME_FUNCTION` extents and a PE decodes no FDE ranges.
+    """
+
+    PDATA = [(0x1000, 0x2000, False)]
+    FUNCTIONS = [0x1000]
+    BORDERS = {0x1000: (0x1000, 0x1F00)}
+
+    def ownerOf(self, address, **kwargs):
+        options = {
+            "ranges": [],
+            "functions": self.FUNCTIONS,
+            "borders": self.BORDERS,
+            "pdata": self.PDATA,
+            **kwargs,
+        }
+        return declaredOwnerOf(address, **options)
+
+    def testAnAddressInsideADeclaredExtentIsRefused(self):
+        self.assertEqual(self.ownerOf(0x1500), 0x1000)
+
+    def testAnExtentStartIsNotInteriorToItself(self):
+        self.assertIsNone(self.ownerOf(0x1000))
+
+    def testAnExtentWhoseOwnerWasNotRecoveredRefusesNothing(self):
+        self.assertIsNone(self.ownerOf(0x1500, functions=[]))
+
+    def testAnAddressPastTheOwnersRecoveredExtentIsKept(self):
+        self.assertIsNone(self.ownerOf(0x1500, borders={0x1000: (0x1000, 0x1100)}))
+
+    def testAFragmentRecordDeclinesRatherThanRefusing(self):
+        # the gap scan takes a fragment as evidence on its own; here the record's own start is
+        # not the function covering the address, so it fails the recovered-owner test instead
+        self.assertIsNone(self.ownerOf(0x1500, pdata=[(0x1400, 0x1600, True)]))
+
+    def testTheFlagTurnsTheRefusalOff(self):
+        self.assertIsNone(self.ownerOf(0x1500, pe_enabled=False))
+
+    def testTheElfFlagDoesNotGateTheExceptionDirectory(self):
+        # the two arms carry their own switches; turning the ELF one off leaves this one alone
+        self.assertEqual(self.ownerOf(0x1500, enabled=False), 0x1000)
 
 
 if __name__ == "__main__":

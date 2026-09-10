@@ -744,6 +744,13 @@ class FunctionCandidateManager:
         begin in the alignment padding ahead of its function, which leaves the real entry a few
         bytes in interior to nothing.
 
+        Both structures answer here, as they do in the gap scan, and they are format-disjoint:
+        `_pdata_ranges` is only ever filled from a PE exception directory and the `.eh_frame`
+        ranges decode nothing unless lief reports an ELF, so no address is arbitrated between
+        them. A fragment record is not the shortcut it is in the gap scan: its own start is not
+        the function that covers the address, so it fails the recovered-owner test below and
+        declines, which is the conservative reading at a point where a better one is available.
+
         A third guard the gap scan does not need: the owner's own recovered extent has to
         surround the address. An FDE can reach past everything its function's control flow
         arrives at, and refusing an address out there discards bytes nothing else claims --
@@ -758,17 +765,21 @@ class FunctionCandidateManager:
         nothing in the format forbids that; what bounds it is measurement rather than
         structure, no true positive lost across the ELF corpora this was measured over.
         """
-        if not self.config.USE_ELF_FDE_INTERIOR_GAPS:
+        owner = None
+        if self.config.USE_ELF_FDE_INTERIOR_GAPS and not self.isInDeclaredPltSection(addr):
+            declared = self.declaredFdeRangeContaining(addr)
+            if declared is not None:
+                owner = declared[0]
+        if owner is None and self._pdata_ranges and self.config.USE_PE_X64_PDATA_INTERIOR_GAPS:
+            declared = self.declaredExceptionRangeContaining(addr)
+            if declared is not None:
+                owner = declared[0]
+        if owner is None or owner not in self.disassembly.functions:
             return None
-        if self.isInDeclaredPltSection(addr):
-            return None
-        containing = self.declaredFdeRangeContaining(addr)
-        if containing is None or containing[0] not in self.disassembly.functions:
-            return None
-        borders = self.disassembly.function_borders.get(containing[0])
+        borders = self.disassembly.function_borders.get(owner)
         if borders is None or not borders[0] <= addr < borders[1]:
             return None
-        return containing[0]
+        return owner
 
     def opensInsideDeclaredFdeRange(self, addr):
         """Whether `addr` falls inside a declared FDE range without being that range's start."""
