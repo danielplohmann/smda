@@ -81,6 +81,7 @@ class FunctionCandidateManager:
         self._eh_frame_fde_starts = []
         self._declared_landing_pads = None
         self._plt_ranges = None
+        self._code_area_index = None
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
@@ -96,9 +97,25 @@ class FunctionCandidateManager:
     def _passesCodeFilter(self, addr):
         if addr is None:
             return False
-        if self._code_areas:
-            return any(area[0] <= addr < area[1] for area in self._code_areas)
-        return True
+        areas = self._code_areas
+        if not areas:
+            return True
+        index = getattr(self, "_code_area_index", None)
+        if index is None or index[0] is not areas:
+            ordered = sorted((start, end) for start, end in areas)
+            merged = [list(ordered[0])]
+            for start, end in ordered[1:]:
+                if start <= merged[-1][1]:
+                    if end > merged[-1][1]:
+                        merged[-1][1] = end
+                else:
+                    merged.append([start, end])
+            starts = [start for start, _end in merged]
+            self._code_area_index = (areas, starts, merged)
+            index = self._code_area_index
+        _areas, starts, merged = index
+        pos = bisect.bisect_right(starts, addr) - 1
+        return pos >= 0 and addr < merged[pos][1]
 
     def getBitMask(self):
         if self.bitness == 64:
@@ -143,11 +160,8 @@ class FunctionCandidateManager:
                     candidate = self.candidates[candidate_addr]
                     if candidate.removeCallRefs(conflict):
                         dirty_candidates.append(candidate)
-                if isinstance(self.candidate_queue, BracketQueue):
-                    for candidate in dirty_candidates:
-                        self.candidate_queue.update(candidate)
-                elif dirty_candidates:
-                    self.candidate_queue.update()
+                for candidate in dirty_candidates:
+                    self.candidate_queue.update(candidate)
 
     def _addCappedCallRef(self, candidate, source_ref):
         """add an inbound call reference, honoring MAX_CALL_REFS_PER_CANDIDATE to bound set growth and rescoring."""

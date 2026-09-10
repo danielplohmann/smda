@@ -28,11 +28,38 @@ class WinApiResolver(AbstractLabelProvider):
         self._api_map = {"lief": {}}
         self._os_name = None
         self._is_buffer = False
+        # parsing an uncached ApiScout DB costs tens of milliseconds; defer it to the
+        # first getApi() so analyses that never resolve an API don't pay for it.
+        # Cached DBs are attached immediately, they keep _os_name resolution cheap.
+        deferred_dbs = []
         for os_name, db_filepath in self._config.API_COLLECTION_FILES.items():
-            self._loadDbFile(os_name, db_filepath)
+            if db_filepath in WinApiResolver._db_cache:
+                self._loadDbFile(os_name, db_filepath)
+            else:
+                deferred_dbs.append((os_name, db_filepath))
+        # os-name selection must wait until every configured DB had its chance to
+        # load, otherwise a single cached DB pins the name prematurely
+        self._deferred_dbs = deferred_dbs
+        if not deferred_dbs:
+            self._resolveOsName()
+
+    def _resolveOsName(self):
+        # deferred loading runs after construction, so setOsName() may already have
+        # pinned a name; an explicit choice always outranks the inference below
+        if self._os_name is not None:
+            return
         loaded_os_names = [os_name for os_name in self._config.API_COLLECTION_FILES if os_name in self._api_map]
         if len(loaded_os_names) == 1:
             self._os_name = loaded_os_names[0]
+
+    def _ensureDbsLoaded(self):
+        deferred_dbs = self._deferred_dbs
+        if not deferred_dbs:
+            return
+        self._deferred_dbs = None
+        for os_name, db_filepath in deferred_dbs:
+            self._loadDbFile(os_name, db_filepath)
+        self._resolveOsName()
 
     def update(self, binary_info):
         self._is_buffer = binary_info.is_buffer
@@ -96,6 +123,7 @@ class WinApiResolver(AbstractLabelProvider):
 
     def getApi(self, to_addr, absolute_addr=None):
         """If the LabelProvider has any information about a used API for the given address, return (dll, api), else return (None, None)"""
+        self._ensureDbsLoaded()
         # if we work on a dump, use ApiScout method:
         if self._is_buffer:
             if self._os_name and self._os_name in self._api_map:

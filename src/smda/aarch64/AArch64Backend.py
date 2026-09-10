@@ -12,6 +12,7 @@ from .analyzers import AArch64IndirectCallAnalyzer, AArch64JumpTableAnalyzer, AA
 from .definitions import (
     ADD_IMM64_MASK,
     ADD_IMM64_VALUE,
+    ADR_VALUE,
     ADRP_MASK,
     ADRP_VALUE,
     ALWAYS_BRANCH_INS,
@@ -30,6 +31,7 @@ from .definitions import (
     NOP,
     RET_INS,
     UNCOND_JUMP_INS,
+    adr_pc_value,
     adrp_page_value,
     is_bti_landing_pad,
     is_exception_record_entry,
@@ -52,6 +54,55 @@ _HEX_OPERAND = re.compile(r"0x[0-9a-fA-F]+")
 # address — the only values it ever records. Verified against capstone ground
 # truth (zero false negatives across the aarch64 corpora and live pipelines).
 _IMM_TOKEN = re.compile(r"#?-?0x[0-9a-fA-F]+|#-?\d+")
+
+
+_WIDE_IMM_MASK = 0x7F800000
+_MOVZ_OPC = 0x52800000
+_MOVN_OPC = 0x12800000
+_MOVK_OPC = 0x72800000
+_LDST_IMM_MASK = 0x3B000000
+_LDST_UNSIGNED_VALUE = 0x39000000
+_LDST_REGIMM_VALUE = 0x38000000
+
+
+def _dataRefImmediatesFromWord(ins_bytes, i_address):
+    # None: unknown encoding, fall back to Capstone detail.
+    # (): known encoding with no IMM / absolute-MEM data-ref operands.
+    if len(ins_bytes) != INSTRUCTION_SIZE:
+        return None
+    word = int.from_bytes(ins_bytes, "little")
+    if (word & ADRP_MASK) == ADRP_VALUE:
+        return (adrp_page_value(word, i_address),)
+    if (word & ADRP_MASK) == ADR_VALUE:
+        return (adr_pc_value(word, i_address),)
+    if ((word >> 23) & 0x3F) == 0x22:
+        return (((word >> 10) & 0xFFF),)
+    if (word & _LDST_IMM_MASK) == _LDST_UNSIGNED_VALUE:
+        return ()
+    if ((word >> 27) & 0x7) == 0x5 and ((word >> 23) & 0x7) in (0, 2, 3):
+        return ()
+    if (word & _LDST_IMM_MASK) == _LDST_REGIMM_VALUE:
+        bits_11_10 = (word >> 10) & 3
+        if bits_11_10 != 1 or (word >> 21) & 1:
+            return ()
+    opc = word & _WIDE_IMM_MASK
+    if opc not in (_MOVZ_OPC, _MOVN_OPC, _MOVK_OPC):
+        return None
+    hw = (word >> 21) & 0x3
+    sf = word >> 31
+    if not sf and hw >= 2:
+        return None
+    imm16 = (word >> 5) & 0xFFFF
+    if opc == _MOVK_OPC:
+        return (imm16,)
+    shifted = imm16 << (hw * 16)
+    if opc == _MOVZ_OPC:
+        return (shifted,)
+    width = 64 if sf else 32
+    val = (~shifted) & ((1 << width) - 1)
+    if val >= 1 << (width - 1):
+        val -= 1 << width
+    return (val,)
 
 
 def _hasDataRefImmediate(op_str, base_addr, upper_addr, is_in_code_areas):
@@ -302,17 +353,26 @@ class AArch64Backend(ArchBackend):
         ins_bytes = d.disassembly.getBytes(i_address, i_size)
         if not ins_bytes or len(ins_bytes) != i_size:
             return
-        detailed = next(d.capstone.disasm(ins_bytes, i_address), None)
-        if detailed is None:
-            return
         emitted = set()
-        for operand in detailed.operands:
-            value = None
-            if operand.type == ARM64_OP_IMM:
-                value = operand.imm
-            elif operand.type == ARM64_OP_MEM and operand.mem.base == 0:
-                value = operand.mem.disp
-            if value is None or value in emitted:
+        word_imms = _dataRefImmediatesFromWord(ins_bytes, i_address)
+        if word_imms is None:
+            detailed = next(d.capstone.disasm(ins_bytes, i_address), None)
+            if detailed is None:
+                return
+            for operand in detailed.operands:
+                value = None
+                if operand.type == ARM64_OP_IMM:
+                    value = operand.imm
+                elif operand.type == ARM64_OP_MEM and operand.mem.base == 0:
+                    value = operand.mem.disp
+                if value is None or value in emitted:
+                    continue
+                if d.disassembly.isAddrWithinMemoryImage(value) and not binary_info.isInCodeAreas(value):
+                    emitted.add(value)
+                    state.addDataRef(i_address, value)
+            return
+        for value in word_imms:
+            if value in emitted:
                 continue
             if d.disassembly.isAddrWithinMemoryImage(value) and not binary_info.isInCodeAreas(value):
                 emitted.add(value)

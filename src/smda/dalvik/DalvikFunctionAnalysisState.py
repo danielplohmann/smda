@@ -46,7 +46,6 @@ class DalvikFunctionAnalysisState:
         self.block_start = 0xFFFFFFFF
         self.data_bytes = set()
         self.data_refs = set()
-        self.code_refs = set()
         self.code_refs_from = {}
         self.code_refs_to = {}
         self.suspicious_ins_count = 0
@@ -99,29 +98,44 @@ class DalvikFunctionAnalysisState:
         if self.is_next_instruction_reachable:
             self.addCodeRef(i_address, i_address + i_size)
 
+    @property
+    def code_refs(self):
+        return {(addr_from, addr_to) for addr_from, dests in self.code_refs_from.items() for addr_to in dests}
+
+    @code_refs.setter
+    def code_refs(self, value):
+        self.code_refs_from = {}
+        self.code_refs_to = {}
+        if not value:
+            return
+        for addr_from, addr_to in value:
+            self.code_refs_from.setdefault(addr_from, set()).add(addr_to)
+            self.code_refs_to.setdefault(addr_to, set()).add(addr_from)
+
     def addCodeRef(self, addr_from, addr_to, by_jump=False):
-        self.code_refs.add((addr_from, addr_to))
         code_refs_from = self.code_refs_from
-        if addr_from in code_refs_from:
-            code_refs_from[addr_from].add(addr_to)
-        else:
+        dests = code_refs_from.get(addr_from)
+        if dests is None:
             code_refs_from[addr_from] = {addr_to}
-        code_refs_to = self.code_refs_to
-        if addr_to in code_refs_to:
-            code_refs_to[addr_to].add(addr_from)
         else:
+            dests.add(addr_to)
+        code_refs_to = self.code_refs_to
+        srcs = code_refs_to.get(addr_to)
+        if srcs is None:
             code_refs_to[addr_to] = {addr_from}
+        else:
+            srcs.add(addr_from)
         if by_jump:
             self.jump_refs.add((addr_from, addr_to))
             self.jump_targets.add(addr_to)
 
     def removeCodeRef(self, addr_from, addr_to):
-        if (addr_from, addr_to) in self.code_refs:
-            self.code_refs.remove((addr_from, addr_to))
-        if addr_from in self.code_refs_from and addr_to in self.code_refs_from[addr_from]:
-            self.code_refs_from[addr_from].remove(addr_to)
-        if addr_to in self.code_refs_to and addr_from in self.code_refs_to[addr_to]:
-            self.code_refs_to[addr_to].remove(addr_from)
+        dests = self.code_refs_from.get(addr_from)
+        if dests is not None and addr_to in dests:
+            dests.remove(addr_to)
+        srcs = self.code_refs_to.get(addr_to)
+        if srcs is not None and addr_from in srcs:
+            srcs.remove(addr_from)
         if (addr_from, addr_to) in self.jump_refs:
             self.jump_refs.remove((addr_from, addr_to))
             if not any(to == addr_to for _, to in self.jump_refs):
@@ -170,15 +184,18 @@ class DalvikFunctionAnalysisState:
         self.disassembly.functions[self.start_addr] = self.getBlocks()
         code_refs_from = self.disassembly.code_refs_from
         code_refs_to = self.disassembly.code_refs_to
-        for addr_from, addr_to in self.code_refs:
-            if addr_from in code_refs_from:
-                code_refs_from[addr_from].add(addr_to)
+        for addr_from, dests in self.code_refs_from.items():
+            outgoing = code_refs_from.get(addr_from)
+            if outgoing is None:
+                code_refs_from[addr_from] = set(dests)
             else:
-                code_refs_from[addr_from] = {addr_to}
-            if addr_to in code_refs_to:
-                code_refs_to[addr_to].add(addr_from)
-            else:
-                code_refs_to[addr_to] = {addr_from}
+                outgoing.update(dests)
+            for addr_to in dests:
+                incoming = code_refs_to.get(addr_to)
+                if incoming is None:
+                    code_refs_to[addr_to] = {addr_from}
+                else:
+                    incoming.add(addr_from)
         for dref in self.data_refs:
             self.disassembly.addDataRefs(dref[0], dref[1])
         if self.is_recursive:
@@ -225,8 +242,9 @@ class DalvikFunctionAnalysisState:
             for byte in range(ins[1]):
                 self.disassembly.code_map.pop(ins[0] + byte, None)
                 self.disassembly.ins2fn.pop(ins[0] + byte, None)
-        for cref in self.code_refs:
-            self.disassembly.removeCodeRefs(cref[0], cref[1])
+        for addr_from, dests in self.code_refs_from.items():
+            for addr_to in dests:
+                self.disassembly.removeCodeRefs(addr_from, addr_to)
         for dref in self.data_refs:
             self.disassembly.removeDataRefs(dref[0], dref[1])
         self.disassembly.functions.pop(self.start_addr, None)
@@ -272,7 +290,9 @@ class DalvikFunctionAnalysisState:
         return self.blocks
 
     def hasUnprocessedBlocks(self):
-        return bool(self._queued_blocks - self.processed_blocks)
+        # addBlockToQueue() never queues a processed block and chooseNextBlock() moves each
+        # pop straight into processed_blocks, so the two sets are always disjoint
+        return bool(self._queued_blocks)
 
     def isProcessed(self, addr):
         return addr in self.processed_bytes

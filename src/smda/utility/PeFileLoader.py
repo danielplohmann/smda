@@ -95,7 +95,7 @@ class PeFileLoader:
             # support up to 100MB for now.
             if max_virt_section_offset > SmdaConfig.MAX_IMAGE_SIZE:
                 raise ValueError("PE file larger than MAX_IMAGE_SIZE")
-            mapped_binary = bytearray([0] * max_virt_section_offset)
+            mapped_binary = bytearray(max_virt_section_offset)
             # clamp to both the raw file's actual length and mapped_binary's capacity so this
             # header-copy slice assignment can never resize mapped_binary (same length on
             # both sides of the assignment, mirroring the per-section copy clamp below)

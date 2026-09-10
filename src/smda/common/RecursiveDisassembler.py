@@ -280,13 +280,22 @@ class RecursiveDisassembler:
             cache = self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start)
             cache_pos = 0
             previous_i = None
+            # per-instruction locals: the maps are only ever mutated in place during
+            # analysis, so aliasing them here stays identity-safe through the whole loop
+            code_map = self.disassembly.code_map
+            data_map = self.disassembly.data_map
+            ins2fn = self.disassembly.ins2fn
+            raw_binary = binary_info.binary
+            analyze_instruction = self.backend.analyzeInstruction
+            add_instruction = state.addInstruction
+            processed_bytes = state.processed_bytes
             while True:
                 for i in cache:
                     i_address, i_size, i_mnemonic, i_op_str = i
 
                     i_op_str = i_op_str.strip()
                     i_relative_address = i_address - binary_info.base_addr
-                    i_bytes = binary_info.binary[i_relative_address : i_relative_address + i_size]
+                    i_bytes = raw_binary[i_relative_address : i_relative_address + i_size]
                     if debug_logging:
                         LOGGER.debug(
                             "  analyzeFunction() now processing instruction @0x%08x: %s",
@@ -313,28 +322,24 @@ class RecursiveDisassembler:
                             return state
                     # delegate architecture-specific control-flow analysis to the backend;
                     # a True return means: cut the block here without booking this instruction
-                    if self.backend.analyzeInstruction(self, i, state, previous_i, start_addr):
+                    if analyze_instruction(self, i, state, previous_i, start_addr):
                         break
                     previous_i = i
-                    if (
-                        i_address not in self.disassembly.code_map
-                        and i_address not in self.disassembly.data_map
-                        and i_address not in state.processed_bytes
-                    ):
+                    if i_address not in code_map and i_address not in data_map and i_address not in processed_bytes:
                         if debug_logging:
                             LOGGER.debug(
                                 "  analyzeFunction() booked instruction @0x%08x: %s for processed state",
                                 i_address,
                                 i_mnemonic + " " + i_op_str,
                             )
-                        state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
-                    elif i_address in self.disassembly.code_map:
+                        add_instruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
+                    elif i_address in code_map:
                         if debug_logging:
                             LOGGER.debug(
                                 "  analyzeFunction() was already present?! instruction @0x%08x: %s (function: 0x%08x)",
                                 i_address,
                                 i_mnemonic + " " + i_op_str,
-                                self.disassembly.ins2fn[i_address],
+                                ins2fn[i_address],
                             )
                         # If the collision is with a gap function, revert it and
                         # book this instruction so the current function absorbs it.
@@ -342,7 +347,7 @@ class RecursiveDisassembler:
                         # not during the gap pass itself — gap candidates are
                         # expected to have independent analysis there.
                         if not as_gap and self._revertGapFunction(i_address, start_addr):
-                            state.addInstruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
+                            add_instruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
                         else:
                             state.setBlockEndingInstruction(True)
                             state.addCollision(i_address)
