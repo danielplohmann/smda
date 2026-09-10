@@ -826,6 +826,67 @@ class TestIntelDisassembler(unittest.TestCase):
 
         self.assertEqual(manager.nextGapCandidate(), 0x1003)
 
+    def test_gap_scan_skips_a_rex_prefixed_nop_in_64bit(self):
+        # Every REX prefix can open an instruction capstone spells `nop`, so a 64-bit
+        # first-byte filter that omits 0x40-0x4F stops recognising REX-padded alignment
+        # filler and books a candidate on the padding itself. Three encodings, each
+        # followed by a real prologue so the address the scan should reach is unambiguous.
+        for label, nop in (
+            ("48 0f 1f 00", b"\x48\x0f\x1f\x00"),
+            ("41 0f 1f 00", b"\x41\x0f\x1f\x00"),
+            ("40 90", b"\x40\x90"),
+        ):
+            with self.subTest(nop=label):
+                config = SmdaConfig()
+                binary_info = BinaryInfo(nop + b"\x55\x48\x89\xe5\xc3")
+                binary_info.base_addr = 0x1000
+                binary_info.bitness = 64
+                binary_info.binary_size = len(binary_info.binary)
+
+                manager = FunctionCandidateManager(config)
+                manager.disassembly = SimpleNamespace(
+                    binary_info=binary_info,
+                    code_map={},
+                    data_map={},
+                    # bound as a default so the reader is this subtest's buffer, not the
+                    # loop variable as it stands whenever the lambda happens to run
+                    getRawBytes=lambda offset, size, info=binary_info: info.binary[offset : offset + size],
+                )
+                manager.bitness = 64
+                manager.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
+                manager.function_gaps = [[0x1000, 0x1000 + binary_info.binary_size, binary_info.binary_size]]
+                manager.gap_pointer = 0x1000
+
+                self.assertEqual(manager.nextGapCandidate(), 0x1000 + len(nop))
+
+    def test_gap_scan_does_not_disassemble_a_rex_byte_in_32bit(self):
+        # 0x40-0x4F are inc/dec at 32 bits and can never be a nop, so the probe the test
+        # above requires must not run here: admitting the range unconditionally would
+        # spend a 15-byte disassembly on every inc/dec that opens a gap.
+        config = SmdaConfig()
+        binary_info = BinaryInfo(b"\x48\x0f\x1f\x00\xc3")
+        binary_info.base_addr = 0x1000
+        binary_info.bitness = 32
+        binary_info.binary_size = len(binary_info.binary)
+
+        manager = FunctionCandidateManager(config)
+        manager.disassembly = SimpleNamespace(
+            binary_info=binary_info,
+            code_map={},
+            data_map={},
+            getRawBytes=lambda offset, size: binary_info.binary[offset : offset + size],
+        )
+        manager.bitness = 32
+
+        def boom(*_args, **_kwargs):
+            raise AssertionError("disasm_lite should not run for a REX byte at 32 bits")
+
+        manager.capstone = SimpleNamespace(disasm_lite=boom)
+        manager.function_gaps = [[0x1000, 0x1005, 5]]
+        manager.gap_pointer = 0x1000
+
+        self.assertEqual(manager.nextGapCandidate(), 0x1000)
+
     def test_gap_scan_does_not_disassemble_bytes_that_cannot_be_nop(self):
         config = SmdaConfig()
         binary_info = BinaryInfo(b"\xe8\x00\x00\x00\x00\xc3")
