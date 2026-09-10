@@ -1,7 +1,9 @@
 import logging
+import re
 import unittest
 
 from smda.DisassemblyResult import DisassemblyResult
+from smda.intel.definitions import DEFAULT_PROLOGUES, DEFAULT_PROLOGUES_64
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
 
@@ -45,6 +47,23 @@ class _BufferBinaryInfo:
         # A raw buffer has no container, so the declared-range lookup finds no `.eh_frame`
         # and the rules built on it are inert here -- which is what a memory dump also sees.
         return None
+
+
+def scannedPrologueOrder(bitness=64):
+    """The patterns `locatePrologueCandidates` hands to the seeding scan, in scan order."""
+    manager = FunctionCandidateManager(SmdaConfig())
+    disassembly = DisassemblyResult()
+    disassembly.binary_info = _BufferBinaryInfo(bitness, BASE_ADDR, PAD + BODY + PAD)
+    order = []
+    seed = manager._seedPrologueMatches
+
+    def recording(pattern, *args, **kwargs):
+        order.append(pattern)
+        return seed(pattern, *args, **kwargs)
+
+    manager._seedPrologueMatches = recording
+    manager.init(disassembly)
+    return order
 
 
 def seededStarts(buffer, bitness=64):
@@ -125,6 +144,85 @@ class InteriorPrologueSuppressionTest(unittest.TestCase):
         seeded = seededStarts(buffer, bitness=32)
         self.assertIn(entry, seeded)
         self.assertNotIn(entry + 2, seeded)
+
+    def testTheBaseFamilyIsScannedBeforeThe64BitFamily(self):
+        """The refusal is directional, so the containing prologue has to be seeded first.
+
+        `_opensInsideAnEarlierPrologue` refuses a match only when the address the
+        preceding prologue starts at is *already* a candidate. Nothing re-examines a
+        match once a later pattern seeds the prologue in front of it, so the rule
+        refuses B-after-A and never A-after-B: the clang pair it was written for,
+        `push rbp; mov rbp, rsp` then `push r15; push r14`, is refused only because
+        the frame prologue is scanned first.
+
+        That makes the family order load-bearing rather than incidental. The
+        behavioural tests above do fail when it changes, but they fail as an
+        unexpected address and can be quieted by editing the expected set, which
+        would drop the suppression this rule was measured to be worth. This one
+        fails as what it is.
+
+        The CET pad scanned between the two families is deliberately left out.
+        `endbr64` opens a function ahead of `push rbp; mov rbp, rsp`, and being
+        scanned second it does seed that pair four bytes into every such entry --
+        19,536 times over the 260-cell built C/C++ matrix, across 40 of its
+        cells. It changes no reported function: the entry is recovered from the
+        pad and the interior candidate is absorbed into it, so moving the pad
+        ahead of the base family leaves TP, FP and FN identical on the nine cells
+        where the pattern is densest. Pinning a position that carries nothing
+        would only make the order harder to change for the reasons it should be.
+        """
+        order = scannedPrologueOrder()
+        for prologue in DEFAULT_PROLOGUES + DEFAULT_PROLOGUES_64:
+            self.assertIn(re.escape(prologue), order)
+        last_base = max(order.index(re.escape(p)) for p in DEFAULT_PROLOGUES)
+        first_wide = min(order.index(re.escape(p)) for p in DEFAULT_PROLOGUES_64)
+        self.assertLess(
+            last_base,
+            first_wide,
+            "DEFAULT_PROLOGUES must all be scanned before DEFAULT_PROLOGUES_64: the "
+            "interior-prologue refusal only fires when the containing prologue is already "
+            "a candidate, so moving a pattern across the two families, or reordering the "
+            "two scans, silently stops it refusing the body matches it was measured on.",
+        )
+
+    def testAContainingPrologueIsScannedBeforeThePatternItEndsWith(self):
+        """A pattern that is the tail of a longer one must be scanned after it.
+
+        `\x8b\xff\x55\x8b\xec` is the MSVC hotpatch pad in front of
+        `\x55\x8b\xec`, so the bare form matches two bytes into every padded
+        entry. The neighbouring hotpatch rule refuses that match on the same
+        "already a candidate" test the interior rule uses, which again holds only
+        because the padded form is seeded first.
+
+        Stated over the patterns themselves rather than over the pair that exists
+        today, so a prologue added later that happens to end with one already on
+        the list is covered without anyone remembering to come back here.
+        """
+        order = scannedPrologueOrder()
+        seeded = DEFAULT_PROLOGUES + DEFAULT_PROLOGUES_64
+        pairs = [
+            (longer, shorter)
+            for longer in seeded
+            for shorter in seeded
+            if longer != shorter and longer.endswith(shorter)
+        ]
+        self.assertTrue(pairs, "expected at least the hotpatch pad over the bare frame prologue")
+        for longer, shorter in pairs:
+            self.assertLess(
+                order.index(re.escape(longer)),
+                order.index(re.escape(shorter)),
+                f"{longer!r} ends with {shorter!r}, so every match of the shorter one inside it "
+                f"names a body rather than an entry. The rules that refuse those matches test "
+                f"whether the longer form is already a candidate, so it has to be scanned first.",
+            )
+
+    def testA32BitScanSeedsOnlyTheBaseFamily(self):
+        """The 64-bit family is gated on bitness, so nothing at 32 bits can depend on it."""
+        order = scannedPrologueOrder(bitness=32)
+        for prologue in DEFAULT_PROLOGUES:
+            self.assertIn(re.escape(prologue), order)
+        for prologue in DEFAULT_PROLOGUES_64:
+            self.assertNotIn(re.escape(prologue), order)
 
 
 if __name__ == "__main__":
