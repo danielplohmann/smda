@@ -78,7 +78,7 @@ past roughly six lines it belongs in the PR the entry links.
   not only a gap-scan candidate -- the gap pointer reaches only what the gap scan walks to, so the prologue,
   reference and symbol scans seeded the rest unchecked. A procedure linkage table is exempt, the declared
   range's own start has to be a recovered function, and that owner's recovered extent has to surround the
-  address. *Measured on `a043145` against compiler symbol tables:* 72 AArch64 ELF cells 95.994 -> 97.063 PPV
+  address. *Measured on `857081f` against compiler symbol tables:* 72 AArch64 ELF cells 95.994 -> 97.063 PPV
   (-683 false positives) and 140 built C/C++ ELF cells 98.903 -> 98.969 (-77), both at identical true positives
   and false negatives; the PE, Go, ARM64 Mach-O and 57 malpedia cells are bit-identical, which is the control
   that it reaches only images carrying an `.eh_frame`. *Not reproducible from the bundled fixtures, which
