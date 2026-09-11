@@ -119,6 +119,13 @@ When a change warrants a version bump, update **all three** in one commit:
 
 Keep the two version strings in sync. Do not bump versions unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
 
+**Scope lives in a milestone named for the tag.** A PR joins `vX.Y.Z` when it is accepted for that
+release rather than when it is opened, so the milestone stays a list of what is left rather than a
+wishlist; issues that have to close for the release join it too. Cut when it reads 100% and `master`
+is green, and close it when the tag is pushed. It answers "what is left before the release" as a
+query instead of a re-read of the issue and PR lists, which is the half `CHANGELOG.md` cannot cover:
+the changelog records what landed and what it cost, the milestone what has not landed yet.
+
 **Tag after `master` is green, not at merge.** A tag created on the merge commit before CI has confirmed the merged tree can need moving, and moving one a PyPI publish has already consumed is a different problem from moving one nobody has fetched.
 
 Every other PR writes its own bullet under `## [Unreleased]` as it merges, rather than the release being reconstructed from merge commits afterwards — see *How an entry is written* in `CHANGELOG.md` for the subsections, the scope prefix and the four content rules. `.github/workflows/changelog.yml` requires a PR touching `src/smda/` to touch `CHANGELOG.md` or carry the `no-changelog` label.
