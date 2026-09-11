@@ -80,7 +80,7 @@ past roughly six lines it belongs in the PR the entry links.
   it. *Measured on `857081f`:* the marked tier is 124 of 2110 tests and 116s of the 151s total, so the
   default target drops from about 150s to about 40s. *Not reproduced on other hardware;* the ratio is what
   travels, not the seconds. CI is unchanged and still runs the whole suite on every leg, so the gate does
-  not move — `make test-all` before pushing is what keeps a slow-tier failure from reaching the PR. (#339)
+  not move — `make test-all` before pushing is what keeps a slow-tier failure from reaching the PR. (#340)
 
 ### Deprecated
 
