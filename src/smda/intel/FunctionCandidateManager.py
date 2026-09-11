@@ -239,6 +239,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return None
         return target
 
+    def _pdataInteriorRefusalEnabled(self):
+        """The flag this backend's gap scan already answers to, for the analysis-time rule."""
+        return self.config.USE_PE_X64_PDATA_INTERIOR_GAPS
+
     def nextGapCandidate(self, start_gap_pointer=None):
         if self.language_candidates_only:
             return None
