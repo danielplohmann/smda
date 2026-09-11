@@ -72,6 +72,14 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+- **(ci)** Pushing a `vX.Y.Z` tag now releases: the workflow builds, publishes to PyPI through
+  trusted publishing, creates the GitHub release from that version's changelog section, and closes
+  the milestone named for the tag. It refuses to publish unless the tag matches both version
+  strings, the version has a changelog section, the commit is on `master`, CI passed on that
+  commit, and the milestone has no open items — the checks that previously lived in a person's
+  memory between `make package` and `make publish`. No API token is stored anywhere, and each file
+  carries signed provenance. A manual run rehearses the whole path against TestPyPI. (#343)
+
 ### Changed
 
 - **(tests)** `make test` now runs the fast tier and `make test-all` runs the whole suite. The `slow`

@@ -128,6 +128,8 @@ the changelog records what landed and what it cost, the milestone what has not l
 
 **Tag after `master` is green, not at merge.** A tag created on the merge commit before CI has confirmed the merged tree can need moving, and moving one a PyPI publish has already consumed is a different problem from moving one nobody has fetched.
 
+**Pushing the tag is the release.** `.github/workflows/publish-release.yml` builds, publishes to PyPI through trusted publishing, creates the GitHub release from this version's `CHANGELOG.md` section, and closes the milestone. Nothing above is left to remember at the console: it refuses to publish unless the tag matches both version strings, this version has a changelog section, the commit is on `master`, CI passed on that commit, and the milestone for the tag has no open items. Run the workflow manually from a tag first to rehearse the whole path against TestPyPI without touching PyPI.
+
 Every other PR writes its own bullet under `## [Unreleased]` as it merges, rather than the release being reconstructed from merge commits afterwards — see *How an entry is written* in `CHANGELOG.md` for the subsections, the scope prefix and the four content rules. `.github/workflows/changelog.yml` requires a PR touching `src/smda/` to touch `CHANGELOG.md` or carry the `no-changelog` label.
 
 ## Git Workflow

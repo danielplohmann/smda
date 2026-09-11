@@ -1,0 +1,17 @@
+# Not a workflow: GitHub reads the generated-release-notes configuration from this path and
+# nowhere else. The workflow that cuts a release is `.github/workflows/publish-release.yml`.
+changelog:
+  categories:
+    - title: Changes
+      labels:
+        - "*"
+      exclude:
+        labels:
+          - dependencies
+          - github_actions
+          - pre_commit
+    - title: Dependency and tooling updates
+      labels:
+        - dependencies
+        - github_actions
+        - pre_commit
