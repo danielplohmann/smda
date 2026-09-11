@@ -82,6 +82,16 @@ past roughly six lines it belongs in the PR the entry links.
   travels, not the seconds. CI is unchanged and still runs the whole suite on every leg, so the gate does
   not move — `make test-all` before pushing is what keeps a slow-tier failure from reaching the PR. (#340)
 
+- **(common)** Refuse a candidate from any source that the image's `.eh_frame` declares interior to a function,
+  not only a gap-scan candidate -- the gap pointer reaches only what the gap scan walks to, so the prologue,
+  reference and symbol scans seeded the rest unchecked. A procedure linkage table is exempt, the declared
+  range's own start has to be a recovered function, and that owner's recovered extent has to surround the
+  address. *Measured on `0a0a4c6` against compiler symbol tables:* 72 AArch64 ELF cells 95.994 -> 97.063 PPV
+  (-683 false positives) and 140 built C/C++ ELF cells 98.903 -> 98.969 (-77), both at identical true positives
+  and false negatives; the PE, Go, ARM64 Mach-O and 57 malpedia cells are bit-identical, which is the control
+  that it reaches only images carrying an `.eh_frame`. *Not reproducible from the bundled fixtures, which
+  produce 0 refusals.* (#327)
+
 ### Deprecated
 
 ### Removed
@@ -116,6 +126,9 @@ past roughly six lines it belongs in the PR the entry links.
 - Recovery output moves on Intel PE and ELF images whose gap scan meets a failed candidate: the
   bytes after it are now scanned instead of skipped. No true positive was lost on the corpora
   this was measured over. (#338)
+- Recovery output moves on ELF images carrying an `.eh_frame`: an address a declared FDE range covers is no
+  longer reported as a function start unless it is that range's own start. No true positive was lost on the
+  corpora this was measured over. (#327)
 
 ## Older releases
 

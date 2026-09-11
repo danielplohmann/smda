@@ -211,6 +211,21 @@ class SmdaConfig:
     # table names `dispatch`, and aarch64_static drops 0x400350 and 0x40DF30, both mid-function
     # instructions inside a declared FDE. None of the six carries a symbol or is a declared
     # start, so both baselines moved toward the truth.
+    # The same evidence also refuses a candidate from any other source, at the point analysis
+    # would begin on it, since the gap pointer reaches only what the gap scan walks to and the
+    # seeding scans reach the rest. That arm carries a third condition the gap scan does not
+    # need: the owner's own recovered extent has to surround the address. A declared range can
+    # reach past everything its function's control flow arrives at, and refusing an address out
+    # there discards bytes nothing else claims along with any reference only those bytes carry
+    # - without it the AArch64 corpus loses three functions reached through exactly that shape.
+    # Measured against compiler symbol tables, no corpus losing a true positive:
+    #   72 AArch64 ELF cells   PPV 95.994 -> 97.063  -683 FP at identical TP and FN
+    #   140 built C/C++ ELF    PPV 98.903 -> 98.969   -77 FP at identical TP and FN
+    # The 120 MinGW PE cells, 23 Go cells, 11 ARM64 Mach-O cells and all 57 malpedia dumps are
+    # bit-identical, the control that it reaches only images carrying an .eh_frame. Rust is too,
+    # and not because the rule is inert there: its images decode their ranges and 25 of 26 false
+    # positives on the first cell are interior to one, but the two conditions above decline all
+    # of them - 78 of 94 on the owner's extent, the rest on the owner not being recovered.
     USE_ELF_FDE_INTERIOR_GAPS = True
     RESOLVE_REGISTER_CALLS = True
     # resolve "call/jmp dword ptr [<reg> + <disp>]" against a runtime-built import table and

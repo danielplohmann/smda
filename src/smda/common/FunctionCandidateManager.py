@@ -733,6 +733,43 @@ class FunctionCandidateManager:
             index -= 1
         return None
 
+    def declaredInteriorOwner(self, addr):
+        """The recovered function whose declared `.eh_frame` range contains `addr`, or None.
+
+        The same evidence the gap scan already refuses on, asked at the point a candidate from
+        any source is about to be analysed rather than only where the gap pointer reaches. Both
+        of that rule's guards apply unchanged. A PLT is exempt because the whole table sits
+        under one FDE, so the range test reads every stub after the first as interior to the
+        first. And the range's own start has to be a recovered function, because an FDE can
+        begin in the alignment padding ahead of its function, which leaves the real entry a few
+        bytes in interior to nothing.
+
+        A third guard the gap scan does not need: the owner's own recovered extent has to
+        surround the address. An FDE can reach past everything its function's control flow
+        arrives at, and refusing an address out there discards bytes nothing else claims --
+        along with any reference only those bytes carry, which costs real functions elsewhere.
+        Inside the extent, the address is never one the owner decoded: a candidate landing on
+        recovered code is refused a step earlier against a byte-level code map, and
+        `function_borders` records only the extremes of that code, not its coverage. What
+        reaches here sits in the holes -- alignment between blocks, an unreached tail, a data
+        island -- so the exposure is a real entry with no FDE of its own in one of them, which
+        loses whatever reference only its bytes carry. An entry that carries its own FDE is
+        never interior to it, so the shape needs a routine covered by a neighbour's range, and
+        nothing in the format forbids that; what bounds it is measurement rather than
+        structure, no true positive lost across the ELF corpora this was measured over.
+        """
+        if not self.config.USE_ELF_FDE_INTERIOR_GAPS:
+            return None
+        if self.isInDeclaredPltSection(addr):
+            return None
+        containing = self.declaredFdeRangeContaining(addr)
+        if containing is None or containing[0] not in self.disassembly.functions:
+            return None
+        borders = self.disassembly.function_borders.get(containing[0])
+        if borders is None or not borders[0] <= addr < borders[1]:
+            return None
+        return containing[0]
+
     def opensInsideDeclaredFdeRange(self, addr):
         """Whether `addr` falls inside a declared FDE range without being that range's start."""
         return self.declaredFdeRangeContaining(addr) is not None
