@@ -1,6 +1,95 @@
 # Changelog
 
-Newest first. Entries carry the release date, the version, and what changed.
+All notable changes to this project are documented here, in the format of [keep a
+changelog](https://keepachangelog.com/en/1.1.0/).
+
+**The package version is a release counter, not [semantic versioning](https://semver.org/).** Major has meant a new
+capability, minor a notable feature group, and patch everything else including small features -- `v4.3.4` added a
+new configuration option, `v4.0.0` added an architecture without breaking anything, and `v4.4.3` carried a whole
+audit-hardening pass. Reading a version bump as a compatibility signal will mislead you.
+
+The compatibility promise for report consumers is carried by three constants instead, alongside the `toDict()`
+report shape:
+
+| constant | what it versions |
+|---|---|
+| `SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY` | the escaped-operand form that escaped-block shingles and minhashes are built from |
+| `SmdaFunction.INTEL_PIC_HASH_ESCAPE_VERSION` | the Intel `pic_hash` escaping |
+| `SmdaFunction.CIL_PIC_HASH_ESCAPE_VERSION` | the CIL `pic_hash` escaping |
+
+**If a release moves any of the three, that release's `Compatibility` section names which one and from what to
+what.** A header pointing at constants the entries do not track would be worse than no promise at all, because it
+looks precise.
+
+## How an entry is written
+
+Each PR adds its own bullet under `## [Unreleased]` while the change is fresh, rather than the release being
+reconstructed from merge commits afterwards. At release time a missing entry looks exactly like a change that did
+not need one, and only the author can tell the difference. A PR touching `src/smda/` therefore has to touch this
+file or carry the `no-changelog` label.
+
+Subsections are the keep-a-changelog set -- `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security` --
+plus `Compatibility`, which comes last and holds both "recovery output moves on binaries these paths touch" and
+"this constant moved, from X to Y". Drop the ones a release did not use when it is cut.
+
+A bullet opens with a bold subsystem prefix, then one summary sentence, then the mechanism, the measurement and the
+cost:
+
+```markdown
+### Fixed
+- **(intel)** Keep the switch index tied across a relative dispatch's base add. `_findJumpTableSize` read the
+  base `add` as a redefinition and sized a 27-case table at 2, so 25 unreferenced case bodies reached the gap
+  scan and five were booked as functions inside the function they belong to. *Measured on `<sha>`:* 140 built
+  C/C++ cells (117,654 truth functions) -- 20 false positives removed, no true positive lost, 135/140 cells
+  bit-identical. *Reproduced by reviewer on bundled fixtures.* (#306)
+```
+
+**The prefix is the PR title's own scope token**, from the list `.github/workflows/semantic-pr-title.yml` already
+enforces: `core`, `intel`, `aarch64`, `dalvik`, `cil`, `common`, `utility`, `loaders`, `labels`, `report`, `ida`,
+`cli`, `profiling`, `tests`, `ci`, `build`, `docs`. A PR carrying no scope gets no prefix rather than an invented
+one, and a scope added to that workflow is available here the same day -- one vocabulary, enforced in one place.
+
+Four rules for the content:
+
+1. **Any accuracy or performance claim names the corpus it was measured on.** A bare percentage is not an
+   entry.
+2. **Say whether the figure was reproduced.** A figure resting on a corpus that is not bundled cannot be checked
+   by a reader, and saying which ones those are is what keeps the rest worth something.
+3. **A measured claim states its cost, or says there was none.** "20 false positives removed" reads as free. What
+   makes an entry trustworthy is *no true positive lost*, or *-580 false positives against -53 functions*, or
+   *bit-identical on the corpora it does not reach*. An entry reporting only the gain is the one that gets written
+   when a trade did happen and nobody wanted to lead with it.
+4. **A figure that is marginal against a moving baseline says so** -- in practice "measured on `<tree>`", four more
+   words. An exact split is a property of an instruction encoding and does not decay; an absolute count is a
+   property of every other rule in the engine on the day it was taken, and one published as 2,941 false positives
+   removed measured 745 two releases later against a baseline 6.5 points higher. Neither number was wrong when it
+   was taken, and without the tree a reader cannot tell staleness from disagreement.
+
+On length: the summary line is one sentence, the attached block is the mechanism, the measurement and the cost, and
+past roughly six lines it belongs in the PR the entry links.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## Older releases
+
+Entries below predate this format and are kept verbatim, in the one-line shape they were written in. They are
+ordered by **version**, not by date, so a patch on an older line can sit below a minor released before it --
+`v4.4.0` above `v4.3.11` and `v3.1.0` above `v3.0.2` are both that rather than filing errors. The undated lines at
+the very bottom predate versioned releases entirely.
 
  * 2026-09-10: v4.6.0 - Function-boundary accuracy taken from what the image declares rather than guessed from the
    bytes, plus an analysis hot-path pass that leaves report output unchanged. Each topic below links the PR that
@@ -438,6 +527,11 @@ Newest first. Entries carry the release date, the version, and what changed.
  * 2023-03-14: v1.11.1  - rendering dotGraph can now include API references instead of plain calls.
  * 2023-02-06: v1.11.0  - SmdaReport now has functionality to find a function/block by a given offset contained within in (THX to @cccs-ay!).
  * 2023-02-06: v1.10.0  - Adjusted to LIEF 0.12.3 API for binary parsing (THX to @lainswork!).
+ * 2022-11-18: v1.9.16- Fixed a bug where handling of inrefs in SmdaReport could lead to crashes (THX to @1337-42!).
+ * 2022-09-27: v1.9.15- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).
+ * 2022-09-20: v1.9.13- Fixed a bug for listing unreachable basic block refs pointing outside of function boundaries (exception handling).
+ * 2022-09-19: v1.9.12- Fixed a logic binding bug in IntelInstructionEscaper (THX to @1337-42!).
+ * 2022-09-08: v1.9.11- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.
  * 2022-08-31: v1.9.9 - Better handling of colliding code due to tailjumps.
  * 2022-08-30: v1.9.8 - Improved accuracy for references around tailcalls.
  * 2022-08-25: v1.9.6 - Fixed bug in delphi knowledge base handling and improved performance.
@@ -505,11 +599,6 @@ Newest first. Entries carry the release date, the version, and what changed.
  * 2019-02-14: v1.0.2 - ELF symbols for functions are now resolved, if present in the file. Also "-m" parameter changed to "-p" to imply parsing instead of just mapping (THX: @VPaulV).
  * 2018-07-09: v1.0.1 - Performance improvements.
  * 2018-07-01: v1.0.0   - Initial Release.
- * 2022-11-18: v1.9.16- Fixed a bug where handling of inrefs in SmdaReport could lead to crashes (THX to @1337-42!).
- * 2022-09-27: v1.9.15- Fixed a bug where recognition of code areas would not incorporate virtual addressing (infinite loops while Delphi VMT parsing).
- * 2022-09-20: v1.9.13- Fixed a bug for listing unreachable basic block refs pointing outside of function boundaries (exception handling).
- * 2022-09-19: v1.9.12- Fixed a logic binding bug in IntelInstructionEscaper (THX to @1337-42!).
- * 2022-09-08: v1.9.11- Exposed masking of intraprocedural jmps/calls in SmdaInstruction.
  * 2020-03-10: Various minor fixes and QoL improvements.
  * 2019-08-20: IdaExporter is now handling failed instruction conversion via capstone properly.
  * 2019-08-19: Minor fix for crashes caused by PDB parser.
@@ -518,3 +607,5 @@ Newest first. Entries carry the release date, the version, and what changed.
  * 2018-12-12: all gcc jump table styles are now parsed correctly.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
+
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.6.0...HEAD

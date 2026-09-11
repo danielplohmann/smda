@@ -52,11 +52,39 @@ class TestPackageMetadata(unittest.TestCase):
         # whose escaped output 4.4.5 invalidated.
         self.assertFalse(_version_tuple("4.4.4") < _version_tuple("1.13.16"))
 
-    def test_the_changelog_documents_the_current_version(self):
+    def _documentedVersions(self):
+        """Every release the changelog documents, newest first.
+
+        Releases cut from keep-a-changelog onward head their section `## [vX.Y.Z] - date`;
+        the ones before it keep the one-line ` * date: vX.Y.Z - ` shape under Older releases.
+        Both are read, so this keeps working across the release that introduces the first of
+        the new form rather than failing on it.
+        """
         changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        versions = re.findall(r"^ \* \d{4}-\d{2}-\d{2}: v([\d.]+) ", changelog, re.MULTILINE)
-        self.assertIn(smda.__version__, versions)
-        self.assertEqual(smda.__version__, versions[0])
+        headings = re.findall(r"^## \[v([\d.]+)\] - \d{4}-\d{2}-\d{2}", changelog, re.MULTILINE)
+        legacy = re.findall(r"^ \* \d{4}-\d{2}-\d{2}: v([\d.]+)\s*-", changelog, re.MULTILINE)
+        return headings + legacy
+
+    def test_the_changelog_documents_the_current_version(self):
+        documented = self._documentedVersions()
+        self.assertIn(smda.__version__, documented)
+        self.assertEqual(smda.__version__, documented[0])
+
+    def test_the_changelog_is_ordered_newest_version_first(self):
+        """Entries are ordered by version, which is a rule a reader cannot enforce by eye.
+
+        Date order and version order disagree legitimately -- a patch on an older line can be
+        released after a newer minor -- so an entry filed in the wrong place looks exactly like
+        one of those. The v1.9.16-v1.9.11 block had been appended below v1.0.0 instead of filed
+        above v1.9.9 and went unnoticed across 186 entries.
+        """
+        documented = self._documentedVersions()
+        out_of_order = [
+            (earlier, later)
+            for earlier, later in zip(documented, documented[1:], strict=False)
+            if _version_tuple(earlier) < _version_tuple(later)
+        ]
+        self.assertEqual(out_of_order, [], "a later entry names a higher version than the one above it")
 
     def test_config_instances_do_not_share_mutable_defaults(self):
         first, second = SmdaConfig(), SmdaConfig()
