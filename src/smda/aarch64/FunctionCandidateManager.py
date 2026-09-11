@@ -1062,6 +1062,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if scanned % 4096 == 0 and self._candidateTimeoutTripped():
                 return None
             if base + size < self.gap_pointer:
+                LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)
                 return None
             # align to the instruction stride
             self.gap_pointer = (self.gap_pointer + (INSTRUCTION_SIZE - 1)) & ~(INSTRUCTION_SIZE - 1)
@@ -1069,9 +1070,17 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if offset < 0 or offset + INSTRUCTION_SIZE > size:
                 return None
             if self.gap_pointer in self.disassembly.code_map:
+                LOGGER.debug(
+                    "nextGapCandidate() gap_ptr is already inside code map: 0x%08x",
+                    self.gap_pointer,
+                )
                 self.gap_pointer = self.getNextGap()
                 continue
             if self.gap_pointer in self.disassembly.data_map:
+                LOGGER.debug(
+                    "nextGapCandidate() gap_ptr is already inside data map: 0x%08x",
+                    self.gap_pointer,
+                )
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if exec_ranges and not in_exec(self.gap_pointer):
@@ -1079,6 +1088,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             word = words[offset // INSTRUCTION_SIZE]
             if word in (0, NOP):  # inter-function padding
+                LOGGER.debug(
+                    "nextGapCandidate() found padding word - gap_ptr += %d: 0x%08x",
+                    INSTRUCTION_SIZE,
+                    self.gap_pointer,
+                )
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             # Same three declared-evidence rules as the intel gap scan, in the same order and
@@ -1095,6 +1109,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     # it names has actually been recovered; until then the record says nothing
                     # about what covers this address. Resuming at the extent's end skips the
                     # body rather than the one word, which is what the record describes.
+                    LOGGER.debug(
+                        "nextGapCandidate() gap_ptr is inside a declared .pdata extent: 0x%08x",
+                        self.gap_pointer,
+                    )
                     self.gap_pointer = containing[1]
                     continue
             if self.config.USE_LSDA_LANDING_PADS and self.isDeclaredLandingPad(self.gap_pointer):
@@ -1104,6 +1122,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 # the shape test then reads the bti as evidence of a legitimate indirect-call
                 # target instead of as a pad. It also knows where the pad's function ends,
                 # where the shape test only knows where the run of pads ends.
+                LOGGER.debug(
+                    "nextGapCandidate() gap_ptr is a declared landing pad: 0x%08x",
+                    self.gap_pointer,
+                )
                 skip = self.declaredLandingPadSkipTarget(self.gap_pointer)
                 self.gap_pointer = skip or self.gap_pointer + INSTRUCTION_SIZE
                 continue
@@ -1116,25 +1138,51 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 # range is one function: an FDE can begin in the alignment padding ahead of
                 # its function, and then the real entry a few bytes in is interior to nothing.
                 if containing is not None and containing[0] in self.disassembly.functions:
+                    LOGGER.debug(
+                        "nextGapCandidate() gap_ptr is inside a declared FDE range: 0x%08x",
+                        self.gap_pointer,
+                    )
                     self.gap_pointer = containing[1]
                     continue
             if is_bti_landing_pad(word) and self._isLikelyInteriorBtiCandidate(self.gap_pointer, word):
                 # #310's resume target, not one instruction on: stepping a single word lands
                 # inside the pad the scan just refused and books that instead.
+                LOGGER.debug(
+                    "nextGapCandidate() gap_ptr is an interior indirect-branch landing pad: 0x%08x",
+                    self.gap_pointer,
+                )
                 self.gap_pointer = self._endOfRefusedLandingPadRun(self.gap_pointer)
                 continue
             if is_trap(word):  # udf-space data words / trap filler, never an entry
+                LOGGER.debug(
+                    "nextGapCandidate() found trap word - gap_ptr += %d: 0x%08x",
+                    INSTRUCTION_SIZE,
+                    self.gap_pointer,
+                )
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if self.previously_analyzed_gap == self.gap_pointer:
+                LOGGER.debug(
+                    "--- HRM, nextGapCandidate() gap_ptr at: 0x%08x was previously analyzed",
+                    self.gap_pointer,
+                )
                 self.gap_pointer = self.getNextGap(dont_skip=True)
                 continue
             if not self._passesCodeFilter(self.gap_pointer):
+                LOGGER.debug(
+                    "nextGapCandidate() gap_ptr did not pass the code filter: 0x%08x",
+                    self.gap_pointer,
+                )
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if self._gapRunFlowsIntoInterior(self.gap_pointer):
+                LOGGER.debug(
+                    "nextGapCandidate() gap run flows into the interior of a mapped function: 0x%08x",
+                    self.gap_pointer,
+                )
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
+            LOGGER.debug("nextGapCandidate() using 0x%08x as candidate", self.gap_pointer)
             self.previously_analyzed_gap = self.gap_pointer
             self.addGapCandidate(self.gap_pointer)
             return self.gap_pointer
