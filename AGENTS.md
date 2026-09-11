@@ -78,7 +78,8 @@ All commands assume the venv is activated. Prefer the `Makefile` targets:
 | Lint (ruff check) | `make lint`  (or `ruff check .`) |
 | Format (ruff format) | `make format`  (or `ruff format .`) |
 | Auto-fix lint | `make ruff-fix` |
-| Run tests | `make test`  (or `pytest tests/test*`) |
+| Run tests (fast tier) | `make test`  (or `pytest -m "not slow" tests/test*`) |
+| Run tests (everything) | `make test-all`  (or `pytest tests/test*`) |
 | Tests + coverage | `make test-coverage` |
 | Build package | `make package` |
 | Publish to PyPI | `make publish` |
@@ -133,7 +134,8 @@ Every other PR writes its own bullet under `## [Unreleased]` as it merges, rathe
 ## Testing
 
 - Add or update tests under `tests/` for behavioral changes; match the existing `test*.py` naming and pytest style.
-- Run `make test` and `make lint` before considering work complete.
+- Run `make test` and `make lint` while you work; run **`make test-all` before you push**. `make test` deselects the `slow` marker, which is 124 of the 2110 tests but about three quarters of the wall time (roughly 40s against 150s), so the fast tier is the edit-run loop and `test-all` is the pre-push gate. CI always runs the whole suite, so a slow-tier failure surfaces on the PR rather than silently — but it surfaces later than it needs to.
+- Mark a test `slow` (`pytestmark = pytest.mark.slow`, or per-test) when it disassembles a real fixture corpus. Marking one keeps the default loop fast; forgetting to mark one is what makes it slow again.
 - Architecture-specific behavior (intel / aarch64 / cil / dalvik) should be covered with representative fixtures where feasible.
 - The xored `tests/*_xored` corpora and the malpedia **benchmark matrix (`.github/workflows/perf_benchmark.yml`) are PR/CI-only** — they require a password-gated malpedia corpus and are not expected to run locally. For local recovery-quality validation, the maintainer works against separate groundtruth datasets rather than the full public matrix. Do not assume you can reproduce the benchmark suite locally.
 - Run tests with `python -m pytest tests/test*` (or `make test`) against a Python 3.11+ environment with the `dev` extra installed.
