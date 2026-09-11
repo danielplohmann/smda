@@ -152,14 +152,19 @@ class FdeInteriorGapRuleAArch64Test(unittest.TestCase):
                 return original(manager, candidate_address)
 
             FunctionCandidateManager.declaredInteriorOwner = claiming
-        with tempfile.NamedTemporaryFile(suffix=".elf", delete=False) as handle:
-            handle.write(self.data)
-            temp_path = handle.name
-        disassembler = Disassembler(config)
+        temp_path = None
         try:
+            with tempfile.NamedTemporaryFile(suffix=".elf", delete=False) as handle:
+                handle.write(self.data)
+                temp_path = handle.name
+            disassembler = Disassembler(config)
             report = disassembler.disassembleFile(temp_path)
         finally:
-            os.unlink(temp_path)
+            if temp_path is not None:
+                os.unlink(temp_path)
+            # restore inside the finally, and with everything after the patch inside the try:
+            # a failure while writing the sample or building the disassembler would otherwise
+            # leave the claim installed on the class for every later test in the process
             FunctionCandidateManager.declaredInteriorOwner = original
         return disassembler.disassembler, {function.offset for function in report.getFunctions()}
 
