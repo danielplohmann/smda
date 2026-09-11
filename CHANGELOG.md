@@ -119,6 +119,13 @@ past roughly six lines it belongs in the PR the entry links.
   before the memo was written, so a section naming one dead pointer from every record read it once per record;
   remembered by address, that is now one read. *All 447 cells across the six corpora are bit-identical.* (#335)
 
+- **(common)** Let each backend decide whether its own exception-directory interior rule is enabled. Both native
+  backends fill the same `_pdata_ranges` list, but the shared rule named `USE_PE_X64_PDATA_INTERIOR_GAPS` alone,
+  so on an ARM64 PE the refusal answered to a switch for a format it never sees: the ARM64 flag no longer turned
+  it off, and the x64 flag would have. Default output does not move -- with both flags on the gap scan reaches
+  those addresses first -- so this is flag semantics rather than a recovery change, and the bundled ARM64 PE
+  fixture is what makes it visible. (#329)
+
 ### Security
 
 ### Compatibility
