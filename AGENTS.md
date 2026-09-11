@@ -114,9 +114,13 @@ When a change warrants a version bump, update **all three** in one commit:
 
 1. `src/smda/__init__.py` → `__version__`
 2. `src/smda/SmdaConfig.py` → `SmdaConfig.VERSION`
-3. Add a dated entry at the top of `CHANGELOG.md`. The header line is ` * YYYY-MM-DD: vX.Y.Z - <summary>`, and what changed goes under it as a nested list of `**Topic:**` bullets — see v4.5.1 and later. Entries before that are one long paragraph; do not take them as the model.
+3. `CHANGELOG.md` → rename `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD`, drop the subsections the release did not use, open a fresh empty `## [Unreleased]` above it, and update the compare links at the foot of the file.
 
 Keep the two version strings in sync. Do not bump versions unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
+
+**Tag after `master` is green, not at merge.** A tag created on the merge commit before CI has confirmed the merged tree can need moving, and moving one a PyPI publish has already consumed is a different problem from moving one nobody has fetched.
+
+Every other PR writes its own bullet under `## [Unreleased]` as it merges, rather than the release being reconstructed from merge commits afterwards — see *How an entry is written* in `CHANGELOG.md` for the subsections, the scope prefix and the four content rules. `.github/workflows/changelog.yml` requires a PR touching `src/smda/` to touch `CHANGELOG.md` or carry the `no-changelog` label.
 
 ## Git Workflow
 
