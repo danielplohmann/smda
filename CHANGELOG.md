@@ -100,6 +100,14 @@ past roughly six lines it belongs in the PR the entry links.
   against +12, and **no true positive lost on any corpus**. The 140 C/C++ ELF cells, 72 AArch64
   ELF cells and 11 ARM64 Mach-O cells are bit-identical. *Not reproducible from the bundled
   fixtures, which do not move.* (#338)
+- **(common)** Bound the LSDA reads that lead nowhere, and remember a pointer that reads back empty. The
+  call-site table budget is charged only once a table's length field is parsed, so an LSDA failing before that
+  point -- an unsupported LPStart mode, a short buffer, a TType offset that will not read -- cost a read of up to
+  `MAX_LSDA_BYTES` and charged nothing: a section naming `MAX_RECORDS` such pointers read 12.2 GB over 199,999
+  reads. `MAX_LSDA_FAILED_READ_BYTES` holds that to 256 MB over 4,096, leaving 8.6x headroom over the heaviest
+  real image measured, which spends 29.75 MB. Separately, an address the reader hands nothing back for returned
+  before the memo was written, so a section naming one dead pointer from every record read it once per record;
+  remembered by address, that is now one read. *All 447 cells across the six corpora are bit-identical.* (#335)
 
 ### Security
 
