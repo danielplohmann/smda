@@ -104,6 +104,14 @@ _PDATA_MAX_FUNCTION_SIZE = 0x100000
 # EHANDLER/UHANDLER/CHAININFO are defined -- so just these eight byte values are legal.
 _UNWIND_INFO_FIRST_BYTES = frozenset(0x01 | (flags << 3) for flags in range(8))
 
+_INT3 = b"\xcc"
+#: How far past a failed gap candidate to look for the padding run that ends it. A failed
+#: candidate whose gap holds no padding within this costs nothing and keeps the old behaviour.
+_FAILED_GAP_RESUME_WINDOW = 4096
+#: Alignment a resumed entry has to already sit on. Compilers align function entries; a byte
+#: that follows padding without being aligned is padding inside something else.
+_ENTRY_ALIGNMENT = 16
+
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
     CANDIDATE_CLASS = FunctionCandidate
@@ -192,6 +200,44 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         ]:
             is_alignment_sequence = False
         return is_alignment_sequence
+
+    def _failedGapResumeTarget(self):
+        """The first address past the next int3 run after the failed candidate, when aligned.
+
+        A candidate that failed leaves the rest of its gap unscanned. Resuming one byte along
+        instead walks the interior of whatever the failed candidate was, byte by byte, which
+        costs an order of magnitude in runtime; the padding run a compiler leaves between two
+        adjacent functions steps over it in one move. The answer can fall past the end of the
+        gap, which is why the caller takes the nearer of it and the next gap.
+        """
+        if self.gap_pointer is None or self.disassembly is None:
+            return None
+        binary_info = self.disassembly.binary_info
+        if binary_info is None:
+            return None
+        start = self.gap_pointer + 1 - binary_info.base_addr
+        if start < 0:
+            # a slice from a negative offset reads the tail of the image instead of failing
+            return None
+        window = self.disassembly.getRawBytes(start, _FAILED_GAP_RESUME_WINDOW) or b""
+        run_start = window.find(_INT3)
+        if run_start < 0:
+            return None
+        cursor = run_start
+        while cursor < len(window) and window[cursor] == _INT3[0]:
+            cursor += 1
+        if cursor >= len(window):
+            return None
+        target = self.gap_pointer + 1 + cursor
+        # Decline rather than round up. Rounding moves the resume point to the next aligned
+        # address, which resumes somewhere else instead of not resuming -- measured, that keeps
+        # every unaligned candidate and finds more of them. Requiring the byte after the padding
+        # to be aligned already is what separates the two populations: a lone 0xCC inside a data
+        # structure leaves the remainder of that structure unaligned, while a compiler-emitted
+        # entry after real padding is aligned by construction.
+        if target % _ENTRY_ALIGNMENT:
+            return None
+        return target
 
     def nextGapCandidate(self, start_gap_pointer=None):
         if self.language_candidates_only:

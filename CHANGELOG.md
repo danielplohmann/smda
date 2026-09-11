@@ -80,9 +80,26 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(intel)** Resume the gap scan inside the gap a failed candidate was found in, rather than
+  abandoning the rest of it. `getNextGap`'s resume refinement is gated on the candidate being in
+  `code_map`, so one that failed to become a function fell through to the next entry of a gap map
+  that is snapshotted once when the gap phase opens and never refreshed -- everything between the
+  failed candidate and the end of its gap was never offered as a candidate at all. The Intel
+  backend now names the first entry past the padding run that ends the failed candidate, and only
+  when that entry is already 16-byte aligned; a backend with no reading of its own padding keeps
+  the previous behaviour. *Measured on `857081f` against compiler symbol tables:* 120 MinGW PE
+  cells +47 true positives against +18 false, 24 Rust cells +0 against +6, 57 malpedia dumps +7
+  against +12, and **no true positive lost on any corpus**. The 140 C/C++ ELF cells, 72 AArch64
+  ELF cells and 11 ARM64 Mach-O cells are bit-identical. *Not reproducible from the bundled
+  fixtures, which do not move.* (#338)
+
 ### Security
 
 ### Compatibility
+
+- Recovery output moves on Intel PE and ELF images whose gap scan meets a failed candidate: the
+  bytes after it are now scanned instead of skipped. No true positive was lost on the corpora
+  this was measured over. (#338)
 
 ## Older releases
 
