@@ -288,8 +288,31 @@ class FunctionCandidateManager:
                 dont_skip,
                 next_gap,
             )
+        elif dont_skip and self.gap_pointer is not None and self.disassembly is not None:
+            # The branch above only fires for a candidate that became a function. One that did
+            # not leaves gap_pointer outside code_map, so the scan resumes at the next entry of
+            # the gap map -- snapshotted once in initGapSearch() and never refreshed -- which
+            # abandons whatever is left of the gap this candidate was found in.
+            resume = self._failedGapResumeTarget()
+            if resume is not None:
+                next_gap = min(next_gap, resume)
+                LOGGER.debug(
+                    "getNextGap(%s) => resuming inside the gap a failed candidate was in: 0x%08x",
+                    dont_skip,
+                    next_gap,
+                )
         LOGGER.debug("getNextGap(%s) final gap_ptr: 0x%08x", dont_skip, next_gap)
         return next_gap
+
+    def _failedGapResumeTarget(self):
+        """Where to resume after a gap candidate failed to become a function, or None.
+
+        None keeps the historical behaviour of abandoning the rest of the gap. A backend
+        overrides this when it can name the next plausible entry cheaply; scanning byte by byte
+        from the failed address instead costs an order of magnitude in runtime, because the
+        candidates it then walks are mostly the interior of whatever the failed one was.
+        """
+        return None
 
     def nextGapCandidate(self, start_gap_pointer=None):
         """Architecture-specific gap scan; implemented per backend."""
