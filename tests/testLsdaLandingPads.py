@@ -480,6 +480,54 @@ class EhFrameLandingPadWalkTest(unittest.TestCase):
         )
         self.assertEqual(len(reads), 1)
 
+    def testAnUnreadableLsdaPointerIsReadOnceHoweverManyRecordsNameIt(self):
+        # an address that reads back empty never reaches the per-(table, function) memo, so
+        # without one by address a section naming the same dead pointer from every record
+        # calls the reader once per record -- 199,999 times at max_records
+        reads = []
+
+        def counting_read(addr, length):
+            reads.append(addr)
+            return b""
+
+        section = self.sectionWith(*[self.fdeBody(self.LSDA_VA, 0x2000 + 0x40 * step) for step in range(16)])
+        self.assertEqual(decodeEhFrameLandingPads(section, 0x1000, counting_read), set())
+        self.assertEqual(reads, [self.LSDA_VA])
+
+    def testEachDistinctUnreadablePointerIsStillRead(self):
+        # the memo is by address rather than a latch: one dead pointer does not stop the next
+        # address being tried
+        reads = []
+
+        def counting_read(addr, length):
+            reads.append(addr)
+            return b""
+
+        section = self.sectionWith(
+            *[self.fdeBody(self.LSDA_VA + 0x100 * step, 0x2000 + 0x40 * step) for step in range(4)]
+        )
+        self.assertEqual(decodeEhFrameLandingPads(section, 0x1000, counting_read), set())
+        self.assertEqual(reads, [self.LSDA_VA + 0x100 * step for step in range(4)])
+
+    def testATableThatDecodesAndDeclaresNoPadIsChargedToo(self):
+        # the charge condition is that the read yielded no pads, which is broader than failing
+        # before the table length: this table parses cleanly, charges the table budget and
+        # still declares nothing. Documented rather than separated because it is negligible --
+        # one LSDA of 11,656 bytes across the bundled fixtures and none on four of the five
+        declares_no_pad = bytes([0xFF, 0xFF, 0x01, 0x04, 0x00, 0x10, 0x00, 0x00])
+        reads = []
+
+        def counting_read(addr, length):
+            reads.append(addr)
+            return declares_no_pad
+
+        section = self.sectionWith(*[self.fdeBody(self.LSDA_VA + step, 0x2000 + step) for step in (0, 0x40)])
+        self.assertEqual(
+            decodeEhFrameLandingPads(section, 0x1000, counting_read, max_failed_read_bytes=len(declares_no_pad)),
+            set(),
+        )
+        self.assertEqual(len(reads), 1, "a clean decode that declares no pad was not charged")
+
     def testTheFailedReadBudgetClearsTheHeaviestRealImageMeasured(self):
         # a bound sized below real input would drop pads on the images this rule is for; the
         # worst measured across the built ELF corpora spends 29.75 MB on reads that decode to
