@@ -147,8 +147,11 @@ class SmdaConfig:
     #   2 Rust windows-gnu-x64    -2 FP at identical TP and FN
     # Nothing else moves at all. The 140 x86-64 ELF cells, 72 AArch64 ELF cells, 23 Go cells,
     # 11 ARM64 Mach-O cells, the 32-bit and ELF Rust cells and all 57 malpedia dumps are
-    # bit-identical. The dumps are the reading worth keeping: none of the 57 declares an
-    # exception directory at all, so this evidence does not reach a mapped image.
+    # bit-identical. The dumps are the reading worth keeping, and not because the evidence is
+    # absent: three of the 57 do declare an exception directory, 282 to 430 records each, and on
+    # all three the rule is consulted and refuses nothing - every address its guards see is
+    # declined. Reachable and declining is the stronger control; an earlier note here claimed
+    # none of the dumps carried a directory, which is not so.
     USE_PE_X64_PDATA_INTERIOR_GAPS = True
     # Refuse a gap candidate that an ARM64 PE image's own exception directory places inside a
     # routine. The same evidence and the same rule as the x64 flag above, reached differently:

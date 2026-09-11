@@ -74,6 +74,18 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+- **(common)** Let a PE exception directory refuse an interior candidate too, not only an ELF's
+  `.eh_frame`. A `RUNTIME_FUNCTION` extent names the addresses inside a routine the way an FDE range
+  does, and it now answers where analysis would begin on a candidate from any source, under the same
+  guards: the record's own function has to be recovered, and its recovered extent has to surround the
+  address. A fragment record is not the shortcut it is in the gap scan -- its own start is not the
+  function covering the address, so it declines rather than refusing. *Measured on `fb510c4` against
+  compiler symbol tables:* 120 MinGW PE x64 cells 93.191 -> 93.235 PPV (-47 false positives, 109/120
+  bit-identical) and 2 Rust windows-gnu-x64 cells (-2), both at identical true positives and false
+  negatives; the 140 C/C++ ELF cells and all 57 malpedia dumps are bit-identical. Three of the dumps
+  do declare an exception directory, and the rule is consulted on all three and refuses nothing, which
+  is what makes that a control rather than an absence. (#329)
+
 - **(tests)** `make test` now runs the fast tier and `make test-all` runs the whole suite. The `slow`
   marker already existed, was already applied to the eleven fixture-corpus files, and was documented in
   `pyproject.toml` with its own deselect recipe — but no entry point used it, so every local run paid for
@@ -129,6 +141,10 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
+
+- Recovery output moves on PE images that declare an exception directory: an address a
+  `RUNTIME_FUNCTION` extent covers is no longer reported as a function start unless it is that
+  record's own start. No true positive was lost on the corpora this was measured over. (#329)
 
 - Recovery output moves on Intel PE and ELF images whose gap scan meets a failed candidate: the
   bytes after it are now scanned instead of skipped. No true positive was lost on the corpora
