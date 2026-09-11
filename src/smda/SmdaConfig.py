@@ -59,6 +59,23 @@ class SmdaConfig:
     # record with the X bit clear or no .xdata at all, so they are not exception funclets and
     # nothing in the unwind data distinguishes them. clang/llvm-mingw emits one record per function
     # symbol and does not split them, so a from-source ARM64 PE is unaffected either way.
+    #
+    # That over-reporting is a trade taken deliberately, not a gap waiting on a better test.
+    # Chunks are ordinary MSVC output rather than a peculiarity of the three system binaries:
+    # across thirteen MSVC ARM64 images with private-PDB extents, 3,473 classified chunks. The
+    # entry-shape filter already refuses 2,829 of them (81.5%), and 643 of the 644 that survive
+    # into seeding open with a genuine routine shape - a recognised prologue, a BTI pad, a
+    # single-register `str Xt, [sp, #-imm]!`, or a bare `sub sp, sp, #imm`. Shape is applied and
+    # the remainder is 643-to-1 against it. A packed record is never a chunk at all: 6,763 of
+    # them, none, so seeding those is right.
+    # What is left to read is the space between adjacent functions, and that cannot be read
+    # portably. The three system binaries pad between functions and these images pack them back
+    # to back, so a rule testing whether a record begins where another's extent ends inverts
+    # between them: refusing an unreferenced, unaligned record that abuts an extent end removes
+    # 51 of the 78 for 2 real functions on ping/robocopy/bcrypt, and over the six packed images
+    # carrying PDB extents removes nothing at all while losing 712 of 3,026. Every removal in
+    # the first figure comes from one of the three binaries, which is the tell before the second
+    # is measured at all.
     USE_PE_ARM64_PDATA_CANDIDATES = True
     # do not read `bti j` as a function entry on AArch64. The four BTI forms are not
     # interchangeable: J permits a target reached by `br` - an indirect jump, which is what a
