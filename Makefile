@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: init package publish ruff-check ruff-format ruff-fix lint format typecheck test test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
+.PHONY: init package publish ruff-check ruff-format ruff-fix lint format typecheck test test-all test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
 
 # Default profiling target fixture; override e.g. `make profile-cpu TARGET=komplex`
 TARGET ?= asprox
@@ -25,7 +25,12 @@ format: ruff-format
 # Paths must match the Code Quality job in .github/workflows/ci.yml
 typecheck:
 	$(PYTHON) -m ty check src/smda/ fuzzing/ profiling/ .github/workflows/scripts/
+# The `slow` tier is 124 of 2110 tests and roughly three quarters of the wall time, so the
+# default target leaves it out to keep the edit-run loop short. CI always runs everything,
+# and `make test-all` is the same thing locally -- run it before you push.
 test:
+	$(PYTHON) -m pytest -m "not slow" tests/test*
+test-all:
 	$(PYTHON) -m pytest tests/test*
 test-coverage:
 	$(PYTHON) -m pytest --cov=smda --cov-report=html:coverage-html tests/

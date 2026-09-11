@@ -74,6 +74,14 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+- **(tests)** `make test` now runs the fast tier and `make test-all` runs the whole suite. The `slow`
+  marker already existed, was already applied to the eleven fixture-corpus files, and was documented in
+  `pyproject.toml` with its own deselect recipe — but no entry point used it, so every local run paid for
+  it. *Measured on `857081f`:* the marked tier is 124 of 2110 tests and 116s of the 151s total, so the
+  default target drops from about 150s to about 40s. *Not reproduced on other hardware;* the ratio is what
+  travels, not the seconds. CI is unchanged and still runs the whole suite on every leg, so the gate does
+  not move — `make test-all` before pushing is what keeps a slow-tier failure from reaching the PR. (#340)
+
 - **(common)** Refuse a candidate from any source that the image's `.eh_frame` declares interior to a function,
   not only a gap-scan candidate -- the gap pointer reaches only what the gap scan walks to, so the prologue,
   reference and symbol scans seeded the rest unchecked. A procedure linkage table is exempt, the declared
@@ -102,6 +110,14 @@ past roughly six lines it belongs in the PR the entry links.
   against +12, and **no true positive lost on any corpus**. The 140 C/C++ ELF cells, 72 AArch64
   ELF cells and 11 ARM64 Mach-O cells are bit-identical. *Not reproducible from the bundled
   fixtures, which do not move.* (#338)
+- **(common)** Bound the LSDA reads that lead nowhere, and remember a pointer that reads back empty. The
+  call-site table budget is charged only once a table's length field is parsed, so an LSDA failing before that
+  point -- an unsupported LPStart mode, a short buffer, a TType offset that will not read -- cost a read of up to
+  `MAX_LSDA_BYTES` and charged nothing: a section naming `MAX_RECORDS` such pointers read 12.2 GB over 199,999
+  reads. `MAX_LSDA_FAILED_READ_BYTES` holds that to 256 MB over 4,096, leaving 8.6x headroom over the heaviest
+  real image measured, which spends 29.75 MB. Separately, an address the reader hands nothing back for returned
+  before the memo was written, so a section naming one dead pointer from every record read it once per record;
+  remembered by address, that is now one read. *All 447 cells across the six corpora are bit-identical.* (#335)
 
 ### Security
 
