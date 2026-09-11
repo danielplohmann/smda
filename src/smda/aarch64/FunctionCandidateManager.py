@@ -1032,6 +1032,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             or auth_or_exception_return
         )
 
+    def _pdataInteriorRefusalEnabled(self):
+        """The flag this backend's gap scan already answers to, for the analysis-time rule."""
+        return self.config.USE_PE_ARM64_PDATA_INTERIOR_GAPS
+
     def nextGapCandidate(self, start_gap_pointer=None):
         # AArch64 gap scan: a fixed-stride linear sweep of unanalyzed executable bytes
         # for functions that no prologue, call reference or stored pointer reached

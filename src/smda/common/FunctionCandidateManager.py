@@ -733,8 +733,23 @@ class FunctionCandidateManager:
             index -= 1
         return None
 
+    def _pdataInteriorRefusalEnabled(self):
+        """Whether this backend's exception-directory interior rule is enabled.
+
+        `_pdata_ranges` is filled by whichever backend read the directory, and the two that do
+        answer to separate flags: the x64 and ARM64 PE rules are separate features with separate
+        defaults. Naming either flag here would leave one architecture's rule answering to the
+        other architecture's switch, so each backend says instead. Those two are also the only
+        managers this engine builds today, so what is inherited here is the answer for one that
+        carves no directory at all: off, there being no extents for the rule to read.
+        """
+        return False
+
     def declaredInteriorOwner(self, addr):
-        """The recovered function whose declared `.eh_frame` range contains `addr`, or None.
+        """The recovered function whose declared range contains `addr`, or None.
+
+        Either structure that declares one answers: an ELF's `.eh_frame` FDE ranges, or a PE
+        exception directory's `RUNTIME_FUNCTION` extents.
 
         The same evidence the gap scan already refuses on, asked at the point a candidate from
         any source is about to be analysed rather than only where the gap pointer reaches. Both
@@ -747,9 +762,13 @@ class FunctionCandidateManager:
         Both structures answer here, as they do in the gap scan, and they are format-disjoint:
         `_pdata_ranges` is only ever filled from a PE exception directory and the `.eh_frame`
         ranges decode nothing unless lief reports an ELF, so no address is arbitrated between
-        them. A fragment record is not the shortcut it is in the gap scan: its own start is not
-        the function that covers the address, so it fails the recovered-owner test below and
-        declines, which is the conservative reading at a point where a better one is available.
+        them. Disjointness is load-bearing rather than merely tidy, unlike in the gap scan: a
+        declared FDE range whose start was never recovered sets `owner` and then fails the
+        recovered-owner test, so on an image carrying both structures the exception directory
+        would never be asked about that address. A fragment record is not the shortcut it is in
+        the gap scan: its own start is not the function that covers the address, so it fails the
+        recovered-owner test below and declines, which is the conservative reading at a point
+        where a better one is available.
 
         A third guard the gap scan does not need: the owner's own recovered extent has to
         surround the address. An FDE can reach past everything its function's control flow
@@ -770,7 +789,7 @@ class FunctionCandidateManager:
             declared = self.declaredFdeRangeContaining(addr)
             if declared is not None:
                 owner = declared[0]
-        if owner is None and self._pdata_ranges and self.config.USE_PE_X64_PDATA_INTERIOR_GAPS:
+        if owner is None and self._pdata_ranges and self._pdataInteriorRefusalEnabled():
             declared = self.declaredExceptionRangeContaining(addr)
             if declared is not None:
                 owner = declared[0]
