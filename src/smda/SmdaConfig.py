@@ -1,10 +1,11 @@
 import logging
 import os
 
+from smda import __version__
+
 
 class SmdaConfig:
-    # keep this in sync with smda.__version__
-    VERSION = "4.6.0"
+    VERSION = __version__
     # Bump this whenever any architecture's InstructionEscaper changes its
     # output (mnemonic groups or escaped operands). Downstream indexes such as
     # MCRIT treat reports whose smda_version is below this value as stale.

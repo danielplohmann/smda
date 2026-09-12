@@ -72,7 +72,25 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+- **(ci)** Pushing a `vX.Y.Z` tag now releases: the workflow builds, publishes to PyPI through
+  trusted publishing, creates the GitHub release from that version's changelog section, and closes
+  the milestone named for the tag. It refuses to publish unless the tag matches the packaged
+  version, the version has a changelog section, the commit is on `master`, CI passed on that
+  commit, and the milestone has no open items — the checks that previously lived in a person's
+  memory between `make package` and `make publish`. No API token is stored anywhere, and each file
+  carries signed provenance. Pre-release tags (`v4.7.0rc1`) are marked as such. A manual run
+  rehearses the whole path against TestPyPI. The process is documented in `RELEASING.md` and is
+  the one every MCRIT ecosystem repository follows. (#343)
+
 ### Changed
+
+- **(core)** `SmdaConfig.VERSION` is read from `smda.__version__` instead of being a second literal
+  kept in sync by hand, so a release bumps one line. `report.smda_version` is unchanged. (#343)
+
+- **(build)** `pyproject.toml` declares the license as the SPDX expression `BSD-2-Clause` with
+  `license-files` (PEP 639) instead of the free-text form and the deprecated license classifier,
+  and gains `Repository`, `Issues` and `Changelog` URLs. Building now needs `setuptools>=77`; the
+  wheel's metadata is otherwise unchanged. (#343)
 
 - **(tests)** `make test` now runs the fast tier and `make test-all` runs the whole suite. The `slow`
   marker already existed, was already applied to the eleven fixture-corpus files, and was documented in
@@ -95,6 +113,10 @@ past roughly six lines it belongs in the PR the entry links.
 ### Deprecated
 
 ### Removed
+
+- **(build)** Python 3.11 is no longer supported; `requires-python` is `>=3.12`, and CI runs 3.12
+  through 3.14. Nothing in the engine needed 3.12 — the MCRIT ecosystem now shares a 3.12 floor so
+  one interpreter serves every component. (#343)
 
 ### Fixed
 

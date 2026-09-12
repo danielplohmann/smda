@@ -191,7 +191,7 @@ Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependenc
 
 For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-dex containers are not first-class workflows. ODEX (`dey\n`) and CDEX (`cdex`) are not analysis-compatible (quickened ops / compact `code_item`): with `backend="dalvik"` they raise an explicit error; auto-detect will not select the Dalvik backend for those magics.
 
-The code requires Python 3.11+.
+The code requires Python 3.12+.
 `SmdaReport.metadata.language` is always a score map (`language name -> float`). Internal guesses and evidence
 counters are not serialized; loading an older report normalizes its legacy string/private-key form to this contract.
 To pick a single language from the map, take the highest score, except that `go` and `rust` win outright when their

@@ -1,22 +1,21 @@
 [build-system]
-requires = ["setuptools>=64.0.0,<84.1.0", "wheel>=0.47.0"]
+requires = ["setuptools>=77,<84.1.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "smda"
 description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
 readme = "README.md"
-requires-python = ">=3.11"
-license = {text = "BSD 2-Clause"}
+requires-python = ">=3.12"
+license = "BSD-2-Clause"
+license-files = ["LICENSE"]
 authors = [
     {name = "Daniel Plohmann", email = "daniel.plohmann@mailbox.org"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -39,6 +38,9 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/danielplohmann/smda"
+Repository = "https://github.com/danielplohmann/smda"
+Issues = "https://github.com/danielplohmann/smda/issues"
+Changelog = "https://github.com/danielplohmann/smda/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
@@ -148,8 +150,8 @@ directory = "coverage-html"
 # Same as Black.
 line-length = 120
 
-# Assume Python 3.11+
-target-version = "py311"
+# Assume Python 3.12+
+target-version = "py312"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
