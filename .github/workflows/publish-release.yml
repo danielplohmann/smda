@@ -20,6 +20,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
   verify:
     name: Verify the tag
@@ -31,6 +34,7 @@ jobs:
       issues: read
     outputs:
       version: ${{ steps.guard.outputs.version }}
+      prerelease: ${{ steps.guard.outputs.prerelease }}
     steps:
       - name: Refuse anything that is not a tag
         env:
@@ -51,15 +55,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Check the tag against the packaged version and the changelog
         id: guard
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          python .github/workflows/scripts/release_guard.py --tag "${TAG}" --notes release-notes.md
-          echo "version=${TAG#v}" >> "${GITHUB_OUTPUT}"
+          python .github/workflows/scripts/release_guard.py \
+            --tag "${TAG}" --notes release-notes.md --github-output "${GITHUB_OUTPUT}"
 
       - name: Check the tag is on master
         env:
@@ -128,7 +132,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Build the sdist and the wheel
         run: |
@@ -136,14 +140,15 @@ jobs:
           python -m build
           python -m twine check --strict dist/*
 
-      - name: Disassemble with the built wheel, runtime dependencies only
+      # -P keeps the checkout off sys.path, so the import cannot fall back to the source tree
+      - name: Smoke-test the built wheel
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           python -m venv /tmp/smoke
           /tmp/smoke/bin/python -m pip install --upgrade pip
-          /tmp/smoke/bin/python -m pip install "dist/smda-${VERSION}-py3-none-any.whl"
-          /tmp/smoke/bin/python - <<'PY'
+          /tmp/smoke/bin/python -m pip install dist/smda-"${VERSION}"-py3-none-any.whl
+          /tmp/smoke/bin/python -P - <<'PY'
           import os
           import pathlib
 
@@ -223,21 +228,27 @@ jobs:
           name: release-notes
 
       # --generate-notes appends its list under --notes-file rather than replacing it, so the
-      # changelog section leads and `.github/release.yml` groups what follows
+      # changelog section leads and `.github/release.yml` groups what follows. A pre-release
+      # is marked as such and never becomes "latest".
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           shopt -s failglob
+          flags=(--latest)
+          if [ "${PRERELEASE}" = "true" ]; then
+            flags=(--prerelease --latest=false)
+          fi
           gh release create "${TAG}" dist/* \
             --repo "${REPO}" \
             --title "${TAG}" \
             --notes-file release-notes.md \
             --generate-notes \
             --verify-tag \
-            --latest
+            "${flags[@]}"
 
       - name: Close the milestone for this tag
         env:

@@ -42,6 +42,12 @@ CHANGELOG = """# Changelog
 
 - recovery output moves. (#2)
 
+## [4.7.0rc1] - 2026-09-15
+
+### Added
+
+- the candidate. (#2)
+
 ## [v4.6.0] - 2026-09-10
 
 ### Fixed
@@ -63,8 +69,13 @@ class ChangelogSectionTest(unittest.TestCase):
     def testTheSectionStopsAtTheNextRelease(self):
         # without the stop it would swallow every older entry and the whole Older releases block
         notes = guard.changelogSection(CHANGELOG, "4.7.0")
+        self.assertNotIn("the candidate", notes)
         self.assertNotIn("an older release", notes)
         self.assertNotIn("Older releases", notes)
+
+    def testAHeadingWithOrWithoutTheVPrefixIsASection(self):
+        self.assertIn("the candidate", guard.changelogSection(CHANGELOG, "4.7.0rc1"))
+        self.assertIn("an older release", guard.changelogSection(CHANGELOG, "4.6.0"))
 
     def testAnUnreleasedSectionIsNotAVersion(self):
         # `## [Unreleased]` carries no date, so it cannot be mistaken for the release being cut
@@ -90,14 +101,10 @@ class ChangelogSectionTest(unittest.TestCase):
 
 
 class DeclaredVersionTest(unittest.TestCase):
-    def testBothVersionsAreReadFromTheRealTree(self):
+    def testTheVersionIsReadFromTheRealTree(self):
         versions = guard.declaredVersions(_ROOT)
-        self.assertEqual(set(versions), {"smda.__version__", "SmdaConfig.VERSION"})
-        self.assertTrue(all(value for value in versions.values()))
-
-    def testTheTwoAgreeInThisTree(self):
-        versions = guard.declaredVersions(_ROOT)
-        self.assertEqual(versions["smda.__version__"], versions["SmdaConfig.VERSION"])
+        self.assertEqual(set(versions), {"smda.__version__"})
+        self.assertRegex(versions["smda.__version__"], r"^\d+\.\d+\.\d+")
 
 
 class MainTest(unittest.TestCase):
@@ -108,15 +115,23 @@ class MainTest(unittest.TestCase):
         package = root / "src" / "smda"
         package.mkdir(parents=True)
         (package / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
-        (package / "SmdaConfig.py").write_text(f'class SmdaConfig:\n    VERSION = "{version}"\n', encoding="utf-8")
         (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
         return root
 
-    def testAMatchingTagPassesAndWritesTheNotes(self):
+    def testAMatchingTagPassesAndWritesTheNotesAndOutputs(self):
         root = self._tree("4.7.0", CHANGELOG)
         notes = root / "notes.md"
-        self.assertEqual(guard.main(["--tag", "v4.7.0", "--root", str(root), "--notes", str(notes)]), 0)
+        output = root / "output.txt"
+        argv = ["--tag", "v4.7.0", "--root", str(root), "--notes", str(notes), "--github-output", str(output)]
+        self.assertEqual(guard.main(argv), 0)
         self.assertIn("the thing this release did", notes.read_text(encoding="utf-8"))
+        self.assertEqual(output.read_text(encoding="utf-8"), "version=4.7.0\nprerelease=false\n")
+
+    def testAPreReleaseTagIsFlagged(self):
+        root = self._tree("4.7.0rc1", CHANGELOG)
+        output = root / "output.txt"
+        self.assertEqual(guard.main(["--tag", "v4.7.0rc1", "--root", str(root), "--github-output", str(output)]), 0)
+        self.assertIn("prerelease=true", output.read_text(encoding="utf-8"))
 
     def testATagThatDisagreesWithThePackagedVersionFails(self):
         # nothing else in the release notices that the tag names a different version
@@ -125,20 +140,11 @@ class MainTest(unittest.TestCase):
             guard.main(["--tag", "v4.7.0", "--root", str(root)])
         self.assertIn("4.6.0", str(raised.exception))
 
-    def testATagWithoutTheVPrefixFails(self):
+    def testAMalformedTagFails(self):
         root = self._tree("4.7.0", CHANGELOG)
-        with self.assertRaises(SystemExit):
-            guard.main(["--tag", "4.7.0", "--root", str(root)])
-
-    def testOneVersionStringLaggingFails(self):
-        # the three-place bump with one place missed
-        root = self._tree("4.7.0", CHANGELOG)
-        (root / "src" / "smda" / "SmdaConfig.py").write_text(
-            'class SmdaConfig:\n    VERSION = "4.6.0"\n', encoding="utf-8"
-        )
-        with self.assertRaises(SystemExit) as raised:
-            guard.main(["--tag", "v4.7.0", "--root", str(root)])
-        self.assertIn("SmdaConfig.VERSION = 4.6.0", str(raised.exception))
+        for tag in ("4.7.0", "v4.7", "v4.7.0-rc1", "v4.7.0.dev1", "vlatest"):
+            with self.subTest(tag=tag), self.assertRaises(SystemExit):
+                guard.main(["--tag", tag, "--root", str(root)])
 
 
 if __name__ == "__main__":
