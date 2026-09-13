@@ -40,7 +40,7 @@ nothing is written twice.
 2. In one commit on a branch, then merged through a PR:
    - set the new version in `src/smda/__init__.py` (`__version__`; `pyproject.toml` reads it dynamically and
 `SmdaConfig.VERSION` imports it);
-   - in `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, drop the empty
+   - in `CHANGELOG.md`, rename `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD`, drop the empty
      subsections, open a fresh empty `## [Unreleased]` above it, and update the compare links at
      the foot of the file.
 3. Wait for CI to pass on the merge commit. Then tag that commit and push the tag:
@@ -53,13 +53,12 @@ nothing is written twice.
 Pushing the tag is the release. `.github/workflows/publish-release.yml` then:
 
 1. **Verify** — refuses to continue unless the tag matches `__version__`, `CHANGELOG.md` has a
-   `## [X.Y.Z] - <date>` section (which becomes the release notes), the tagged commit is on
-   `master`, CI passed on that commit, and the milestone named for the tag, if there is one, has
-   no open items.
+   `## [vX.Y.Z] - <date>` section (which becomes the release notes), the tagged commit is on
+   `master`, the `ci.yml` workflow passed on that commit, and the milestone named for the tag, if
+   there is one, has no open items.
 2. **Build** — builds the sdist and wheel in an isolated environment, checks their metadata with
    `twine check --strict`, and installs the wheel into a clean virtual environment carrying only
-   the declared runtime dependencies to disassemble a bundled sample with it and run the `smda`
-   entry point.
+   the declared runtime dependencies to disassemble a bundled sample with it.
 3. **Publish** — uploads to PyPI through [trusted publishing](https://docs.pypi.org/trusted-publishers/)
    with signed provenance attestations. No API token is stored anywhere.
 4. **Release** — creates the GitHub release for the tag with the changelog section as its body,
@@ -68,11 +67,16 @@ Pushing the tag is the release. `.github/workflows/publish-release.yml` then:
 
 Each gate fails with a message naming what to fix. Nothing has to be remembered at the console.
 
+The CI gate reads `ci.yml` only. Fuzzing, the security audit and the performance and correctness
+benchmark also run on `master` and are not checked here — the benchmark reports `skipping` on some
+events, and a gate that can never complete is worse than a narrow one — so confirm those by eye
+before tagging, the benchmark above all, since it is the one that catches a recovery regression.
+
 ## Pre-releases
 
 A release candidate is tagged `vX.Y.Zrc1` (also `a1`, `b1`), with the same version string in
 `src/smda/__init__.py` (`__version__`; `pyproject.toml` reads it dynamically and
-`SmdaConfig.VERSION` imports it) and a `## [X.Y.Zrc1] - YYYY-MM-DD` changelog section. The workflow marks the
+`SmdaConfig.VERSION` imports it) and a `## [vX.Y.Zrc1] - YYYY-MM-DD` changelog section. The workflow marks the
 GitHub release as a pre-release and does not make it "latest". PyPI
 does not install a pre-release unless it is asked for explicitly (`pip install --pre`).
 
@@ -82,6 +86,10 @@ Run *Publish release* manually from the Actions tab, choosing a tag as the ref. 
 through the same gates and build, publishes to [TestPyPI](https://test.pypi.org/p/smda) instead of
 PyPI (an already-present version is skipped rather than failed), and stops before creating the
 GitHub release. Rehearse the first release after any change to the workflow.
+
+A manual run uses the workflow file as it exists at the chosen tag, so a tag cut before this
+workflow existed has none to run. The first rehearsal needs a tag cut afterwards — a throwaway
+pre-release such as `vX.Y.Zrc0` is enough.
 
 ## When a release fails
 

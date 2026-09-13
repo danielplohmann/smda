@@ -61,7 +61,7 @@ def changelogSection(changelog: str, version: str) -> str:
             raise SystemExit(f"CHANGELOG.md has a heading for {version} but nothing under it")
         return text
     raise SystemExit(
-        f"CHANGELOG.md has no `## [{version}] - <date>` section. "
+        f"CHANGELOG.md has no `## [{version}] - <date>` or `## [v{version}] - <date>` section. "
         "Rename `## [Unreleased]` to the release being cut before tagging."
     )
 

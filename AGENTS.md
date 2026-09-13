@@ -111,7 +111,7 @@ ida_analyze.py   # IDA-side analysis/export helper
 
 ## Versioning & Releases
 
-The version is declared once, in `src/smda/__init__.py` (`__version__`); `pyproject.toml` reads it dynamically and `SmdaConfig.VERSION` imports it. A release bumps that line and `CHANGELOG.md` in one commit: rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, drop the subsections the release did not use, open a fresh empty `## [Unreleased]` above it, and update the compare links at the foot of the file. Do not bump the version unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
+The version is declared once, in `src/smda/__init__.py` (`__version__`); `pyproject.toml` reads it dynamically and `SmdaConfig.VERSION` imports it. A release bumps that line and `CHANGELOG.md` in one commit: rename `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD`, drop the subsections the release did not use, open a fresh empty `## [Unreleased]` above it, and update the compare links at the foot of the file. Do not bump the version unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
 
 **Scope lives in a milestone named for the tag.** A PR joins `vX.Y.Z` when it is accepted for that
 release rather than when it is opened, so the milestone stays a list of what is left rather than a

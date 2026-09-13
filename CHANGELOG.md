@@ -98,7 +98,9 @@ past roughly six lines it belongs in the PR the entry links.
 
 - **(build)** Python 3.11 is no longer supported; `requires-python` is `>=3.12`, and CI runs 3.12
   through 3.14. Nothing in the engine needed 3.12 — the MCRIT ecosystem now shares a 3.12 floor so
-  one interpreter serves every component. (#343)
+  one interpreter serves every component. This is not free for IDA users: IDA 9.3 and 9.4 accept any
+  Python from 3.8 through `idapyswitch`, so an IDA pointed at 3.8–3.11 has to be switched to 3.12 or
+  newer before `smda.ida` can be installed into it from this release on. (#343)
 
 ### Fixed
 
