@@ -74,6 +74,20 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v4.7.0] - 2026-09-13
+
+### Changed
+
 - **(common)** Let a PE exception directory refuse an interior candidate too, not only an ELF's
   `.eh_frame`. A `RUNTIME_FUNCTION` extent names the addresses inside a routine the way an FDE range
   does, and it now answers where analysis would begin on a candidate from any source, under the same
@@ -104,10 +118,6 @@ past roughly six lines it belongs in the PR the entry links.
   that it reaches only images carrying an `.eh_frame`. *Not reproducible from the bundled fixtures, which
   produce 0 refusals.* (#327)
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
 - **(intel)** Resume the gap scan inside the gap a failed candidate was found in, rather than
@@ -137,8 +147,6 @@ past roughly six lines it belongs in the PR the entry links.
   it off, and the x64 flag would have. Default output does not move -- with both flags on the gap scan reaches
   those addresses first -- so this is flag semantics rather than a recovery change, and the bundled ARM64 PE
   fixture is what makes it visible. (#329)
-
-### Security
 
 ### Compatibility
 
@@ -677,4 +685,5 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.6.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.7.0...HEAD
+[v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
