@@ -84,6 +84,32 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+- **(core)** `SmdaConfig.VERSION` is read from `smda.__version__` instead of being a second literal
+  kept in sync by hand, so a release bumps one line. `report.smda_version` is unchanged. (#343)
+
+- **(build)** `pyproject.toml` declares the license as the SPDX expression `BSD-2-Clause` with
+  `license-files` (PEP 639) instead of the free-text form and the deprecated license classifier,
+  and gains `Repository`, `Issues` and `Changelog` URLs. Building now needs `setuptools>=77`; the
+  wheel's metadata is otherwise unchanged. (#343)
+
+### Deprecated
+
+### Removed
+
+- **(build)** Python 3.11 is no longer supported; `requires-python` is `>=3.12`, and CI runs 3.12
+  through 3.14. Nothing in the engine needed 3.12 — the MCRIT ecosystem now shares a 3.12 floor so
+  one interpreter serves every component. (#343)
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v4.7.0] - 2026-09-13
+
+### Changed
+
 - **(common)** Let a PE exception directory refuse an interior candidate too, not only an ELF's
   `.eh_frame`. A `RUNTIME_FUNCTION` extent names the addresses inside a routine the way an FDE range
   does, and it now answers where analysis would begin on a candidate from any source, under the same
@@ -95,14 +121,6 @@ past roughly six lines it belongs in the PR the entry links.
   negatives; the 140 C/C++ ELF cells and all 57 malpedia dumps are bit-identical. Three of the dumps
   do declare an exception directory, and the rule is consulted on all three and refuses nothing, which
   is what makes that a control rather than an absence. (#329)
-
-- **(core)** `SmdaConfig.VERSION` is read from `smda.__version__` instead of being a second literal
-  kept in sync by hand, so a release bumps one line. `report.smda_version` is unchanged. (#343)
-
-- **(build)** `pyproject.toml` declares the license as the SPDX expression `BSD-2-Clause` with
-  `license-files` (PEP 639) instead of the free-text form and the deprecated license classifier,
-  and gains `Repository`, `Issues` and `Changelog` URLs. Building now needs `setuptools>=77`; the
-  wheel's metadata is otherwise unchanged. (#343)
 
 - **(tests)** `make test` now runs the fast tier and `make test-all` runs the whole suite. The `slow`
   marker already existed, was already applied to the eleven fixture-corpus files, and was documented in
@@ -121,14 +139,6 @@ past roughly six lines it belongs in the PR the entry links.
   and false negatives; the PE, Go, ARM64 Mach-O and 57 malpedia cells are bit-identical, which is the control
   that it reaches only images carrying an `.eh_frame`. *Not reproducible from the bundled fixtures, which
   produce 0 refusals.* (#327)
-
-### Deprecated
-
-### Removed
-
-- **(build)** Python 3.11 is no longer supported; `requires-python` is `>=3.12`, and CI runs 3.12
-  through 3.14. Nothing in the engine needed 3.12 — the MCRIT ecosystem now shares a 3.12 floor so
-  one interpreter serves every component. (#343)
 
 ### Fixed
 
@@ -159,8 +169,6 @@ past roughly six lines it belongs in the PR the entry links.
   it off, and the x64 flag would have. Default output does not move -- with both flags on the gap scan reaches
   those addresses first -- so this is flag semantics rather than a recovery change, and the bundled ARM64 PE
   fixture is what makes it visible. (#329)
-
-### Security
 
 ### Compatibility
 
@@ -699,4 +707,5 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.6.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.7.0...HEAD
+[v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
