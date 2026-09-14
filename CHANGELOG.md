@@ -105,6 +105,17 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(common)** Order a pre-release version when importing a report, instead of treating it as no
+  version at all. `SmdaFunction.fromDict` gated its escape-version comparisons on
+  `v?\d+(\.\d+)*`, which no PEP 440 pre-release matches, so a report written by `4.8.0rc1` fell to
+  the "no valid version information" branch and had every function's `pic_hash` and nesting depth
+  recomputed on every import -- correct values at a cost proportional to the report, and the wrong
+  reading of a report from the newest build in existence. A pre-release now sorts directly below its
+  own release, so a candidate for the release that changed an escaper is still recomputed. *Measured
+  on `669153c` on the bundled `cutwail_xored` report:* 33 of 33 functions recomputed before, 0 after,
+  with hashes identical either way; a version this cannot order, such as `4.4.4-dev`, still
+  recomputes. (#345)
+
 ### Security
 
 ### Compatibility

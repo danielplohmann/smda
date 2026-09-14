@@ -5,7 +5,7 @@ import logging
 import re
 import struct
 from operator import itemgetter
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, NoReturn, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, NoReturn, Optional, Tuple
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
 from smda.aarch64.definitions import CALL_INS as AARCH64_CALL_INS
@@ -58,6 +58,23 @@ CIL_PIC_HASH_ESCAPE_VERSION = [4, 3, 8]
 # on the pic_hash path and so retaining the raw signed branch offset. Older reports have
 # position-dependent Dalvik pic_hash values and must recalculate on import.
 DALVIK_PIC_HASH_ESCAPE_VERSION = [4, 4, 2]
+
+
+# A report version as something the escape-version gates can be compared against: the
+# release numbers, then 1 for a release and 0 for a PEP 440 pre-release, so 4.2.0rc1 sorts
+# below 4.2.0 and a report written by a candidate for the release that changed an escaper
+# is recomputed rather than trusted. None means the string states no version this can order,
+# which is what sends the report down the recalculate-everything path.
+def _reportVersionKey(version: str) -> Optional[Tuple[List[int], int]]:
+    match = re.fullmatch(r"v?(?P<release>\d+(?:\.\d+)*)(?P<pre>(?:a|b|rc)\d+)?", version)
+    if match is None:
+        return None
+    return ([int(part) for part in match.group("release").split(".")], 0 if match.group("pre") else 1)
+
+
+def _isBeforeEscapeVersion(version_key: Tuple[List[int], int], escape_version: List[int]) -> bool:
+    return version_key < (escape_version, 1)
+
 
 MAX_ADDRESS_VALUE = 1 << 64
 REQUIRED_FUNCTION_FIELDS = frozenset({"offset", "blocks", "apirefs", "blockrefs", "inrefs", "outrefs", "metadata"})
@@ -804,28 +821,31 @@ class SmdaFunction:
         if version and version.startswith("MCRIT4IDA"):
             version = version.rsplit(" ", 1)[-1]
         # modernize older reports on import
-        if version and re.fullmatch(r"v?\d+(\.\d+)*", version):
-            version = version.replace("v", "")
-            version = [int(v) for v in version.split(".")]
-            recalculate_pic_hash = version < [1, 3, 0]
+        version_key = _reportVersionKey(version) if version else None
+        if version_key is not None:
+            recalculate_pic_hash = _isBeforeEscapeVersion(version_key, [1, 3, 0])
             if (
                 not recalculate_pic_hash
                 and function_architecture == "aarch64"
-                and version < AARCH64_PIC_HASH_ESCAPE_VERSION
+                and _isBeforeEscapeVersion(version_key, AARCH64_PIC_HASH_ESCAPE_VERSION)
             ):
                 recalculate_pic_hash = True
             if (
                 not recalculate_pic_hash
                 and function_architecture == "intel"
-                and version < INTEL_PIC_HASH_ESCAPE_VERSION
+                and _isBeforeEscapeVersion(version_key, INTEL_PIC_HASH_ESCAPE_VERSION)
             ):
                 recalculate_pic_hash = True
-            if not recalculate_pic_hash and function_architecture == "cil" and version < CIL_PIC_HASH_ESCAPE_VERSION:
+            if (
+                not recalculate_pic_hash
+                and function_architecture == "cil"
+                and _isBeforeEscapeVersion(version_key, CIL_PIC_HASH_ESCAPE_VERSION)
+            ):
                 recalculate_pic_hash = True
             if (
                 not recalculate_pic_hash
                 and function_architecture == "dalvik"
-                and version < DALVIK_PIC_HASH_ESCAPE_VERSION
+                and _isBeforeEscapeVersion(version_key, DALVIK_PIC_HASH_ESCAPE_VERSION)
             ):
                 recalculate_pic_hash = True
             if recalculate_pic_hash:
