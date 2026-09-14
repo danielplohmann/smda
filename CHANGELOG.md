@@ -84,7 +84,7 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Compatibility
 
-## [v4.8.0rc1] - 2026-09-14
+## [v4.8.0] - 2026-09-14
 
 ### Added
 
@@ -731,6 +731,6 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.8.0rc1...HEAD
-[v4.8.0rc1]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0rc1
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.8.0...HEAD
+[v4.8.0]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0
 [v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
