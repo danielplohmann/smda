@@ -9,7 +9,13 @@ from pathlib import Path
 
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.SmdaBasicBlock import SmdaBasicBlock
-from smda.common.SmdaFunction import INTEL_PIC_HASH_ESCAPE_VERSION, LazyIntKeyDict, SmdaFunction
+from smda.common.SmdaFunction import (
+    INTEL_PIC_HASH_ESCAPE_VERSION,
+    LazyIntKeyDict,
+    SmdaFunction,
+    _isBeforeEscapeVersion,
+    _reportVersionKey,
+)
 from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import REQUIRED_REPORT_FIELDS, SmdaReport
 from smda.Disassembler import Disassembler
@@ -383,6 +389,61 @@ class TestCommonModels(unittest.TestCase):
         imported = SmdaFunction.fromDict(function_dict, version="4.4.4-dev", smda_report=report)
 
         self.assertEqual(imported.pic_hash, expected_pic_hash)
+
+    def test_imported_report_from_a_prerelease_above_the_escape_version_keeps_pic_hash(self):
+        # a pre-release states a version, so it is ordered rather than treated as unversioned:
+        # without that, every report a release candidate wrote is rehashed on every import
+        report = _disassemble_intel_bytes(b"\xc3")  # ret
+        function_dict = report.getFunction(INTEL_BASE).toDict()
+        stored_pic_hash = 0x0123456789ABCDEF
+        function_dict["metadata"]["pic_hash"] = stored_pic_hash
+        above_gate = [*INTEL_PIC_HASH_ESCAPE_VERSION[:-1], INTEL_PIC_HASH_ESCAPE_VERSION[-1] + 1]
+
+        for suffix in ("a1", "b2", "rc1"):
+            with self.subTest(suffix=suffix):
+                version = ".".join(str(v) for v in above_gate) + suffix
+
+                imported = SmdaFunction.fromDict(function_dict, version=version, smda_report=report)
+
+                self.assertEqual(imported.pic_hash, stored_pic_hash)
+
+    def test_imported_report_from_a_prerelease_of_the_escape_version_recalculates(self):
+        # 4.3.5rc1 precedes 4.3.5, so a candidate for the release that changed the escaper
+        # cannot be assumed to carry the change
+        report = _disassemble_intel_bytes(b"\xc3")  # ret
+        function = report.getFunction(INTEL_BASE)
+        expected_pic_hash = function.pic_hash
+        function_dict = function.toDict()
+        function_dict["metadata"]["pic_hash"] = 0x0123456789ABCDEF
+        gate_version = ".".join(str(v) for v in INTEL_PIC_HASH_ESCAPE_VERSION)
+
+        for suffix in ("a1", "b2", "rc1"):
+            with self.subTest(suffix=suffix):
+                imported = SmdaFunction.fromDict(function_dict, version=gate_version + suffix, smda_report=report)
+
+                self.assertEqual(imported.pic_hash, expected_pic_hash)
+
+    def test_report_version_ordering_is_unchanged_for_release_and_unorderable_strings(self):
+        # the shapes that were already ordered have to keep ordering the same way, a version
+        # shorter than the gate included: [4, 3] precedes [4, 3, 5] on the prefix rule
+        ordered = {
+            "4.3.5": False,
+            "v4.3.5": False,
+            "4.3.4": True,
+            "4.3": True,
+            "4.3.6": False,
+            "5": False,
+        }
+        for version, expected in ordered.items():
+            with self.subTest(version=version):
+                key = _reportVersionKey(version)
+
+                self.assertIsNotNone(key)
+                self.assertEqual(_isBeforeEscapeVersion(key, INTEL_PIC_HASH_ESCAPE_VERSION), expected)
+
+        for version in ("4.4.4-dev", "MCRIT4IDA", "", "4..5", "4.3.5rc"):
+            with self.subTest(version=version):
+                self.assertIsNone(_reportVersionKey(version))
 
     def test_imported_report_skips_hashing_against_an_unlocated_binary_info(self):
         report = _disassemble_intel_bytes(b"\xc3")  # ret
