@@ -72,6 +72,22 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v4.8.0rc1] - 2026-09-14
+
+### Added
+
 - **(ci)** Pushing a `vX.Y.Z` tag now releases: the workflow builds, publishes to PyPI through
   trusted publishing, creates the GitHub release from that version's changelog section, and closes
   the milestone named for the tag. It refuses to publish unless the tag matches the packaged
@@ -101,8 +117,6 @@ past roughly six lines it belongs in the PR the entry links.
   `smda.ida` users too: IDA 9.3 and 9.4 accept any Python from 3.8 through `idapyswitch`, so an IDA
   pointed at 3.11 or older will need switching to 3.12 or newer once the floor moves. (#343)
 
-### Removed
-
 ### Fixed
 
 - **(common)** Order a pre-release version when importing a report, instead of treating it as no
@@ -115,10 +129,6 @@ past roughly six lines it belongs in the PR the entry links.
   on `669153c` on the bundled `cutwail_xored` report:* 33 of 33 functions recomputed before, 0 after,
   with hashes identical either way; a version this cannot order, such as `4.4.4-dev`, still
   recomputes. (#345)
-
-### Security
-
-### Compatibility
 
 ## [v4.7.0] - 2026-09-13
 
@@ -721,5 +731,6 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.7.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.8.0rc1...HEAD
+[v4.8.0rc1]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0rc1
 [v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
