@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "smda"
 description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = "BSD-2-Clause"
 license-files = ["LICENSE"]
 authors = [
@@ -16,6 +16,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -150,8 +151,8 @@ directory = "coverage-html"
 # Same as Black.
 line-length = 120
 
-# Assume Python 3.12+
-target-version = "py312"
+# Assume Python 3.11+
+target-version = "py311"
 
 [tool.ruff.lint]
 # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.

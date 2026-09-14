@@ -94,13 +94,14 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Deprecated
 
-### Removed
+- **(build)** Python 3.11 support will end at whichever comes first: MCRIT and purepdb moving their
+  floor to 3.12, a runtime dependency dropping 3.11, or 3.11's end of life in October 2027. SMDA's
+  floor follows MCRIT's and the two move together, because an SMDA that dropped an interpreter MCRIT
+  still declares would be silently held back under MCRIT rather than failing. This affects
+  `smda.ida` users too: IDA 9.3 and 9.4 accept any Python from 3.8 through `idapyswitch`, so an IDA
+  pointed at 3.11 or older will need switching to 3.12 or newer once the floor moves. (#343)
 
-- **(build)** Python 3.11 is no longer supported; `requires-python` is `>=3.12`, and CI runs 3.12
-  through 3.14. Nothing in the engine needed 3.12 — the MCRIT ecosystem now shares a 3.12 floor so
-  one interpreter serves every component. This is not free for IDA users: IDA 9.3 and 9.4 accept any
-  Python from 3.8 through `idapyswitch`, so an IDA pointed at 3.8–3.11 has to be switched to 3.12 or
-  newer before `smda.ida` can be installed into it from this release on. (#343)
+### Removed
 
 ### Fixed
 

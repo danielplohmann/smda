@@ -18,6 +18,26 @@ The version is declared in `src/smda/__init__.py` (`__version__`; `pyproject.tom
 `SmdaConfig.VERSION` imports it). The release workflow refuses a tag that does not
 match every one of them, so a bump that misses one fails before anything is published.
 
+## Supported Python versions
+
+SMDA supports Python 3.11 through 3.14, and CI runs every one of them.
+
+The floor follows MCRIT's rather than being set on its own, and the two move in the same release
+wave. An installer resolves a dependency by the interpreter's version, so an SMDA that stopped
+supporting an interpreter MCRIT still declares would be silently held back to its last compatible
+release under MCRIT on that interpreter, with nothing reporting the downgrade.
+
+3.11 support ends at whichever of these comes first:
+
+- MCRIT and purepdb both move their floor to 3.12,
+- a runtime dependency drops 3.11, or
+- 3.11 reaches end of life, in October 2027.
+
+The release that raises the floor says so in its `Removed` section, and the one before it carries
+a `Deprecated` notice. Raising it is not only metadata: Ruff's pyupgrade rules key on
+`target-version`, so the same change starts rewriting syntax to the new floor and stops being
+reversible by a one-line edit.
+
 ## Changelog
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). It is the one
