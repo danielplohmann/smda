@@ -72,9 +72,34 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+- **(ci)** Pushing a `vX.Y.Z` tag now releases: the workflow builds, publishes to PyPI through
+  trusted publishing, creates the GitHub release from that version's changelog section, and closes
+  the milestone named for the tag. It refuses to publish unless the tag matches the packaged
+  version, the version has a changelog section, the commit is on `master`, CI passed on that
+  commit, and the milestone has no open items — the checks that previously lived in a person's
+  memory between `make package` and `make publish`. No API token is stored anywhere, and each file
+  carries signed provenance. Pre-release tags (`v4.7.0rc1`) are marked as such. A manual run
+  rehearses the whole path against TestPyPI. The process is documented in `RELEASING.md` and is
+  the one every MCRIT ecosystem repository follows. (#343)
+
 ### Changed
 
+- **(core)** `SmdaConfig.VERSION` is read from `smda.__version__` instead of being a second literal
+  kept in sync by hand, so a release bumps one line. `report.smda_version` is unchanged. (#343)
+
+- **(build)** `pyproject.toml` declares the license as the SPDX expression `BSD-2-Clause` with
+  `license-files` (PEP 639) instead of the free-text form and the deprecated license classifier,
+  and gains `Repository`, `Issues` and `Changelog` URLs. Building now needs `setuptools>=77`; the
+  wheel's metadata is otherwise unchanged. (#343)
+
 ### Deprecated
+
+- **(build)** Python 3.11 support will end at whichever comes first: MCRIT and purepdb moving their
+  floor to 3.12, a runtime dependency dropping 3.11, or 3.11's end of life in October 2027. SMDA's
+  floor follows MCRIT's and the two move together, because an SMDA that dropped an interpreter MCRIT
+  still declares would be silently held back under MCRIT rather than failing. This affects
+  `smda.ida` users too: IDA 9.3 and 9.4 accept any Python from 3.8 through `idapyswitch`, so an IDA
+  pointed at 3.11 or older will need switching to 3.12 or newer once the floor moves. (#343)
 
 ### Removed
 

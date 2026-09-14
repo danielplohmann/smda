@@ -111,13 +111,7 @@ ida_analyze.py   # IDA-side analysis/export helper
 
 ## Versioning & Releases
 
-When a change warrants a version bump, update **all three** in one commit:
-
-1. `src/smda/__init__.py` → `__version__`
-2. `src/smda/SmdaConfig.py` → `SmdaConfig.VERSION`
-3. `CHANGELOG.md` → rename `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD`, drop the subsections the release did not use, open a fresh empty `## [Unreleased]` above it, and update the compare links at the foot of the file.
-
-Keep the two version strings in sync. Do not bump versions unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
+The version is declared once, in `src/smda/__init__.py` (`__version__`); `pyproject.toml` reads it dynamically and `SmdaConfig.VERSION` imports it. A release bumps that line and `CHANGELOG.md` in one commit: rename `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD`, drop the subsections the release did not use, open a fresh empty `## [Unreleased]` above it, and update the compare links at the foot of the file. Do not bump the version unless the change is a release-worthy change (and see Git Workflow re: explicit ask).
 
 **Scope lives in a milestone named for the tag.** A PR joins `vX.Y.Z` when it is accepted for that
 release rather than when it is opened, so the milestone stays a list of what is left rather than a
@@ -128,7 +122,9 @@ the changelog records what landed and what it cost, the milestone what has not l
 
 **Tag after `master` is green, not at merge.** A tag created on the merge commit before CI has confirmed the merged tree can need moving, and moving one a PyPI publish has already consumed is a different problem from moving one nobody has fetched.
 
-Every other PR writes its own bullet under `## [Unreleased]` as it merges, rather than the release being reconstructed from merge commits afterwards — see *How an entry is written* in `CHANGELOG.md` for the subsections, the scope prefix and the four content rules. `.github/workflows/changelog.yml` requires a PR touching `src/smda/` to touch `CHANGELOG.md` or carry the `no-changelog` label.
+**Pushing the tag is the release.** `.github/workflows/publish-release.yml` builds, publishes to PyPI through trusted publishing, creates the GitHub release from this version's `CHANGELOG.md` section, and closes the milestone. It refuses to publish unless the tag matches `__version__`, this version has a changelog section, the commit is on `master`, CI passed on that commit, and the milestone for the tag has no open items. The full procedure — cutting, rehearsing against TestPyPI, pre-releases, recovery, what a maintainer configures once — is in [`RELEASING.md`](RELEASING.md), which is the same process every MCRIT ecosystem repository follows.
+
+Every other PR writes its own bullet under `## [Unreleased]` as it merges, rather than the release being reconstructed from merge commits afterwards — see *How an entry is written* in `CHANGELOG.md` for the subsections, the scope prefix and the four content rules. `.github/workflows/changelog.yml` requires a PR touching `src/smda/` or `pyproject.toml` to touch `CHANGELOG.md` or carry the `no-changelog` label.
 
 ## Git Workflow
 
