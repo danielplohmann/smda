@@ -17,6 +17,11 @@ on: # zizmor: ignore[dangerous-triggers]
 permissions:
   pull-requests: read
 
+# a title is often corrected two or three times in a row; only the last check matters
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   validate-pr-title:
     name: Validate PR title
@@ -24,6 +29,7 @@ jobs:
     # and its titles are not editable by a maintainer without closing the PR.
     if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check Conventional Commit format
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1

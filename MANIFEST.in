@@ -1,0 +1,5 @@
+# setuptools' default sdist rules pick up tests/ but not the extension-less xored corpora the
+# suite reads, so the published sdist carried 1.6 MB of a test suite that could not run from it
+# -- and those corpora are live malware, which is not something to publish to an index either.
+# The sdist carries src/ and the packaging metadata; clone the repository to run the tests.
+prune tests

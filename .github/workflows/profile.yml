@@ -115,6 +115,10 @@ jobs:
       # run + downloadable artifacts (artifacts can't be embedded inline).
       - name: Post PR comment with profiling links
         if: always() && github.event_name == 'pull_request'
+        # a pull request from a fork gets a read-only token whatever this job requests, so
+        # labelling one fails here after the profiling itself succeeded; the artifacts and the
+        # run summary carry the result either way
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

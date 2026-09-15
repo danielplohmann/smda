@@ -1,7 +1,11 @@
 name: Security
 
 on:
+  # `push` is limited to master on purpose: a pull request from a branch in this repository
+  # would otherwise audit the same tree twice, once for the branch push and once for the PR,
+  # under two different concurrency groups so neither cancels the other.
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
   schedule:

@@ -1,7 +1,12 @@
 name: CI
 
 on:
+  # `push` is limited to master on purpose: a pull request from a branch in this repository
+  # would otherwise run the whole matrix twice, once for the branch push and once for the PR,
+  # under two different concurrency groups so neither cancels the other. Work on a branch is
+  # covered by its PR, and `workflow_dispatch` covers a branch without one.
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 

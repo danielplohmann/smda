@@ -73,6 +73,17 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(build)** Correct the package summary and describe the package to PyPI properly. The summary
+  shipped `disassmbler` in every release's metadata, which is also the string PyPI's search index
+  matches on. The classifier list gained `Typing :: Typed` -- `py.typed` has shipped since the
+  package-data entry was added, with nothing advertising it -- plus the two `Intended Audience`
+  entries, `Programming Language :: Python :: 3 :: Only`, and a `keywords` list, none of which
+  PyPI could infer. No code, no runtime dependency and no report field moves.
+- **(build)** Stop shipping `tests/` in the sdist. setuptools' default rules picked up every
+  `.py` file under the root but not the extension-less xored corpora they read, so the published
+  sdist carried 1.6 MB of a test suite that could not run from it -- and the corpora are live
+  malware, which is not something to publish to an index either. A `MANIFEST.in` prunes it; the
+  sdist goes 3.12 MB -> 1.49 MB and the wheel is unaffected. Run the suite from a clone.
 
 ### Deprecated
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smda"
-description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
+description = "A recursive disassembler optimized for CFG recovery from memory dumps. Based on capstone."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "BSD-2-Clause"
@@ -12,16 +12,34 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Daniel Plohmann", email = "daniel.plohmann@mailbox.org"}
 ]
+keywords = [
+    "disassembler",
+    "capstone",
+    "control-flow-graph",
+    "reverse-engineering",
+    "malware-analysis",
+    "memory-dump",
+    "x86",
+    "aarch64",
+    "cil",
+    "dalvik",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Software Development :: Disassemblers",
+    # the package ships py.typed (see [tool.setuptools.package-data]); without this
+    # classifier PyPI does not advertise that consumers get types
+    "Typing :: Typed",
 ]
 dynamic = ["version"]
 dependencies = [
