@@ -101,11 +101,14 @@ recognized all ten bundled foreign samples, but it is biased towards silence, so
 $ python analyze.py /path/to/sample -o report.smda
 ```
 
-`analyze.py` disassembles one file or dump and optionally writes the JSON report. The flags worth
-knowing: `-a/--base_addr` (base address for a dump; also inferred from a `_0x<addr>` filename),
+`analyze.py` disassembles one file or dump and optionally writes the JSON report. Container formats
+(PE, ELF, Mach-O, Delphi KB, DEX) are detected from the bytes and mapped automatically; anything
+else is treated as a raw buffer. Passing `-a/--base_addr` or `-i/--oep` says the input is a dump
+with a known mapping and selects raw buffer mode even for a file that starts with a container
+header, while `-p/--parse_header` forces mapping in turn. The flags worth knowing:
+`-a/--base_addr` (base address for a dump; also inferred from a `_0x<addr>` filename),
 `-b/--bitness`, `-r/--architecture` (`intel`, `aarch64`, `cil`, `dalvik`; default auto),
-`-p/--parse_header` to map the file first, `-d/--pdb_path`, `-i/--oep`, `-s/--strings`,
-`-v/--verbose`.
+`-p/--parse_header`, `-d/--pdb_path`, `-i/--oep`, `-s/--strings`, `-v/--verbose`.
 
 ### Batch mode
 
