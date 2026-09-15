@@ -82,6 +82,10 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Security
 
+- **(report)** Bound stored report-buffer inflation by `SmdaConfig.MAX_IMAGE_SIZE` and reject non-native ZIP
+  layouts before materializing their contents, so a crafted serialized report cannot trigger unbounded
+  decompression while the remainder of a malformed report stays loadable. (#350)
+
 ### Compatibility
 
 ## [v4.8.0] - 2026-09-14

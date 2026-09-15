@@ -4,7 +4,9 @@ import io
 import json
 import logging
 import os
+import struct
 import zipfile
+import zlib
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
@@ -12,6 +14,7 @@ from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE
 from smda.common.BlockLocator import BlockLocator
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.DisassemblyStatistics import DisassemblyStatistics
+from smda.SmdaConfig import SmdaConfig
 
 from .BinaryInfo import BinaryInfo
 from .SmdaBasicBlock import SmdaBasicBlock
@@ -340,10 +343,41 @@ class SmdaReport:
 
     @staticmethod
     def _unpackBuffer(packed: str) -> bytes:
-        """Inverse of :meth:`_packBuffer`: decode base85 and inflate the stored buffer bytes."""
+        """Decode and inflate a native packed buffer within the configured image-size limit."""
+        max_size = SmdaConfig.MAX_IMAGE_SIZE
         zip_buffer = io.BytesIO(base64.b85decode(packed))
         with zipfile.ZipFile(zip_buffer, "r") as zip_file:
-            return zip_file.read("buffer")
+            entries = zip_file.infolist()
+            if len(entries) != 1 or entries[0].filename != "buffer" or entries[0].compress_type != zipfile.ZIP_DEFLATED:
+                raise ValueError("stored buffer archive does not use the SMDA report format")
+            entry = entries[0]
+            if entry.file_size > max_size:
+                raise ValueError(f"stored buffer exceeds MAX_IMAGE_SIZE ({max_size} bytes)")
+            archive = zip_buffer.getbuffer()
+            local_header_end = entry.header_offset + 30
+            if local_header_end > len(archive):
+                raise ValueError("stored buffer has an invalid local archive header")
+            local_header = archive[entry.header_offset : local_header_end]
+            if local_header[:4] != b"PK\x03\x04":
+                raise ValueError("stored buffer has an invalid local archive header")
+            filename_size, extra_size = struct.unpack_from("<HH", local_header, 26)
+            compressed_start = local_header_end + filename_size + extra_size
+            compressed_end = compressed_start + entry.compress_size
+            if compressed_end > len(archive):
+                raise ValueError("stored buffer has invalid compressed-data bounds")
+            decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
+            buffer = decompressor.decompress(archive[compressed_start:compressed_end], max_size + 1)
+            if len(buffer) > max_size:
+                raise ValueError(f"stored buffer exceeds MAX_IMAGE_SIZE ({max_size} bytes)")
+            if (
+                not decompressor.eof
+                or decompressor.unconsumed_tail
+                or decompressor.unused_data
+                or len(buffer) != entry.file_size
+                or zlib.crc32(buffer) != entry.CRC
+            ):
+                raise ValueError("stored buffer does not match its archive metadata")
+            return buffer
 
     @classmethod
     def fromFile(cls, file_path):
