@@ -1,7 +1,6 @@
 name: Fuzzing
 
 on:
-  # master only: a branch push and its pull request would otherwise fuzz the same tree twice
   push:
     branches: [master]
     paths:

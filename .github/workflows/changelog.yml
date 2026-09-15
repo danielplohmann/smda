@@ -19,8 +19,6 @@ permissions:
   contents: read
   pull-requests: read
 
-# keyed on the pull request rather than the ref: an edit that adds the label arrives while the
-# previous check is still running, and the stale one has nothing left to say
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true

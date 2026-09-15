@@ -37,8 +37,6 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Software Development :: Disassemblers",
-    # the package ships py.typed (see [tool.setuptools.package-data]); without this
-    # classifier PyPI does not advertise that consumers get types
     "Typing :: Typed",
 ]
 dynamic = ["version"]

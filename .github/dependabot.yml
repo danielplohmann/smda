@@ -5,15 +5,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
-    # A release that is yanked or found compromised is usually caught within days, and
-    # nothing here needs a dependency the day it ships. Security updates are exempt from
-    # cooldown, so a real advisory still arrives immediately.
+    # a yanked or compromised release is usually caught within days, and nothing here needs a
+    # dependency the day it ships; Dependabot exempts security updates from cooldown, so an
+    # advisory still arrives immediately
     cooldown:
       default-days: 7
     groups:
-      # The dev extra is tooling, not shipped surface: one PR a week for it keeps the
-      # review queue for the runtime dependencies, which are the ones that can change
-      # recovery output.
       dev-dependencies:
         dependency-type: "development"
         patterns:
@@ -22,14 +19,12 @@ updates:
       # ty is pinned in pyproject.toml and ships new error rules in patch releases;
       # bump it in a dedicated change that addresses those rules, not via Dependabot.
       - dependency-name: "ty"
-      # ruff is pinned in pyproject.toml and kept equal to the ruff-pre-commit rev in
-      # .pre-commit-config.yaml, which is a separate ecosystem here. Dependabot can only
-      # ever move one of the two, and the pair being unequal is exactly the failure the
-      # pin exists to prevent - so both sides are bumped by hand, in one change.
+      # the `ruff==` pin in pyproject.toml has to stay equal to the ruff-pre-commit rev in
+      # .pre-commit-config.yaml, and Dependabot can only ever move one of the two; both sides
+      # are bumped by hand, in one change.
       - dependency-name: "ruff"
-      # capstone<6 is a deliberate bound with its rationale in pyproject.toml: 6.x renames
-      # the arm64 constants and is a port, not a bump. Widening the bound is a project, and
-      # a weekly PR proposing it is noise.
+      # capstone<6 is a deliberate bound; its rationale is at the pin in pyproject.toml.
+      # 6.x is a port, not a bump, so a weekly PR proposing it is noise.
       - dependency-name: "capstone"
         update-types: ["version-update:semver-major"]
 
@@ -39,8 +34,6 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
-      # Actions are pinned to commit SHAs, so every bump is an unreadable hash either way;
-      # reviewing them as one PR against one set of release notes beats six.
       actions:
         patterns:
           - "*"
@@ -55,8 +48,7 @@ updates:
         patterns:
           - "*"
     ignore:
-      # the other half of the ruff pin above: this rev has to move together with the `ruff==`
-      # pin in pyproject.toml, which Dependabot cannot do in one PR. Wildcarded because the
-      # pre-commit ecosystem's dependency naming is undocumented, so this matches the hook
-      # repository however Dependabot spells it.
+      # the other half of the ruff pin above. Wildcarded because the pre-commit ecosystem's
+      # dependency naming is undocumented, so this matches the hook repository however
+      # Dependabot spells it.
       - dependency-name: "*ruff-pre-commit*"

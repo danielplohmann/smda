@@ -17,7 +17,6 @@ on: # zizmor: ignore[dangerous-triggers]
 permissions:
   pull-requests: read
 
-# a title is often corrected two or three times in a row; only the last check matters
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true

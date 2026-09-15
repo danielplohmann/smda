@@ -5,8 +5,6 @@ Types and scopes are the lists in .github/workflows/semantic-pr-title.yml, and C
 
 ## What this changes
 
-<!-- One or two sentences. What is different afterwards, and why. -->
-
 ## How it was verified
 
 <!--
