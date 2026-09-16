@@ -57,7 +57,7 @@ dev = [
     # floating, the two drift apart on astral's release schedule and a hook that
     # passes locally reddens CI on a rule the other version does not have yet.
     # Move both in one change.
-    "ruff==0.16.6",
+    "ruff==0.16.7",
     # pinned: ty is pre-1.0 and adds lint rules in patch releases, so an unpinned
     # floating version reddens unrelated PRs on someone else's release schedule
     # (0.0.69/0.0.70 added unsound-return-statement and unsound-yield; 0.0.74
