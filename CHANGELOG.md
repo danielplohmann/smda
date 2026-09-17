@@ -46,7 +46,7 @@ cost:
 
 **The prefix is the PR title's own scope token**, from the list `.github/workflows/semantic-pr-title.yml` already
 enforces: `core`, `intel`, `aarch64`, `dalvik`, `cil`, `common`, `utility`, `loaders`, `labels`, `report`, `ida`,
-`cli`, `profiling`, `tests`, `ci`, `build`, `docs`. A PR carrying no scope gets no prefix rather than an invented
+`binja`, `cli`, `profiling`, `tests`, `ci`, `build`, `docs`. A PR carrying no scope gets no prefix rather than an invented
 one, and a scope added to that workflow is available here the same day -- one vocabulary, enforced in one place.
 
 Four rules for the content:
