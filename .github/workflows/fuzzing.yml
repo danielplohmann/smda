@@ -39,32 +39,76 @@ env:
   ATHERIS_VERSION: "3.1.0"
 
 jobs:
+  # Each target reaches one region of the tree — the loaders, the report model, the
+  # synthesizers, the backends — so a pull request that touches none of a target's region
+  # can only re-fuzz code it did not change. The harness, the workflow and anything shared
+  # (top-level modules, smda.common) rebuild the whole matrix. Non-PR events fuzz everything.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      any: ${{ steps.filter.outputs.any }}
+      matrix: ${{ steps.filter.outputs.matrix }}
+    steps:
+      - name: Select fuzz targets
+        id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          # Everything every target reaches: the harness itself, the workflow, the top-level
+          # modules and smda.common.
+          shared='^(fuzzing/|\.github/workflows/fuzzing\.yml$|src/smda/[^/]+\.py$|src/smda/common/)'
+
+          run_all=true
+          changed=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            changed="$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+            printf 'changed files:\n%s\n' "$changed"
+            if ! printf '%s\n' "$changed" | grep -qE "$shared"; then
+              run_all=false
+            fi
+          fi
+
+          entries=""
+          for spec in \
+            "fuzz_loaders:binary:262144:^src/smda/utility/" \
+            "fuzz_formats:formats:262144:^src/smda/utility/" \
+            "fuzz_disassembler:binary:65536:^src/smda/(utility|intel|aarch64|cil|dalvik)/" \
+            "fuzz_buffer:buffer:65536:^src/smda/(utility|intel|aarch64|cil|dalvik)/" \
+            "fuzz_report:report:1048576:^src/smda/common/" \
+            "fuzz_synthesis:synthesis:1048576:^src/smda/(synthesis|utility)/"; do
+            IFS=':' read -r target profile max_len region <<<"$spec"
+            if [ "$run_all" != true ] && ! printf '%s\n' "$changed" | grep -qE "$region"; then
+              echo "skipping ${target}: nothing changed under ${region}"
+              continue
+            fi
+            entries="${entries:+${entries},}{\"target\":\"${target}\",\"seed_profile\":\"${profile}\",\"max_len\":${max_len}}"
+          done
+
+          if [ -z "$entries" ]; then
+            printf 'any=false\nmatrix={"include":[]}\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf 'any=true\nmatrix={"include":[%s]}\n' "$entries" >> "$GITHUB_OUTPUT"
+
   fuzz:
     name: Fuzz (${{ matrix.target }})
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: fuzz_loaders
-            seed_profile: binary
-            max_len: 262144
-          - target: fuzz_formats
-            seed_profile: formats
-            max_len: 262144
-          - target: fuzz_disassembler
-            seed_profile: binary
-            max_len: 65536
-          - target: fuzz_buffer
-            seed_profile: buffer
-            max_len: 65536
-          - target: fuzz_report
-            seed_profile: report
-            max_len: 1048576
-          - target: fuzz_synthesis
-            seed_profile: synthesis
-            max_len: 1048576
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
 
     steps:
       - name: Checkout code
@@ -108,7 +152,9 @@ jobs:
         run: python fuzzing/restore_corpus.py "${TARGET#fuzz_}" corpus
 
       - name: Generate seed corpus
-        run: python fuzzing/generate_seeds.py corpus --profile ${{ matrix.seed_profile }}
+        env:
+          SEED_PROFILE: ${{ matrix.seed_profile }}
+        run: python fuzzing/generate_seeds.py corpus --profile "$SEED_PROFILE"
 
       - name: Determine fuzzing duration
         id: duration

@@ -74,6 +74,14 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+- **(ci)** Pull requests only start the jobs their diff can move. A `Changed paths` job reads
+  the PR file list and gates the rest: the MCRIT install matrix needs a packaging change, lint
+  and tests skip a documentation-only PR, the two security audits need a dependency or `.github/`
+  change, the benchmark workflow triggers only on files that can move output or timing and skips
+  Malpedia for changes confined to the AArch64, CIL or Dalvik backends, and each fuzz target runs
+  only when its region of the tree was touched. `push`, `schedule` and `workflow_dispatch` still
+  run every job. (#359)
+
 ### Deprecated
 
 ### Removed
