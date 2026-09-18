@@ -28,8 +28,7 @@ def export_database(input_path, output_path=None):
     config = SmdaConfig()
     disassembler = Disassembler(config)
     with IdaInterface.fromPath(input_path) as ida_interface:
-        disassembler.disassembler = IdaExporter(config, ida_interface=ida_interface)
-        disassembler._explicit_backend = True
+        disassembler.setExporter(IdaExporter(config, ida_interface=ida_interface))
         binary = ida_interface.getBinary()
         base_addr = ida_interface.getBaseAddr()
         report = disassembler.disassembleBuffer(binary, base_addr)

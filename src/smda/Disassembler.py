@@ -2,7 +2,7 @@ import datetime
 import hashlib
 import logging
 import traceback
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.aarch64.definitions import looksLikeAArch64
@@ -13,6 +13,7 @@ from smda.common.instruction_set_probe import detectUnsupportedInstructionSet
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.SmdaReport import SmdaReport
 from smda.dalvik.DalvikDisassembler import DalvikDisassembler
+from smda.export.Exporter import Exporter
 from smda.ida.IdaExporter import IdaExporter
 from smda.intel.IntelDisassembler import IntelDisassembler
 from smda.SmdaConfig import SmdaConfig
@@ -69,7 +70,9 @@ class Disassembler:
         if config is None:
             config = SmdaConfig()
         self.config = config
-        self.disassembler = None
+        self.disassembler: Optional[
+            Union[IntelDisassembler, AArch64Disassembler, CilDisassembler, DalvikDisassembler, Exporter]
+        ] = None
         self._explicit_backend = bool(backend)
         self._active_architecture = backend if backend in ("intel", "aarch64", "cil", "dalvik") else None
         if backend == "intel":
@@ -88,6 +91,12 @@ class Disassembler:
         self._timeout_reported = False
         # cache the last DisassemblyResult
         self.disassembly = None
+
+    def setExporter(self, exporter: Exporter) -> None:
+        """Build reports from a frontend's analysis through *exporter* instead of disassembling."""
+        self.disassembler = exporter
+        self._explicit_backend = True
+        self._active_architecture = None
 
     def initDisassembler(self, architecture: str = "intel") -> None:
         """Initialize disassembler backend to given architecture, default: intel.

@@ -72,13 +72,29 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+- `smda.export`: the engine that turns a disassembler frontend's analysis into a report, and
+  `Disassembler.setExporter(exporter)` to pin one, which `ida_domain_export.py` and downstream
+  callers used to do through a private flag. (#360)
+
 ### Changed
+
+- The export engine moved out of `smda.ida` into `smda.export`. `Exporter(config, interface)` builds
+  the report from any `BackendInterface`, and `BackendInterface` now declares exactly the methods
+  the engine reads: `getApiMap` and `isExternalFunction` added, the never-called `getApiOffsets`
+  dropped. The engine was IDA-only in name: the interface it reads has had two IDA implementations
+  since the IDA Domain backend, and nothing in it touches IDA, so a second frontend should not
+  import it from the first. `smda.ida.IdaExporter` and `smda.ida.BackendInterface` remain as
+  before, so no caller changes; the engine's code moved verbatim. (#360)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
+  `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
+  (#360)
 
 ### Security
 
