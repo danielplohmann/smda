@@ -100,13 +100,15 @@ Pre-commit hooks (ruff + standard hygiene checks) run on commit via `.pre-commit
 ## Repo Layout
 
 ```
-src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, export/, ida/, synthesis/, utility/)
+src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, export/, ida/, binja/, synthesis/, utility/)
 tests/           # pytest suite (test*.py)
 data/            # generated ApiScout / reference JSON data (do not hand-edit; see Gotchas)
 profiling/       # CPU/memory profiling toolkit (make profile-cpu / profile-mem / profile-flame)
 analyze.py       # demo: disassemble a file/dump, optionally store JSON
 export.py        # example export usage
 ida_analyze.py   # IDA-side analysis/export helper
+binja_export.py  # export of Binary Ninja's analysis, in the GUI or headless
+binja_analyze.py # Binary Ninja-side SMDA augmentation helper
 ```
 
 ## Versioning & Releases
