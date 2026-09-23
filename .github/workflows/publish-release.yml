@@ -12,8 +12,13 @@ permissions:
 
 # A cancelled publish can leave PyPI holding some files of a version and not others, and the
 # version number cannot be reused afterwards.
+#
+# The trigger is part of the group so that a rehearsal can run beside a real run parked on the
+# `pypi` reviewer gate. Both carry the same `github.ref` for one tag, so on the ref alone the
+# rehearsal queues behind a run that is waiting for a human and never starts. Two real publishes
+# of one tag still share a group and still serialise, which is what the paragraph above is about.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: false
 
 defaults:
