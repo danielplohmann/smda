@@ -1,4 +1,7 @@
-PYTHON ?= python3
+# Prefer the repository's own virtualenv when it exists, so the targets work from an
+# unactivated shell. `?=` still wins, so `make PYTHON=... ` and an activated venv both
+# override it, and CI has no .venv so it falls through to python3 as before.
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
 .PHONY: init package publish ruff-check ruff-format ruff-fix lint format typecheck test test-all test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
 
