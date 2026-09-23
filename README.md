@@ -174,9 +174,13 @@ begins and each caps its own table reads, so `TIMEOUT` does not bound them. A ru
 before comparing counts across samples, and pass `TIMEOUT = 0` to disable the bound entirely. A
 caller that needs a hard wall-clock ceiling has to impose one itself.
 
+For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-dex containers are not first-class workflows. ODEX (`dey\n`) and CDEX (`cdex`) are not analysis-compatible (quickened ops / compact `code_item`): with `backend="dalvik"` they raise an explicit error; auto-detect will not select the Dalvik backend for those magics.
+
+The code requires Python 3.11+.
+
 ### IDA Pro integration
 
-SMDA can also turn an IDA-analyzed database into a SMDA report instead of running its own disassembly. Inside the IDA GUI, SMDA supports IDA Pro 8.4 and newer via the existing IDAPython integrations; older SDK generations are rejected. On IDA 9.1 or newer, it prefers the higher-level [IDA Domain API](https://ida-domain.docs.hex-rays.com/) when the optional package is installed and otherwise falls back to IDAPython.
+SMDA can also turn an IDA-analyzed database into a SMDA report instead of running its own disassembly: `smda.export.Exporter` builds the report from whatever a disassembler frontend reports through `smda.export.BackendInterface`, and `smda.ida.IdaInterface` is the IDA frontend. Inside the IDA GUI, SMDA supports IDA Pro 8.4 and newer via the existing IDAPython integrations; older SDK generations are rejected. On IDA 9.1 or newer, it prefers the higher-level [IDA Domain API](https://ida-domain.docs.hex-rays.com/) when the optional package is installed and otherwise falls back to IDAPython.
 
 Inside the IDA GUI, run `export.py` to export IDA's existing analysis to a `.smda` file next to the database. Run `ida_analyze.py` to have SMDA independently recover functions from the loaded bytes and add missing function starts and names back to IDA. This augmentation workflow is useful when IDA analyzes a raw or mapped buffer conservatively. Both scripts can be launched via *File -> Script file...*.
 
@@ -189,9 +193,26 @@ python ida_domain_export.py /path/to/sample.i64 -o sample.smda
 
 Headless export requires IDA 9.1+ and the optional `ida-domain>=0.5.0` dependency. Make sure `IDADIR` points at the IDA installation when it cannot be discovered automatically (see the [getting started guide](https://ida-domain.docs.hex-rays.com/getting_started/)). Standard SMDA installations do not include `ida-domain`.
 
-For Dalvik, the current scope is raw single-DEX inputs (`dex\n`). APK and multi-dex containers are not first-class workflows. ODEX (`dey\n`) and CDEX (`cdex`) are not analysis-compatible (quickened ops / compact `code_item`): with `backend="dalvik"` they raise an explicit error; auto-detect will not select the Dalvik backend for those magics.
+### Binary Ninja integration
 
-The code requires Python 3.11+.
+`smda.binja` is the Binary Ninja frontend for the same engine: functions, blocks, edges, symbols and imports come from Binary Ninja's analysis, and `smda.export.Exporter` re-decodes the instruction bytes with capstone and builds the report, so the report has the same shape as an IDA export. Binary Ninja's Python API ships with the application rather than on PyPI, so there is no extra to install; the module only needs `binaryninja` importable, headless or inside the GUI.
+
+Inside Binary Ninja, open the binary and run `binja_export.py` through *Run Script...* to export the view to a `.smda` file next to the open file (the database, when one is open), or `binja_analyze.py` to have SMDA independently recover functions from the loaded bytes and add missing function starts to the view and name the functions that still carry a default `sub_` name, as one undo step. Both need `smda` importable from Binary Ninja's Python.
+
+For headless export (no GUI), the same `binja_export.py` takes a binary or a `.bndb`, with a licensed Binary Ninja whose Python API is on the path (see [batch processing](https://docs.binary.ninja/dev/batch.html)):
+
+```
+PYTHONPATH="/Applications/Binary Ninja.app/Contents/Resources/python" python binja_export.py /path/to/sample -o sample.smda
+```
+
+With a `BinaryView` you already hold:
+
+```python
+from smda.binja.BinjaExporter import exportBinaryView
+
+report = exportBinaryView(bv)
+```
+
 `SmdaReport.metadata.language` is always a score map (`language name -> float`). Internal guesses and evidence
 counters are not serialized; loading an older report normalizes its legacy string/private-key form to this contract.
 To pick a single language from the map, take the highest score, except that `go` and `rust` win outright when their

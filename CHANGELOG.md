@@ -72,13 +72,43 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+- `smda.export`: the engine that turns a disassembler frontend's analysis into a report, and
+  `Disassembler.setExporter(exporter)` to pin one, which `ida_domain_export.py` and downstream
+  callers used to do through a private flag. (#360)
+- Export Binary Ninja's analysis as a SMDA report, the way `smda.ida` does for IDA.
+  `smda.binja.BinjaInterface` reads functions, blocks, edges, symbols and imports from a
+  `BinaryView` and feeds `smda.export.Exporter`, `smda.binja.BinjaExporter.exportBinaryView(bv)`
+  wraps the two, and the scripts match the IDA ones: `binja_export.py` exports the open view from
+  *Run Script...* or a binary or `.bndb` headlessly, and `binja_analyze.py` adds SMDA's recovered
+  functions and names to the open view as one undo step. Ported from the MCRIT plugin, where the
+  exporter was versioned by the plugin's releases instead of the report format it produces. No new
+  dependency: Binary Ninja's API comes with the application, and the module imports without it.
+  *Measured with Binary Ninja 6.0 on an x64 PE DLL, two x86_64 Mach-O binaries and `/bin/ls`:*
+  reports identical to the plugin's exporter except `oep`, which ELF and Mach-O reports now record
+  relative to the base address as native SMDA reports and IDA exports do (the plugin recorded an
+  absolute address; PE entry points were already RVAs). *Not reproducible from the repository:*
+  none of the binaries is bundled and the comparison needs a licensed Binary Ninja. No cost to the
+  disassembly backends, which it does not touch. (#357)
+
 ### Changed
+
+- The export engine moved out of `smda.ida` into `smda.export`. `Exporter(config, interface)` builds
+  the report from any `BackendInterface`, and `BackendInterface` now declares exactly the methods
+  the engine reads: `getApiMap` and `isExternalFunction` added, the never-called `getApiOffsets`
+  dropped. The engine was IDA-only in name: the interface it reads has had two IDA implementations
+  since the IDA Domain backend, and nothing in it touches IDA, so a second frontend should not
+  import it from the first. `smda.ida.IdaExporter` and `smda.ida.BackendInterface` remain as
+  before, so no caller changes; the engine's code moved verbatim. (#360)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
+  `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
+  (#360)
 
 ### Security
 
