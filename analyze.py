@@ -15,6 +15,21 @@ if not __package__:
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.DexFileLoader import DexFileLoader
+from smda.utility.FileLoader import FileLoader
+
+
+def shouldParseHeader(buffer, args):
+    """Decide whether a given input is treated as a container file or as a raw buffer.
+
+    An explicit base address or OEP means the caller is describing a dump's mapping, so
+    the bytes are treated as a raw buffer even when they start with a container header.
+    Otherwise any format loader recognizing the buffer selects the header-parsing path.
+    """
+    if args.parse_header:
+        return True
+    if args.base_addr or args.oep:
+        return False
+    return any(loader.isCompatible(buffer) for loader in FileLoader.file_loaders)
 
 
 def parseBaseAddrFromArgs(args, silent=False):
@@ -102,7 +117,9 @@ if __name__ == "__main__":
         "--parse_header",
         action="store_true",
         default=False,
-        help="Parse header/symbols and perform mapping of the file as normalization.",
+        help="Force parsing of header/symbols and mapping of the file as normalization. This is "
+        "now done automatically for every recognized container format, unless a base address "
+        "(-a) or OEP (-i) is given, which selects raw buffer mode.",
     )
     PARSER.add_argument(
         "-d",
@@ -188,11 +205,11 @@ if __name__ == "__main__":
     if os.path.isfile(ARGS.input_path):
         print(f"now analyzing {ARGS.input_path}")
         INPUT_FILENAME = os.path.basename(ARGS.input_path)
-        if ARGS.parse_header:
+        BUFFER = readFileContent(ARGS.input_path)
+        if shouldParseHeader(BUFFER, ARGS):
             DISASSEMBLER = Disassembler(config, backend=ARGS.architecture)
             SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
         else:
-            BUFFER = readFileContent(ARGS.input_path)
             treat_as_dalvik = ARGS.architecture in {"", "dalvik"} and DexFileLoader.isCompatible(BUFFER)
             if treat_as_dalvik:
                 BASE_ADDR = DexFileLoader.getBaseAddress(BUFFER)

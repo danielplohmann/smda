@@ -1,0 +1,11 @@
+# Blank issues stay available on purpose: a question about recovery output or about using the
+# library as a consumer fits neither form below, and forcing it into one produces a bug report
+# that is not one.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/danielplohmann/smda/security/advisories/new
+    about: Crashes, hangs or unbounded allocation reachable from a crafted input go here privately, not into a public issue. See SECURITY.md for what is in scope.
+  - name: Contributing and development setup
+    url: https://github.com/danielplohmann/smda/blob/master/CONTRIBUTING.md
+    about: How to build, test and open a pull request against SMDA.

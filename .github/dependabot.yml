@@ -5,19 +5,50 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # a yanked or compromised release is usually caught within days, and nothing here needs a
+    # dependency the day it ships; Dependabot exempts security updates from cooldown, so an
+    # advisory still arrives immediately
+    cooldown:
+      default-days: 7
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        patterns:
+          - "*"
     ignore:
       # ty is pinned in pyproject.toml and ships new error rules in patch releases;
       # bump it in a dedicated change that addresses those rules, not via Dependabot.
       - dependency-name: "ty"
+      # the `ruff==` pin in pyproject.toml has to stay equal to the ruff-pre-commit rev in
+      # .pre-commit-config.yaml, and Dependabot can only ever move one of the two; both sides
+      # are bumped by hand, in one change.
+      - dependency-name: "ruff"
+      # capstone<6 is a deliberate bound; its rationale is at the pin in pyproject.toml.
+      # 6.x is a port, not a bump, so a weekly PR proposing it is noise.
+      - dependency-name: "capstone"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      hooks:
+        patterns:
+          - "*"
+    ignore:
+      # the other half of the ruff pin above. Wildcarded because the pre-commit ecosystem's
+      # dependency naming is undocumented, so this matches the hook repository however
+      # Dependabot spells it.
+      - dependency-name: "*ruff-pre-commit*"

@@ -5,8 +5,11 @@ PYTHON ?= python3
 # Default profiling target fixture; override e.g. `make profile-cpu TARGET=komplex`
 TARGET ?= asprox
 
+# The setuptools range mirrors [build-system].requires in pyproject.toml, and has to: `make
+# package` builds with --no-isolation, so the interpreter's own setuptools is the build backend.
+# The floor is 77 because that is where the SPDX `license` expression emits valid metadata.
 init:
-	$(PYTHON) -m pip install --upgrade pip "setuptools>=64.0.0,<83.1.0" "wheel>=0.47.0"
+	$(PYTHON) -m pip install --upgrade pip "setuptools>=77,<84.1.0" "wheel>=0.47.0"
 	$(PYTHON) -m pip install -e ".[dev]"
 	$(PYTHON) -m pre_commit install
 package:

@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a capability, a recovery pass, or an interface change.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing
+      description: The problem you hit, before any proposed solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: >
+        If it changes recovery, say what it would cost: SMDA prioritizes completeness over
+        precision on purpose, and the golden fixtures under `tests/` are frozen baselines.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Roughly the scope tokens CI enforces on PR titles.
+      options:
+        - core (engine / RecursiveDisassembler)
+        - intel
+        - aarch64
+        - cil
+        - dalvik
+        - loaders (PE / ELF / Mach-O / DEX / raw)
+        - labels (symbols, imports, exports, strings)
+        - report (SmdaReport, hashing, escaping)
+        - ida
+        - cli / tooling
+        - other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: downstream
+    attributes:
+      label: Compatibility
+      options:
+        - label: This would change the `SmdaReport` shape or a hash, which downstream consumers (MCRIT, capa) depend on.
+        - label: I am willing to open a pull request for this.
