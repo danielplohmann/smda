@@ -1,9 +1,16 @@
+import base64
 import datetime
+import io
+import struct
 import unittest
+import zipfile
+import zlib
+from unittest import mock
 
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.DisassemblyStatistics import DisassemblyStatistics
+from smda.SmdaConfig import SmdaConfig
 
 
 def _make_minimal_report(buffer=None):
@@ -31,12 +38,79 @@ def _make_minimal_report(buffer=None):
     return report
 
 
+def _pack_zip(entries, compression=zipfile.ZIP_DEFLATED):
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", compression=compression) as zip_file:
+        for name, payload in entries:
+            zip_file.writestr(name, payload)
+    return base64.b85encode(zip_buffer.getvalue()).decode("ascii")
+
+
+def _forge_uncompressed_metadata(packed, payload):
+    archive = bytearray(base64.b85decode(packed))
+    local_header = archive.index(b"PK\x03\x04")
+    central_header = archive.index(b"PK\x01\x02")
+    for header, crc_offset, size_offset in ((local_header, 14, 22), (central_header, 16, 24)):
+        struct.pack_into("<L", archive, header + crc_offset, zlib.crc32(payload))
+        struct.pack_into("<L", archive, header + size_offset, len(payload))
+    return base64.b85encode(archive).decode("ascii")
+
+
 class TestSmdaReportBufferPacking(unittest.TestCase):
     def test_pack_unpack_roundtrip(self):
         for payload in (b"", b"hello world", bytes(range(256)) * 8):
             packed = SmdaReport._packBuffer(payload)
             self.assertIsInstance(packed, str)
             self.assertEqual(SmdaReport._unpackBuffer(packed), payload)
+
+    def test_unpack_accepts_payload_at_configured_limit(self):
+        payload = b"A" * 32
+        packed = SmdaReport._packBuffer(payload)
+
+        with mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", len(payload)):
+            self.assertEqual(SmdaReport._unpackBuffer(packed), payload)
+
+    def test_unpack_rejects_payload_above_configured_limit(self):
+        payload = b"A" * 33
+        packed = SmdaReport._packBuffer(payload)
+
+        with mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", len(payload) - 1), self.assertRaises(ValueError):
+            SmdaReport._unpackBuffer(packed)
+
+    def test_unpack_rejects_stream_larger_than_forged_metadata(self):
+        payload = b"A" * 33
+        declared_payload = payload[:-1]
+        packed = _forge_uncompressed_metadata(SmdaReport._packBuffer(payload), declared_payload)
+
+        for max_size in (len(declared_payload), len(payload)):
+            with (
+                self.subTest(max_size=max_size),
+                mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", max_size),
+                self.assertRaises(ValueError),
+            ):
+                SmdaReport._unpackBuffer(packed)
+
+    def test_oversized_buffer_field_degrades_to_none(self):
+        payload = b"A" * 33
+        report_dict = _make_minimal_report(buffer=None).toDict()
+        report_dict["buffer"] = SmdaReport._packBuffer(payload)
+
+        with mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", len(payload) - 1):
+            restored = SmdaReport.fromDict(report_dict)
+
+        self.assertIsNone(restored.getBuffer())
+
+    def test_unpack_rejects_non_native_compression(self):
+        packed = _pack_zip([("buffer", b"payload")], compression=zipfile.ZIP_STORED)
+
+        with self.assertRaises(ValueError):
+            SmdaReport._unpackBuffer(packed)
+
+    def test_unpack_rejects_archives_with_extra_members(self):
+        packed = _pack_zip([("buffer", b"payload"), ("metadata", b"unexpected")])
+
+        with self.assertRaises(ValueError):
+            SmdaReport._unpackBuffer(packed)
 
     def test_packed_buffer_is_ascii_and_compresses(self):
         payload = b"\x00" * 4096
