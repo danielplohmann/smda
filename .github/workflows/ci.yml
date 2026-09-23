@@ -17,8 +17,57 @@ defaults:
     shell: bash
 
 jobs:
+  # A docs-only pull request has nothing for the linters or the test matrix to say, and
+  # only this checkout's packaging metadata can move the MCRIT resolution check's verdict.
+  # Non-PR events skip the classification and run everything: the release workflow requires
+  # a complete CI run on the master commit it publishes.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      packaging: ${{ steps.filter.outputs.packaging }}
+    steps:
+      - name: Classify changed files
+        id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            printf 'code=true\npackaging=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed="$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+          printf 'changed files:\n%s\n' "$changed"
+
+          docs='(\.md$|^docs/|^\.github/ISSUE_TEMPLATE/)'
+          packaging='^pyproject\.toml$'
+
+          code=false
+          if printf '%s\n' "$changed" | grep -qvE "$docs"; then
+            code=true
+          fi
+          packaging_touched=false
+          if printf '%s\n' "$changed" | grep -qE "$packaging"; then
+            packaging_touched=true
+          fi
+
+          printf 'code=%s\npackaging=%s\n' "$code" "$packaging_touched" >> "$GITHUB_OUTPUT"
+
   lint:
     name: Code Quality
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -59,6 +108,8 @@ jobs:
 
   test:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     # 3.14 is pre-release; report but do not block PRs on it.
@@ -151,6 +202,8 @@ jobs:
 
   mcrit-install:
     name: MCRIT install (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     # 3.14 is pre-release; report but do not block PRs on it.
