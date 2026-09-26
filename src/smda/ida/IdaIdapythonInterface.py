@@ -127,9 +127,12 @@ class Ida84Interface(_ModernIdapythonInterface):
         info = idaapi.get_inf_structure()
         procname = info.procname
         if procname == "ARM":
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32:
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if procname in self._processor_map:
             return self._processor_map[procname]
         raise ValueError("Unsupported Architecture")
@@ -151,9 +154,12 @@ class Ida85Interface(_ModernIdapythonInterface):
     def getArchitecture(self):
         procname = idaapi.inf_get_procname()
         if procname == "ARM":
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32:
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if procname in self._processor_map:
             return self._processor_map[procname]
         raise ValueError("Unsupported Architecture")

@@ -7,7 +7,17 @@ import os
 import zipfile
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
+from capstone import (
+    CS_ARCH_ARM,
+    CS_ARCH_ARM64,
+    CS_ARCH_X86,
+    CS_MODE_32,
+    CS_MODE_64,
+    CS_MODE_ARM,
+    CS_MODE_LITTLE_ENDIAN,
+    CS_MODE_THUMB,
+    Cs,
+)
 
 from smda.common.BlockLocator import BlockLocator
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -263,13 +273,24 @@ class SmdaReport:
         # simply re-creates it on demand
         state = self.__dict__.copy()
         state.pop("capstone", None)
+        state.pop("_arm_capstones", None)
         return state
 
-    def getCapstone(self):
+    def getCapstone(self, thumb=False):
+        """A detail-enabled capstone engine for the report's instruction set; for ARM, the
+        A32 one or the T32 one as ``thumb`` selects (see a function's architecture_metadata)."""
+        if self.architecture == "arm":
+            engines = self.__dict__.setdefault("_arm_capstones", {})
+            engine = engines.get(bool(thumb))
+            if engine is None:
+                engine = Cs(CS_ARCH_ARM, (CS_MODE_THUMB if thumb else CS_MODE_ARM) | CS_MODE_LITTLE_ENDIAN)
+                engine.detail = True
+                engines[bool(thumb)] = engine
+            return engine
         if self.capstone is None:
             if self.architecture is not None and self.architecture not in ("intel", "aarch64"):
                 raise NotImplementedError(
-                    f"getCapstone() is only available for Intel and AArch64, not '{self.architecture}'"
+                    f"getCapstone() is only available for Intel, AArch64 and ARM, not '{self.architecture}'"
                 )
             if self.architecture == "aarch64":
                 self.capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)

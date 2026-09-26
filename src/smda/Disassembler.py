@@ -6,6 +6,8 @@ from typing import Any, List, Optional
 
 from smda.aarch64.AArch64Disassembler import AArch64Disassembler
 from smda.aarch64.definitions import looksLikeAArch64
+from smda.arm.ArmDisassembler import ArmDisassembler
+from smda.arm.definitions import looksLikeArm
 from smda.cil.CilDisassembler import CilDisassembler
 from smda.common.BinaryInfo import BinaryInfo
 from smda.common.ExceptionHandling import reraise_non_operational_exception
@@ -30,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 #: PE resolves to intel here rather than to cil: its CLR metadata is addressed by file
 #: offset, which a mapped image no longer has, so routing a dump there on the strength
 #: of the header alone would lose it.
-_BACKEND_ARCHITECTURES = ("intel", "aarch64")
+_BACKEND_ARCHITECTURES = ("intel", "aarch64", "arm")
 
 
 def _peDeclaredArchitecture(file_content: bytes) -> str:
@@ -71,11 +73,13 @@ class Disassembler:
         self.config = config
         self.disassembler = None
         self._explicit_backend = bool(backend)
-        self._active_architecture = backend if backend in ("intel", "aarch64", "cil", "dalvik") else None
+        self._active_architecture = backend if backend in ("intel", "aarch64", "arm", "cil", "dalvik") else None
         if backend == "intel":
             self.disassembler = IntelDisassembler(self.config)
         elif backend == "aarch64":
             self.disassembler = AArch64Disassembler(self.config)
+        elif backend == "arm":
+            self.disassembler = ArmDisassembler(self.config)
         elif backend == "cil":
             self.disassembler = CilDisassembler(self.config)
         elif backend == "dalvik":
@@ -99,6 +103,8 @@ class Disassembler:
             self.disassembler = IntelDisassembler(self.config)
         elif architecture == "aarch64":
             self.disassembler = AArch64Disassembler(self.config)
+        elif architecture == "arm":
+            self.disassembler = ArmDisassembler(self.config)
         elif architecture == "cil":
             self.disassembler = CilDisassembler(self.config)
         elif architecture == "dalvik":
@@ -306,6 +312,8 @@ class Disassembler:
                 architecture = declared
                 if bitness is None and architecture == "aarch64":
                     bitness = 64
+                elif bitness is None and architecture == "arm":
+                    bitness = 32
             elif looksLikeAArch64(file_content):
                 # A dump carries no container header to read the instruction set from, and
                 # decoding AArch64 as x86 produces a full report whose every block is wrong.
@@ -313,6 +321,11 @@ class Disassembler:
                 architecture = "aarch64"
                 if bitness is None:
                     bitness = 64
+            elif looksLikeArm(file_content):
+                LOGGER.warning("Buffer contains 32-bit ARM machine code; disassembling as arm rather than intel.")
+                architecture = "arm"
+                if bitness is None:
+                    bitness = 32
             else:
                 unsupported_instruction_set = detectUnsupportedInstructionSet(file_content)
         architecture = architecture or "intel"

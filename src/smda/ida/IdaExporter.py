@@ -1,7 +1,17 @@
 import datetime
 import logging
 
-from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
+from capstone import (
+    CS_ARCH_ARM,
+    CS_ARCH_ARM64,
+    CS_ARCH_X86,
+    CS_MODE_32,
+    CS_MODE_64,
+    CS_MODE_ARM,
+    CS_MODE_LITTLE_ENDIAN,
+    CS_MODE_THUMB,
+    Cs,
+)
 
 from smda.DisassemblyResult import DisassemblyResult
 
@@ -25,6 +35,12 @@ class IdaExporter:
     def _initCapstone(self):
         if self.architecture == "aarch64":
             self.capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        elif self.architecture == "arm":
+            self._arm_capstones = {
+                False: Cs(CS_ARCH_ARM, CS_MODE_ARM | CS_MODE_LITTLE_ENDIAN),
+                True: Cs(CS_ARCH_ARM, CS_MODE_THUMB | CS_MODE_LITTLE_ENDIAN),
+            }
+            self.capstone = self._arm_capstones[False]
         elif self.bitness == 64:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
         else:
@@ -58,7 +74,7 @@ class IdaExporter:
             out.append((i_address, i_size, i_mnemonic, i_op_str, sub_bytes))
             consumed += i_size
         while consumed < len(instruction_bytes):
-            chunk = 4 if architecture == "aarch64" else (len(instruction_bytes) - consumed)
+            chunk = 4 if architecture in ("aarch64", "arm") else (len(instruction_bytes) - consumed)
             chunk = min(chunk, len(instruction_bytes) - consumed)
             sub_bytes = bytes(instruction_bytes[consumed : consumed + chunk])
             bytes_hex = sub_bytes.hex()
@@ -104,6 +120,10 @@ class IdaExporter:
             if self.ida_interface.isExternalFunction(function_offset):
                 continue
             converted_function = []
+            if self.architecture == "arm":
+                thumb = bool(self.ida_interface.isThumb(function_offset))
+                self.capstone = self._arm_capstones[thumb]
+                self.disassembly.function_metadata[function_offset] = {"thumb": thumb}
             for block in self.ida_interface.getBlocks(function_offset):
                 converted_block = []
                 for instruction_offset in block:

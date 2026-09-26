@@ -34,3 +34,15 @@ class BackendInterface:
 
     def getApiOffsets(self):
         raise NotImplementedError
+
+    def isThumb(self, offset):
+        """Whether 32-bit ARM code at ``offset`` is T32: IDA keeps the instruction set in the
+        ``T`` segment register (0 for A32, 1 for T32)."""
+        try:
+            import idc
+        except ImportError:
+            return False
+        try:
+            return idc.get_sreg(offset, "T") == 1
+        except Exception:
+            return False

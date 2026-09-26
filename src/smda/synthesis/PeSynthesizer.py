@@ -37,6 +37,7 @@ DATA_DIR_BASE_PE32_PLUS = 112
 MACHINE_I386 = 0x014C
 MACHINE_AMD64 = 0x8664
 MACHINE_ARM64 = 0xAA64
+MACHINE_ARMNT = 0x01C4
 
 IMAGE_BASE_ALIGNMENT = 0x10000
 
@@ -71,6 +72,8 @@ class PeSynthesizer(BinarySynthesizer):
     def _getMachine(self):
         if self.report.architecture == "aarch64":
             return MACHINE_ARM64
+        if self.report.architecture == "arm":
+            return MACHINE_ARMNT
         return MACHINE_AMD64 if self._getBitness() == 64 else MACHINE_I386
 
     def _plantFunctions(self, regions, offsets, base):

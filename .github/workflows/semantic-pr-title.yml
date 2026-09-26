@@ -45,6 +45,7 @@ jobs:
             core
             intel
             aarch64
+            arm
             dalvik
             cil
             common

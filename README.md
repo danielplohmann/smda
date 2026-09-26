@@ -3,7 +3,7 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/danielplohmann/smda)
 
 SMDA is a minimalist recursive disassembler library that is optimized for accurate Control Flow Graph (CFG) recovery from memory dumps.
-It is based on [Capstone](http://www.capstone-engine.org/) and currently provides native backends for x86/x64 Intel and AArch64 (ARM64) machine code, experimental CIL (.NET) disassembly, and Dalvik bytecode from raw DEX files.
+It is based on [Capstone](http://www.capstone-engine.org/) and currently provides native backends for x86/x64 Intel, AArch64 (ARM64) and 32-bit ARM (A32 and Thumb/T32) machine code, experimental CIL (.NET) disassembly, and Dalvik bytecode from raw DEX files.
 As input, PE, ELF, and Mach-O files (including fat/universal binaries), arbitrary memory dumps (ideally with known base address), and raw DEX files can be processed.
 The output is a collection of functions, basic blocks, and instructions with their respective edges between blocks and functions (in/out).
 Optionally, references to the Windows API can be inferred by using the ApiScout method.
@@ -52,11 +52,11 @@ There is also a demo script:
 #### What an offset in a report means
 
 `SmdaFunction.offset`, the basic-block keys and `SmdaInstruction.offset` are **virtual addresses** on
-the native backends, `intel` and `aarch64`. On the two managed ones they are **file offsets**:
+the native backends, `intel`, `aarch64` and `arm`. On the two managed ones they are **file offsets**:
 
 | `report.architecture` | what an offset is |
 |---|---|
-| `intel`, `aarch64` | a virtual address - `base_addr` plus an RVA |
+| `intel`, `aarch64`, `arm` | a virtual address - `base_addr` plus an RVA |
 | `cil` | the offset of the method body in the assembly file |
 | `dalvik` | the offset of the code item in the DEX file |
 
@@ -80,8 +80,8 @@ bug fix.
 #### Raw buffers and the instruction set
 
 `disassembleFile` reads the instruction set from the container header. `disassembleBuffer` has no
-header to read, so it guesses: DEX and AArch64 are recognized from the bytes, and anything else is
-analysed as x86. A buffer holding ARM32, MIPS, PowerPC, SPARC, SH4, m68k, Xtensa, NIOS2 or OpenRISC
+header to read, so it guesses: DEX, AArch64 and little-endian 32-bit ARM are recognized from the bytes,
+and anything else is analysed as x86. A buffer holding big-endian ARM32, MIPS, PowerPC, SPARC, SH4, m68k, Xtensa, NIOS2 or OpenRISC
 code is now recognized as well, and comes back as `status == "error"` naming the instruction set
 rather than as a report whose every block is wrong.
 
@@ -91,6 +91,18 @@ encoding, aligned, close enough together to be one code region, and not sitting 
 recognized all ten bundled foreign samples. It is still a guess over bytes the caller supplies, and
 it is biased towards silence, so **pass `architecture=` whenever you know it** - an explicitly named
 architecture is never overruled.
+
+#### 32-bit ARM and Thumb
+
+An `arm` report mixes two instruction sets, and each function records the one it was decoded in as
+`function.architecture_metadata["thumb"]`. The set is chosen per function from the strongest evidence
+available: bit 0 of a symbol, pointer or `blx` target, ELF mapping symbols (`$a`/`$t`/`$d`), the
+container (Windows on ARM images are Thumb only) and, for a headerless buffer, which of the two
+instruction sets' return encodings the surrounding code is dense in. Function candidates come from
+the image's unwind index as well (`.ARM.exidx`, or `.pdata` on ARMNT), switch tables are followed for
+`tbb`/`tbh`, `ldr pc` and `add pc` dispatches, and conditional (IT-predicated) instructions keep
+their condition. `SmdaInstruction.getDetailed()` decodes in the function's own instruction set.
+Big-endian ARM has no backend.
 
 ### Batch mode
 
@@ -151,7 +163,7 @@ nesting 4.6% and SCC 3.2% of all calls, and disabling all three removes 17.8%. T
 a downstream consumer does not read.
 
 `RESOLVE_TAILCALLS` runs the other way round: it is **off** by default and buys recovery for time.
-Only the x86/x64 and AArch64 recursive disassemblers read it — the CIL and Dalvik backends run their
+Only the x86/x64, AArch64 and ARM recursive disassemblers read it — the CIL and Dalvik backends run their
 own analysis pipelines and ignore it, so enabling it costs and buys nothing there. Where it does
 apply, it promotes the target of a jump that leaves a function into a function of its own, in a pass
 after gap analysis, so what it is worth depends on how much a binary tail-calls. On `libstdc++.so.6`

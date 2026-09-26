@@ -8,10 +8,11 @@ SMDA is a minimalist recursive disassembler optimized for accurate Control Flow 
 
 - **intel** — x86 / x64
 - **aarch64** — ARM64
+- **arm** — 32-bit ARM (A32 and Thumb/T32, little-endian)
 - **cil** — .NET / CIL (via `dncil` / `dnfile`)
 - **dalvik** — Android DEX bytecode
 
-**Backend maturity:** `intel` is production-ready and rivals other disassemblers in accuracy. `aarch64` (ARM64) is a newer but consistent addition — on test data it matched IDA's output closely, so treat it as more mature than the rest. `cil` (.NET) and `dalvik` are recent additions that produce solid results but have **not yet been benchmarked against non-uniform / obfuscated code**, so expect caveats.
+**Backend maturity:** `intel` is production-ready and rivals other disassemblers in accuracy. `aarch64` (ARM64) is a newer but consistent addition — on test data it matched IDA's output closely, so treat it as more mature than the rest. `arm` (32-bit ARM/Thumb) is the newest native backend: it chooses the instruction set per function and records it in `architecture_metadata["thumb"]`. `cil` (.NET) and `dalvik` are recent additions that produce solid results but have **not yet been benchmarked against non-uniform / obfuscated code**, so expect caveats.
 
 Inputs are arbitrary memory dumps (ideally with a known base address), raw DEX files, or binary files parsed via LIEF.
 Output is a tree of functions → basic blocks → instructions with inter-block / inter-function edges. On top of the recovered CFG, SMDA performs a variety of optional recovery passes: symbol extraction and reconstruction (e.g. Windows API references via the ApiScout method, exports, imports, ELF/PE symbols, Rust/Delphi VMT parsing), and referenced string parsing. A function may only contain instructions that belong to a single function, and instructions may not overlap (IDA-style model).
@@ -100,7 +101,7 @@ Pre-commit hooks (ruff + standard hygiene checks) run on commit via `.pre-commit
 ## Repo Layout
 
 ```
-src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, ida/, synthesis/, utility/)
+src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, arm/, cil/, dalvik/, ida/, synthesis/, utility/)
 tests/           # pytest suite (test*.py)
 data/            # generated ApiScout / reference JSON data (do not hand-edit; see Gotchas)
 profiling/       # CPU/memory profiling toolkit (make profile-cpu / profile-mem / profile-flame)
@@ -166,7 +167,7 @@ Constraints an agent must respect to avoid breaking SMDA or its downstream consu
 
 ### Architecture code is isolated by the `ArchBackend` interface
 - `smda.common.RecursiveDisassembler` is the **architecture-agnostic** engine (traversal, candidate orchestration, gap/tailcall passes, label/symbol resolution). It delegates all arch-specific work to an injected `ArchBackend` (`smda.common.arch.ArchBackend`).
-- Per-arch backends live under `smda.intel`, `smda.aarch64`, `smda.cil`, `smda.dalvik`. Symbol/label logic lives under `smda.common.labelprovider`.
+- Per-arch backends live under `smda.intel`, `smda.aarch64`, `smda.arm`, `smda.cil`, `smda.dalvik`. Symbol/label logic lives under `smda.common.labelprovider`.
 - There is **no hard boundary** as of now: in practice, most changes land in the areas around `RecursiveDisassembler` (the engine), the arch backends, the label providers, or the `FunctionCandidateManager`. To add or change an architecture, implement/extend `ArchBackend` and keep arch-specific logic within its own module; share only through the common base class rather than baking arch behavior into the engine.
 
 ### Version strings stay in sync — and are load-bearing

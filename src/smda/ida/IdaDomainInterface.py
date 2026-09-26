@@ -75,9 +75,12 @@ class IdaDomainInterface(BackendInterface):
             raise ValueError("Unsupported Architecture")
         normalized = procname.lower()
         if normalized in ("arm", "arm64", "aarch64"):
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32 and normalized == "arm":
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if normalized in _INTEL_PROCESSORS or "x86" in normalized or normalized.startswith("metapc"):
             return "intel"
         raise ValueError(f"Unsupported Architecture: {procname}")
