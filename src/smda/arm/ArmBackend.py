@@ -48,6 +48,7 @@ _LITERAL_LOAD_SIZES = {
     "pld": 0,
     "pli": 0,
 }
+_VLDR_SIZES = {"h": 2, "s": 4, "d": 8}
 _WIDTH_QUALIFIERS = (".w", ".n")
 
 
@@ -265,6 +266,8 @@ class ArmBackend(ArchBackend):
             literal = _PC_LITERAL.search(i_op_str)
             if literal is not None and base in _LITERAL_LOAD_SIZES and "!" not in i_op_str:
                 size = _LITERAL_LOAD_SIZES[base]
+                if base == "vldr":
+                    size = _VLDR_SIZES.get(i_op_str[:1], size)
                 offset = int(literal.group(1), 0) if literal.group(1) else 0
                 pool = ((i_address + 4) & ~3 if thumb else i_address + 8) + offset
                 if size and d.disassembly.isAddrWithinMemoryImage(pool):
@@ -399,7 +402,9 @@ class ArmBackend(ArchBackend):
         if target in d.disassembly.functions:
             state.setSanelyEnding(True)
         elif target in d.fc_manager.getStrongFunctionStarts():
-            # an entry the image or a call instruction vouches for: a tailcall
+            # an entry the image or a call instruction vouches for: a tailcall, and a direct
+            # branch does not change the instruction set
+            d.fc_manager.noteMode(target, thumb)
             state.setSanelyEnding(True)
         else:
             slot = self._resolvePltSlot(d, target)

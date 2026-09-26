@@ -184,10 +184,21 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if authoritative or addr not in self._modes:
             self._modes[addr] = bool(thumb)
             candidate = self.candidates.get(addr)
-            if candidate is not None and candidate.is_thumb != bool(thumb) and not candidate.isFinished():
-                candidate.is_thumb = bool(thumb)
-                candidate.function_start_score = None
-                candidate._score = None
+            if candidate is not None and candidate.is_thumb != bool(thumb):
+                if not candidate.isFinished():
+                    candidate.is_thumb = bool(thumb)
+                    candidate.function_start_score = None
+                    candidate._score = None
+                elif candidate.analysis_aborted and addr not in self.disassembly.functions:
+                    # decoded in the instruction set a guess named and rejected there: the
+                    # statement now made about it earns it a second attempt
+                    candidate.is_thumb = bool(thumb)
+                    candidate.function_start_score = None
+                    candidate._score = None
+                    candidate.finished = False
+                    candidate.analysis_aborted = False
+                    candidate.abortion_reason = ""
+                    self.candidate_queue.add(candidate)
         return addr
 
     def _mappingKind(self, addr):

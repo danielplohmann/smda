@@ -130,6 +130,28 @@ class ArmIdiomRecoveryTest(unittest.TestCase):
                 self.assertEqual(original.pic_hash, relocated.pic_hash)
 
 
+class ArmLiteralAndGapTest(unittest.TestCase):
+    """``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000`` of:
+
+    caller          push {r4, lr}; bl literal_user; pop {r4, pc}
+    literal_user    push {r4, lr}; vldr s0, [pc, #4]; bl callee; pop {r4, pc}; .word 0x3f800000
+    callee          push {r4, lr}; mov r4, r0; add r0, r4, #1; pop {r4, pc}
+    (unreferenced)  bl <32 MB past the image>; bx lr
+    """
+
+    BUFFER = bytes.fromhex(
+        "10402de9000000eb1080bde810402de9010a9fed010000eb1080bde80000803f10402de90040a0e1010084e2"
+        "1080bde8ffff7feb1eff2fe1"
+    )
+
+    def test_a_single_precision_literal_is_one_word(self):
+        report = _disassemble(self.BUFFER)
+        self.assertEqual(
+            {function.offset: function.num_instructions for function in report.getFunctions()},
+            {0x10000: 3, 0x1000C: 4, 0x10020: 4},
+        )
+
+
 class ArmRoutingTest(unittest.TestCase):
     def test_a_headerless_arm_buffer_is_recognised(self):
         body = IDIOMS * 64
