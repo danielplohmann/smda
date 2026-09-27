@@ -75,8 +75,9 @@ past roughly six lines it belongs in the PR the entry links.
   function (symbol and pointer bit 0, `blx`, `$a`/`$t`/`$d` mapping symbols, the ARMNT container, and a return-encoding
   density probe for headerless buffers) and recorded as `architecture_metadata["thumb"]`; IT blocks keep their
   conditions. Candidates come from `.ARM.exidx`/ARMNT `.pdata`, BL/BLX scans, relocated data pointers and prologues;
-  `tbb`/`tbh`, `ldr pc` and `add pc` switch tables, PLT/IAT stubs, linker veneers and `mov lr, pc` calls are resolved,
-  and an `ArmInstructionEscaper` gives PicHash/OpcHash. ELF, PE (0x1C0/0x1C2/0x1C4) and Mach-O ARM inputs, raw
+  `tbb`/`tbh`, `ldr pc` and `add pc` switch tables, switches through libgcc's Thumb-1 `__gnu_thumb1_case_*` helpers,
+  PLT/IAT stubs, linker veneers (a Thumb `bx pc` veneer is one function, not one per instruction set) and
+  `mov lr, pc` calls are resolved, and an `ArmInstructionEscaper` gives PicHash/OpcHash. ELF, PE (0x1C0/0x1C2/0x1C4) and Mach-O ARM inputs, raw
   buffers, synthesis and the IDA exporter are routed to it. *Measured on this branch:* 14 stripped clang builds of
   lz4/brotli/zstd (A32, T32, mixed; -O0/-O2/-Os) recover 4,827 of 4,839 symbol-table functions (98.3-100% per
   build) for 19 extra starts (94.5-100% precision per build, mixed brotli lowest), none in the wrong instruction

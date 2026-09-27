@@ -23,6 +23,7 @@ from .definitions import (
     T16_NOPS,
     TABLE_BRANCH_BASES,
     TRAP_BASES,
+    a32_branch_target,
     is_a32_prologue,
     is_t32_prologue,
     split_mnemonic,
@@ -366,6 +367,16 @@ class ArmBackend(ArchBackend):
             return
         d.fc_manager.addCallCandidate(target, target_thumb, i_address)
         d._handleCallTarget(state, i_address, target)
+        if thumb and base == "bl":
+            cases = d.jumptable_analyzer.getCaseTargets(instruction, state, target)
+            if cases:
+                # a switch through a libgcc case helper: the helper returns into a case, and
+                # what follows the call is its table
+                for case in cases:
+                    state.addBlockToQueue(case)
+                    state.addCodeRef(i_address, case, by_jump=True)
+                state.setNextInstructionReachable(False)
+                state.setBlockEndingInstruction(True)
 
     def _analyzeCondBranch(self, d, instruction, state, target):
         i_address, i_size, _i_mnemonic, _i_op_str = instruction
@@ -429,7 +440,12 @@ class ArmBackend(ArchBackend):
         state.setBlockEndingInstruction(True)
 
     def _analyzeIndirectJump(self, d, instruction, state, conditional):
-        i_address, i_size, _i_mnemonic, _i_op_str = instruction
+        i_address, i_size, _i_mnemonic, i_op_str = instruction
+        if not conditional and i_op_str == "pc" and d.capstone.is_thumb:
+            target = self._thumbVeneerTarget(d, i_address)
+            if target is not None:
+                self._analyzeThumbVeneer(d, instruction, state, target)
+                return
         stub = resolveImportStub(d, state.start_addr, d.capstone.is_thumb)
         if stub is not None and stub[0] == i_address + i_size:
             state.setThunkCall(True)
@@ -479,11 +495,50 @@ class ArmBackend(ArchBackend):
         return stub is not None and stub[1] is None and self._isCodeAddress(d, stub[2] & ~1)
 
     def _resolvePltSlot(self, d, target):
-        binary_info = d.disassembly.binary_info
-        if not any(start <= target < end for start, end in self._getImportStubRanges(binary_info)):
-            return None
-        stub = resolveImportStub(d, target, d.fc_manager.isThumb(target))
+        ranges = self._getImportStubRanges(d.disassembly.binary_info)
+        thumb = d.fc_manager.isThumb(target)
+        if not any(start <= target < end for start, end in ranges):
+            # a Thumb caller reaches an A32 PLT entry through a veneer of its own
+            veneer, target = target, self._thumbVeneerTarget(d, target)
+            if target is None or not any(start <= target < end for start, end in ranges):
+                return None
+            d.fc_manager.noteMode(veneer, True)
+            thumb = False
+        stub = resolveImportStub(d, target, thumb)
         return stub[1] if stub is not None else None
+
+    @classmethod
+    def _thumbVeneerTarget(cls, d, address):
+        """Destination of the Thumb-to-A32 veneer at ``address``, or None.
+
+        The veneer is ``bx pc``, which continues in A32 at the next word (padded with a
+        ``nop`` when ``bx pc`` is not word aligned), followed by an A32 ``b``. The two halves
+        are one stub in two instruction sets, not two functions.
+        """
+        if cls._bytesAt(d, address, 2) != b"\x78\x47":
+            return None
+        arm_address = (address + 4) & ~3
+        word = cls._wordAt(d, arm_address)
+        if word is None or (word & 0xFF000000) != 0xEA000000:
+            return None
+        return a32_branch_target(word, arm_address)[0]
+
+    def _analyzeThumbVeneer(self, d, instruction, state, target):
+        i_address, i_size = instruction[0], instruction[1]
+        state.setThunkCall(True)
+        # the A32 half cannot be booked in a Thumb function; claiming it keeps the gap
+        # sweep from reporting it as a function of its own
+        arm_end = ((i_address + 4) & ~3) + A32_INSTRUCTION_SIZE
+        state.addDataRef(i_address, i_address + i_size, size=arm_end - i_address - i_size)
+        slot = self._resolvePltSlot(d, i_address)
+        if slot is not None and d._handleApiTarget(i_address, slot, slot, slot=slot):
+            state.addCodeRef(i_address, target, by_jump=True)
+        elif self._isCodeAddress(d, target):
+            d.fc_manager.addTailcallCandidate(target, False)
+            state.addCodeRef(i_address, target, by_jump=True)
+        state.setSanelyEnding(True)
+        state.setNextInstructionReachable(False)
+        state.setBlockEndingInstruction(True)
 
     # --- engine entry point ----------------------------------------------
     def analyzeInstruction(self, disassembler, instruction, state, previous_instruction, start_addr):

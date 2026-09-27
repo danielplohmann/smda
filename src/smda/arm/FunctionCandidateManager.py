@@ -189,9 +189,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     candidate.is_thumb = bool(thumb)
                     candidate.function_start_score = None
                     candidate._score = None
-                elif candidate.analysis_aborted and addr not in self.disassembly.functions:
-                    # decoded in the instruction set a guess named and rejected there: the
-                    # statement now made about it earns it a second attempt
+                elif addr not in self.disassembly.functions and (
+                    candidate.analysis_aborted or not self.disassembly.isCode(addr)
+                ):
+                    # decoded in the instruction set a guess named, and rejected there or left
+                    # without a block: the statement now made about it earns it a second attempt
                     candidate.is_thumb = bool(thumb)
                     candidate.function_start_score = None
                     candidate._score = None
@@ -286,10 +288,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return False
         if self.disassembly.isCode(target) or not self.disassembly.isAddrWithinMemoryImage(target):
             return False
+        if not thumb and self._followsThumbVeneerPrefix(target):
+            # the A32 half of a Thumb veneer is entered by its ``bx pc``; a literal naming it
+            # is far more often a constant that happens to match
+            return False
         self.noteMode(target, thumb)
         self.addCandidate(target, reference_source=source)
         self._candidate_offsets.add(target)
         return True
+
+    def _followsThumbVeneerPrefix(self, addr):
+        # ``bx pc`` continues at the next word: right before it, or before its padding
+        for prefix in (addr - 2, addr - 4):
+            data = self.disassembly.getBytes(prefix, 2)
+            if data and bytes(data) == b"\x78\x47" and (prefix + 4) & ~3 == addr:
+                return True
+        return False
 
     def addTailcallCandidate(self, addr, thumb=None):
         if thumb is not None:

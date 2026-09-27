@@ -152,6 +152,46 @@ class ArmLiteralAndGapTest(unittest.TestCase):
         )
 
 
+class ArmThumbOneIdiomTest(unittest.TestCase):
+    """``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000`` of:
+
+    entry       (A32) push {r4, lr}; blx dispatch; blx veneer; pop {r4, pc}
+    dispatch    (T32) push {r4, lr}; cmp r0, #4; bls 1f; default: movs r0, #0; b 9f
+                1: bl case_sqi; .byte (c0-table)/2 .. (c3-table)/2, (default-table)/2
+                c0..c3: movs r0, #N; b 9f; 9: pop {r4, pc}
+    case_sqi    (T32) libgcc's __gnu_thumb1_case_sqi: push {r1}; mov r1, lr; lsrs r1, r1, #1;
+                lsls r1, r1, #1; ldrsb r1, [r1, r0]; lsls r1, r1, #1; add lr, r1; pop {r1}; bx lr
+    veneer      (T32) bx pc; nop; (A32) b arm_target
+    arm_target  (A32) mov r0, #7; bx lr
+    """
+
+    BUFFER = bytes.fromhex(
+        "10402de9010000fa0e0000fa1080bde810b5042801d900200be000f00bf803050709fc000a2004e00b2002e0"
+        "0c2000e00d2010bd02b4714649084900095649008e4402bc70470000784700bfffffffea0700a0e31eff2fe1"
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report = _disassemble(cls.BUFFER)
+
+    def test_a_case_helper_call_dispatches_into_its_inline_table(self):
+        dispatch = self.report.getFunction(0x10010)
+        # every case, the negative entry naming the default included, and no table bytes
+        self.assertEqual(
+            sorted(block.offset for block in dispatch.getBlocks()),
+            [0x10010, 0x10016, 0x1001A, 0x10024, 0x10028, 0x1002C, 0x10030, 0x10032],
+        )
+        self.assertEqual(dispatch.blockrefs[0x1001A], [0x10016, 0x10024, 0x10028, 0x1002C, 0x10030])
+        self.assertIsNotNone(self.report.getFunction(0x10034))
+
+    def test_a_thumb_to_a32_veneer_is_one_function(self):
+        self.assertEqual(
+            {function.offset: function.architecture_metadata["thumb"] for function in self.report.getFunctions()},
+            {0x10000: False, 0x10010: True, 0x10034: True, 0x10048: True, 0x10050: False},
+        )
+        self.assertEqual(self.report.getFunction(0x10048).num_instructions, 1)
+
+
 class ArmRoutingTest(unittest.TestCase):
     def test_a_headerless_arm_buffer_is_recognised(self):
         body = IDIOMS * 64

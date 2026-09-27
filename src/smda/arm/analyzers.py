@@ -25,6 +25,18 @@ MAX_TABLE_ENTRIES = 4096
 MAX_STUB_INSTRUCTIONS = 6
 _STUB_BASES = frozenset({"add", "sub", "adr", "ldr", "movw", "movt", "mov", "nop", "bx"})
 _BOUND_BRANCHES = frozenset({"hi", "ls", "hs", "lo", "cs", "cc", "gt", "le", "ge", "lt"})
+#: libgcc's Thumb-1 switch helpers (``__gnu_thumb1_case_*`` in lib1funcs.S), by their
+#: instruction sequence, since a stripped image does not name them: the entry size, whether
+#: an entry is signed, and whether it is a word offset from the aligned table (``si``) rather
+#: than a halfword count from the return address
+_CASE_HELPERS = {
+    ("push", "mov", "lsr", "lsl", "ldrsb", "lsl", "add", "pop", "bx"): (1, True, False),
+    ("push", "mov", "lsr", "lsl", "ldrb", "lsl", "add", "pop", "bx"): (1, False, False),
+    ("push", "mov", "lsr", "lsl", "lsl", "ldrsh", "lsl", "add", "pop", "bx"): (2, True, False),
+    ("push", "mov", "lsr", "lsl", "lsl", "ldrh", "lsl", "add", "pop", "bx"): (2, False, False),
+    ("push", "mov", "add", "lsr", "lsl", "lsl", "ldr", "add", "mov", "pop", "mov"): (4, True, True),
+}
+_CASE_HELPER_LENGTH = max(len(sequence) for sequence in _CASE_HELPERS)
 
 
 class ArmTfIdf:
@@ -321,6 +333,58 @@ class ArmJumpTableAnalyzer:
     def __init__(self, disassembler):
         self.disassembler = disassembler
         self.disassembly = self.disassembler.disassembly
+        self._case_helpers = {}
+
+    def _caseHelper(self, address):
+        """The ``_CASE_HELPERS`` shape of the Thumb code at ``address``, or None."""
+        if address not in self._case_helpers:
+            shape = None
+            data = self.disassembly.getBytes(address, 2 * _CASE_HELPER_LENGTH)
+            if data:
+                sequence = []
+                for ins in self.disassembler.capstone.thumb.disasm(bytes(data), address, _CASE_HELPER_LENGTH):
+                    mnemonic = ins.mnemonic.split(".")[0]
+                    sequence.append(mnemonic[:-1] if mnemonic in ("lsls", "lsrs", "adds", "movs") else mnemonic)
+                    if tuple(sequence) in _CASE_HELPERS and ins.op_str.replace(" ", "") in ("lr", "pc,lr"):
+                        shape = _CASE_HELPERS[tuple(sequence)]
+                        break
+            self._case_helpers[address] = shape
+        return self._case_helpers[address]
+
+    def getCaseTargets(self, call_instruction, state, helper):
+        """Cases of a Thumb-1 switch dispatched by a call to a libgcc case helper.
+
+        The helper reads its table at the call's return address and returns into the case
+        it selects, so the call ends the block and the table behind it is data. The index
+        is r0; its bound comes from the ``cmp`` guarding the call, which usually reaches it
+        by a conditional branch rather than by falling through.
+        """
+        shape = self._caseHelper(helper)
+        if shape is None:
+            return []
+        entry_size, signed, word_offsets = shape
+        address = call_instruction[0]
+        origin = address + call_instruction[1]
+        context = _context(self.disassembler, state, address)
+        if not context:
+            context = self._branchContext(state, address)
+        bound = self._bound(context, "r0")
+        if word_offsets:
+            table = (origin + 3) & ~3
+            return self._readTable(
+                state, address, table, 4, bound, lambda entry: (table + entry) & 0xFFFFFFFE, signed=True
+            )
+        return self._readTable(
+            state, address, origin, entry_size, bound, lambda entry: origin + 2 * entry, signed=signed
+        )
+
+    def _branchContext(self, state, address):
+        # the straight-line context of a conditional branch to ``address``
+        for ins in state.instructions:
+            base, condition, _ = split_mnemonic(ins[2])
+            if base == "b" and condition in _BOUND_BRANCHES and ins[3] == f"#0x{address:x}":
+                return decode(self.disassembler, precedingInstructions(state, ins[0] + ins[1], CONTEXT_INSTRUCTIONS))
+        return []
 
     def getJumpTargets(self, jump_instruction, state):
         d = self.disassembler
