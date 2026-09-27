@@ -1,8 +1,8 @@
 """Recovery quality of the 32-bit ARM backend against the symbol tables of real builds.
 
 The fixtures are clang builds of the lz4 library with their symbol tables removed:
-``arm_lz4_mixed_O2`` interleaves A32 and T32 functions at -O2, ``arm_lz4_thumb_Os`` is
-T32 at -Os, and ``armnt_lz4_dll`` is a Windows on ARM (ARMNT, T32 only) DLL importing
+``arm_lz4_mixed_O2`` interleaves A32 and T32 functions at -O2, ``arm_lz4_mixed_Os``
+alternates A32 and T32 object files at -Os, ``arm_lz4_thumb_Os`` is T32 at -Os, and ``armnt_lz4_dll`` is a Windows on ARM (ARMNT, T32 only) DLL importing
 from kernel32. ``arm_ground_truth.json`` holds the function starts and instruction sets
 the unstripped builds and the linker map name.
 """
@@ -58,6 +58,11 @@ class ArmCorpusRecoveryTest(unittest.TestCase):
         name = "arm_lz4_mixed_O2_xored"
         report = Disassembler(_config()).disassembleUnmappedBuffer(_load(name))
         self._assertRecovery(name, report, recall=0.98, precision=0.98)
+
+    def test_address_taken_a32_functions_between_thumb_objects(self):
+        name = "arm_lz4_mixed_Os_xored"
+        report = Disassembler(_config()).disassembleUnmappedBuffer(_load(name))
+        self._assertRecovery(name, report, recall=1.0, precision=0.99)
 
     def test_stripped_thumb_shared_object(self):
         name = "arm_lz4_thumb_Os_xored"

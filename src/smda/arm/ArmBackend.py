@@ -286,7 +286,7 @@ class ArmBackend(ArchBackend):
             immediate = _IMMEDIATE.search(i_op_str)
             if immediate is not None:
                 value = ((i_address + 4) & ~3 if thumb else i_address + 8) + int(immediate.group(1), 0)
-                self._recordValue(d, state, i_address, value)
+                self._recordValue(d, state, i_address, value, pc_relative=True)
             return
         if base in ("movw", "movt", "mov"):
             destination, _, source = i_op_str.partition(",")
@@ -318,7 +318,7 @@ class ArmBackend(ArchBackend):
             immediate = int(operands[2][1:], 0)
             value = (i_address + 4) & ~3 if thumb else i_address + 8
             value = value + immediate if base == "add" else value - immediate
-            self._recordValue(d, state, i_address, value)
+            self._recordValue(d, state, i_address, value, pc_relative=True)
             pending.pop(operands[0], None)
             return
         if base != "add":
@@ -336,11 +336,11 @@ class ArmBackend(ArchBackend):
         if literal is None:
             return
         value = (literal + (i_address + 4 if thumb else i_address + 8)) & 0xFFFFFFFF
-        self._recordValue(d, state, i_address, value)
+        self._recordValue(d, state, i_address, value, pc_relative=True)
         pending[operands[0]] = value
 
     @staticmethod
-    def _recordValue(d, state, i_address, value, allow_code=True):
+    def _recordValue(d, state, i_address, value, allow_code=True, pc_relative=False):
         value &= 0xFFFFFFFF
         disassembly = d.disassembly
         if not disassembly.isAddrWithinMemoryImage(value & ~1):
@@ -349,7 +349,7 @@ class ArmBackend(ArchBackend):
         if not binary_info.isInCodeAreas(value & ~1):
             state.addDataRef(i_address, value)
         elif allow_code:
-            d.fc_manager.addPointerCandidate(value, i_address)
+            d.fc_manager.addPointerCandidate(value, i_address, pc_relative=pc_relative)
 
     # --- control flow -------------------------------------------------------
     def _analyzeCall(self, d, instruction, state, base, thumb):

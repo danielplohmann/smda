@@ -213,18 +213,20 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         return self._mappingKind(addr) == "d"
 
     def isThumb(self, addr):
+        mode = self._declaredThumb(addr)
+        return self._regionThumb(addr) if mode is None else mode
+
+    def _declaredThumb(self, addr):
         mode = self._modes.get(addr)
         if mode is not None:
             return mode
         kind = self._mappingKind(addr)
-        if kind == "t":
-            return True
-        if kind == "a":
-            return False
+        if kind in ("t", "a"):
+            return kind == "t"
         for start, end, thumb in self._section_modes:
             if start <= addr < end:
                 return thumb
-        return self._regionThumb(addr)
+        return None
 
     def _regionThumb(self, addr):
         if self._container_thumb is not None:
@@ -273,11 +275,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self._candidate_offsets.add(target)
         return target in self.candidates
 
-    def addPointerCandidate(self, value, source):
+    def addPointerCandidate(self, value, source, pc_relative=False):
         """A code address held in data or materialised by code (literal, ``movw``/``movt``)."""
         target = value & ~1
         thumb = bool(value & 1)
-        if not thumb and (target & 3 or self.isThumb(target)):
+        if not thumb and (target & 3 or (self._declaredThumb(target) if pc_relative else self.isThumb(target))):
             # an even address in Thumb code is not an entry: interworking needs bit 0 set
             return False
         if target in self.candidates or not self._passesCodeFilter(target):
@@ -604,7 +606,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if not in_exec(target) or not self._passesCodeFilter(target):
                     continue
                 thumb = bool(value & 1)
-                if not thumb and (target & 3 or self.isThumb(target)):
+                if not thumb and (
+                    target & 3 or (self._declaredThumb(target) if relocated is not None else self.isThumb(target))
+                ):
                     continue
                 if self._mappingKind(target) == "d":
                     continue
