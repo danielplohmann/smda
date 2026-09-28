@@ -139,6 +139,16 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(report)** Refuse an ELF or Mach-O synthesis whose section span exceeds `SmdaConfig.MAX_IMAGE_SIZE`, instead
+  of allocating it. `_resolveFunctionOffsets` bounded the span from the first function offset to the last
+  function's extent end, but `_syntheticSpan` also stretches the section up to the highest function offset. A
+  report whose function offset lies far above its own blocks therefore passed the check and asked `_nopFill` for
+  gigabytes. `fuzz_synthesis` found it on `master` after #371 merged, though synthesis has not changed since 4.8.0.
+  `_syntheticSpan` now raises `ValueError` over the limit, the same operational error the offset check raises. PE
+  synthesis, which does not use it, still builds such a report. *Reproduced in `tests/testSynthesis.py`:* a report
+  with one function 0x90000000 above its blocks raises `MemoryError` under a 4 GiB cap before this change, and
+  `ValueError` without allocating after it.
+
 - **(ci)** Classify a large pull request's file list correctly. Every path filter piped the list into
   `grep -q` under `set -o pipefail`; `grep -q` exits on its first match, `printf` then dies of SIGPIPE once the
   list outgrows the 64 KB pipe buffer, and the pipeline's exit status reads as "no match". A PR of about 1,500

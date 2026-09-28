@@ -101,7 +101,13 @@ class BinarySynthesizer:
         """
         va_start = align_down(min(offsets), start_alignment)
         extent_end = max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in offsets)
-        return va_start, align_up(max(extent_end, max(offsets) + 1), end_alignment)
+        va_end = align_up(max(extent_end, max(offsets) + 1), end_alignment)
+        if va_end - va_start > SmdaConfig.MAX_IMAGE_SIZE:
+            raise ValueError(
+                f"synthesized section span of 0x{va_end - va_start:x} bytes exceeds MAX_IMAGE_SIZE; "
+                "a function offset lies too far from the code it covers"
+            )
+        return va_start, va_end
 
     def _growSectionForOverflow(self, sections, section, block_end):
         """Extends an executable section's end towards block_end, stopping at the next section.
