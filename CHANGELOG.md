@@ -157,6 +157,13 @@ past roughly six lines it belongs in the PR the entry links.
   module re-exports it); its truncation warning no longer names IDA. No other change to Binary Ninja output: a
   segment's unbacked tail past `data_length` is still zero-filled and still counts toward the image size. (#371)
 
+- **(report)** Apply `SmdaConfig.MAX_IMAGE_SIZE` when a report is written, not only when it is read. Since #350
+  `fromDict()` refuses to inflate a stored buffer larger than the limit, but `toDict()` still packed any buffer, so
+  a dump over 100 MiB analysed with `STORE_BUFFER=True` wrote a buffer that its own reload dropped. `toDict()` now
+  leaves out a buffer over the limit and logs a warning, so a written report loads back with everything it
+  contains; the in-memory report keeps its buffer. No cost for buffers within the limit, which serialize as
+  before. Nothing in the MCRIT family reads a stored buffer (searched 2026-09-28). (#372)
+
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
   (#360)

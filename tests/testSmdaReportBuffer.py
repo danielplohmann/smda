@@ -1,6 +1,7 @@
 import base64
 import datetime
 import io
+import logging
 import struct
 import unittest
 import zipfile
@@ -99,6 +100,31 @@ class TestSmdaReportBufferPacking(unittest.TestCase):
             restored = SmdaReport.fromDict(report_dict)
 
         self.assertIsNone(restored.getBuffer())
+
+    def test_todict_drops_buffer_above_configured_limit(self):
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+        payload = b"A" * 33
+        report = _make_minimal_report(buffer=payload)
+
+        with (
+            mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", len(payload) - 1),
+            self.assertLogs("smda.common.SmdaReport", level="WARNING"),
+        ):
+            report_dict = report.toDict()
+
+        self.assertNotIn("buffer", report_dict)
+        self.assertEqual(report.getBuffer(), payload)
+
+    def test_todict_keeps_buffer_at_configured_limit(self):
+        payload = b"A" * 32
+        report = _make_minimal_report(buffer=payload)
+
+        with mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", len(payload)):
+            restored = SmdaReport.fromDict(report.toDict())
+
+        self.assertEqual(restored.getBuffer(), payload)
 
     def test_unpack_rejects_non_native_compression(self):
         packed = _pack_zip([("buffer", b"payload")], compression=zipfile.ZIP_STORED)
