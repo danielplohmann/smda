@@ -139,6 +139,12 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(cli)** Keep shellcode that starts with `MZ` in raw buffer mode. `analyze.py`'s container detection took any
+  loader's `isCompatible()` as its answer, and `PeFileLoader`'s checks only the two `MZ` bytes, so `MZ`-prefixed
+  shellcode went down the PE header path and could come back as an empty report. For PE, detection now also needs
+  the `PE\0\0` signature at `e_lfanew`; `isCompatible()` itself, which `FileLoader` dispatches on, is unchanged, and
+  `-p` still forces header parsing. No cost on well-formed PE files, which carry the signature (`cutwail` fixture).
+
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
   (#360)

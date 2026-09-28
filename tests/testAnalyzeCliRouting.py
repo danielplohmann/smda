@@ -7,7 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyze import shouldParseHeader
+from analyze import hasPeSignature, shouldParseHeader
 from smda.Disassembler import Disassembler
 from smda.utility.FileLoader import FileLoader
 
@@ -41,6 +41,18 @@ class AnalyzeCliRoutingTest(unittest.TestCase):
     def test_unrecognized_buffer_falls_back_to_raw_mode(self):
         self.assertFalse(shouldParseHeader(self.dump, _args()))
         self.assertFalse(shouldParseHeader(b"", _args()))
+
+    def test_mz_without_pe_signature_stays_raw(self):
+        shellcode = b"MZ" + bytes.fromhex("e800000000") + b"\x90" * 0x100
+        self.assertFalse(shouldParseHeader(shellcode, _args()))
+        self.assertFalse(shouldParseHeader(b"MZ\x90\x90", _args()))
+        far_lfanew = bytearray(self.pe[:0x200])
+        far_lfanew[0x3C:0x40] = (0x10000).to_bytes(4, "little")
+        self.assertFalse(shouldParseHeader(bytes(far_lfanew), _args()))
+
+    def test_pe_signature_is_read_at_e_lfanew(self):
+        self.assertTrue(hasPeSignature(self.pe))
+        self.assertTrue(shouldParseHeader(self.pe[:0x400], _args()))
 
     def test_explicit_base_addr_or_oep_forces_raw_mode(self):
         self.assertFalse(shouldParseHeader(self.pe, _args(base_addr="0x400000")))
