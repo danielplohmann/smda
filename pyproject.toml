@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smda"
-description = "A recursive disassmbler optimized for CFG recovery from memory dumps. Based on capstone."
+description = "A recursive disassembler optimized for CFG recovery from memory dumps. Based on capstone."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "BSD-2-Clause"
@@ -12,16 +12,32 @@ license-files = ["LICENSE"]
 authors = [
     {name = "Daniel Plohmann", email = "daniel.plohmann@mailbox.org"}
 ]
+keywords = [
+    "disassembler",
+    "capstone",
+    "control-flow-graph",
+    "reverse-engineering",
+    "malware-analysis",
+    "memory-dump",
+    "x86",
+    "aarch64",
+    "cil",
+    "dalvik",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Software Development :: Disassemblers",
+    "Typing :: Typed",
 ]
 dynamic = ["version"]
 dependencies = [
@@ -57,7 +73,7 @@ dev = [
     # floating, the two drift apart on astral's release schedule and a hook that
     # passes locally reddens CI on a rule the other version does not have yet.
     # Move both in one change.
-    "ruff==0.16.6",
+    "ruff==0.16.8",
     # pinned: ty is pre-1.0 and adds lint rules in patch releases, so an unpinned
     # floating version reddens unrelated PRs on someone else's release schedule
     # (0.0.69/0.0.70 added unsound-return-statement and unsound-yield; 0.0.74
