@@ -50,7 +50,7 @@ dependencies = [
     "dnfile",
     "lief>=0.16.0",
     "pycxxfilt>=0.1.0",
-    "purepdb>=0.3.0",
+    "purepdb>=0.6.0",
 ]
 
 [project.urls]
