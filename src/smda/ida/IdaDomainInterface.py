@@ -5,8 +5,7 @@ import os
 import re
 
 from smda.export.BackendInterface import BackendInterface
-
-from .segment_mapping import assembleSegmentBuffer
+from smda.export.segment_mapping import assembleSegmentBuffer
 
 _IDA_DOMAIN_MISSING = (
     "ida-domain is not available. Install it with 'pip install \"smda[ida]\"' and "
