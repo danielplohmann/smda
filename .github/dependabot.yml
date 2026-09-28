@@ -19,10 +19,6 @@ updates:
       # ty is pinned in pyproject.toml and ships new error rules in patch releases;
       # bump it in a dedicated change that addresses those rules, not via Dependabot.
       - dependency-name: "ty"
-      # the `ruff==` pin in pyproject.toml has to stay equal to the ruff-pre-commit rev in
-      # .pre-commit-config.yaml, and Dependabot can only ever move one of the two; both sides
-      # are bumped by hand, in one change.
-      - dependency-name: "ruff"
       # capstone<6 is a deliberate bound; its rationale is at the pin in pyproject.toml.
       # 6.x is a port, not a bump, so a weekly PR proposing it is noise.
       - dependency-name: "capstone"
@@ -47,8 +43,3 @@ updates:
       hooks:
         patterns:
           - "*"
-    ignore:
-      # the other half of the ruff pin above. Wildcarded because the pre-commit ecosystem's
-      # dependency naming is undocumented, so this matches the hook repository however
-      # Dependabot spells it.
-      - dependency-name: "*ruff-pre-commit*"
