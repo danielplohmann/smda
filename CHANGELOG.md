@@ -144,7 +144,7 @@ past roughly six lines it belongs in the PR the entry links.
   whose segments lie far apart raised `MemoryError` instead of exporting. Both frontends now share
   `assembleSegmentBuffer`, which moved from `smda.ida.segment_mapping` to `smda.export.segment_mapping` (the old
   module re-exports it); its truncation warning no longer names IDA. No other change to Binary Ninja output: a
-  segment's unbacked tail past `data_length` is still zero-filled and still counts toward the image size.
+  segment's unbacked tail past `data_length` is still zero-filled and still counts toward the image size. (#371)
 
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
