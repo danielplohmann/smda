@@ -55,11 +55,11 @@ jobs:
           printf 'changed files:\n%s\n' "$changed"
 
           dependencies=false
-          if printf '%s\n' "$changed" | grep -qE '^(pyproject\.toml|\.github/workflows/security\.yml)$'; then
+          if grep -qE '^(pyproject\.toml|\.github/workflows/security\.yml)$' <<<"$changed"; then
             dependencies=true
           fi
           workflows=false
-          if printf '%s\n' "$changed" | grep -qE '^\.github/'; then
+          if grep -qE '^\.github/' <<<"$changed"; then
             workflows=true
           fi
 

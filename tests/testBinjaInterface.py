@@ -1,3 +1,4 @@
+import logging
 import sys
 import types
 import unittest
@@ -5,6 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from smda.binja.BinjaInterface import BinjaInterface
+from smda.SmdaConfig import SmdaConfig
 
 
 class _FakeBlock:
@@ -151,6 +153,26 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.assertEqual(image[:0x1000], b"\x00" * 0x1000)
         self.assertEqual(image[0x1000:0x1009], bytes.fromhex("e805000000c331c0c3"))
         self.assertEqual(image[0x2000:], b"\x11" * 8)
+
+    def test_image_is_capped_at_max_image_size(self):
+        previous_disable = logging.root.manager.disable
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, previous_disable)
+        self.bv.segments.append(SimpleNamespace(start=0x7FF000000000, end=0x7FF000000010, data_length=0x10))
+        with (
+            mock.patch.object(SmdaConfig, "MAX_IMAGE_SIZE", 0x3000),
+            self.assertLogs("smda.export.segment_mapping", level="WARNING"),
+        ):
+            image = self.interface.getBinary()
+        self.assertEqual(len(image), 0x3000)
+        self.assertEqual(image[0x1000:0x1009], bytes.fromhex("e805000000c331c0c3"))
+        self.assertEqual(image[0x2000:0x2008], b"\x11" * 8)
+
+    def test_unbacked_segment_tail_is_zero_filled(self):
+        self.bv.segments[1].data_length = 4
+        image = self.interface.getBinary()
+        self.assertEqual(len(image), 0x2008)
+        self.assertEqual(image[0x2000:], b"\x11" * 4 + b"\x00" * 4)
 
     def test_empty_view(self):
         self.bv.segments = []

@@ -139,6 +139,24 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(ci)** Classify a large pull request's file list correctly. Every path filter piped the list into
+  `grep -q` under `set -o pipefail`; `grep -q` exits on its first match, `printf` then dies of SIGPIPE once the
+  list outgrows the 64 KB pipe buffer, and the pipeline's exit status reads as "no match". A PR of about 1,500
+  paths or more could therefore skip lint, tests, the audits, the benchmark and fuzzing and still show green, and
+  pass the changelog check without an entry. The filters now read the list from a here-string. On the same
+  change, `CHANGELOG.md` no longer counts as documentation for the lint/test gate (the release guard tests parse
+  it), `data/` counts as benchmark input (`run_perf_check.py` loads the ApiScout database from it), and the MCRIT
+  install matrix runs when `ci.yml` itself changes. *Measured by running each filter's step script locally against
+  a stubbed file list:* at 3,000 paths the old filters gave the wrong verdict in every workflow and the new ones
+  the right one; on small lists both agree except for the three filter changes above. (#370)
+
+- **(binja)** Cap the image `BinjaInterface.getBinary()` assembles at `SmdaConfig.MAX_IMAGE_SIZE`, as the IDA
+  frontends already do. It allocated from the lowest segment to the highest segment end in one piece, so a view
+  whose segments lie far apart raised `MemoryError` instead of exporting. Both frontends now share
+  `assembleSegmentBuffer`, which moved from `smda.ida.segment_mapping` to `smda.export.segment_mapping` (the old
+  module re-exports it); its truncation warning no longer names IDA. No other change to Binary Ninja output: a
+  segment's unbacked tail past `data_length` is still zero-filled and still counts toward the image size. (#371)
+
 - **(report)** Apply `SmdaConfig.MAX_IMAGE_SIZE` when a report is written, not only when it is read. Since #350
   `fromDict()` refuses to inflate a stored buffer larger than the limit, but `toDict()` still packed any buffer, so
   a dump over 100 MiB analysed with `STORE_BUFFER=True` wrote a buffer that its own reload dropped. `toDict()` now

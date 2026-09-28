@@ -13,6 +13,7 @@ on:
       - "!src/smda/binja/**"
       - "!src/smda/ida/**"
       - "tests/*_xored"
+      - "data/**"
       - "pyproject.toml"
       - ".github/workflows/perf_benchmark.yml"
       - ".github/workflows/data/**"
@@ -62,11 +63,12 @@ jobs:
           changed="$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
           printf 'changed files:\n%s\n' "$changed"
 
-          measured='^(src/smda/|tests/[^/]*_xored$|pyproject\.toml$|\.github/workflows/(perf_benchmark\.yml$|data/|scripts/))'
+          measured='^(src/smda/|data/|tests/[^/]*_xored$|pyproject\.toml$|\.github/workflows/(perf_benchmark\.yml$|data/|scripts/))'
           unexercised='^src/smda/(aarch64|binja|cil|dalvik|ida)/'
 
           malpedia=false
-          if printf '%s\n' "$changed" | grep -E "$measured" | grep -qvE "$unexercised"; then
+          measured_changed="$(grep -E "$measured" <<<"$changed" || true)"
+          if [ -n "$measured_changed" ] && grep -qvE "$unexercised" <<<"$measured_changed"; then
             malpedia=true
           fi
 
