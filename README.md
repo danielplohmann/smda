@@ -339,6 +339,37 @@ installations do not include it. Make sure `IDADIR` points at the IDA installati
 discovered automatically (see the
 [getting started guide](https://ida-domain.docs.hex-rays.com/getting_started/)).
 
+## Binary Ninja integration
+
+`smda.binja` is the Binary Ninja frontend for the same engine: functions, blocks, edges, symbols and
+imports come from Binary Ninja's analysis, and `smda.export.Exporter` re-decodes the instruction
+bytes with capstone, so the report has the same shape as an IDA export. Binary Ninja's Python API
+ships with the application rather than on PyPI, so there is no extra to install -- the module only
+needs `binaryninja` importable, headless or inside the GUI.
+
+Inside the Binary Ninja GUI (*Run Script...*):
+
+* `binja_export.py` exports the open view to a `.smda` file next to the file or database.
+* `binja_analyze.py` has SMDA independently recover functions from the loaded bytes, then adds the
+  missing function starts and names the functions still carrying a default `sub_` name, as one undo
+  step.
+
+For headless export (no GUI), the same `binja_export.py` takes a binary or a `.bndb` with a licensed
+Binary Ninja whose Python API is on the path (see
+[batch processing](https://docs.binary.ninja/dev/batch.html)):
+
+```
+PYTHONPATH="/Applications/Binary Ninja.app/Contents/Resources/python" python binja_export.py /path/to/sample -o sample.smda
+```
+
+With a `BinaryView` you already hold:
+
+```python
+from smda.binja.BinjaExporter import exportBinaryView
+
+report = exportBinaryView(bv)
+```
+
 ## Experimental: binary synthesis
 
 `SmdaReport.synthesizeBinary()` rebuilds a fictive PE, ELF or Mach-O file from a recovered CFG. The
