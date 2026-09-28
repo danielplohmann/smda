@@ -139,6 +139,17 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(ci)** Classify a large pull request's file list correctly. Every path filter piped the list into
+  `grep -q` under `set -o pipefail`; `grep -q` exits on its first match, `printf` then dies of SIGPIPE once the
+  list outgrows the 64 KB pipe buffer, and the pipeline's exit status reads as "no match". A PR of about 1,500
+  paths or more could therefore skip lint, tests, the audits, the benchmark and fuzzing and still show green, and
+  pass the changelog check without an entry. The filters now read the list from a here-string. On the same
+  change, `CHANGELOG.md` no longer counts as documentation for the lint/test gate (the release guard tests parse
+  it), `data/` counts as benchmark input (`run_perf_check.py` loads the ApiScout database from it), and the MCRIT
+  install matrix runs when `ci.yml` itself changes. *Measured by running each filter's step script locally against
+  a stubbed file list:* at 3,000 paths the old filters gave the wrong verdict in every workflow and the new ones
+  the right one; on small lists both agree except for the three filter changes above. (#370)
+
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
   (#360)
