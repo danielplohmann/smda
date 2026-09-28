@@ -148,7 +148,7 @@ past roughly six lines it belongs in the PR the entry links.
   it), `data/` counts as benchmark input (`run_perf_check.py` loads the ApiScout database from it), and the MCRIT
   install matrix runs when `ci.yml` itself changes. *Measured by running each filter's step script locally against
   a stubbed file list:* at 3,000 paths the old filters gave the wrong verdict in every workflow and the new ones
-  the right one; on small lists both agree except for the three filter changes above.
+  the right one; on small lists both agree except for the three filter changes above. (#370)
 
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
