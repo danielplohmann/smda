@@ -74,7 +74,7 @@ jobs:
           if [ "$EVENT_NAME" = "pull_request" ]; then
             changed="$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
             printf 'changed files:\n%s\n' "$changed"
-            if ! printf '%s\n' "$changed" | grep -qE "$shared"; then
+            if ! grep -qE "$shared" <<<"$changed"; then
               run_all=false
             fi
           fi
@@ -88,7 +88,7 @@ jobs:
             "fuzz_report:report:1048576:^src/smda/common/" \
             "fuzz_synthesis:synthesis:1048576:^src/smda/(synthesis|utility)/"; do
             IFS=':' read -r target profile max_len region <<<"$spec"
-            if [ "$run_all" != true ] && ! printf '%s\n' "$changed" | grep -qE "$region"; then
+            if [ "$run_all" != true ] && ! grep -qE "$region" <<<"$changed"; then
               echo "skipping ${target}: nothing changed under ${region}"
               continue
             fi
