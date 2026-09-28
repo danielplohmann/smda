@@ -434,6 +434,20 @@ class SynthesisRobustnessTestSuite(unittest.TestCase):
         self.assertNotIn(offsets[0], resolved)
         self.assertEqual(len(resolved), len(offsets) - 1)
 
+    def test_a_function_offset_far_above_its_blocks_is_refused_not_allocated(self):
+        code = bytes.fromhex("5589e5b8010000005dc3") + b"\x90" * 6 + bytes.fromhex("5589e531c05dc3")
+        report_dict = Disassembler(SmdaConfig()).disassembleBuffer(code, 0x1000, 32).toDict()
+        first = next(iter(report_dict["xcfg"]))
+        far = int(first) + 0x90000000
+        report_dict["xcfg"][far] = dict(copy.deepcopy(report_dict["xcfg"][first]), offset=far)
+        report_dict["code_sections"] = []
+        report = SmdaReport.fromDict(report_dict)
+
+        for output_format in (FORMAT_ELF, FORMAT_MACHO):
+            with self.subTest(output_format=output_format), self.assertRaisesRegex(ValueError, "MAX_IMAGE_SIZE"):
+                report.synthesizeBinary(output_format=output_format)
+        self.assertTrue(report.synthesizeBinary(output_format=FORMAT_PE))
+
     def test_scattered_import_slots_do_not_pad_the_whole_gap(self):
         from smda.synthesis.PeSynthesizer import MAX_IAT_PADDING_SPAN, PeSynthesizer
 
