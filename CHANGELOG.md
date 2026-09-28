@@ -75,6 +75,7 @@ past roughly six lines it belongs in the PR the entry links.
 - `smda.export`: the engine that turns a disassembler frontend's analysis into a report, and
   `Disassembler.setExporter(exporter)` to pin one, which `ida_domain_export.py` and downstream
   callers used to do through a private flag. (#360)
+
 - **(binja)** Export Binary Ninja's analysis as a SMDA report, the way `smda.ida` does for IDA.
   `smda.binja.BinjaInterface` reads functions, blocks, edges, symbols and imports from a
   `BinaryView` and feeds `smda.export.Exporter`, `smda.binja.BinjaExporter.exportBinaryView(bv)`
