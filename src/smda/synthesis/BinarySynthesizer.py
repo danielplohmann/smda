@@ -51,7 +51,10 @@ class BinarySynthesizer:
         if skipped:
             self._warn("synthesis: %d requested function offsets are not in the report", skipped)
         if resolved:
-            span = max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in resolved) - resolved[0]
+            # _syntheticSpan also covers max(offsets) + 1, which lies past every extent end when a
+            # function's blocks all sit below its own offset
+            extent_end = max(self._functionExtentEnd(self.report.xcfg[offset]) for offset in resolved)
+            span = max(extent_end, resolved[-1] + 1) - resolved[0]
             if span > SmdaConfig.MAX_IMAGE_SIZE:
                 raise ValueError(
                     f"synthesized image span of 0x{span:x} bytes exceeds MAX_IMAGE_SIZE; "

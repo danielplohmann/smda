@@ -167,6 +167,21 @@ class SmdaSynthesisTestSuite(unittest.TestCase):
                     report.synthesizeBinary(output_format=output_format)
                 assert "MAX_IMAGE_SIZE" in str(ctx.exception)
 
+    def testFarFunctionOffsetWithNearBlocksIsRejected(self):
+        report_dict = json.loads(json.dumps(self.pe_report.toDict()))
+        offsets = sorted(int(offset) for offset in report_dict["xcfg"])
+        far_offset = offsets[0] + SmdaConfig.MAX_IMAGE_SIZE * 4
+        moved = copy.deepcopy(report_dict["xcfg"][str(offsets[0])])
+        moved["offset"] = far_offset
+        report_dict["xcfg"][str(far_offset)] = moved
+
+        for output_format in (FORMAT_PE, FORMAT_ELF, FORMAT_MACHO):
+            with self.subTest(output_format=output_format):
+                report = SmdaReport.fromDict(copy.deepcopy(report_dict))
+                with self.assertRaises(ValueError) as ctx:
+                    report.synthesizeBinary(output_format=output_format)
+                assert "MAX_IMAGE_SIZE" in str(ctx.exception)
+
     def testAddressFieldsBeyond64BitsAreRejectedOnImport(self):
         for field in ("base_addr", "binary_size", "bitness", "identified_alignment", "oep"):
             for value in (-1, 2**64, 2**96):
