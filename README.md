@@ -84,8 +84,8 @@ The three entry points on `Disassembler`:
 
 `disassembleFile` reads the instruction set from the container header. `disassembleBuffer` has no
 header to read, so it guesses: a mapped image still begins with its own headers and those are read
-first, DEX and AArch64 are recognized from the bytes, and anything else is analyzed as x86. A buffer
-holding ARM32, MIPS, PowerPC, SPARC, SH4, m68k, Xtensa, NIOS2 or OpenRISC code is recognized as well
+first, DEX, AArch64 and little-endian 32-bit ARM are recognized from the bytes, and anything else is
+analyzed as x86. A buffer holding big-endian ARM32, MIPS, PowerPC, SPARC, SH4, m68k, Xtensa, NIOS2 or OpenRISC code is recognized as well
 and comes back as `status == "error"` naming the instruction set, rather than as a report whose
 every block is wrong.
 
@@ -94,6 +94,18 @@ encoding, aligned, close enough together to be one code region, and not sitting 
 60939 files of every type on one machine it named nothing that was not that architecture and
 recognized all ten bundled foreign samples, but it is biased towards silence, so **pass
 `architecture=` whenever you know it** -- an explicitly named architecture is never overruled.
+
+#### 32-bit ARM and Thumb
+
+An `arm` report mixes two instruction sets, and each function records the one it was decoded in as
+`function.architecture_metadata["thumb"]`. The set is chosen per function from the strongest evidence
+available: bit 0 of a symbol, pointer or `blx` target, ELF mapping symbols (`$a`/`$t`/`$d`), the
+container (Windows on ARM images are Thumb only) and, for a headerless buffer, which of the two
+instruction sets' return encodings the surrounding code is dense in. Function candidates come from
+the image's unwind index as well (`.ARM.exidx`, or `.pdata` on ARMNT), switch tables are followed for
+`tbb`/`tbh`, `ldr pc` and `add pc` dispatches, and conditional (IT-predicated) instructions keep
+their condition. `SmdaInstruction.getDetailed()` decodes in the function's own instruction set.
+Big-endian ARM has no backend.
 
 ### Command line
 
@@ -107,7 +119,7 @@ else is treated as a raw buffer. Passing `-a/--base_addr` or `-i/--oep` says the
 with a known mapping and selects raw buffer mode even for a file that starts with a container
 header, while `-p/--parse_header` forces mapping in turn. The flags worth knowing:
 `-a/--base_addr` (base address for a dump; also inferred from a `_0x<addr>` filename),
-`-b/--bitness`, `-r/--architecture` (`intel`, `aarch64`, `cil`, `dalvik`; default auto),
+`-b/--bitness`, `-r/--architecture` (`intel`, `aarch64`, `arm`, `cil`, `dalvik`; default auto),
 `-p/--parse_header`, `-d/--pdb_path`, `-i/--oep`, `-s/--strings`, `-v/--verbose`.
 
 ### Batch mode
@@ -163,6 +175,7 @@ Backends:
 | --- | --- | --- |
 | `intel` | x86 / x64 | production, benchmarked against other disassemblers |
 | `aarch64` | ARM64 | consistent; matches IDA closely on the test corpora |
+| `arm` | 32-bit ARM, A32 and Thumb/T32 | recent, measured against symbol tables of stripped clang builds |
 | `cil` | .NET / CIL, via `dnfile` / `dncil` | recent, solid on regular code, not benchmarked against obfuscated code |
 | `dalvik` | Android DEX bytecode | recent, same caveat |
 
@@ -170,14 +183,14 @@ Containers:
 
 | input | notes |
 | --- | --- |
-| PE | x86, x64, ARM64; a CLR header routes to the `cil` backend |
-| ELF | x86, x64, AArch64 |
-| Mach-O | x86, x64, ARM64, including fat/universal binaries |
+| PE | x86, x64, ARM64, ARMNT; a CLR header routes to the `cil` backend |
+| ELF | x86, x64, AArch64, 32-bit ARM (little-endian) |
+| Mach-O | x86, x64, ARM64, 32-bit ARM, including fat/universal binaries |
 | DEX | raw single-DEX files (`dex\n`) only |
 | IDR knowledge base | Delphi `IDR Knowledge Base File` dumps |
 | raw memory dump | any buffer, via `disassembleBuffer` with a base address |
 
-Other machine types (ARM32, MIPS, PowerPC, SPARC, RISC-V, SH, m68k, Xtensa, NIOS2, OpenRISC) are
+Other machine types (big-endian ARM32, MIPS, PowerPC, SPARC, RISC-V, SH, m68k, Xtensa, NIOS2, OpenRISC) are
 *recognized* by the loaders so report metadata stays truthful, but there is no backend for them.
 
 APK and multi-dex containers are not first-class Dalvik workflows, and ODEX (`dey\n`) / CDEX
@@ -210,7 +223,7 @@ The knobs most callers touch:
 | `API_COLLECTION_FILES` | `{}` | ApiScout WinAPI databases for API resolution in dumps |
 | `CALCULATE_HASHING` / `CALCULATE_NESTING` / `CALCULATE_SCC` | `True` | optional per-function metadata (PIC hashes, nesting depth, SCCs) |
 | `RESOLVE_TAILCALLS` | `False` | promote tailcall targets to functions of their own |
-| `HIGH_ACCURACY`, `USE_*`, `RESOLVE_*`, `RECORD_*`, `CANDIDATE_QUEUE` | see source | candidate discovery; read by the `intel` and `aarch64` backends only |
+| `HIGH_ACCURACY`, `USE_*`, `RESOLVE_*`, `RECORD_*`, `CANDIDATE_QUEUE` | see source | candidate discovery; read by the `intel`, `aarch64` and `arm` backends only |
 | `MAX_FUNCTION_CANDIDATES`, `MAX_CALL_REFS_PER_CANDIDATE`, `MAX_INDIRECT_CALLS_PER_BASIC_BLOCK` | see source | safeguards against pathological input; do not disable them by default |
 
 Windows API resolution via ApiScout needs profiles matching the target machine and works mainly on
@@ -226,7 +239,7 @@ machine), hashing accounts for 10.0%, nesting 4.6% and SCC 3.2% of all calls, an
 three removes 17.8%. Turn off whatever a downstream consumer does not read.
 
 `RESOLVE_TAILCALLS` runs the other way round: it is off by default and buys recovery for time. Only
-the `intel` and `aarch64` disassemblers read it -- `cil` and `dalvik` run their own pipelines and
+the `intel`, `aarch64` and `arm` disassemblers read it -- `cil` and `dalvik` run their own pipelines and
 ignore it. Where it applies, it promotes the target of a jump that leaves a function into a function
 of its own, in a pass after gap analysis, so what it is worth depends on how much a binary
 tail-calls. On `libstdc++.so.6` it adds 337 functions (8473 to 8810) for 40-130% more analysis time,
@@ -260,7 +273,7 @@ mnemonic/operands; `SmdaInstruction` exposes it with accessors.
 ### What an offset means
 
 `SmdaFunction.offset`, the basic-block keys and `SmdaInstruction.offset` are **virtual addresses**
-(`base_addr` plus an RVA) on `intel` and `aarch64`. On the two managed backends they are **file
+(`base_addr` plus an RVA) on `intel`, `aarch64` and `arm`. On the two managed backends they are **file
 offsets**: the method body in the assembly for `cil`, the code item in the DEX for `dalvik`.
 
 The two are not the same kind of number, so correlating a managed report with a native one -- or

@@ -75,9 +75,12 @@ class IdaDomainInterface(BackendInterface):
             raise ValueError("Unsupported Architecture")
         normalized = procname.lower()
         if normalized in ("arm", "arm64", "aarch64"):
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32 and normalized == "arm":
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if normalized in _INTEL_PROCESSORS or "x86" in normalized or normalized.startswith("metapc"):
             return "intel"
         raise ValueError(f"Unsupported Architecture: {procname}")
@@ -156,6 +159,15 @@ class IdaDomainInterface(BackendInterface):
                 api_name = f"{imported.module_name}!{api_name}"
             api_map[imported.address] = api_name
         return api_map
+
+    def isThumb(self, offset):
+        # IDA keeps the ARM instruction set in the ``T`` segment register (0 for A32, 1 for T32)
+        try:
+            import idc
+
+            return idc.get_sreg(offset, "T") == 1
+        except Exception:
+            return False
 
     def isExternalFunction(self, function_offset):
         segment = self.db.segments.get_at(function_offset)

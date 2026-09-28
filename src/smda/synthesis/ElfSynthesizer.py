@@ -37,10 +37,12 @@ ET_EXEC = 2
 EM_386 = 3
 EM_X86_64 = 62
 EM_AARCH64 = 183
+EM_ARM = 40
 
 R_386_JUMP_SLOT = 7
 R_X86_64_JUMP_SLOT = 7
 R_AARCH64_JUMP_SLOT = 1026
+R_ARM_JUMP_SLOT = 22
 
 STB_GLOBAL_STT_FUNC = 0x12
 
@@ -111,12 +113,16 @@ class ElfSynthesizer(BinarySynthesizer):
                 return machine
         if self.report.architecture == "aarch64":
             return EM_AARCH64
+        if self.report.architecture == "arm":
+            return EM_ARM
         return EM_X86_64 if self._getBitness() == 64 else EM_386
 
     def _getJumpSlotType(self):
         machine = self._getMachine()
         if machine == EM_AARCH64:
             return R_AARCH64_JUMP_SLOT
+        if machine == EM_ARM:
+            return R_ARM_JUMP_SLOT
         return R_X86_64_JUMP_SLOT if self._getBitness() == 64 else R_386_JUMP_SLOT
 
     def _collectSections(self):
