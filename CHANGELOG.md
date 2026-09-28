@@ -72,6 +72,22 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v4.9.0] - 2026-09-28
+
+### Added
+
 - `smda.export`: the engine that turns a disassembler frontend's analysis into a report, and
   `Disassembler.setExporter(exporter)` to pin one, which `ida_domain_export.py` and downstream
   callers used to do through a private flag. (#360)
@@ -133,10 +149,6 @@ past roughly six lines it belongs in the PR the entry links.
   only when its region of the tree was touched. `push`, `schedule` and `workflow_dispatch` still
   run every job. (#359)
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
 - **(report)** Refuse an ELF or Mach-O synthesis whose section span exceeds `SmdaConfig.MAX_IMAGE_SIZE`, instead
@@ -189,8 +201,6 @@ past roughly six lines it belongs in the PR the entry links.
 - **(report)** Bound stored report-buffer inflation by `SmdaConfig.MAX_IMAGE_SIZE` and reject non-native ZIP
   layouts before materializing their contents, so a crafted serialized report cannot trigger unbounded
   decompression while the remainder of a malformed report stays loadable. (#350)
-
-### Compatibility
 
 ## [v4.8.0] - 2026-09-14
 
@@ -839,6 +849,7 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.8.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.9.0...HEAD
+[v4.9.0]: https://github.com/danielplohmann/smda/compare/v4.8.0...v4.9.0
 [v4.8.0]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0
 [v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
