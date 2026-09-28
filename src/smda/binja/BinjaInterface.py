@@ -1,6 +1,7 @@
 import re
 
 from smda.export.BackendInterface import BackendInterface
+from smda.export.segment_mapping import assembleSegmentBuffer
 
 # sections Binary Ninja synthesizes for imports and compiler builtins; they hold no real code
 _SYNTHETIC_SECTIONS = {".extern", ".synthetic_builtins"}
@@ -117,16 +118,14 @@ class BinjaInterface(BackendInterface):
         return (segments[0].start // 0x10000) * 0x10000
 
     def getBinary(self):
-        """Image mapped at getBaseAddr(), with gaps between segments zero-filled."""
+        """Image mapped at getBaseAddr(), with gaps between segments zero-filled, capped at MAX_IMAGE_SIZE."""
         segments = self._dataSegments()
-        if not segments:
-            return b""
-        base = self.getBaseAddr()
-        image = bytearray(max(segment.end for segment in segments) - base)
-        for segment in segments:
-            data = self.bv.read(segment.start, min(segment.data_length, segment.end - segment.start))
-            image[segment.start - base : segment.start - base + len(data)] = data
-        return bytes(image)
+        backed = {segment.start: min(segment.data_length, segment.end - segment.start) for segment in segments}
+        return assembleSegmentBuffer(
+            self.getBaseAddr(),
+            [(segment.start, segment.end) for segment in segments],
+            lambda address, size: self.bv.read(address, min(size, backed.get(address, size))),
+        )
 
     def getApiMap(self):
         api_map = {}
