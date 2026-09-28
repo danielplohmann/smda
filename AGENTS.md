@@ -100,7 +100,7 @@ Pre-commit hooks (ruff + standard hygiene checks) run on commit via `.pre-commit
 ## Repo Layout
 
 ```
-src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, ida/, synthesis/, utility/)
+src/smda/        # the package (Disassembler, SmdaConfig, common/, intel/, aarch64/, cil/, dalvik/, export/, ida/, synthesis/, utility/)
 tests/           # pytest suite (test*.py)
 data/            # generated ApiScout / reference JSON data (do not hand-edit; see Gotchas)
 profiling/       # CPU/memory profiling toolkit (make profile-cpu / profile-mem / profile-flame)
@@ -152,7 +152,7 @@ Constraints an agent must respect to avoid breaking SMDA or its downstream consu
 - Pre-commit excludes these from trailing-whitespace / end-of-file-fixer and only `check-json`s `^data/.*\.json$`; the `check-added-large-files` hook caps at 85 MB. Do not commit new/larger generated data without adjusting the hook limit.
 
 ### IDA Pro interface compatibility
-- `smda.ida.IdaInterface` / `IdaExporter` convert IDA Pro's disassembly into an `SmdaReport`. Downstream projects that build on SMDA depend on this interface, so **do not change the `SmdaReport` format or version in ways that break it** without an explicit, deliberate decision.
+- `smda.export.Exporter` converts a disassembler frontend's analysis into an `SmdaReport` through a `BackendInterface`; `smda.ida.IdaInterface` is the IDA Pro frontend and `smda.ida.IdaExporter` binds the two. Downstream projects that build on SMDA depend on this interface, so **do not change the `SmdaReport` format or version in ways that break it** without an explicit, deliberate decision.
 - `IdaInterface` is version-branched on `IDA_SDK_VERSION` (`< 740`, `< 850`, ...). Changes here must stay compatible across those SDK generations.
 
 ### Resource safeguards are configurable — preserve them

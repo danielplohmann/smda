@@ -4,7 +4,8 @@ import importlib
 import os
 import re
 
-from .BackendInterface import BackendInterface
+from smda.export.BackendInterface import BackendInterface
+
 from .segment_mapping import assembleSegmentBuffer
 
 _IDA_DOMAIN_MISSING = (
