@@ -48,7 +48,7 @@ dependencies = [
     "capstone<6",
     "dncil",
     "dnfile",
-    "lief>=0.16.0",
+    "lief>=1.0.0",
     "pycxxfilt>=0.1.0",
     "purepdb>=0.3.0",
 ]
