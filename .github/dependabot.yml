@@ -5,6 +5,9 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # smda is a library: a lower bound is a requirement put on every downstream install, so it
+    # moves only when a range no longer admits the latest release, never just because one shipped
+    versioning-strategy: increase-if-necessary
     # a yanked or compromised release is usually caught within days, and nothing here needs a
     # dependency the day it ships; Dependabot exempts security updates from cooldown, so an
     # advisory still arrives immediately
@@ -39,6 +42,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # the same cooldown as pip, so the ruff-pre-commit rev and the `ruff==` pin in pyproject.toml
+    # become eligible on the same day and arrive as a pair rather than a week apart
+    cooldown:
+      default-days: 7
     groups:
       hooks:
         patterns:
