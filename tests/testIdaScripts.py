@@ -66,8 +66,7 @@ class TestIdaDomainExport(unittest.TestCase):
             self.assertEqual(json.loads(output_path.read_text(encoding="utf-8")), {"status": "ok"})
 
         self.assertIs(result, report)
-        self.assertIs(disassembler.disassembler, ida_exporter)
-        self.assertTrue(disassembler._explicit_backend)
+        disassembler.setExporter.assert_called_once_with(ida_exporter)
         self.assertEqual(disassembler_class.call_count, 1)
         ida_exporter_class.assert_called_once_with(disassembler_class.call_args.args[0], ida_interface=ida_interface)
         disassembler.disassembleBuffer.assert_called_once_with(b"\x90", 0x1000)
