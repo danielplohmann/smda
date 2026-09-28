@@ -1,11 +1,15 @@
 import sys
+import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analyze import shouldParseHeader
+from smda.Disassembler import Disassembler
+from smda.utility.FileLoader import FileLoader
 
 PE_FIXTURE = "cutwail_xored"
 ELF_FIXTURE = "mirai_x64_xored"
@@ -41,6 +45,18 @@ class AnalyzeCliRoutingTest(unittest.TestCase):
     def test_explicit_base_addr_or_oep_forces_raw_mode(self):
         self.assertFalse(shouldParseHeader(self.pe, _args(base_addr="0x400000")))
         self.assertFalse(shouldParseHeader(self.elf, _args(oep="0x1000")))
+
+    def test_header_path_reuses_the_buffer_the_cli_already_read(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "sample.bin"
+            path.write_bytes(self.elf)
+            with mock.patch.object(
+                FileLoader, "_loadRawFileContent", side_effect=AssertionError("file re-read")
+            ) as no_reread:
+                report = Disassembler().disassembleFile(str(path), buffer=self.elf)
+            self.assertEqual(no_reread.call_count, 0)
+        self.assertEqual(report.architecture, "intel")
+        self.assertTrue(report.getFunctions())
 
     def test_parse_header_flag_wins_over_explicit_mapping_args(self):
         self.assertTrue(shouldParseHeader(self.dump, _args(parse_header=True)))

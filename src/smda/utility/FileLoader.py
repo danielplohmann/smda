@@ -25,13 +25,13 @@ class FileLoader:
     _code_areas = None
     file_loaders = [PeFileLoader, ElfFileLoader, MachoFileLoader, DelphiKbFileLoader, DexFileLoader]
 
-    def __init__(self, file_path, load_file=True, map_file=False):
+    def __init__(self, file_path, load_file=True, map_file=False, buffer=None):
         self._file_path = file_path
         self._map_file = map_file
         self._code_areas = []
         self._has_backend = False
         if load_file:
-            self._loadFile()
+            self._loadFile(buffer)
 
     def _loadRawFileContent(self):
         binary = b""

@@ -208,7 +208,7 @@ if __name__ == "__main__":
         BUFFER = readFileContent(ARGS.input_path)
         if shouldParseHeader(BUFFER, ARGS):
             DISASSEMBLER = Disassembler(config, backend=ARGS.architecture)
-            SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path)
+            SMDA_REPORT = DISASSEMBLER.disassembleFile(ARGS.input_path, pdb_path=ARGS.pdb_path, buffer=BUFFER)
         else:
             treat_as_dalvik = ARGS.architecture in {"", "dalvik"} and DexFileLoader.isCompatible(BUFFER)
             if treat_as_dalvik:
