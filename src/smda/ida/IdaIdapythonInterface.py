@@ -3,7 +3,8 @@
 import contextlib
 import re
 
-from .BackendInterface import BackendInterface
+from smda.export.BackendInterface import BackendInterface
+
 from .segment_mapping import assembleSegmentBuffer
 
 try:
@@ -90,6 +91,15 @@ class _ModernIdapythonInterface(BackendInterface):
             self._import_module_name = ida_nalt.get_import_module_name(module_index)
             ida_nalt.enum_import_names(module_index, self._cbEnumImports)
         return self._api_map
+
+    def isThumb(self, offset):
+        # IDA keeps the ARM instruction set in the ``T`` segment register (0 for A32, 1 for T32)
+        try:
+            import idc
+
+            return idc.get_sreg(offset, "T") == 1
+        except Exception:
+            return False
 
     def isExternalFunction(self, function_offset):
         segment = ida_segment.getseg(function_offset)

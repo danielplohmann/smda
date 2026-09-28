@@ -4,7 +4,8 @@ import importlib
 import os
 import re
 
-from .BackendInterface import BackendInterface
+from smda.export.BackendInterface import BackendInterface
+
 from .segment_mapping import assembleSegmentBuffer
 
 _IDA_DOMAIN_MISSING = (
@@ -159,6 +160,15 @@ class IdaDomainInterface(BackendInterface):
                 api_name = f"{imported.module_name}!{api_name}"
             api_map[imported.address] = api_name
         return api_map
+
+    def isThumb(self, offset):
+        # IDA keeps the ARM instruction set in the ``T`` segment register (0 for A32, 1 for T32)
+        try:
+            import idc
+
+            return idc.get_sreg(offset, "T") == 1
+        except Exception:
+            return False
 
     def isExternalFunction(self, function_offset):
         segment = self.db.segments.get_at(function_offset)

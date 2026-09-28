@@ -2873,11 +2873,11 @@ class TestAArch64MovMacroSplit(unittest.TestCase):
     """IDA's MOV-macro feature collapses MOVZ+MOVK pairs (materialising a 32-bit
     constant in a Wn register across two 4-byte AArch64 instructions) into one
     logical "head" whose reported size is 8 bytes.  Without splitting,
-    IdaExporter._convertIdaInsToSmda would feed all 8 bytes to capstone and
+    Exporter._convertInstruction would feed all 8 bytes to capstone and
     take only ``cache[0]`` (the MOVZ), silently dropping the MOVK and producing
     an exported report that drifted from SMDA's own per-instruction AArch64 output.
 
-    These tests exercise IdaExporter._splitInstructionBytes directly (no IDA
+    These tests exercise Exporter._splitInstructionBytes directly (no IDA
     mocking required), verifying that an 8-byte macro head from IDA is correctly
     unpacked into two 4-byte sub-instructions.
     """
@@ -2885,12 +2885,12 @@ class TestAArch64MovMacroSplit(unittest.TestCase):
     def _split(self, offset, instruction_bytes):
         from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 
-        from smda.ida.IdaExporter import IdaExporter
+        from smda.export.Exporter import Exporter
 
         capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
         errors = {}
         return (
-            IdaExporter._splitInstructionBytes(capstone, offset, instruction_bytes, "aarch64", errors),
+            Exporter._splitInstructionBytes(capstone, offset, instruction_bytes, "aarch64", errors),
             errors,
         )
 
