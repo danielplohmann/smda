@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77,<84.1.0"]
+requires = ["setuptools>=84.0.0,<84.1.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -84,7 +84,7 @@ dev = [
     "twine",
 ]
 ida = [
-    "ida-domain>=0.5.0",
+    "ida-domain>=0.5.1",
 ]
 # Optional CPU/memory profiling toolkit (see profiling/). Kept out of `dev` so
 # the default install stays lean. Install with: pip install -e ".[dev,profile]"
