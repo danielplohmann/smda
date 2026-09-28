@@ -17,17 +17,23 @@ from smda.SmdaConfig import SmdaConfig
 from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.FileLoader import FileLoader
 
+BASE_ADDR_IN_FILENAME = re.compile("_0x(?P<base_addr>[0-9a-fA-F]{8,16})")
+
 
 def shouldParseHeader(buffer, args):
     """Decide whether a given input is treated as a container file or as a raw buffer.
 
-    An explicit base address or OEP means the caller is describing a dump's mapping, so
-    the bytes are treated as a raw buffer even when they start with a container header.
+    A base address or OEP means the caller is describing a dump's mapping, so the bytes are
+    treated as a raw buffer even when they start with a container header -- including the
+    address `parseBaseAddrFromArgs()` reads out of the file name, because a dumped image keeps
+    the header it was mapped from and parsing that again would map an already-mapped image.
     Otherwise any format loader recognizing the buffer selects the header-parsing path.
     """
     if args.parse_header:
         return True
     if args.base_addr or args.oep:
+        return False
+    if BASE_ADDR_IN_FILENAME.search(args.input_path):
         return False
     return any(loader.isCompatible(buffer) for loader in FileLoader.file_loaders)
 
@@ -38,7 +44,7 @@ def parseBaseAddrFromArgs(args, silent=False):
         logging.info("using provided base address: 0x%08x", parsed_base_addr)
         return parsed_base_addr
     # try to infer base addr from filename:
-    baddr_match = re.search(re.compile("_0x(?P<base_addr>[0-9a-fA-F]{8,16})"), args.input_path)
+    baddr_match = BASE_ADDR_IN_FILENAME.search(args.input_path)
     if baddr_match:
         parsed_base_addr = int(baddr_match.group("base_addr"), 16)
         logging.info("Parsed base address from file name: 0x%08x", parsed_base_addr)

@@ -98,9 +98,11 @@ past roughly six lines it belongs in the PR the entry links.
   the bytes -- the same list `FileLoader` dispatches on, not a second copy of the magic. An explicit
   `-a/--base_addr` or `-i/--oep` still selects raw buffer mode, because a dump of a mapped image
   begins with the header it was mapped from and the caller naming its base address is describing
-  exactly that; `-p` keeps working and overrides both. DEX is unchanged in output: routed through
-  `disassembleFile` the `blockblast` fixture yields the same 2,219 functions / 2,527 blocks / 9,824
-  instructions at base 0 as the buffer path. Detection needs the bytes, so `disassembleFile()` and
+  exactly that -- and so does a base address in the file name, the `_0x<addr>` form
+  `parseBaseAddrFromArgs()` already read, since a memory-dumped PE still starts with `MZ` and would
+  otherwise be mapped a second time; `-p` keeps working and overrides all of them. DEX is unchanged
+  in output: routed through `disassembleFile` the `blockblast` fixture yields the same 2,219
+  functions / 2,527 blocks / 9,824 instructions at base 0 as the buffer path. Detection needs the bytes, so `disassembleFile()` and
   `FileLoader` take an optional `buffer` the caller has already read and skip reading the file a
   second time; omitting it loads from the path as before.
 - **(build)** Correct the package summary and describe the package to PyPI properly. The summary

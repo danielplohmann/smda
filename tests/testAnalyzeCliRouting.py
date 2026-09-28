@@ -22,8 +22,8 @@ def _load_xored_fixture(fixture_name):
     return bytes(byte ^ (index % 256) for index, byte in enumerate(data))
 
 
-def _args(parse_header=False, base_addr="", oep=""):
-    return Namespace(parse_header=parse_header, base_addr=base_addr, oep=oep)
+def _args(parse_header=False, base_addr="", oep="", input_path="sample.bin"):
+    return Namespace(parse_header=parse_header, base_addr=base_addr, oep=oep, input_path=input_path)
 
 
 class AnalyzeCliRoutingTest(unittest.TestCase):
@@ -58,9 +58,18 @@ class AnalyzeCliRoutingTest(unittest.TestCase):
         self.assertEqual(report.architecture, "intel")
         self.assertTrue(report.getFunctions())
 
+    def test_base_addr_in_file_name_forces_raw_mode(self):
+        for name in ("x_0x00400000", "/dumps/x_0x00400000", "x_0x00007FF6A1B20000.bin"):
+            self.assertFalse(shouldParseHeader(self.pe, _args(input_path=name)))
+
+    def test_file_name_without_base_addr_still_auto_detects(self):
+        for name in ("sample.bin", "x_0x400000", "0x00400000"):
+            self.assertTrue(shouldParseHeader(self.pe, _args(input_path=name)))
+
     def test_parse_header_flag_wins_over_explicit_mapping_args(self):
         self.assertTrue(shouldParseHeader(self.dump, _args(parse_header=True)))
         self.assertTrue(shouldParseHeader(self.pe, _args(parse_header=True, base_addr="0x400000")))
+        self.assertTrue(shouldParseHeader(self.pe, _args(parse_header=True, input_path="x_0x00400000")))
 
 
 if __name__ == "__main__":
