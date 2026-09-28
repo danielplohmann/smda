@@ -4,8 +4,7 @@ import contextlib
 import re
 
 from smda.export.BackendInterface import BackendInterface
-
-from .segment_mapping import assembleSegmentBuffer
+from smda.export.segment_mapping import assembleSegmentBuffer
 
 try:
     import idaapi

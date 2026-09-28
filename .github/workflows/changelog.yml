@@ -55,12 +55,12 @@ jobs:
 
           changed="$(gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
 
-          if ! printf '%s\n' "${changed}" | grep -qE '^(src/smda/|pyproject.toml$)'; then
+          if ! grep -qE '^(src/smda/|pyproject.toml$)' <<<"${changed}"; then
             echo "No shipped files changed; entry not required."
             exit 0
           fi
 
-          if printf '%s\n' "${changed}" | grep -qx 'CHANGELOG.md'; then
+          if grep -qx 'CHANGELOG.md' <<<"${changed}"; then
             echo "CHANGELOG.md touched beside the change."
             exit 0
           fi

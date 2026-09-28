@@ -87,6 +87,24 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+- Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
+  report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
+  returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
+  Thumb bit, so labels land on the address the code starts at.
+
+## [v4.9.0] - 2026-09-28
+
+### Added
+
 - `smda.export`: the engine that turns a disassembler frontend's analysis into a report, and
   `Disassembler.setExporter(exporter)` to pin one, which `ida_domain_export.py` and downstream
   callers used to do through a private flag. (#360)
@@ -148,11 +166,48 @@ past roughly six lines it belongs in the PR the entry links.
   only when its region of the tree was touched. `push`, `schedule` and `workflow_dispatch` still
   run every job. (#359)
 
-### Deprecated
-
-### Removed
-
 ### Fixed
+
+- **(report)** Refuse an ELF or Mach-O synthesis whose section span exceeds `SmdaConfig.MAX_IMAGE_SIZE`, instead
+  of allocating it. `_resolveFunctionOffsets` bounded the span from the first function offset to the last
+  function's extent end, but `_syntheticSpan` also stretches the section up to the highest function offset. A
+  report whose function offset lies far above its own blocks therefore passed the check and asked `_nopFill` for
+  gigabytes. `fuzz_synthesis` found it on `master` after #371 merged, though synthesis has not changed since 4.8.0.
+  `_syntheticSpan` now raises `ValueError` over the limit, the same operational error the offset check raises. PE
+  synthesis, which does not use it, still builds such a report. *Reproduced in `tests/testSynthesis.py`:* a report
+  with one function 0x90000000 above its blocks raises `MemoryError` under a 4 GiB cap before this change, and
+  `ValueError` without allocating after it. (#376)
+
+- **(ci)** Classify a large pull request's file list correctly. Every path filter piped the list into
+  `grep -q` under `set -o pipefail`; `grep -q` exits on its first match, `printf` then dies of SIGPIPE once the
+  list outgrows the 64 KB pipe buffer, and the pipeline's exit status reads as "no match". A PR of about 1,500
+  paths or more could therefore skip lint, tests, the audits, the benchmark and fuzzing and still show green, and
+  pass the changelog check without an entry. The filters now read the list from a here-string. On the same
+  change, `CHANGELOG.md` no longer counts as documentation for the lint/test gate (the release guard tests parse
+  it), `data/` counts as benchmark input (`run_perf_check.py` loads the ApiScout database from it), and the MCRIT
+  install matrix runs when `ci.yml` itself changes. *Measured by running each filter's step script locally against
+  a stubbed file list:* at 3,000 paths the old filters gave the wrong verdict in every workflow and the new ones
+  the right one; on small lists both agree except for the three filter changes above. (#370)
+
+- **(binja)** Cap the image `BinjaInterface.getBinary()` assembles at `SmdaConfig.MAX_IMAGE_SIZE`, as the IDA
+  frontends already do. It allocated from the lowest segment to the highest segment end in one piece, so a view
+  whose segments lie far apart raised `MemoryError` instead of exporting. Both frontends now share
+  `assembleSegmentBuffer`, which moved from `smda.ida.segment_mapping` to `smda.export.segment_mapping` (the old
+  module re-exports it); its truncation warning no longer names IDA. No other change to Binary Ninja output: a
+  segment's unbacked tail past `data_length` is still zero-filled and still counts toward the image size. (#371)
+
+- **(report)** Apply `SmdaConfig.MAX_IMAGE_SIZE` when a report is written, not only when it is read. Since #350
+  `fromDict()` refuses to inflate a stored buffer larger than the limit, but `toDict()` still packed any buffer, so
+  a dump over 100 MiB analysed with `STORE_BUFFER=True` wrote a buffer that its own reload dropped. `toDict()` now
+  leaves out a buffer over the limit and logs a warning, so a written report loads back with everything it
+  contains; the in-memory report keeps its buffer. No cost for buffers within the limit, which serialize as
+  before. Nothing in the MCRIT family reads a stored buffer (searched 2026-09-28). (#372)
+
+- **(cli)** Keep shellcode that starts with `MZ` in raw buffer mode. `analyze.py`'s container detection took any
+  loader's `isCompatible()` as its answer, and `PeFileLoader`'s checks only the two `MZ` bytes, so `MZ`-prefixed
+  shellcode went down the PE header path and could come back as an empty report. For PE, detection now also needs
+  the `PE\0\0` signature at `e_lfanew`; `isCompatible()` itself, which `FileLoader` dispatches on, is unchanged, and
+  `-p` still forces header parsing. No cost on well-formed PE files, which carry the signature (`cutwail` fixture). (#373)
 
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
@@ -163,12 +218,6 @@ past roughly six lines it belongs in the PR the entry links.
 - **(report)** Bound stored report-buffer inflation by `SmdaConfig.MAX_IMAGE_SIZE` and reject non-native ZIP
   layouts before materializing their contents, so a crafted serialized report cannot trigger unbounded
   decompression while the remainder of a malformed report stays loadable. (#350)
-
-### Compatibility
-- Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
-  report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
-  returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
-  Thumb bit, so labels land on the address the code starts at.
 
 ## [v4.8.0] - 2026-09-14
 
@@ -817,6 +866,7 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.8.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.9.0...HEAD
+[v4.9.0]: https://github.com/danielplohmann/smda/compare/v4.8.0...v4.9.0
 [v4.8.0]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0
 [v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0

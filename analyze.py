@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import struct
 import sys
 import textwrap
 
@@ -16,6 +17,7 @@ from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.FileLoader import FileLoader
+from smda.utility.PeFileLoader import PeFileLoader
 
 BASE_ADDR_IN_FILENAME = re.compile("_0x(?P<base_addr>[0-9a-fA-F]{8,16})")
 
@@ -27,7 +29,8 @@ def shouldParseHeader(buffer, args):
     treated as a raw buffer even when they start with a container header -- including the
     address `parseBaseAddrFromArgs()` reads out of the file name, because a dumped image keeps
     the header it was mapped from and parsing that again would map an already-mapped image.
-    Otherwise any format loader recognizing the buffer selects the header-parsing path.
+    Otherwise any format loader recognizing the buffer selects the header-parsing path; for PE
+    that takes a ``PE\\0\\0`` signature at ``e_lfanew``, since ``MZ`` alone also starts shellcode.
     """
     if args.parse_header:
         return True
@@ -35,7 +38,17 @@ def shouldParseHeader(buffer, args):
         return False
     if BASE_ADDR_IN_FILENAME.search(args.input_path):
         return False
-    return any(loader.isCompatible(buffer) for loader in FileLoader.file_loaders)
+    return any(
+        loader.isCompatible(buffer) and (loader is not PeFileLoader or hasPeSignature(buffer))
+        for loader in FileLoader.file_loaders
+    )
+
+
+def hasPeSignature(buffer):
+    if len(buffer) < 0x40:
+        return False
+    pe_offset = struct.unpack_from("<I", buffer, 0x3C)[0]
+    return buffer[pe_offset : pe_offset + 4] == b"PE\x00\x00"
 
 
 def parseBaseAddrFromArgs(args, silent=False):
