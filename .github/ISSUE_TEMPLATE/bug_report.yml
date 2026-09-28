@@ -1,0 +1,85 @@
+name: Bug report
+description: SMDA crashed, hung, or recovered something it should not have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **A crash, hang or unbounded allocation reachable from a crafted input is a security
+        report**, not a bug report — use the [private advisory form](https://github.com/danielplohmann/smda/security/advisories/new)
+        instead. See [SECURITY.md](https://github.com/danielplohmann/smda/blob/master/SECURITY.md).
+
+        **Never attach a runnable malware sample.** Share inputs XOR-obfuscated
+        (`byte ^ (index % 256)`, the scheme the bundled fixtures use) or in a password-protected
+        archive.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: >
+        The smallest input and the exact call. `analyze.py`, a `Disassembler(...)` snippet or a
+        `fuzzing/replay.py` invocation are all fine.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback or output
+      render: text
+
+  - type: input
+    id: smda-version
+    attributes:
+      label: SMDA version
+      description: "`python -c \"import smda; print(smda.__version__)\"`"
+      placeholder: "4.8.0"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Python, OS, capstone and LIEF versions
+      description: >
+        `python -c "import sys, capstone, lief; print(sys.version, capstone.__version__, lief.__version__)"`.
+        Both native libraries are in scope for a crash, so their versions matter.
+      placeholder: "3.11.9 / Ubuntu 24.04 / capstone 5.0.6 / lief 0.16.6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Architecture backend
+      options:
+        - intel (x86/x64)
+        - aarch64 (ARM64)
+        - cil (.NET)
+        - dalvik (Android DEX)
+        - unknown / several
+    validations:
+      required: true
+
+  - type: dropdown
+    id: input-kind
+    attributes:
+      label: Input kind
+      options:
+        - mapped memory dump
+        - unmapped file (PE / ELF / Mach-O / DEX)
+        - raw buffer
+        - an SmdaReport being loaded
+        - IDA export (smda.ida)
+    validations:
+      required: true

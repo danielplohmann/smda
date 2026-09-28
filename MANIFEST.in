@@ -1,0 +1,4 @@
+# setuptools' default sdist rules pick up tests/ but not the extension-less xored corpora the
+# suite reads, so the sdist carried a test suite that could not run from it -- and those
+# corpora are live malware, which does not belong on an index. Clone the repo to run tests.
+prune tests

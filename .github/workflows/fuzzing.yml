@@ -2,6 +2,7 @@ name: Fuzzing
 
 on:
   push:
+    branches: [master]
     paths:
       - "fuzzing/**"
       - "src/smda/**"

@@ -239,10 +239,10 @@ class Disassembler:
         if not binary_info.md5:
             binary_info.md5 = hashlib.md5(data).hexdigest()
 
-    def disassembleFile(self, file_path: str, pdb_path: str = "") -> SmdaReport:
+    def disassembleFile(self, file_path: str, pdb_path: str = "", buffer: Optional[bytes] = None) -> SmdaReport:
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
-            loader = FileLoader(file_path, map_file=True)
+            loader = FileLoader(file_path, map_file=True, buffer=buffer)
             binary_info = self._populateBinaryInfo(loader, file_path)
             self.initDisassembler(binary_info.architecture)
             if self.disassembler:

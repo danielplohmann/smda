@@ -19,10 +19,15 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   changelog-entry:
     name: Changelog entry
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       # The job runs unconditionally and decides inside the step, rather than skipping on an
       # `if`: a skipped job reports as neither passing nor failing, and the reason a PR is
