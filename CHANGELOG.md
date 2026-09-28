@@ -144,7 +144,7 @@ past roughly six lines it belongs in the PR the entry links.
   a dump over 100 MiB analysed with `STORE_BUFFER=True` wrote a buffer that its own reload dropped. `toDict()` now
   leaves out a buffer over the limit and logs a warning, so a written report loads back with everything it
   contains; the in-memory report keeps its buffer. No cost for buffers within the limit, which serialize as
-  before. Nothing in the MCRIT family reads a stored buffer (searched 2026-09-28).
+  before. Nothing in the MCRIT family reads a stored buffer (searched 2026-09-28). (#372)
 
 - `Disassembler(backend="IDA").disassembleFile()` no longer fails on the unconditional
   `addPdbFile` call; the export engine now carries the same no-op the CIL and Dalvik backends have.
