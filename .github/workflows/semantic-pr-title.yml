@@ -58,6 +58,7 @@ jobs:
             labels
             report
             ida
+            binja
             cli
             profiling
             tests

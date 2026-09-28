@@ -312,9 +312,11 @@ the output moves, which is the reminder to do it.
 
 ## IDA Pro integration
 
-SMDA can turn an IDA-analyzed database into a SMDA report instead of running its own disassembly.
-Inside the IDA GUI it supports IDA Pro 8.4 and newer (`IDA_SDK_VERSION >= 840`); older SDK
-generations are rejected. On IDA 9.1+ it prefers the higher-level
+SMDA can turn an IDA-analyzed database into a SMDA report instead of running its own disassembly:
+`smda.export.Exporter` builds the report from whatever a disassembler frontend reports through
+`smda.export.BackendInterface`, and `smda.ida.IdaInterface` is the IDA frontend. Inside the IDA GUI
+it supports IDA Pro 8.4 and newer (`IDA_SDK_VERSION >= 840`); older SDK generations are rejected. On
+IDA 9.1+ it prefers the higher-level
 [IDA Domain API](https://ida-domain.docs.hex-rays.com/) when the optional package is installed, and
 otherwise falls back to IDAPython.
 
