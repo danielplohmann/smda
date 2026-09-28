@@ -610,7 +610,14 @@ class SmdaReport:
         # keeps serialized reports unchanged for the default file/memory analysis path.
         # `is not None` so an intentionally stored empty buffer survives as b"" (not dropped).
         if self.buffer is not None:
-            report_dict["buffer"] = self._packBuffer(self.buffer)
+            if len(self.buffer) > SmdaConfig.MAX_IMAGE_SIZE:
+                LOGGER.warning(
+                    "stored buffer of %d bytes exceeds MAX_IMAGE_SIZE (%d bytes) and is not serialized",
+                    len(self.buffer),
+                    SmdaConfig.MAX_IMAGE_SIZE,
+                )
+            else:
+                report_dict["buffer"] = self._packBuffer(self.buffer)
         return report_dict
 
     def toFile(self, output_filepath) -> None:

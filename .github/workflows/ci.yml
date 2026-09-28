@@ -52,14 +52,14 @@ jobs:
           printf 'changed files:\n%s\n' "$changed"
 
           docs='(\.md$|^docs/|^\.github/ISSUE_TEMPLATE/)'
-          packaging='^pyproject\.toml$'
+          packaging='^(pyproject\.toml|\.github/workflows/ci\.yml)$'
 
           code=false
-          if printf '%s\n' "$changed" | grep -qvE "$docs"; then
+          if grep -qvE "$docs" <<<"$changed" || grep -qx 'CHANGELOG.md' <<<"$changed"; then
             code=true
           fi
           packaging_touched=false
-          if printf '%s\n' "$changed" | grep -qE "$packaging"; then
+          if grep -qE "$packaging" <<<"$changed"; then
             packaging_touched=true
           fi
 
