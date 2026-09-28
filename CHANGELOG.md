@@ -147,7 +147,7 @@ past roughly six lines it belongs in the PR the entry links.
   `_syntheticSpan` now raises `ValueError` over the limit, the same operational error the offset check raises. PE
   synthesis, which does not use it, still builds such a report. *Reproduced in `tests/testSynthesis.py`:* a report
   with one function 0x90000000 above its blocks raises `MemoryError` under a 4 GiB cap before this change, and
-  `ValueError` without allocating after it.
+  `ValueError` without allocating after it. (#376)
 
 - **(ci)** Classify a large pull request's file list correctly. Every path filter piped the list into
   `grep -q` under `set -o pipefail`; `grep -q` exits on its first match, `printf` then dies of SIGPIPE once the
