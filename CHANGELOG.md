@@ -46,7 +46,7 @@ cost:
 
 **The prefix is the PR title's own scope token**, from the list `.github/workflows/semantic-pr-title.yml` already
 enforces: `core`, `intel`, `aarch64`, `dalvik`, `cil`, `common`, `utility`, `loaders`, `labels`, `report`, `ida`,
-`cli`, `profiling`, `tests`, `ci`, `build`, `docs`. A PR carrying no scope gets no prefix rather than an invented
+`binja`, `cli`, `profiling`, `tests`, `ci`, `build`, `docs`. A PR carrying no scope gets no prefix rather than an invented
 one, and a scope added to that workflow is available here the same day -- one vocabulary, enforced in one place.
 
 Four rules for the content:
@@ -75,7 +75,7 @@ past roughly six lines it belongs in the PR the entry links.
 - `smda.export`: the engine that turns a disassembler frontend's analysis into a report, and
   `Disassembler.setExporter(exporter)` to pin one, which `ida_domain_export.py` and downstream
   callers used to do through a private flag. (#360)
-- Export Binary Ninja's analysis as a SMDA report, the way `smda.ida` does for IDA.
+- **(binja)** Export Binary Ninja's analysis as a SMDA report, the way `smda.ida` does for IDA.
   `smda.binja.BinjaInterface` reads functions, blocks, edges, symbols and imports from a
   `BinaryView` and feeds `smda.export.Exporter`, `smda.binja.BinjaExporter.exportBinaryView(bv)`
   wraps the two, and the scripts match the IDA ones: `binja_export.py` exports the open view from
