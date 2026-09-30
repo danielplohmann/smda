@@ -16,6 +16,8 @@ class BinjaInterface(BackendInterface):
         super().__init__()
         self.bv = bv
         self._code_refs = None
+        self._block_addresses = {}
+        self._instruction_bytes = {}
 
     def getArchitecture(self):
         name = self.bv.arch.name
@@ -32,11 +34,23 @@ class BinjaInterface(BackendInterface):
         return sorted(function.start for function in self.bv.functions)
 
     def _instructionAddresses(self, block):
-        addresses = []
-        address = block.start
-        for _tokens, length in block:
-            addresses.append(address)
-            address += length
+        key = (block.start, block.end)
+        addresses = self._block_addresses.get(key)
+        if addresses is None:
+            addresses = []
+            arch = block.arch
+            data = self.bv.read(block.start, block.end - block.start)
+            address = block.start
+            while address < block.end:
+                length = self.bv.get_instruction_length(address, arch)
+                if not length:
+                    break
+                addresses.append(address)
+                instruction = data[address - block.start : address - block.start + length]
+                if len(instruction) == length:
+                    self._instruction_bytes[address] = instruction
+                address += length
+            self._block_addresses[key] = addresses
         return addresses
 
     def getBlocks(self, function_offset):
@@ -47,6 +61,9 @@ class BinjaInterface(BackendInterface):
         return sorted(block for block in blocks if block)
 
     def getInstructionBytes(self, offset):
+        cached = self._instruction_bytes.get(offset)
+        if cached is not None:
+            return cached
         length = self.bv.get_instruction_length(offset)
         return self.bv.read(offset, length) if length else b""
 
@@ -146,6 +163,8 @@ class BinjaInterface(BackendInterface):
         if self.bv.get_function_at(offset) is not None:
             return False
         self._code_refs = None
+        self._block_addresses.clear()
+        self._instruction_bytes.clear()
         return self.bv.create_user_function(offset) is not None
 
     def makeName(self, offset, name):
