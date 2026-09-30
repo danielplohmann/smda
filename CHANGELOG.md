@@ -74,6 +74,13 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Changed
 
+- **(binja)** Read instruction lengths from the core instead of rendering each block's disassembly text.
+  `_instructionAddresses` iterated each block, which builds text tokens for every instruction, and ran twice per
+  block; it now calls `get_instruction_length` with the block's architecture, decodes each block once and serves
+  `getInstructionBytes` from one read per block. *Measured on `2247ee6` with Binary Ninja 6.0 on a 2,329-function
+  x64 PE, not bundled:* `exportBinaryView` 7.7 s to 2.2 s, report identical. Cost: one bytes object per
+  instruction is held for the lifetime of the interface. (#378)
+
 ### Deprecated
 
 ### Removed
