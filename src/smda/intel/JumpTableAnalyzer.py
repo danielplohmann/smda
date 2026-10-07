@@ -36,6 +36,10 @@ _X64_BONUS_OFFSET_RE = re.compile(r"[a-z0-9]{2,3},.*0x[0-9a-f]+\]")
 _SCALED_INDEX_RE = re.compile(r"\[(?:[a-z][a-z0-9]{1,3} \+ )?(?P<index>[a-z][a-z0-9]{1,3})\*[1248]")
 _IMMEDIATE_RE = re.compile(r"^(?:0x[0-9a-f]+|[0-9]+)$")
 _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]{1,4}")
+# 32-bit writes zero the upper half, so these are the widths an `and` bounds the whole register at
+_FULL_WIDTH_REGISTER_RE = re.compile(r"^(?:r[a-z]{2}|e[a-z]{2}|r(?:[89]|1[0-5])d?)$")
+# the largest `and` mask read as a table bound; a real switch index is masked to a few bits
+_MAX_MASK_BOUND = 0xFFFF
 _INDEX_COPY_MNEMONICS = frozenset({"mov", "movzx", "movsx", "movsxd", "movabs"})
 # Mnemonics whose only register write is the operand they name first, so a backward walk can
 # carry a value past one that names a different register.
@@ -244,6 +248,26 @@ class JumpTableAnalyzer:
             return destination_key in cls._keyRegisters(source.strip())
         return False
 
+    @staticmethod
+    def _maskBound(destination, source):
+        """The table size an `and <index>, <imm>` guarantees, or 0 when it guarantees none.
+
+        Go 1.22+ dispatches type switches on bits of the type hash and bounds the index with
+        this mask alone, with no compare after it. Masking keeps the index within 0..mask, so
+        mask + 1 entries cover it. Only a 32- or 64-bit write bounds the whole register - `and
+        al, 7` leaves the bits above untouched - and only a low run of bits is how an index is
+        masked; anything else (`and eax, 0xffffffff` zero-extends, it bounds nothing useful)
+        is left to the compare scan.
+        """
+        destination = destination.strip()
+        source = source.strip()
+        if not _IMMEDIATE_RE.match(source) or not _FULL_WIDTH_REGISTER_RE.match(destination):
+            return 0
+        mask = int(source, 16 if source.startswith("0x") else 10)
+        if mask & (mask + 1) or mask > _MAX_MASK_BOUND:
+            return 0
+        return mask + 1
+
     def _findJumpTableSize(self, backtracked, index_keys=None):
         """Recover the switch bound, preferring a compare against the dispatch's own index.
 
@@ -286,6 +310,18 @@ class JumpTableAnalyzer:
             if mnemonic in _INDEX_COPY_MNEMONICS:
                 carried = self._dispatchIndexKeys(source) if destination_key in tracked else set()
                 tracked = self._invalidated(tracked, destination_key) | carried
+                continue
+            if mnemonic == "and" and destination_key in tracked:
+                mask_bound = self._maskBound(destination, source)
+                if mask_bound:
+                    return mask_bound
+            if mnemonic in _NAMED_DESTINATION_MNEMONICS and destination_key not in tracked:
+                # These write only the operand they name, so a write to a register the index
+                # is not held in leaves the index alone - the `lea` loading the table base
+                # sits right before the dispatch in Go's type switches, and dropping the tie
+                # there lost every bound behind it. Cells addressed through that register
+                # still name different storage from here on.
+                tracked = self._invalidated(tracked, destination_key)
                 continue
             if position == 0 and destination_key in tracked and self._addsTableBase(mnemonic, destination_key, source):
                 tracked = self._invalidated(tracked, destination_key) | {destination_key}

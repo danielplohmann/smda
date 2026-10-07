@@ -138,16 +138,15 @@ class IndexTiedBoundTestSuite(unittest.TestCase):
 
         self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x3E9)
 
-    def test_any_non_copy_write_drops_the_tie(self):
+    def test_a_write_beyond_the_named_operand_drops_the_tie(self):
         """Several x86 instructions write a register they do not name first - xchg and xadd
         write both operands, mul and div write rdx:rax, cpuid writes four - so a tie carried
-        across any non-copy write can bound a value the dispatch never indexes with. The tie
-        is dropped whole and the untied scan answers: here the nearer compare, not the tied
-        one further back."""
+        across one can bound a value the dispatch never indexes with. The tie is dropped whole
+        and the untied scan answers: here the nearer compare, not the tied one further back."""
         analyzer = _makeAnalyzer()
         backtracked = [
             (0x1000, 5, "cmp", "eax, 0x3e8"),
-            (0x1005, 3, "add", "edx, 8"),
+            (0x1005, 3, "xchg", "edx, eax"),
             (0x1008, 5, "cmp", "esi, 0x3"),
             (0x100D, 2, "mov", "ecx, eax"),
         ]
@@ -276,6 +275,115 @@ class IndexTiedBoundTestSuite(unittest.TestCase):
         backtracked = [(0x1000, 3, "cmp", "eax, ecx")]
 
         self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0)
+
+    def test_a_write_to_an_unrelated_register_keeps_the_tie(self):
+        """`add edx, 8` writes edx and nothing else, so the index held in rax is untouched and
+        the compare further back still bounds it."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 3, "add", "edx, 8"),
+            (0x1008, 5, "cmp", "esi, 0x3"),
+            (0x100D, 2, "mov", "ecx, eax"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 0x3E9)
+
+    def test_a_write_to_a_cells_base_register_still_invalidates_the_cell(self):
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 6, "cmp", "dword ptr [rbx], 0x3ff"),
+            (0x1006, 4, "lea", "rbx, [rbx + 8]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"dword ptr [rbx]"}), 0)
+
+
+class AndMaskBoundTestSuite(unittest.TestCase):
+    """Go 1.22+ compiles a type switch to a jump table indexed by bits of the runtime type
+    hash, bounded by an `and` mask with no compare after it (issue #363). Without the mask the
+    bound came back 0 and the scan ran through the tables Go stores right behind it."""
+
+    def test_the_mask_bounds_the_table_past_the_base_load(self):
+        # image/draw.DrawMask, go1.26.8 windows/amd64
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x140662A40, 7, "cmp", "r15d, 0x45c88a47"),
+            (0x140662ABF, 4, "mov", "r15d, dword ptr [r13 + 0x10]"),
+            (0x140662AC3, 4, "shr", "r15d, 0x17"),
+            (0x140662AC7, 4, "and", "r15d, 7"),
+            (0x140662ACB, 7, "lea", "rax, [rip + 0x414f6e]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"r15"}), 8)
+
+    def test_the_mask_is_found_past_a_test_and_the_base_load(self):
+        # database/sql.convertAssignRows, go1.26.8 linux/amd64
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x730676, 3, "mov", "edx, dword ptr [rax + 0x10]"),
+            (0x730679, 3, "and", "edx, 7"),
+            (0x73067C, 3, "test", "rax, rax"),
+            (0x73067F, 7, "lea", "r8, [rip + 0x729f7a]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rdx"}), 8)
+
+    def test_the_mask_is_found_past_unrelated_writes(self):
+        # go/types.(*Checker).stmt, go1.26.8 linux/amd64
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x9CC676, 4, "mov", "r12d, dword ptr [rdx + 0x10]"),
+            (0x9CC67A, 4, "shr", "r12d, 8"),
+            (0x9CC67E, 8, "mov", "rbx, qword ptr [rsp + 0x748]"),
+            (0x9CC686, 3, "mov", "r13, rbx"),
+            (0x9CC689, 4, "and", "r13, 0xffffffffffffffe3"),
+            (0x9CC68D, 8, "mov", "qword ptr [rsp + 0xb0], r13"),
+            (0x9CC695, 4, "and", "r12d, 0x3f"),
+            (0x9CC699, 3, "test", "rdx, rdx"),
+            (0x9CC69C, 7, "lea", "rax, [rip + 0x49e71d]"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"r12"}), 0x40)
+
+    def test_the_mask_is_followed_through_a_copy(self):
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 3, "and", "ecx, 0xf"),
+            (0x1003, 3, "mov", "eax, ecx"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x10)
+
+    def test_a_sub_dword_mask_does_not_bound_the_register(self):
+        """`and al, 7` leaves the bits above al as they were."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 2, "and", "al, 7"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x3E9)
+
+    def test_a_mask_that_is_not_a_low_bit_run_is_not_a_bound(self):
+        analyzer = _makeAnalyzer()
+        for mask in ("0xfffffff0", "0xffffffff", "0x30"):
+            with self.subTest(mask=mask):
+                backtracked = [
+                    (0x1000, 5, "cmp", "eax, 0x3e8"),
+                    (0x1005, 3, "and", f"eax, {mask}"),
+                ]
+
+                self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x3E9)
+
+    def test_a_mask_on_an_unrelated_register_is_not_a_bound(self):
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x9"),
+            (0x1005, 3, "and", "edx, 7"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0xA)
 
 
 class RelativeDispatchBaseAddTestSuite(unittest.TestCase):
@@ -548,6 +656,56 @@ class UnboundedTableOverreadTestSuite(unittest.TestCase):
         functions, _neighbour = self._functions(bound_is_tied=False)
 
         self.assertIn(BASE + TEXT_RVA, functions)
+
+
+class GoTypeSwitchTestSuite(unittest.TestCase):
+    """End to end for issue #363: Go stores its jump tables back to back, so every entry past
+    the end of one table is a code pointer into another function. A scan that does not stop at
+    the mask's bound reads those as case targets and the dispatcher absorbs the neighbour."""
+
+    CASES = 4
+
+    def _image(self):
+        body = bytearray()
+        dispatch_offset = len(body)
+        body += b"\x55\x48\x89\xe5"  # push rbp ; mov rbp, rsp
+        body += b"\x8b\x47\x10"  # mov eax, dword ptr [rdi + 0x10] -- the type hash
+        body += b"\x83\xe0" + bytes([self.CASES - 1])  # and eax, 3
+        lea_at = len(body)
+        body += b"\x48\x8d\x0d" + struct.pack("<i", 0)  # lea rcx, [rip + disp]
+        body += b"\xff\x24\xc1"  # jmp qword ptr [rcx + rax*8]
+        case_offsets = []
+        for index in range(self.CASES):
+            case_offsets.append(len(body))
+            body += b"\xb8" + struct.pack("<I", index) + b"\x5d\xc3"
+        while len(body) % 16:
+            body += b"\x90"
+        neighbour_offset = len(body)
+        # a separate function, reached only through its own table stored behind ours
+        body += b"\x55\x48\x89\xe5\x31\xc0\x5d\xc3"
+        struct.pack_into("<i", body, lea_at + 3, (TABLE_RVA - TEXT_RVA) - (lea_at + 7))
+
+        image = bytearray(IMAGE_SIZE)
+        image[TEXT_RVA : TEXT_RVA + len(body)] = body
+        tables = b"".join(struct.pack("<Q", BASE + TEXT_RVA + offset) for offset in case_offsets)
+        tables += b"".join(struct.pack("<Q", BASE + TEXT_RVA + neighbour_offset) for _ in range(8))
+        image[TABLE_RVA : TABLE_RVA + len(tables)] = tables
+        return bytes(image), BASE + TEXT_RVA + dispatch_offset, BASE + TEXT_RVA + neighbour_offset
+
+    def setUp(self):
+        image, self.dispatch, self.neighbour = self._image()
+        config = SmdaConfig()
+        config.CALCULATE_HASHING = False
+        config.TIMEOUT = 0
+        report = Disassembler(config=config).disassembleBuffer(image, BASE, bitness=64)
+        self.assertEqual(report.status, "ok")
+        self.functions = {function.offset: function for function in report.getFunctions()}
+
+    def test_the_dispatcher_keeps_to_its_own_cases(self):
+        self.assertIn(self.dispatch, self.functions)
+        dispatcher = self.functions[self.dispatch]
+        self.assertNotIn(self.neighbour, dispatcher.blocks)
+        self.assertEqual(dispatcher.num_blocks, 1 + self.CASES)
 
 
 if __name__ == "__main__":
