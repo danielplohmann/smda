@@ -104,8 +104,11 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
+        # The base tree runs in this same environment, so its dependencies are installed
+        # first; the editable install then replaces the package but keeps them.
         run: |
           python -m pip install --upgrade pip
+          python -m pip install ./base-repo
           python -m pip install -e ".[dev]"
 
       - name: Verify benchmark imports
@@ -179,8 +182,11 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
+        # The base tree runs in this same environment, so its dependencies are installed
+        # first; the editable install then replaces the package but keeps them.
         run: |
           python -m pip install --upgrade pip
+          python -m pip install ./base-repo
           python -m pip install -e ".[dev]"
 
       - name: Verify benchmark imports
