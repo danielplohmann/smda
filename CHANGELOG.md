@@ -71,6 +71,12 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(utility)** `extract_strings` reads Go and Rust strings at their real length, taken from the paired length
+  load (next argument register or stack word) or a (pointer, length) header, decoded as UTF-8. Adds `mode="rust"`;
+  with no mode the report's language picks it. *Measured on small builds, not bundled (go1.24.7 amd64/386,
+  rustc 1.97.0 x86-64):* Go amd64 164 -> 1772 strings; Go 386 1705 -> 1750, 27 dropped (pointer bytes, one
+  stray 2-byte read); Rust 1356 hits, 44 of them runs of concatenated literals -> 280 exact. Other languages
+  unchanged.
 
 ### Changed
 
