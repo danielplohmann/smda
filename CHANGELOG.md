@@ -80,6 +80,14 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index. Go indexes these tables
+  with bits of the type hash and checks the index with `and idx, mask` alone, but `_findJumpTableSize` dropped the
+  tie at the `lea` loading the table base and never read an `and` as a bound, so the 0xFF fallback scanned on
+  through the tables Go stores back to back and the dispatcher absorbed other functions. *Measured on the
+  issue's reproducer built with go1.24.7, windows and linux amd64:* `image/draw.DrawMask` drops from 1,065 / 549
+  blocks to the correct 238, failed candidates from 73 / 62 to 30 / 25, and no function keeps more than 10 blocks
+  outside its symbol. *Not bundled:* Go binaries are built, not committed. (#363)
+
 ### Security
 
 ### Compatibility
