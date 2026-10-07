@@ -1,8 +1,10 @@
 import datetime
+import types
 import unittest
 
 from smda.common.SmdaReport import SmdaReport
 from smda.DisassemblyStatistics import DisassemblyStatistics
+from smda.synthesis.BinarySynthesizer import BinarySynthesizer
 from smda.utility.StringExtractor import derefs, extract_strings, read_go_string, read_sized_string
 
 
@@ -308,6 +310,21 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
             report, [_StubInstruction(0x10, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40])]
         )
         self.assertEqual(list(extract_strings(function)), [("plainCString", 0x10, self.base + 0x40, "ascii")])
+
+
+class TestSynthesizedUtf8Strings(unittest.TestCase):
+    def test_utf8_string_keeps_its_bytes(self):
+        function = types.SimpleNamespace(
+            stringrefs=[
+                {"string": "größe", "ins_addr": 0x10, "data_addr": 0x40, "type": "utf8"},
+                {"string": "plain", "ins_addr": 0x20, "data_addr": 0x50, "type": "ascii"},
+            ]
+        )
+        report = types.SimpleNamespace(getFunctions=lambda: [function])
+        self.assertEqual(
+            list(BinarySynthesizer(report)._iterStringRefs()),
+            [(0x40, "größe".encode() + b"\x00"), (0x50, b"plain\x00")],
+        )
 
 
 if __name__ == "__main__":
