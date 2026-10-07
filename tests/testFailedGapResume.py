@@ -9,9 +9,13 @@ the failed candidate and the end of its gap was never offered as a candidate at 
 """
 
 import logging
+import struct
 import unittest
 
+from capstone import CS_ARCH_X86, CS_MODE_64, Cs
+
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as CommonFunctionCandidateManager
+from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.FunctionCandidateManager import _FAILED_GAP_RESUME_WINDOW, FunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
@@ -156,6 +160,99 @@ class FailedGapResumeTest(unittest.TestCase):
         # the backend does name a target, and it is past the next gap's start
         self.assertEqual(manager._failedGapResumeTarget(), 0x401250)
         self.assertEqual(manager.getNextGap(dont_skip=True), 0x401200)
+
+
+def bufferWithCode(address, code):
+    """A buffer of 0x00 bytes, so no int3 run, with `code` placed at `address`."""
+    buffer = bytearray(GAP_END + 0x2000 - BASE_ADDR)
+    offset = address - BASE_ADDR
+    buffer[offset : offset + len(code)] = code
+    return bytes(buffer)
+
+
+class PaddedExtentResumeTest(unittest.TestCase):
+    """GCC and Clang pad ELF functions with nops, not int3, so the int3 rule never resumes there.
+
+    A failed candidate whose own straight-line code runs into nops up to an aligned address
+    resumes at that address instead of abandoning the gap.
+    """
+
+    def _manager(self, code, extent_end):
+        manager = managerAt(0x401100, bufferWithCode(0x401100, code))
+        manager.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
+        manager.failed_gap_extent_end = extent_end
+        return manager
+
+    def testNopPaddingAfterTheFailedCodeNamesTheAlignedAddress(self):
+        # jmp short; nop dword ptr [rax + rax] x2 (8 + 6 bytes) up to 0x401110
+        code = b"\xeb\xfe" + b"\x0f\x1f\x84\x00\x00\x00\x00\x00" + b"\x66\x0f\x1f\x44\x00\x00"
+        manager = self._manager(code, 0x401102)
+        self.assertEqual(manager._failedGapResumeTarget(), 0x401110)
+
+    def testAnAlignedEndWithNoPaddingNamesNothing(self):
+        """A misdecoded candidate ends wherever its overlap with real code happens to end, and that
+        is as often 16-aligned inside a function as anywhere else; padding is what marks a boundary."""
+        manager = self._manager(b"\x90" * 0x20, 0x401110)
+        self.assertIsNone(manager._failedGapResumeTarget())
+
+    def testSomethingOtherThanPaddingBeforeTheAlignedAddressNamesNothing(self):
+        # jmp short; mov eax, 1 -- code, not padding, follows what the candidate decoded
+        manager = self._manager(b"\xeb\xfe\xb8\x01\x00\x00\x00", 0x401102)
+        self.assertIsNone(manager._failedGapResumeTarget())
+
+    def testTheExtentIsOnlyUsedForTheCandidateItWasRecordedFor(self):
+        code = b"\xeb\xfe" + b"\x0f\x1f\x84\x00\x00\x00\x00\x00" + b"\x66\x0f\x1f\x44\x00\x00"
+        manager = self._manager(code, 0x401102)
+        manager._failedGapResumeTarget()
+        self.assertIsNone(manager._failedGapResumeTarget())
+
+    def testAnExtentThatDoesNotAdvanceNamesNothing(self):
+        manager = self._manager(b"\x90" * 0x20, 0x401100)
+        self.assertIsNone(manager._failedGapResumeTarget())
+
+
+class PaddedExtentResumeEndToEndTest(unittest.TestCase):
+    """A tail fragment the gap scan offers first, then nop padding, then an unreferenced function."""
+
+    def _image(self):
+        body = bytearray()
+        body += b"\x55\x48\x89\xe5\xe8\x00\x00\x00\x00\x5d\xc3"  # main: call helper
+        call_at = 4
+        while len(body) % 16:
+            body += b"\x90"
+        helper = len(body)
+        body += b"\x55\x48\x89\xe5\x5d\xc3"
+        while len(body) % 16:
+            body += b"\x90"
+        # test eax, eax ; je +2 ; jmp short into main ; jmp short into main -- a fragment that
+        # ends in jumps to no function, so it fails as a gap candidate
+        fragment = len(body)
+        body += b"\x85\xc0\x74\x02"
+        body += b"\xeb" + struct.pack("<b", 9 - (fragment + 6))
+        body += b"\xeb" + struct.pack("<b", 9 - (fragment + 8))
+        body += b"\x0f\x1f\x84\x00\x00\x00\x00\x00"  # padding to the next 16 bytes
+        unreferenced = len(body)
+        body += b"\xb8\x01\x00\x00\x00\xc3"  # mov eax, 1 ; ret -- nothing calls it
+        struct.pack_into("<i", body, call_at + 1, helper - (call_at + 5))
+        image = bytearray(0x3000)
+        image[0x1000 : 0x1000 + len(body)] = body
+        return bytes(image), BASE_ADDR + 0x1000 + fragment, BASE_ADDR + 0x1000 + unreferenced
+
+    def setUp(self):
+        image, self.fragment, self.unreferenced = self._image()
+        self.assertEqual(self.unreferenced % 16, 0)
+        config = SmdaConfig()
+        config.CALCULATE_HASHING = False
+        config.TIMEOUT = 0
+        report = Disassembler(config=config).disassembleBuffer(image, BASE_ADDR, bitness=64)
+        self.assertEqual(report.status, "ok")
+        self.functions = {function.offset for function in report.getFunctions()}
+
+    def testTheFunctionAfterTheFailedFragmentIsRecovered(self):
+        self.assertIn(self.unreferenced, self.functions)
+
+    def testTheFragmentItselfIsNotAFunction(self):
+        self.assertNotIn(self.fragment, self.functions)
 
 
 if __name__ == "__main__":

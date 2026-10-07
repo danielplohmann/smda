@@ -219,6 +219,38 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if start < 0:
             # a slice from a negative offset reads the tail of the image instead of failing
             return None
+        targets = [self._paddedExtentEnd(), self._int3ResumeTarget(start)]
+        targets = [target for target in targets if target is not None]
+        return min(targets) if targets else None
+
+    def _paddedExtentEnd(self):
+        """The aligned address the failed candidate's own code runs up to, through nop padding.
+
+        GCC and Clang pad ELF functions with nops rather than int3, so the int3 rule below never
+        fires there and a failed candidate abandoned the rest of its gap - on a static binary,
+        often a whole run of functions behind a tail fragment that the scan offered first. When
+        the code the candidate decoded straight from its start ends in nothing but padding up to
+        an aligned address, that address is where the next function starts.
+        """
+        end = self.failed_gap_extent_end
+        self.failed_gap_extent_end = None
+        if end is None or end <= self.gap_pointer:
+            return None
+        offset = end - self.disassembly.binary_info.base_addr
+        padding = self.disassembly.getRawBytes(offset, _ENTRY_ALIGNMENT) or b""
+        cursor = 0
+        while (end + cursor) % _ENTRY_ALIGNMENT:
+            if cursor < len(padding) and padding[cursor] == _INT3[0]:
+                cursor += 1
+                continue
+            decoded = next(self.capstone.disasm_lite(padding[cursor:], end + cursor, 1), None)
+            if decoded is None or decoded[2] != "nop":
+                return None
+            cursor += decoded[1]
+        # no padding at all is just as likely the middle of whatever the candidate overlapped
+        return end + cursor if cursor else None
+
+    def _int3ResumeTarget(self, start):
         window = self.disassembly.getRawBytes(start, _FAILED_GAP_RESUME_WINDOW) or b""
         run_start = window.find(_INT3)
         if run_start < 0:

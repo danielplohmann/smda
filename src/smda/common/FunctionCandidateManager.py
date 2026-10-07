@@ -72,8 +72,11 @@ class FunctionCandidateManager:
         self._eh_frame_fde_starts = []
         self._declared_landing_pads = None
         self._plt_ranges = None
+        #: Where the straight-line code of the last gap candidate that failed ends, if it did.
+        self.failed_gap_extent_end = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
+        self.failed_gap_extent_end = None
         self._pdata_ranges = []
         self._pdata_range_starts = None
         self._pdata_range_reach = []
