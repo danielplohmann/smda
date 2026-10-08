@@ -1,10 +1,13 @@
 import re
 import string
 import struct
-from typing import Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
+
+from capstone import CS_AC_WRITE, CS_GRP_BRANCH_RELATIVE, CS_GRP_CALL, CS_GRP_INT, CS_GRP_IRET, CS_GRP_JUMP, CS_GRP_RET
 
 from smda.common.SmdaFunction import SmdaFunction
 from smda.common.SmdaReport import SmdaReport
+from smda.synthesis import sniffBinaryFormat
 
 _IS_PRINTABLE_CHAR_CODE = tuple(chr(char) in string.printable for char in range(256))
 _ASCII_RE = re.compile(b"[\x09-\x0d\x20-\x7e]*")
@@ -17,24 +20,24 @@ _MEMORY_SLOT_RE = re.compile(r"\[(?P<base>[a-z][a-z0-9]*)(?:\s*(?P<sign>[+-])\s*
 # how far around a pointer load the matching length load is looked for
 _LENGTH_SCAN_WINDOW = 6
 _SCAN_STOP_MNEMONICS = frozenset(("call", "ret", "bl", "blr", "b", "br", "cbz", "cbnz", "tbz", "tbnz"))
-_REGISTER_ALIASES = {
+_FULL_WIDTH_REGISTER_ALIASES = {
     **{f"e{name}": f"r{name}" for name in ("ax", "bx", "cx", "dx", "si", "di", "bp", "sp")},
     **{f"r{number}d": f"r{number}" for number in range(8, 16)},
     **{f"w{number}": f"x{number}" for number in range(31)},
 }
-# the register a string's length travels in, keyed by the one its pointer travels in; the union of
-# Go's internal ABI (rax, rbx, rcx, rdi, rsi, r8, ...) and the SysV and Win64 C ABIs Rust uses
-_LENGTH_REGISTERS = {
-    "rax": ("rbx",),
-    "rbx": ("rcx",),
-    "rcx": ("rdi", "rdx", "r8"),
-    "rdi": ("rsi",),
-    "rsi": ("r8", "rdx"),
-    "rdx": ("rcx", "r8"),
-    "r8": ("r9",),
-    "r9": ("r10",),
-    "r10": ("r11",),
+_REGISTER_ALIASES = {
+    **{
+        alias: f"r{name}"
+        for name in ("ax", "bx", "cx", "dx")
+        for alias in (name, f"e{name}", f"{name[0]}l", f"{name[0]}h")
+    },
+    **{alias: f"r{name}" for name in ("si", "di", "bp", "sp") for alias in (name, f"e{name}", f"{name}l")},
+    **{f"r{number}{suffix}": f"r{number}" for number in range(8, 16) for suffix in ("b", "w", "d")},
+    **{f"w{number}": f"x{number}" for number in range(31)},
 }
+_GO_ARGUMENT_REGISTERS = ("rax", "rbx", "rcx", "rdi", "rsi", "r8", "r9", "r10", "r11")
+_SYSV_ARGUMENT_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
+_WIN64_ARGUMENT_REGISTERS = ("rcx", "rdx", "r8", "r9")
 
 # ported back from our PR to capa v4.0.0
 # https://github.com/mandiant/capa/blob/v4.0.0/capa/features/extractors/smda/insn.py
@@ -227,23 +230,41 @@ def _normalize_location(operand: str) -> Optional[str]:
         displacement = int(match.group("disp"), 0) if match.group("disp") else 0
         if match.group("sign") == "-":
             displacement = -displacement
-        return f"[{match.group('base')}{displacement:+d}]"
+        base = _REGISTER_ALIASES.get(match.group("base"), match.group("base"))
+        return f"[{base}{displacement:+d}]"
     return _REGISTER_ALIASES.get(operand, operand)
 
 
-def _length_locations(location: str, word_size: int) -> Tuple[str, ...]:
+def _length_registers(smda_report: SmdaReport, mode: str) -> Dict[str, str]:
+    if smda_report.architecture == "aarch64":
+        registers = tuple(f"x{number}" for number in range(16 if mode == "go" else 8))
+    elif smda_report.bitness != 64:
+        return {}
+    elif mode == "go":
+        registers = _GO_ARGUMENT_REGISTERS
+    else:
+        binary_format = sniffBinaryFormat(smda_report.xheader or smda_report.buffer)
+        if binary_format == "pe":
+            registers = _WIN64_ARGUMENT_REGISTERS
+        elif binary_format in ("elf", "macho") or smda_report.abi in ("SYSTEMV", "LINUX"):
+            registers = _SYSV_ARGUMENT_REGISTERS
+        else:
+            sysv = dict(zip(_SYSV_ARGUMENT_REGISTERS[:-1], _SYSV_ARGUMENT_REGISTERS[1:], strict=True))
+            win64 = dict(zip(_WIN64_ARGUMENT_REGISTERS[:-1], _WIN64_ARGUMENT_REGISTERS[1:], strict=True))
+            return {
+                key: value
+                for key, value in (sysv | win64).items()
+                if key not in sysv or key not in win64 or sysv[key] == win64[key]
+            }
+    return dict(zip(registers[:-1], registers[1:], strict=True))
+
+
+def _length_locations(location: str, word_size: int, registers: Dict[str, str]) -> Tuple[str, ...]:
     """Where the length of a (pointer, length) pair lives when the pointer is in location."""
     if location.startswith("["):
-        match = re.fullmatch(r"\[(\w+)([+-]\d+)\]", location)
-        if not match:
-            return ()
-        return (f"[{match.group(1)}{int(match.group(2)) + word_size:+d}]",)
-    if location in _LENGTH_REGISTERS:
-        return _LENGTH_REGISTERS[location]
-    match = re.fullmatch(r"x(\d+)", location)
-    if match and int(match.group(1)) < 30:
-        return (f"x{int(match.group(1)) + 1}",)
-    return ()
+        base, sign, displacement = re.split(r"([+-])", location[1:-1], maxsplit=1)
+        return (f"[{base}{int(sign + displacement) + word_size:+d}]",)
+    return (registers[location],) if location in registers else ()
 
 
 def _destination(insn) -> Optional[str]:
@@ -251,18 +272,88 @@ def _destination(insn) -> Optional[str]:
     return _normalize_location(operands[0]) if operands[0] else None
 
 
-def _immediate_length(instructions, index: int, word_size: int) -> Optional[int]:
-    """Find the length passed alongside the pointer that instructions[index] loads.
+def _written_locations(insn):
+    detailed = insn.getDetailed()
+    _, written = detailed.regs_access()
+    locations = {_normalize_location(detailed.reg_name(register)) for register in written}
+    if detailed.operands and detailed.operands[0].access & CS_AC_WRITE:
+        destination = _destination(insn)
+        match = re.fullmatch(r"\[(\w+)([+-]\d+)\]", destination or "")
+        if match:
+            locations.update(
+                f"[{match.group(1)}{int(match.group(2)) + displacement:+d}]"
+                for displacement in range(detailed.operands[0].size)
+            )
+        else:
+            locations.add(destination)
+    return locations
 
-    The pointer's register is followed into the stack slot it is stored to, and the length is then
-    looked for in the location that pairs with either: the next argument register (Go's internal
-    ABI, SysV, Win64, AArch64) or the next stack word. The scan runs outward in both directions and
-    gives up at the first instruction that writes the length location with anything other than an
-    immediate, or that leaves the straight-line sequence.
-    """
+
+def _full_width_location(operand: str, word_size: int) -> bool:
+    operand = operand.strip()
+    if "[" in operand:
+        return operand.startswith("qword ptr " if word_size == 8 else "dword ptr ")
+    if word_size == 4:
+        return operand in _FULL_WIDTH_REGISTER_ALIASES
+    return operand == _normalize_location(operand)
+
+
+def _immediate_length_value(insn, word_size: int) -> Optional[int]:
+    operands = (insn.operands or "").split(",")
+    if insn.mnemonic != "mov" or len(operands) != 2:
+        return None
+    destination = operands[0].strip()
+    if "[" in destination:
+        if not destination.startswith("qword ptr " if word_size == 8 else "dword ptr "):
+            return None
+    elif destination != _normalize_location(destination) and destination not in _FULL_WIDTH_REGISTER_ALIASES:
+        return None
+    return _parse_immediate(operands[1])
+
+
+def _location_invalidated(location: str, written, word_size: int) -> bool:
+    if location in written:
+        return True
+    if location.startswith("["):
+        match = re.fullmatch(r"\[(\w+)([+-]\d+)\]", location)
+        return bool(
+            match
+            and (
+                match.group(1) in written
+                or any(
+                    f"[{match.group(1)}{int(match.group(2)) + displacement:+d}]" in written
+                    for displacement in range(word_size)
+                )
+            )
+        )
+    return False
+
+
+def _scan_boundary(insn) -> bool:
+    if insn.mnemonic in _SCAN_STOP_MNEMONICS or insn.mnemonic.startswith(("j", "b.")):
+        return True
+    return any(
+        group in (CS_GRP_CALL, CS_GRP_JUMP, CS_GRP_RET, CS_GRP_IRET, CS_GRP_INT, CS_GRP_BRANCH_RELATIVE)
+        for group in insn.getDetailed().groups
+    )
+
+
+def _previous_length(instructions, index: int, locations, word_size: int) -> Optional[int]:
+    for candidate in reversed(instructions[max(0, index - _LENGTH_SCAN_WINDOW) : index]):
+        if _scan_boundary(candidate):
+            break
+        written = _written_locations(candidate)
+        if any(_location_invalidated(location, written, word_size) for location in locations):
+            if _destination(candidate) in locations:
+                return _immediate_length_value(candidate, word_size)
+            return None
+    return None
+
+
+def _immediate_length(instructions, index: int, word_size: int, registers: Dict[str, str]) -> Optional[int]:
+    """Find a live immediate length paired with the referenced pointer, within a straight-line window."""
     insn = instructions[index]
     if insn.mnemonic == "push":
-        # 32-bit stack passing pushes the length right before the pointer
         previous = instructions[index - 1] if index > 0 else None
         if previous is not None and previous.mnemonic == "push":
             return _parse_immediate(previous.operands or "")
@@ -270,32 +361,45 @@ def _immediate_length(instructions, index: int, word_size: int) -> Optional[int]
     pointer_location = _destination(insn)
     if pointer_location is None:
         return None
-    locations = set(_length_locations(pointer_location, word_size))
-    # follow only the first store: a register loaded again further down carries the next pair
-    for follower in instructions[index + 1 : index + 1 + _LENGTH_SCAN_WINDOW]:
-        operands = (follower.operands or "").split(",")
-        if follower.mnemonic == "mov" and len(operands) == 2 and _normalize_location(operands[1]) == pointer_location:
-            stored_to = _normalize_location(operands[0])
-            if stored_to is not None:
-                locations.update(_length_locations(stored_to, word_size))
+    pointers = {pointer_location}
+    backward_locations = _length_locations(pointer_location, word_size, registers)
+    for position, candidate in enumerate(instructions[index + 1 : index + 1 + _LENGTH_SCAN_WINDOW], index + 1):
+        if _scan_boundary(candidate):
             break
-        if _destination(follower) == pointer_location:
-            break
-    if not locations:
-        return None
-    for direction in (1, -1):
-        position = index + direction
-        while 0 <= position < len(instructions) and abs(position - index) <= _LENGTH_SCAN_WINDOW:
-            candidate = instructions[position]
-            if candidate.mnemonic in _SCAN_STOP_MNEMONICS or candidate.mnemonic.startswith(("j", "b.")):
-                break
+        operands = (candidate.operands or "").split(",")
+        copied_to = None
+        if (
+            candidate.mnemonic == "mov"
+            and len(operands) == 2
+            and _normalize_location(operands[1]) in pointers
+            and all(_full_width_location(operand, word_size) for operand in operands)
+        ):
+            copied_to = _normalize_location(operands[0])
+        written = _written_locations(candidate)
+        pointers = {location for location in pointers if not _location_invalidated(location, written, word_size)}
+        if copied_to is not None:
+            pointers.add(copied_to)
+            copied_locations = set(_length_locations(copied_to, word_size, registers)) - pointers
+            copied_length = _previous_length(instructions, position, copied_locations, word_size)
+            if copied_length is not None:
+                return copied_length
+        if pointer_location not in pointers:
+            backward_locations = ()
+        if not pointers:
+            return None
+        locations = {location for pointer in pointers for location in _length_locations(pointer, word_size, registers)}
+        if any(_location_invalidated(location, written, word_size) for location in locations):
+            if copied_to is not None:
+                backward_locations = tuple(
+                    location
+                    for location in backward_locations
+                    if not _location_invalidated(location, written, word_size)
+                )
+                continue
             if _destination(candidate) in locations:
-                operands = (candidate.operands or "").split(",")
-                if candidate.mnemonic == "mov" and len(operands) == 2:
-                    return _parse_immediate(operands[1])
-                break
-            position += direction
-    return None
+                return _immediate_length_value(candidate, word_size)
+            return None
+    return _previous_length(instructions, index, backward_locations, word_size)
 
 
 def _language_mode(smda_report: SmdaReport) -> Optional[str]:
@@ -354,21 +458,23 @@ def extract_strings(f: SmdaFunction, mode: Optional[str] = None) -> Iterator[Tup
         # (registers or stack slots), or through a (pointer, length) header in data
         # as detailed in https://cloud.google.com/blog/topics/threat-intelligence/extracting-strings-go-rust-executables/
         word_size = 8 if smda_report.bitness == 64 else 4
-        instructions = list(f.getInstructions())
-        for index, insn in enumerate(instructions):
-            data_refs = list(insn.getDataRefs())
-            if len(data_refs) != 1:
-                continue
-            data_ref = data_refs[0]
-            string_result = None
-            length = _immediate_length(instructions, index, word_size)
-            if length:
-                string_result = read_sized_string(smda_report, data_ref, length)
-            if string_result is None:
-                string_result = read_go_string(smda_report, data_ref)
-            if string_result:
-                string_read, string_type = string_result
-                yield string_read, insn.offset, data_ref, string_type
+        registers = _length_registers(smda_report, mode)
+        for block in f.getBlocks():
+            instructions = list(block.getInstructions())
+            for index, insn in enumerate(instructions):
+                data_refs = list(insn.getDataRefs())
+                if len(data_refs) != 1:
+                    continue
+                data_ref = data_refs[0]
+                string_result = None
+                length = _immediate_length(instructions, index, word_size, registers)
+                if length:
+                    string_result = read_sized_string(smda_report, data_ref, length)
+                if string_result is None:
+                    string_result = read_go_string(smda_report, data_ref)
+                if string_result:
+                    string_read, string_type = string_result
+                    yield string_read, insn.offset, data_ref, string_type
     else:
         for insn in f.getInstructions():
             for data_ref in insn.getDataRefs():

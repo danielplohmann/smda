@@ -2,6 +2,9 @@ import datetime
 import types
 import unittest
 
+from capstone import CS_AC_WRITE
+
+from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
 from smda.DisassemblyStatistics import DisassemblyStatistics
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer
@@ -70,6 +73,17 @@ class _StubInstruction:
     def getDataRefs(self):
         return list(self._data_refs)
 
+    def getDetailed(self):
+        destination = self.operands.split(",")[0].strip()
+        access = 0 if self.mnemonic in ("cmp", "test", "push", "nop") else CS_AC_WRITE
+        written = [destination] if access and "[" not in destination else []
+        return types.SimpleNamespace(
+            groups=[],
+            regs_access=lambda: ([], written),
+            reg_name=lambda register: register,
+            operands=[types.SimpleNamespace(access=access, size=8 if destination.startswith("qword ptr") else 4)],
+        )
+
 
 class _StubFunction:
     def __init__(self, smda_report, instructions):
@@ -78,6 +92,9 @@ class _StubFunction:
 
     def getInstructions(self):
         return list(self._instructions)
+
+    def getBlocks(self):
+        return [self]
 
 
 class TestStringExtractorDerefs(unittest.TestCase):
@@ -158,6 +175,17 @@ class TestStringExtractorSizedStrings(unittest.TestCase):
         self.assertIsNone(read_sized_string(report, 0x01, 3))
         self.assertEqual(read_sized_string(report, 0x40, 4), ("text", "ascii"))
 
+    def test_literal_at_buffer_end_does_not_require_a_full_pointer_word(self):
+        report = _report_with([(0x40, b"last")], size=0x44)
+        self.assertEqual(read_sized_string(report, report.base_addr + 0x40, 4), ("last", "ascii"))
+
+    def test_header_outside_the_image_is_rejected(self):
+        pointer = (0x400040).to_bytes(8, "little")
+        report = _report_with([(0x40, b"hello"), (0xE0, pointer + (5).to_bytes(8, "little"))])
+        for address in (report.base_addr - 0x20, report.base_addr + report.binary_size):
+            with self.subTest(address=address):
+                self.assertIsNone(read_go_string(report, address))
+
     def test_string_header_in_data_is_dereferenced(self):
         base = 0x400000
         report = _report_with(
@@ -192,8 +220,9 @@ class TestStringExtractorSizedStrings(unittest.TestCase):
 class TestStringExtractorLengthFromCode(unittest.TestCase):
     base = 0x400000
 
-    def _extract(self, instructions, mode="go", bitness=64, blobs=None):
+    def _extract(self, instructions, mode="go", bitness=64, blobs=None, architecture="intel"):
         report = _report_with(blobs or [(0x40, b"smdaGoMarkerhello there ")], bitness=bitness, base=self.base)
+        report.architecture = architecture
         return list(extract_strings(_StubFunction(report, instructions), mode=mode))
 
     def test_go_register_abi_length_in_next_register(self):
@@ -258,7 +287,8 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
                 _StubInstruction(0x14, "add", "x0, x0, #0x40", data_refs=[self.base + 0x40]),
                 _StubInstruction(0x18, "mov", "w1, #4"),
                 _StubInstruction(0x1C, "bl", "#0x1000"),
-            ]
+            ],
+            architecture="aarch64",
         )
         self.assertEqual(result, [("smda", 0x14, self.base + 0x40, "ascii")])
 
@@ -310,6 +340,184 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
             report, [_StubInstruction(0x10, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40])]
         )
         self.assertEqual(list(extract_strings(function)), [("plainCString", 0x10, self.base + 0x40, "ascii")])
+
+
+class TestStringExtractorDecodedPairs(unittest.TestCase):
+    base = 0x400000
+
+    def _extract(self, code, mode="go", header=None, abi=None, split_at=None, architecture="intel", bitness=64):
+        report = _report_with([(0x40, b"helloworldotherstring")], base=self.base, bitness=bitness)
+        report.architecture = architecture
+        report.xheader = header
+        report.abi = abi
+        function = _StubFunction(report, [])
+        function._instructions = [
+            SmdaInstruction([insn.address, insn.bytes.hex(), insn.mnemonic, insn.op_str], smda_function=function)
+            for insn in report.getCapstone().disasm(bytes.fromhex(code), self.base)
+        ]
+        if split_at is not None:
+            instructions = function._instructions
+            function.getBlocks = lambda: [
+                _StubFunction(report, instructions[:split_at]),
+                _StubFunction(report, instructions[split_at:]),
+            ]
+        return list(extract_strings(function, mode=mode))
+
+    def test_unpaired_32bit_push_is_not_a_string(self):
+        self.assertEqual(self._extract("6840004000c3", mode="rust", bitness=32), [])
+
+    def test_indexed_memory_destination_is_not_a_pointer_load(self):
+        self.assertEqual(self._extract("48891cc540004000c3"), [])
+
+    def test_stack_pair_with_a_negative_displacement(self):
+        self.assertEqual(
+            self._extract("488d053900000048894424f848c7042405000000c3"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+
+    def test_pairing_does_not_cross_basic_blocks(self):
+        for code, split_at in (("488d0539000000bb05000000c3", 1), ("bb05000000488d0534000000c3", 1)):
+            with self.subTest(code=code):
+                self.assertEqual(self._extract(code, split_at=split_at), [])
+
+    def test_loop_and_interrupt_stop_pairing(self):
+        for boundary in ("e205", "cd80"):
+            with self.subTest(boundary=boundary):
+                self.assertEqual(self._extract("488d0539000000" + boundary + "bb05000000c3"), [])
+
+    def test_pointer_clobbers_block_pairing(self):
+        for clobber in ("31c0", "b001", "4893", "f7e1"):
+            with self.subTest(clobber=clobber):
+                self.assertEqual(self._extract("488d0539000000" + clobber + "bb0a000000c3"), [])
+
+    def test_length_clobbers_do_not_reuse_backward_values(self):
+        for clobber in ("31db", "b301", "6683c301", "480fc1c3"):
+            with self.subTest(clobber=clobber):
+                self.assertEqual(self._extract("bb05000000488d0534000000" + clobber + "c3"), [])
+
+    def test_implicit_length_clobber_blocks_forward_pairing(self):
+        self.assertEqual(self._extract("b905000000488d1d34000000f3a4c3"), [])
+
+    def test_implicit_length_clobber_blocks_backward_pairing(self):
+        self.assertEqual(self._extract("b905000000f3a4488d1d32000000c3"), [])
+
+    def test_backward_scan_stops_at_a_length_write(self):
+        self.assertEqual(self._extract("bb0500000031db488d0532000000c3"), [])
+
+    def test_partial_length_load_is_not_a_full_length(self):
+        for length_load in ("b305", "66bb0500"):
+            with self.subTest(length_load=length_load):
+                self.assertEqual(self._extract("488d0539000000" + length_load + "c3"), [])
+
+    def test_comparison_does_not_clobber_a_length(self):
+        self.assertEqual(
+            self._extract("bb05000000488d053400000083fb00c3"),
+            [("hello", self.base + 5, self.base + 0x40, "ascii")],
+        )
+
+    def test_stored_pointer_survives_register_reuse(self):
+        self.assertEqual(
+            self._extract("488d05390000004889042431c048c744240805000000c3"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+
+    def test_full_width_register_copy_survives_register_reuse(self):
+        self.assertEqual(
+            self._extract("488d05390000004889c731c0be05000000c3"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+
+    def test_pointer_copy_into_the_old_length_register(self):
+        self.assertEqual(
+            self._extract("488d05390000004889c3b905000000c3"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+        self.assertEqual(self._extract("bb05000000488d05340000004889c3c3"), [])
+
+    def test_copied_pointer_does_not_reuse_the_dead_registers_length(self):
+        self.assertEqual(self._extract("bb05000000488d05340000004889c731c0c3"), [])
+
+    def test_copied_pointer_uses_a_previously_loaded_length(self):
+        for mode in ("go", "rust"):
+            for code in ("be05000000488d05340000004889c7c3", "488d0539000000be050000004889c7c3"):
+                with self.subTest(mode=mode, code=code):
+                    self.assertEqual(
+                        self._extract(code, mode=mode, header=b"\x7fELF"),
+                        [("hello", self.base + (5 if code.startswith("be") else 0), self.base + 0x40, "ascii")],
+                    )
+
+    def test_stored_pointer_uses_a_previously_loaded_length(self):
+        self.assertEqual(
+            self._extract("48c744240805000000488d053000000048890424c3"),
+            [("hello", self.base + 9, self.base + 0x40, "ascii")],
+        )
+
+    def test_copied_pointer_does_not_reuse_a_clobbered_length(self):
+        self.assertEqual(self._extract("be05000000488d053400000031f64889c7c3", mode="rust", header=b"\x7fELF"), [])
+
+    def test_stored_pointer_does_not_reuse_length_after_stack_base_changes(self):
+        self.assertEqual(self._extract("48c744240805000000488d05300000004883c40848890424c3"), [])
+
+    def test_copied_pointer_is_not_also_used_as_its_length(self):
+        self.base = 0
+        for mode, code in (("go", "bb400000004889d8c3"), ("rust", "be400000004889f7c3")):
+            with self.subTest(mode=mode):
+                self.assertEqual(self._extract(code, mode=mode, header=b"\x7fELF"), [])
+
+    def test_truncated_pointer_copies_are_not_followed(self):
+        for copy in ("4088c7", "6689c7", "89c7"):
+            with self.subTest(copy=copy):
+                self.assertEqual(self._extract("488d0539000000" + copy + "31c0be05000000c3"), [])
+
+    def test_decoded_aarch64_pair_and_pointer_clobber(self):
+        for mode in ("go", "rust"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    self._extract("00020010a1008052c0035fd6", mode=mode, architecture="aarch64"),
+                    [("hello", self.base, self.base + 0x40, "ascii")],
+                )
+                self.assertEqual(
+                    self._extract("00020010e0031f2aa1008052c0035fd6", mode=mode, architecture="aarch64"), []
+                )
+
+    def test_stack_base_write_invalidates_the_stored_pair(self):
+        self.assertEqual(self._extract("488d05390000004889042431c04883c40848c744240805000000c3"), [])
+
+    def test_overlapping_stack_write_invalidates_the_stored_pointer(self):
+        self.assertEqual(self._extract("488d053900000048890424c64424010031c048c744240805000000c3"), [])
+
+    def test_narrow_stack_length_write_is_not_a_full_length(self):
+        self.assertEqual(self._extract("488d053900000048890424c744240805000000c3"), [])
+
+    def test_go_ignores_scratch_register_as_length(self):
+        self.assertEqual(
+            self._extract("488d0d39000000ba0a000000bf05000000c3"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+
+    def test_rust_sysv_ignores_go_length_register(self):
+        self.assertEqual(
+            self._extract("488d353900000041b80a000000ba05000000c3", mode="rust", header=b"\x7fELF"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+
+    def test_rust_platform_selects_the_rdx_pair(self):
+        code = "488d1539000000b90a00000041b805000000c3"
+        for header, length in ((b"MZ", "hello"), (b"\x7fELF", "helloworld"), (b"\xcf\xfa\xed\xfe", "helloworld")):
+            with self.subTest(header=header):
+                self.assertEqual(
+                    self._extract(code, mode="rust", header=header),
+                    [(length, self.base, self.base + 0x40, "ascii")],
+                )
+
+    def test_rust_unknown_platform_rejects_ambiguous_register_pairs(self):
+        self.assertEqual(self._extract("488d1539000000b90a00000041b805000000c3", mode="rust"), [])
+
+    def test_rust_elf_abi_selects_sysv_without_a_header(self):
+        self.assertEqual(
+            self._extract("488d1539000000b905000000c3", mode="rust", abi="SYSTEMV"),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
 
 
 class TestSynthesizedUtf8Strings(unittest.TestCase):
