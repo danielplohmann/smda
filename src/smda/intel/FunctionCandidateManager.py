@@ -215,15 +215,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         binary_info = self.disassembly.binary_info
         if binary_info is None:
             return None
-        start = self.gap_pointer + 1 - binary_info.base_addr
+        gap_pointer = self.gap_pointer
+        start = gap_pointer + 1 - binary_info.base_addr
         if start < 0:
             # a slice from a negative offset reads the tail of the image instead of failing
             return None
-        targets = [self._paddedExtentEnd(), self._int3ResumeTarget(start)]
+        targets = [
+            self._paddedExtentEnd(gap_pointer, binary_info.base_addr),
+            self._int3ResumeTarget(gap_pointer, start),
+        ]
         targets = [target for target in targets if target is not None]
         return min(targets) if targets else None
 
-    def _paddedExtentEnd(self):
+    def _paddedExtentEnd(self, gap_pointer, base_addr):
         """The aligned address the failed candidate's own code runs up to, through nop padding.
 
         GCC and Clang pad ELF functions with nops rather than int3, so the int3 rule below never
@@ -234,9 +238,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         """
         end = self.failed_gap_extent_end
         self.failed_gap_extent_end = None
-        if end is None or end <= self.gap_pointer:
+        if end is None or end <= gap_pointer:
             return None
-        offset = end - self.disassembly.binary_info.base_addr
+        offset = end - base_addr
         padding = self.disassembly.getRawBytes(offset, _ENTRY_ALIGNMENT) or b""
         cursor = 0
         while (end + cursor) % _ENTRY_ALIGNMENT:
@@ -250,7 +254,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # no padding at all is just as likely the middle of whatever the candidate overlapped
         return end + cursor if cursor else None
 
-    def _int3ResumeTarget(self, start):
+    def _int3ResumeTarget(self, gap_pointer, start):
         window = self.disassembly.getRawBytes(start, _FAILED_GAP_RESUME_WINDOW) or b""
         run_start = window.find(_INT3)
         if run_start < 0:
@@ -260,7 +264,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             cursor += 1
         if cursor >= len(window):
             return None
-        target = self.gap_pointer + 1 + cursor
+        target = gap_pointer + 1 + cursor
         # Decline rather than round up. Rounding moves the resume point to the next aligned
         # address, which resumes somewhere else instead of not resuming -- measured, that keeps
         # every unaligned candidate and finds more of them. Requiring the byte after the padding
