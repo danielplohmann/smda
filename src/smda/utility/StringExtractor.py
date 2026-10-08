@@ -402,6 +402,32 @@ def _immediate_length(instructions, index: int, word_size: int, registers: Dict[
     return _previous_length(instructions, index, backward_locations, word_size)
 
 
+def _block_start(block):
+    instructions = list(block.getInstructions())
+    return instructions[0].offset if instructions else None
+
+
+def _fallthrough_instructions(blocks_by_start, block_instructions) -> list:
+    """Instructions reached by falling through from the end of block_instructions.
+
+    Blocks also split at join points, but a pointer loaded before the join keeps its value on the
+    path that falls into it, so the forward pairing scan may continue there. Backward scans never
+    start before the pointer's own block, where another predecessor could have set the length.
+    """
+    following: list = []
+    current = block_instructions
+    while current and len(following) < _LENGTH_SCAN_WINDOW:
+        last = current[-1]
+        if _scan_boundary(last) or not getattr(last, "bytes", None):
+            break
+        successor = blocks_by_start.get(last.offset + len(last.bytes) // 2)
+        if successor is None:
+            break
+        current = list(successor.getInstructions())
+        following.extend(current)
+    return following[:_LENGTH_SCAN_WINDOW]
+
+
 def _language_mode(smda_report: SmdaReport) -> Optional[str]:
     scores = smda_report.language if isinstance(smda_report.language, dict) else {}
     best = max(("go", "rust"), key=lambda name: scores.get(name, 0.0))
@@ -459,9 +485,12 @@ def extract_strings(f: SmdaFunction, mode: Optional[str] = None) -> Iterator[Tup
         # as detailed in https://cloud.google.com/blog/topics/threat-intelligence/extracting-strings-go-rust-executables/
         word_size = 8 if smda_report.bitness == 64 else 4
         registers = _length_registers(smda_report, mode)
-        for block in f.getBlocks():
-            instructions = list(block.getInstructions())
-            for index, insn in enumerate(instructions):
+        blocks = list(f.getBlocks())
+        blocks_by_start = {_block_start(block): block for block in blocks}
+        for block in blocks:
+            block_instructions = list(block.getInstructions())
+            instructions = block_instructions + _fallthrough_instructions(blocks_by_start, block_instructions)
+            for index, insn in enumerate(block_instructions):
                 data_refs = list(insn.getDataRefs())
                 if len(data_refs) != 1:
                     continue

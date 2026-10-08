@@ -375,10 +375,19 @@ class TestStringExtractorDecodedPairs(unittest.TestCase):
             [("hello", self.base, self.base + 0x40, "ascii")],
         )
 
-    def test_pairing_does_not_cross_basic_blocks(self):
-        for code, split_at in (("488d0539000000bb05000000c3", 1), ("bb05000000488d0534000000c3", 1)):
-            with self.subTest(code=code):
-                self.assertEqual(self._extract(code, split_at=split_at), [])
+    def test_backward_pairing_does_not_cross_into_a_previous_block(self):
+        # the pointer's block may be a join point, where another predecessor set a different length
+        self.assertEqual(self._extract("bb05000000488d0534000000c3", split_at=1), [])
+
+    def test_forward_pairing_follows_a_fallthrough_block(self):
+        # a block also ends where a later jump lands; the pointer keeps its value on the path into it
+        self.assertEqual(
+            self._extract("488d0539000000bb05000000c3", split_at=1),
+            [("hello", self.base, self.base + 0x40, "ascii")],
+        )
+
+    def test_forward_pairing_stops_at_a_block_ending_in_a_jump(self):
+        self.assertEqual(self._extract("488d0539000000eb00bb05000000c3", split_at=2), [])
 
     def test_loop_and_interrupt_stop_pairing(self):
         for boundary in ("e205", "cd80"):
