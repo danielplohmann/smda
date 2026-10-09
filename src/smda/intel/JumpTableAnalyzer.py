@@ -39,7 +39,15 @@ _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]{1,4}")
 # 32-bit writes zero the upper half, so these are the widths an `and` bounds the whole register at
 _FULL_WIDTH_REGISTER_RE = re.compile(r"^(?:r[a-z]{2}|e[a-z]{2}|r(?:[89]|1[0-5])d?)$")
 # the largest `and` mask read as a table bound; a real switch index is masked to a few bits
-_MAX_MASK_BOUND = 0xFFFF
+# (0x3f is the widest seen in Go type switches), and a wider one is more likely a zero-extension
+_MAX_MASK_BOUND = 0xFF
+_REGISTER_WIDTHS = (
+    (re.compile(r"^(?:[a-d]l|sil|dil|bpl|spl|r(?:[89]|1[0-5])b)$"), 8),
+    (re.compile(r"^(?:[a-d]x|si|di|bp|sp|r(?:[89]|1[0-5])w)$"), 16),
+    (re.compile(r"^(?:e[a-z]{2}|r(?:[89]|1[0-5])d)$"), 32),
+    (re.compile(r"^(?:r[a-z]{2}|r(?:[89]|1[0-5]))$"), 64),
+)
+_MEMORY_WIDTHS = {"byte": 8, "word": 16, "dword": 32, "qword": 64}
 _INDEX_COPY_MNEMONICS = frozenset({"mov", "movzx", "movsx", "movsxd", "movabs"})
 # Mnemonics whose only register write is the operand they name first, so a backward walk can
 # carry a value past one that names a different register.
@@ -268,6 +276,21 @@ class JumpTableAnalyzer:
             return 0
         return mask + 1
 
+    @staticmethod
+    def _operandWidth(operand):
+        """The bit width an operand reads, or 0 when it is not a plain low slice of a value.
+
+        ah and its siblings read bits 8..15, so a compare on them says nothing about the low
+        bits a mask keeps, and they answer 0 like anything unrecognized.
+        """
+        operand = stripFlatSegmentOverride(operand.strip().lower())
+        if "ptr [" in operand:
+            return _MEMORY_WIDTHS.get(operand.split(" ", 1)[0], 0)
+        for pattern, width in _REGISTER_WIDTHS:
+            if pattern.match(operand):
+                return width
+        return 0
+
     def _findJumpTableSize(self, backtracked, index_keys=None):
         """Recover the switch bound, preferring a compare against the dispatch's own index.
 
@@ -276,9 +299,14 @@ class JumpTableAnalyzer:
         where the bound is checked against the memory cell the index is loaded from. Following
         the index backwards through its copies answers both: the compare that bounds the table
         is the one testing whatever the dispatch ends up indexing with.
+
+        An `and` mask on the index bounds it too, but a compare further back can bound it
+        tighter - `cmp eax, 5; ja; and eax, 7` leaves six cases, not eight - so the walk goes
+        on past a mask and takes the smaller of the two.
         """
         tracked = set(index_keys) if index_keys else set()
         untied_size = 0
+        mask_bound = 0
         for position, instr in enumerate(backtracked[::-1]):
             mnemonic = instr[2].split(" ")[-1]
             if mnemonic in RET_INS:
@@ -290,7 +318,12 @@ class JumpTableAnalyzer:
                 if _IMMEDIATE_RE.match(right):
                     bound = int(right, 16 if right.startswith("0x") else 10) + 1
                     if tracked and self._operandKey(left) in tracked:
-                        return bound
+                        if not mask_bound:
+                            return bound
+                        # a compare narrower than the mask leaves the bits above it unchecked
+                        if mask_bound <= 1 << self._operandWidth(left):
+                            return min(bound, mask_bound)
+                        return mask_bound
                     if not untied_size and self.RE_CMP_SIZE.match(operands):
                         untied_size = bound
                 continue
@@ -311,10 +344,13 @@ class JumpTableAnalyzer:
                 carried = self._dispatchIndexKeys(source) if destination_key in tracked else set()
                 tracked = self._invalidated(tracked, destination_key) | carried
                 continue
-            if mnemonic == "and" and destination_key in tracked:
-                mask_bound = self._maskBound(destination, source)
-                if mask_bound:
-                    return mask_bound
+            if mnemonic == "and" and destination_key in tracked and _IMMEDIATE_RE.match(source.strip()):
+                # An immediate mask only clears bits, so the value before it is no smaller and
+                # a compare bounding that bounds the index as well: the tie is kept.
+                bound = self._maskBound(destination, source)
+                if bound:
+                    mask_bound = min(mask_bound, bound) if mask_bound else bound
+                continue
             if mnemonic in _NAMED_DESTINATION_MNEMONICS and destination_key not in tracked:
                 # These write only the operand they name, so a write to a register the index
                 # is not held in leaves the index alone - the `lea` loading the table base
@@ -332,7 +368,7 @@ class JumpTableAnalyzer:
             # tie to a compare that bounds a value the dispatch never indexes with, so the tie
             # is dropped whole and the untied scan answers instead.
             tracked = set()
-        return untied_size
+        return mask_bound or untied_size
 
     def _directHandler(self, jump_instruction_op_str, state, backtracked):
         """Locate an absolute jump table and the width of one of its entries."""

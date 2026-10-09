@@ -80,17 +80,12 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
-- **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index. Go indexes these tables
-  with bits of the type hash and checks the index with `and idx, mask` alone, but `_findJumpTableSize` dropped the
-  tie at the `lea` loading the table base and never read an `and` as a bound, so the 0xFF fallback scanned on
-  through the tables Go stores back to back and the dispatcher absorbed other functions. *Measured on the
-  issue's reproducer built with go1.24.7, windows and linux amd64:* `image/draw.DrawMask` drops from 1,065 / 549
-  blocks to the correct 238, failed candidates from 73 / 62 to 30 / 25, and no function keeps more than 10 blocks
-  outside its symbol. *Not bundled:* Go binaries are built, not committed. Bundled fixtures keep their golden
-  results. *Malpedia CI corpus:* 154/155 files identical; one Akira ELF goes -13/+4. Its 284-block function at
-  `0x5746a0` is now recovered (a `cmp`/`ja` bound behind a base `lea`), which drops a fake call reference to a
-  mid-instruction `0x5247c3`; ten destructors after it were only reached because that false function split the gap,
-  and are lost with it. (#363)
+- **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
+  by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
+  backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's
+  go1.24.7 reproducer, windows and linux amd64 (not bundled):* `image/draw.DrawMask` drops from 1,065 / 549 blocks
+  to 238. *Malpedia CI corpus:* 154/155 files identical; one Akira ELF goes -13/+4, as a recovered table removes a
+  false function that had split a gap. Bundled fixtures keep their golden results. (#363)
 
 ### Security
 

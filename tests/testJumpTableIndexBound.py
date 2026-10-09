@@ -385,6 +385,59 @@ class AndMaskBoundTestSuite(unittest.TestCase):
 
         self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0xA)
 
+    def test_a_wide_mask_does_not_override_a_compare_before_it(self):
+        """`and ecx, 0xffff` zero-extends cx; the compare is the bound, not 64K entries."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 4, "cmp", "cx, 0x20"),
+            (0x1004, 2, "ja", "0x1100"),
+            (0x1006, 6, "and", "ecx, 0xffff"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rcx"}), 0x21)
+
+    def test_a_compare_before_the_mask_tightens_it(self):
+        analyzer = _makeAnalyzer()
+        for compare, mask, expected in (
+            ("al, 0x14", "eax, 0xff", 0x15),
+            ("eax, 5", "eax, 7", 6),
+        ):
+            with self.subTest(compare=compare, mask=mask):
+                backtracked = [
+                    (0x1000, 3, "cmp", compare),
+                    (0x1003, 2, "ja", "0x1100"),
+                    (0x1005, 3, "and", mask),
+                ]
+
+                self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), expected)
+
+    def test_a_compare_looser_than_the_mask_leaves_the_mask(self):
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 5, "cmp", "eax, 0x3e8"),
+            (0x1005, 2, "ja", "0x1100"),
+            (0x1007, 3, "and", "eax, 0x3f"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x40)
+
+    def test_a_compare_narrower_than_the_mask_does_not_bound_it(self):
+        """`cmp ah` checks bits 8..15, which say nothing about the low byte the mask keeps."""
+        analyzer = _makeAnalyzer()
+        backtracked = [
+            (0x1000, 3, "cmp", "ah, 3"),
+            (0x1003, 2, "ja", "0x1100"),
+            (0x1005, 3, "and", "eax, 0xff"),
+        ]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0x100)
+
+    def test_a_mask_wider_than_a_byte_is_not_a_bound(self):
+        analyzer = _makeAnalyzer()
+        backtracked = [(0x1000, 6, "and", "eax, 0x1ff")]
+
+        self.assertEqual(analyzer._findJumpTableSize(backtracked, {"rax"}), 0)
+
 
 class RelativeDispatchBaseAddTestSuite(unittest.TestCase):
     """The last instruction of a relative dispatch adds the table's base to the entry the
