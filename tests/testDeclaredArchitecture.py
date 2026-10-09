@@ -32,9 +32,12 @@ class DeclaredArchitectureTest(unittest.TestCase):
         self.assertEqual(declaredArchitecture(_pe(0x14C)), "intel")
         self.assertEqual(declaredArchitecture(_pe(0x8664)), "intel")
         self.assertEqual(declaredArchitecture(_pe(0xAA64)), "aarch64")
+        self.assertEqual(declaredArchitecture(_pe(0x1C0)), "arm")
+        self.assertEqual(declaredArchitecture(_pe(0x1C4)), "arm")
 
     def testAPeMachineWithNoBackendDeclaresNothing(self):
-        self.assertEqual(declaredArchitecture(_pe(0x1C0)), "")
+        # IMAGE_FILE_MACHINE_POWERPC
+        self.assertEqual(declaredArchitecture(_pe(0x1F0)), "")
 
     def testAnMzWithoutAPeSignatureDeclaresNothing(self):
         image = bytearray(_pe(0xAA64))
@@ -55,9 +58,9 @@ class DeclaredArchitectureTest(unittest.TestCase):
     def testElfHeaderNamesTheInstructionSet(self):
         self.assertEqual(declaredArchitecture(_decode("bashlite_xored")), "intel")
         self.assertEqual(declaredArchitecture(_decode("aarch64_static_xored")), "aarch64")
+        self.assertEqual(declaredArchitecture(_decode("mirai_arm_xored")), "arm")
 
     def testAnElfForAnUnsupportedInstructionSetDeclaresNothing(self):
-        self.assertEqual(declaredArchitecture(_decode("mirai_arm_xored")), "")
         self.assertEqual(declaredArchitecture(_decode("mirai_mips_xored")), "")
 
     def testMachoHeaderNamesTheInstructionSet(self):

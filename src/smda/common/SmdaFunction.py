@@ -13,6 +13,10 @@ from smda.aarch64.definitions import EXCEPTION_RETURN_INS as AARCH64_EXCEPTION_R
 from smda.aarch64.definitions import INDIRECT_JUMP_INS as AARCH64_INDIRECT_JUMP_INS
 from smda.aarch64.definitions import RET_INS as AARCH64_RET_INS
 from smda.aarch64.definitions import UNCOND_JUMP_INS as AARCH64_UNCOND_JUMP_INS
+from smda.arm.ArmInstructionEscaper import ArmInstructionEscaper
+from smda.arm.definitions import CALL_BASES as ARM_CALL_BASES
+from smda.arm.definitions import is_return_instruction as arm_is_return_instruction
+from smda.arm.definitions import split_mnemonic as arm_split_mnemonic
 from smda.cil.CilInstructionEscaper import CilInstructionEscaper
 from smda.common.CodeXref import CodeXref
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
@@ -270,6 +274,8 @@ class SmdaFunction:
             return IntelInstructionEscaper
         if architecture == "aarch64":
             return AArch64InstructionEscaper
+        if architecture == "arm":
+            return ArmInstructionEscaper
         if architecture == "cil":
             return CilInstructionEscaper
         if architecture == "dalvik":
@@ -304,6 +310,13 @@ class SmdaFunction:
             return sum(
                 1 for block in self.blocks.values() for ins in block if (ins.mnemonic or "").startswith("invoke-")
             )
+        if architecture == "arm":
+            return sum(
+                1
+                for block in self.blocks.values()
+                for ins in block
+                if arm_split_mnemonic(ins.mnemonic)[0] in ARM_CALL_BASES
+            )
         if architecture == "aarch64":
             call_mnemonics = AARCH64_CALL_INS
         elif architecture == "cil":
@@ -320,6 +333,13 @@ class SmdaFunction:
         if architecture == "dalvik":
             return sum(
                 1 for block in self.blocks.values() for ins in block if (ins.mnemonic or "").startswith("return")
+            )
+        if architecture == "arm":
+            return sum(
+                1
+                for block in self.blocks.values()
+                for ins in block
+                if arm_is_return_instruction(ins.mnemonic, ins.operands or "")
             )
         if architecture == "aarch64":
             return_mnemonics = AARCH64_RET_INS | AARCH64_EXCEPTION_RETURN_INS
@@ -352,6 +372,8 @@ class SmdaFunction:
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "aarch64":
             return self._isAArch64ApiThunk()
+        if architecture == "arm":
+            return self._isArmApiThunk()
         if self.num_instructions != 1:
             return False
         if self.offset is None:
@@ -382,6 +404,19 @@ class SmdaFunction:
         if not any(ins.offset in self.apirefs and self._baseMnemonic(ins.mnemonic) in transfer for ins in block):
             return False
         return all(self._baseMnemonic(ins.mnemonic) in self._AARCH64_API_THUNK_BODY for ins in block[:-1])
+
+    # ARM import stubs: the PLT entry (add ip, pc / add ip, ip / ldr pc), lld's literal
+    # form, the MSVC movw/movt/ldr/bx thunk and the T32 bx pc prefix in front of any of them
+    _ARM_API_THUNK_BODY = frozenset({"add", "adr", "sub", "ldr", "movw", "movt", "mov", "nop", "bx"})
+    _ARM_API_THUNK_MAX_INSNS = 6
+
+    def _isArmApiThunk(self):
+        if self.num_blocks != 1 or self.num_instructions > self._ARM_API_THUNK_MAX_INSNS:
+            return False
+        block = self.blocks.get(self.offset)
+        if not block or block[-1].offset not in self.apirefs:
+            return False
+        return all(arm_split_mnemonic(ins.mnemonic)[0] in self._ARM_API_THUNK_BODY for ins in block)
 
     def isExported(self):
         return self.is_exported

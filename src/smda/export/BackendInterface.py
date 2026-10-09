@@ -39,3 +39,7 @@ class BackendInterface:
 
     def getApiMap(self):
         raise NotImplementedError
+
+    def isThumb(self, offset):
+        """Whether 32-bit ARM code at ``offset`` is T32 rather than A32."""
+        return False

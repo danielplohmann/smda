@@ -163,7 +163,8 @@ class DeclaredBitnessTest(unittest.TestCase):
         self.assertEqual(BitnessAnalyzer().determineBitness(self._pe(0xAA64)), 64)
 
     def testAnUnknownMachineFallsThroughToTheProbe(self):
-        image = self._pe(0x1C0, self.REX_W_DENSE)
+        # IMAGE_FILE_MACHINE_POWERPC, which SMDA has no backend for
+        image = self._pe(0x1F0, self.REX_W_DENSE)
         self.assertIsNone(BitnessAnalyzer()._declaredBitness(image))
         self.assertEqual(BitnessAnalyzer().determineBitness(image), 64)
 

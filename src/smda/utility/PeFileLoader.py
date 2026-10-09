@@ -16,8 +16,8 @@ _NOT_PROVIDED = object()
 
 
 class PeFileLoader:
-    BITNESS_MAP = {0x14C: 32, 0x8664: 64, 0xAA64: 64}
-    ARCHITECTURE_MAP = {0x14C: "intel", 0x8664: "intel", 0xAA64: "aarch64"}
+    BITNESS_MAP = {0x14C: 32, 0x8664: 64, 0xAA64: 64, 0x1C0: 32, 0x1C2: 32, 0x1C4: 32}
+    ARCHITECTURE_MAP = {0x14C: "intel", 0x8664: "intel", 0xAA64: "aarch64", 0x1C0: "arm", 0x1C2: "arm", 0x1C4: "arm"}
 
     #: IMAGE_COR20_HEADER.ManagedNativeHeader, 64 bytes into the CLR header. A pure-IL
     #: assembly leaves it zero; a ReadyToRun assembly points it at a header whose first
@@ -240,7 +240,7 @@ class PeFileLoader:
 
     @staticmethod
     def getHasBackend(binary, parsed=_NOT_PROVIDED):
-        return PeFileLoader.getArchitecture(binary, parsed=parsed) in ("intel", "cil", "aarch64")
+        return PeFileLoader.getArchitecture(binary, parsed=parsed) in ("intel", "cil", "aarch64", "arm")
 
     @staticmethod
     def checkPe(binary):

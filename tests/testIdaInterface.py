@@ -223,11 +223,12 @@ class TestIdaDomainInterface(unittest.TestCase):
         self.assertEqual(binary[0x2345:0x2349], b"\x90\x90\x90\x90")
         self.assertEqual(binary[:0x2345], b"\x00" * 0x2345)
 
-    def test_domain_maps_aarch64_and_rejects_arm32(self):
+    def test_domain_maps_aarch64_and_arm32(self):
         self.assertEqual(IdaDomainInterface(database=_FakeDatabase("ARM", 64)).getArchitecture(), "aarch64")
         self.assertEqual(IdaDomainInterface(database=_FakeDatabase("aarch64", 64)).getArchitecture(), "aarch64")
-        with self.assertRaisesRegex(ValueError, r"Unsupported Architecture: ARM \(32bit\)"):
-            IdaDomainInterface(database=_FakeDatabase("ARM", 32)).getArchitecture()
+        self.assertEqual(IdaDomainInterface(database=_FakeDatabase("ARM", 32)).getArchitecture(), "arm")
+        with self.assertRaisesRegex(ValueError, r"Unsupported Architecture: ARM \(16bit\)"):
+            IdaDomainInterface(database=_FakeDatabase("ARM", 16)).getArchitecture()
 
     def test_domain_import_map_preserves_named_and_ordinal_imports(self):
         interface = IdaDomainInterface(database=_FakeDatabase())

@@ -133,10 +133,15 @@ class SmdaInstruction:
         if self.smda_function is None or self.smda_function.smda_report is None:
             raise ValueError("SmdaFunction or SmdaReport not set on instruction")
         arch = self.smda_function.smda_report.architecture
-        if arch is not None and arch not in {"intel", "aarch64"}:
-            raise NotImplementedError(f"getDetailed() is only available for Intel and AArch64, not '{arch}'")
+        if arch is not None and arch not in {"intel", "aarch64", "arm"}:
+            raise NotImplementedError(f"getDetailed() is only available for Intel, AArch64 and ARM, not '{arch}'")
         if self.detailed is None:
-            capstone = self.smda_function.smda_report.getCapstone()
+            if arch == "arm":
+                metadata = self.smda_function.architecture_metadata or {}
+                thumb = len(self.bytes or "") == 4 or bool(metadata.get("thumb"))
+                capstone = self.smda_function.smda_report.getCapstone(thumb=thumb)
+            else:
+                capstone = self.smda_function.smda_report.getCapstone()
             with_details = list(capstone.disasm(bytes.fromhex(self.bytes or ""), self.offset))
             if not with_details:
                 raise ValueError(f"Capstone could not disassemble stored bytes '{self.bytes}' at 0x{self.offset:x}")

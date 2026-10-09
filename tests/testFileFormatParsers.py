@@ -494,7 +494,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
             (cpu.X86, ("intel", 32, True)),
             (cpu.X86_64, ("intel", 64, True)),
             # recognized but unsupported (no backend): metadata must stay accurate
-            (cpu.ARM, ("arm", 32, False)),
+            (cpu.ARM, ("arm", 32, True)),
             (cpu.ARM64, ("aarch64", 64, True)),
             (cpu.POWERPC, ("ppc", 32, False)),
             (cpu.POWERPC64, ("ppc", 64, False)),
@@ -585,7 +585,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
     # real Mirai samples, one per ELF machine type:
     # fixture -> (architecture, bitness, has_backend)
     MIRAI_ELF_FIXTURES = {
-        "mirai_arm_xored": ("arm", 32, False),
+        "mirai_arm_xored": ("arm", 32, True),
         # both MIPS endiannesses, bitness derived from the ELF class
         "mirai_mips_xored": ("mips", 32, False),
         "mirai_mipsel_xored": ("mips", 32, False),
@@ -633,7 +633,7 @@ class SmdaIntegrationTestSuite(unittest.TestCase):
 
     def test_elf_real_intel_binaries_disassemble(self):
         for fixture_name, (architecture, bitness, has_backend) in self.MIRAI_ELF_FIXTURES.items():
-            if not has_backend:
+            if not has_backend or architecture != "intel":
                 continue
             with self.subTest(fixture=fixture_name, bitness=bitness):
                 binary = self._load_xored_fixture(fixture_name)
