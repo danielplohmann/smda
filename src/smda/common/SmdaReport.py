@@ -107,6 +107,8 @@ class SmdaReport:
     data_refs_to = None
     _string_cache: Dict[Any, Optional[Tuple[str, str]]]
     _derefs_cache: Dict[int, List[int]]
+    # whether the buffer carries a rustc toolchain path, looked up once by StringExtractor
+    _rustc_path_seen: Optional[bool] = None
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False

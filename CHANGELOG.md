@@ -71,6 +71,12 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(utility)** `extract_strings` reads Go and Rust strings at their real length, taken from the paired length
+  load or a (pointer, length) header, decoded as UTF-8; `data_addr` is the string's address either way. Adds
+  `mode="rust"`; with no mode, Rust needs a `/rustc/<commit>/` path in the image as well as the language score.
+  Unpaired Rust references keep the NUL-terminated read for C strings. *Measured on bundled fixtures:*
+  `rust_pe_gnu` 2657 -> 2173 refs, strings over 200 chars 820 -> 10, 6 of 7 MinGW CRT strings kept (one cut
+  to "M" by an unrelated length register); `mirai_x64` with `/rustc/` appended is identical to master.
 
 ### Changed
 

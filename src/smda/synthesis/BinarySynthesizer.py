@@ -190,7 +190,8 @@ class BinarySynthesizer:
                 string = stringref.get("string")
                 if data_addr is None or not string:
                     continue
-                yield data_addr, string.encode("ascii", errors="ignore") + b"\x00"
+                encoding = "utf-8" if stringref.get("type") == "utf8" else "ascii"
+                yield data_addr, string.encode(encoding, errors="ignore") + b"\x00"
 
     def _hasHeader(self, min_length=0x40):
         return bool(self.report.xheader) and len(self.report.xheader) >= min_length

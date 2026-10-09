@@ -1,15 +1,50 @@
 import re
 import string
 import struct
-from typing import Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
+
+from capstone import CS_AC_WRITE, CS_GRP_BRANCH_RELATIVE, CS_GRP_CALL, CS_GRP_INT, CS_GRP_IRET, CS_GRP_JUMP, CS_GRP_RET
 
 from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaFunction import SmdaFunction
+from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
+from smda.synthesis import sniffBinaryFormat
 
 _IS_PRINTABLE_CHAR_CODE = tuple(chr(char) in string.printable for char in range(256))
 _ASCII_RE = re.compile(b"[\x09-\x0d\x20-\x7e]*")
 _UNICODE_RE = re.compile(b"(?:[\x09-\x0d\x20-\x7e]\x00)*")
+
+# Go and Rust strings carry their own length; a larger one is a misread header, not a literal
+MAX_SIZED_STRING_LEN = 0x10000
+# C0 and C1 controls other than whitespace and ESC; ANSI escapes, NBSP and a BOM stay accepted
+_SIZED_STRING_REJECT_RE = re.compile("[\x00-\x08\x0e-\x1a\x1c-\x1f\x7f-\x9f]")
+# rustc embeds its own source path, commit hash included, in the panic locations of every binary
+# linking std; a bare "/rustc/" substring is too easy to come by to switch extraction modes on
+_RUSTC_PATH_RE = re.compile(rb"/rustc/[0-9a-f]{40}/")
+_MEMORY_SLOT_RE = re.compile(r"\[(?P<base>[a-z][a-z0-9]*)(?:\s*(?P<sign>[+-])\s*(?P<disp>0x[0-9a-f]+|\d+))?\]")
+# how far around a pointer load the matching length load is looked for
+_LENGTH_SCAN_WINDOW = 6
+_SCAN_STOP_MNEMONICS = frozenset(("call", "ret", "bl", "blr", "b", "br", "cbz", "cbnz", "tbz", "tbnz"))
+_FULL_WIDTH_REGISTER_ALIASES = {
+    **{f"e{name}": f"r{name}" for name in ("ax", "bx", "cx", "dx", "si", "di", "bp", "sp")},
+    **{f"r{number}d": f"r{number}" for number in range(8, 16)},
+    **{f"w{number}": f"x{number}" for number in range(31)},
+}
+_REGISTER_ALIASES = {
+    **{
+        alias: f"r{name}"
+        for name in ("ax", "bx", "cx", "dx")
+        for alias in (name, f"e{name}", f"{name[0]}l", f"{name[0]}h")
+    },
+    **{alias: f"r{name}" for name in ("si", "di", "bp", "sp") for alias in (name, f"e{name}", f"{name}l")},
+    **{f"r{number}{suffix}": f"r{number}" for number in range(8, 16) for suffix in ("b", "w", "d")},
+    **{f"w{number}": f"x{number}" for number in range(31)},
+}
+_GO_ARGUMENT_REGISTERS = ("rax", "rbx", "rcx", "rdi", "rsi", "r8", "r9", "r10", "r11")
+_SYSV_ARGUMENT_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
+_WIN64_ARGUMENT_REGISTERS = ("rcx", "rdx", "r8", "r9")
+_RUST_RETURN_PAIR = {"rax": "rdx"}
 
 # ported back from our PR to capa v4.0.0
 # https://github.com/mandiant/capa/blob/v4.0.0/capa/features/extractors/smda/insn.py
@@ -123,25 +158,392 @@ def detect_unicode_len(smda_report: SmdaReport, offset: int, maxlen: Optional[in
     return 0
 
 
+def _looks_like_pointer(smda_report: SmdaReport, va: int) -> bool:
+    word_size = 8 if smda_report.bitness == 64 else 4
+    word_bytes = read_bytes(smda_report, va, num_bytes=word_size)
+    if len(word_bytes) < word_size:
+        return False
+    return bool(smda_report.isAddrWithinMemoryImage(struct.unpack("<Q" if word_size == 8 else "<I", word_bytes)[0]))
+
+
+def _within_mapped_section(smda_report: SmdaReport, va: int) -> bool:
+    """Small immediates read as addresses of a zero-based image land in the file header, whose
+    magic is printable. Literals always sit in a mapped section when the report knows its sections;
+    sections at address 0 are the unmapped ones (ELF .comment, .debug_*)."""
+    mapped = [section for section in smda_report.code_sections if section[1]]
+    return not mapped or any(section[1] <= va < section[2] for section in mapped)
+
+
+def read_sized_string(smda_report: SmdaReport, offset: int, length: int) -> Optional[Tuple[str, str]]:
+    """Read a string of exactly length bytes, as Go and Rust store them: UTF-8 and not NUL-terminated.
+
+    Both toolchains pack their string literals back to back, so the bytes past the end are usually
+    the next literal and say nothing about where this one stops; the length has to come from the
+    reference instead.
+    """
+    cache = smda_report._string_cache
+    cache_key = ("sized", offset, length)
+    if cache_key in cache:
+        return cache[cache_key]
+    res = _read_sized_string(smda_report, offset, length)
+    if len(cache) > 10000:
+        cache.clear()
+    cache[cache_key] = res
+    return res
+
+
+def _read_sized_string(smda_report: SmdaReport, offset: int, length: int) -> Optional[Tuple[str, str]]:
+    if not 0 < length <= MAX_SIZED_STRING_LEN or not smda_report.isAddrWithinMemoryImage(offset):
+        return None
+    if not _within_mapped_section(smda_report, offset):
+        return None
+    # a referenced slot holding an address is a pointer table or slice header; a length shorter
+    # than a pointer would otherwise accept its low bytes, which are often printable
+    word_size = 8 if smda_report.bitness == 64 else 4
+    if length < word_size and _looks_like_pointer(smda_report, offset):
+        return None
+    raw = read_bytes(smda_report, offset, num_bytes=length)
+    if len(raw) != length:
+        return None
+    try:
+        # a NUL-terminated literal passed as a byte slice counts its terminator in the length
+        decoded = raw.decode("utf-8").rstrip("\x00")
+    except UnicodeDecodeError:
+        return None
+    if not decoded or _SIZED_STRING_REJECT_RE.search(decoded):
+        return None
+    return decoded, "ascii" if decoded.isascii() else "utf8"
+
+
+def _starts_string_run(smda_report: SmdaReport, offset: int) -> bool:
+    """True when the byte before offset cannot end a printable string, so a string at offset is
+    the first of its run, as each entry of a C string table is.
+
+    Go and Rust literals are packed without separators, so one in the middle of such a run is
+    preceded by the last byte of the previous literal instead.
+    """
+    buffer = smda_report.buffer
+    base_addr = smda_report.base_addr
+    if buffer is None or base_addr is None:
+        return False
+    rva = offset - base_addr
+    if rva == 0:
+        return True
+    if not 0 < rva <= len(buffer):
+        return False
+    # whitespace, printable ASCII and UTF-8 continuation bytes are what a string can end with
+    previous = buffer[rva - 1]
+    return not (0x09 <= previous <= 0x0D or 0x20 <= previous <= 0x7E or 0x80 <= previous <= 0xBF)
+
+
+def _c_string_at(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str]]:
+    """The NUL-terminated string at offset, when the bytes there look like a C string table entry."""
+    if not _within_mapped_section(smda_report, offset) or not _starts_string_run(smda_report, offset):
+        return None
+    return read_string(smda_report, offset)
+
+
 def read_go_string(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str]]:
-    # for Go strings, we need to deref once to get to the String struct (string pointer and len) and then
-    # deref again for the actual string
-    if smda_report.isAddrWithinMemoryImage(offset):
-        word_size = 8 if smda_report.bitness == 64 else 4
-        word_format = "<Q" if word_size == 8 else "<I"
-        string_pointer_bytes = read_bytes(smda_report, offset, num_bytes=word_size)
-        length_bytes = read_bytes(smda_report, offset + word_size, num_bytes=word_size)
-        if len(string_pointer_bytes) < word_size or len(length_bytes) < word_size:
+    """Read the string a (pointer, length) header at offset describes.
+
+    This is the layout of a Go string header and of a Rust &str, so it serves both.
+    """
+    result = _read_string_header(smda_report, offset)
+    return result[:2] if result else None
+
+
+def _read_string_header(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str, int]]:
+    """Like read_go_string(), and also returns the address the header points at."""
+    if not smda_report.isAddrWithinMemoryImage(offset):
+        return None
+    word_size = 8 if smda_report.bitness == 64 else 4
+    word_format = "<Q" if word_size == 8 else "<I"
+    string_pointer_bytes = read_bytes(smda_report, offset, num_bytes=word_size)
+    length_bytes = read_bytes(smda_report, offset + word_size, num_bytes=word_size)
+    if len(string_pointer_bytes) < word_size or len(length_bytes) < word_size:
+        return None
+    string_pointer = int(struct.unpack(word_format, string_pointer_bytes)[0])
+    length = struct.unpack(word_format, length_bytes)[0]
+    result = read_sized_string(smda_report, string_pointer, length)
+    return (result[0], result[1], string_pointer) if result else None
+
+
+def _parse_immediate(operand: str) -> Optional[int]:
+    try:
+        return int(operand.strip().lstrip("#"), 0)
+    except ValueError:
+        return None
+
+
+def _normalize_location(operand: str) -> Optional[str]:
+    """Canonical name for a register or a [base + disp] slot, None for anything else."""
+    operand = operand.strip().lower()
+    if "[" in operand:
+        match = _MEMORY_SLOT_RE.search(operand)
+        if not match:
             return None
-        string_pointer = struct.unpack(word_format, string_pointer_bytes)[0]
-        length = struct.unpack(word_format, length_bytes)[0]
-        if smda_report.isAddrWithinMemoryImage(string_pointer):
-            return read_string(smda_report, string_pointer, length)
+        displacement = int(match.group("disp"), 0) if match.group("disp") else 0
+        if match.group("sign") == "-":
+            displacement = -displacement
+        base = _REGISTER_ALIASES.get(match.group("base"), match.group("base"))
+        return f"[{base}{displacement:+d}]"
+    return _REGISTER_ALIASES.get(operand, operand)
+
+
+def _length_registers(smda_report: SmdaReport, mode: str) -> Dict[str, str]:
+    if smda_report.architecture == "aarch64":
+        registers = tuple(f"x{number}" for number in range(16 if mode == "go" else 8))
+    elif smda_report.bitness != 64:
+        return {}
+    elif mode == "go":
+        registers = _GO_ARGUMENT_REGISTERS
+    else:
+        binary_format = sniffBinaryFormat(smda_report.xheader or smda_report.buffer)
+        sysv = dict(zip(_SYSV_ARGUMENT_REGISTERS[:-1], _SYSV_ARGUMENT_REGISTERS[1:], strict=True))
+        win64 = dict(zip(_WIN64_ARGUMENT_REGISTERS[:-1], _WIN64_ARGUMENT_REGISTERS[1:], strict=True))
+        if binary_format == "pe":
+            pairs = win64
+        elif binary_format in ("elf", "macho") or smda_report.abi in ("SYSTEMV", "LINUX"):
+            pairs = sysv
+        else:
+            pairs = {
+                key: value
+                for key, value in (sysv | win64).items()
+                if key not in sysv or key not in win64 or sysv[key] == win64[key]
+            }
+        # a &str returned by value comes back in rax:rdx on either platform
+        return {**pairs, **_RUST_RETURN_PAIR}
+    return dict(zip(registers[:-1], registers[1:], strict=True))
+
+
+def _length_locations(location: str, word_size: int, registers: Dict[str, str]) -> Tuple[str, ...]:
+    """Where the length of a (pointer, length) pair lives when the pointer is in location."""
+    if location.startswith("["):
+        base, sign, displacement = re.split(r"([+-])", location[1:-1], maxsplit=1)
+        return (f"[{base}{int(sign + displacement) + word_size:+d}]",)
+    return (registers[location],) if location in registers else ()
+
+
+def _destination(insn) -> Optional[str]:
+    operands = (insn.operands or "").split(",")
+    return _normalize_location(operands[0]) if operands[0] else None
+
+
+def _written_locations(insn):
+    detailed = insn.getDetailed()
+    _, written = detailed.regs_access()
+    locations = {_normalize_location(detailed.reg_name(register)) for register in written}
+    if detailed.operands and detailed.operands[0].access & CS_AC_WRITE:
+        destination = _destination(insn)
+        match = re.fullmatch(r"\[(\w+)([+-]\d+)\]", destination or "")
+        if match:
+            locations.update(
+                f"[{match.group(1)}{int(match.group(2)) + displacement:+d}]"
+                for displacement in range(detailed.operands[0].size)
+            )
+        else:
+            locations.add(destination)
+    return locations
+
+
+def _full_width_location(operand: str, word_size: int) -> bool:
+    operand = operand.strip()
+    if "[" in operand:
+        return operand.startswith("qword ptr " if word_size == 8 else "dword ptr ")
+    if word_size == 4:
+        return operand in _FULL_WIDTH_REGISTER_ALIASES
+    return operand == _normalize_location(operand)
+
+
+def _immediate_length_value(insn, word_size: int) -> Optional[int]:
+    operands = (insn.operands or "").split(",")
+    if insn.mnemonic != "mov" or len(operands) != 2:
+        return None
+    destination = operands[0].strip()
+    if "[" in destination:
+        if not destination.startswith("qword ptr " if word_size == 8 else "dword ptr "):
+            return None
+    elif destination != _normalize_location(destination) and destination not in _FULL_WIDTH_REGISTER_ALIASES:
+        return None
+    return _parse_immediate(operands[1])
+
+
+def _location_invalidated(location: str, written, word_size: int) -> bool:
+    if location in written:
+        return True
+    if location.startswith("["):
+        match = re.fullmatch(r"\[(\w+)([+-]\d+)\]", location)
+        return bool(
+            match
+            and (
+                match.group(1) in written
+                or any(
+                    f"[{match.group(1)}{int(match.group(2)) + displacement:+d}]" in written
+                    for displacement in range(word_size)
+                )
+            )
+        )
+    return False
+
+
+def _scan_boundary(insn) -> bool:
+    if insn.mnemonic in _SCAN_STOP_MNEMONICS or insn.mnemonic.startswith(("j", "b.")):
+        return True
+    return any(
+        group in (CS_GRP_CALL, CS_GRP_JUMP, CS_GRP_RET, CS_GRP_IRET, CS_GRP_INT, CS_GRP_BRANCH_RELATIVE)
+        for group in insn.getDetailed().groups
+    )
+
+
+def _previous_length(instructions, index: int, locations, word_size: int) -> Optional[int]:
+    for candidate in reversed(instructions[max(0, index - _LENGTH_SCAN_WINDOW) : index]):
+        if _scan_boundary(candidate):
+            break
+        written = _written_locations(candidate)
+        if any(_location_invalidated(location, written, word_size) for location in locations):
+            if _destination(candidate) in locations:
+                return _immediate_length_value(candidate, word_size)
+            return None
+    return None
+
+
+def _immediate_length(instructions, index: int, word_size: int, registers: Dict[str, str]) -> Optional[int]:
+    """Find a live immediate length paired with the referenced pointer, within a straight-line window."""
+    insn = instructions[index]
+    if insn.mnemonic == "push":
+        previous = instructions[index - 1] if index > 0 else None
+        if previous is not None and previous.mnemonic == "push":
+            return _parse_immediate(previous.operands or "")
+        return None
+    pointer_location = _destination(insn)
+    if pointer_location is None:
+        return None
+    pointers = {pointer_location}
+    backward_locations = _length_locations(pointer_location, word_size, registers)
+    for position, candidate in enumerate(instructions[index + 1 : index + 1 + _LENGTH_SCAN_WINDOW], index + 1):
+        if _scan_boundary(candidate):
+            break
+        operands = (candidate.operands or "").split(",")
+        copied_to = None
+        if (
+            candidate.mnemonic == "mov"
+            and len(operands) == 2
+            and _normalize_location(operands[1]) in pointers
+            and all(_full_width_location(operand, word_size) for operand in operands)
+        ):
+            copied_to = _normalize_location(operands[0])
+        written = _written_locations(candidate)
+        pointers = {location for location in pointers if not _location_invalidated(location, written, word_size)}
+        if copied_to is not None:
+            pointers.add(copied_to)
+            copied_locations = set(_length_locations(copied_to, word_size, registers)) - pointers
+            copied_length = _previous_length(instructions, position, copied_locations, word_size)
+            if copied_length is not None:
+                return copied_length
+        if pointer_location not in pointers:
+            backward_locations = ()
+        if not pointers:
+            return None
+        locations = {location for pointer in pointers for location in _length_locations(pointer, word_size, registers)}
+        if any(_location_invalidated(location, written, word_size) for location in locations):
+            if copied_to is not None:
+                backward_locations = tuple(
+                    location
+                    for location in backward_locations
+                    if not _location_invalidated(location, written, word_size)
+                )
+                continue
+            if _destination(candidate) in locations:
+                return _immediate_length_value(candidate, word_size)
+            return None
+    return _previous_length(instructions, index, backward_locations, word_size)
+
+
+def _block_start(block):
+    instructions = list(block.getInstructions())
+    return instructions[0].offset if instructions else None
+
+
+def _fallthrough_instructions(blocks_by_start, block_instructions) -> list:
+    """Instructions reached by falling through from the end of block_instructions.
+
+    Blocks also split at join points, but a pointer loaded before the join keeps its value on the
+    path that falls into it, so the forward pairing scan may continue there. Backward scans never
+    start before the pointer's own block, where another predecessor could have set the length.
+    """
+    following: list = []
+    current = block_instructions
+    while current and len(following) < _LENGTH_SCAN_WINDOW:
+        last = current[-1]
+        if not getattr(last, "bytes", None):
+            break
+        try:
+            if _scan_boundary(last):
+                break
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
+            break
+        successor = blocks_by_start.get(last.offset + len(last.bytes) // 2)
+        if successor is None:
+            break
+        current = list(successor.getInstructions())
+        following.extend(current)
+    return following[:_LENGTH_SCAN_WINDOW]
+
+
+def _language_mode(smda_report: SmdaReport) -> Optional[str]:
+    scores = smda_report.language if isinstance(smda_report.language, dict) else {}
+    best = max(("go", "rust"), key=lambda name: scores.get(name, 0.0))
+    if scores.get(best, 0.0) <= 0.5:
+        return None
+    if best == "rust" and not _has_rustc_path(smda_report):
+        return None
+    return best
+
+
+def _has_rustc_path(smda_report: SmdaReport) -> bool:
+    if smda_report._rustc_path_seen is None:
+        buffer = smda_report.buffer
+        if buffer is None:
+            # the buffer can be attached later; only remember an answer drawn from one
+            return False
+        smda_report._rustc_path_seen = bool(_RUSTC_PATH_RE.search(buffer))
+    return smda_report._rustc_path_seen
+
+
+def _c_strings_for_refs(
+    smda_report: SmdaReport, insn: SmdaInstruction, data_refs: List[int]
+) -> Iterator[Tuple[str, Optional[int], int, str]]:
+    """The NUL-terminated path for references that did not pair with a length. Only targets that
+    start a C string are read; one inside a run of packed literals would take the ones after it too."""
+    for data_ref in data_refs:
+        for v in derefs(smda_report, data_ref):
+            string_result = _c_string_at(smda_report, v)
+            if string_result:
+                string_read, string_type = string_result
+                yield string_read.rstrip("\x00"), insn.offset, v, string_type
+
+
+def _sized_string_for_ref(
+    smda_report: SmdaReport, instructions, index: int, data_ref: int, word_size: int, registers: Dict[str, str]
+) -> Optional[Tuple[str, str, int]]:
+    """(string, type, string address) for a Go/Rust reference, or None to use the NUL-terminated path."""
+    try:
+        length = _immediate_length(instructions, index, word_size, registers)
+    except Exception as exc:
+        # the pairing re-decodes instructions; a failure there costs this reference, not the report
+        reraise_non_operational_exception(exc)
+        length = None
+    if length:
+        result = read_sized_string(smda_report, data_ref, length)
+        if result:
+            return result[0], result[1], data_ref
+    return _read_string_header(smda_report, data_ref)
 
 
 def read_string(smda_report: SmdaReport, offset: int, maxlen: Optional[int] = None) -> Optional[Tuple[str, str]]:
-    # in case we are dealing with Go/Rust, we need to dereference the pointer and extract the expected length of the string
-    # TODO handle Go/Rust
+    # NUL- or end-of-printable-terminated strings only; Go and Rust strings carry their length in
+    # the reference instead and go through read_sized_string()
     buffer = smda_report.buffer
     base_addr = smda_report.base_addr
     if buffer is None or base_addr is None:
@@ -182,50 +584,31 @@ def extract_strings(f: SmdaFunction, mode: Optional[str] = None) -> Iterator[Tup
         # every helper below reads the buffer, base address and caches off the report, so a
         # function detached from one has nothing to search rather than an empty result
         return
-    if mode == "go":
-        # we address stack assigned strings and String structs
+    if mode is None:
+        mode = _language_mode(smda_report)
+    if mode in ("go", "rust"):
+        # Go and Rust reference a string either directly, with its length loaded next to the pointer
+        # (registers or stack slots), or through a (pointer, length) header in data
         # as detailed in https://cloud.google.com/blog/topics/threat-intelligence/extracting-strings-go-rust-executables/
-        # first go over the whole function and detect the stack-assigned string constructs
-        instructions = list(f.getInstructions())
-        for index, insn in enumerate(instructions):
-            data_refs = list(insn.getDataRefs())
-            if len(data_refs) == 1:
-                data_ref = data_refs[0]
-                # check if next two instructions are movs
-                found_string = False
-                if (
-                    index + 2 < len(instructions)
-                    and instructions[index + 1].mnemonic == "mov"
-                    and instructions[index + 2].mnemonic == "mov"
-                ):
-                    operands = (instructions[index + 2].operands or "").split(",")
-                    if len(operands) == 2:
-                        # check if the second instruction has an immediate value as second operand
-                        try:
-                            potential_string_len = int(operands[1], 0)
-                            if potential_string_len > 0:
-                                string_result = read_string(smda_report, data_ref, potential_string_len)
-                                if string_result:
-                                    string_read, string_type = string_result
-                                    found_string = True
-                                    yield (
-                                        string_read.rstrip("\x00"),
-                                        insn.offset,
-                                        data_ref,
-                                        string_type,
-                                    )
-                        except Exception as exc:
-                            reraise_non_operational_exception(exc)
-                if not found_string:
-                    string_result = read_go_string(smda_report, data_ref)
-                    if string_result:
-                        string_read, string_type = string_result
-                        yield (
-                            string_read.rstrip("\x00"),
-                            insn.offset,
-                            data_ref,
-                            string_type,
-                        )
+        word_size = 8 if smda_report.bitness == 64 else 4
+        registers = _length_registers(smda_report, mode)
+        blocks = list(f.getBlocks())
+        blocks_by_start = {_block_start(block): block for block in blocks}
+        for block in blocks:
+            block_instructions = list(block.getInstructions())
+            instructions = block_instructions + _fallthrough_instructions(blocks_by_start, block_instructions)
+            for index, insn in enumerate(block_instructions):
+                data_refs = list(insn.getDataRefs())
+                if len(data_refs) == 1:
+                    sized = _sized_string_for_ref(smda_report, instructions, index, data_refs[0], word_size, registers)
+                    if sized:
+                        string_read, string_type, string_addr = sized
+                        yield string_read, insn.offset, string_addr, string_type
+                        continue
+                if mode == "rust":
+                    # Go mode never had the NUL-terminated path; Rust binaries did before sized reads
+                    # and carry C code (CRT, vendored libraries, FFI) whose strings only it finds
+                    yield from _c_strings_for_refs(smda_report, insn, data_refs)
     else:
         for insn in f.getInstructions():
             for data_ref in insn.getDataRefs():
