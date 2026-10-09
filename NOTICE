@@ -11,7 +11,10 @@ rust_demangler
 --------------------------------------------------------------------------------
 src/smda/common/labelprovider/rust_demangler/ is derived from the rust_demangler
 package by Team bi0s (https://github.com/teambi0s/rust_demangler), used under the
-MIT License and modified for use here.
+MIT License and modified for use here: the RustDemangler entry point and its
+mangling-type dispatch, and the TypeNotFoundError, UnableToLegacyDemangle and
+UnableTov0Demangle exceptions. The demangling itself is done by the demangle
+package.
 
 MIT License
 
@@ -34,21 +37,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-================================================================================
-Ghidra
---------------------------------------------------------------------------------
-Parts of the same directory reimplement behaviour from Ghidra's Rust demanglers
-(https://github.com/NationalSecurityAgency/ghidra), specifically
-Ghidra/Features/Rust/src/main/java/ghidra/app/plugin/core/analysis/rust/demangler/
-RustDemanglerV0.java and RustDemanglerLegacy.java: the recursion bound in the v0
-demangler and the strict hash handling in the legacy demangler. Ghidra is
-licensed under the Apache License, Version 2.0, available at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Ghidra's own V0 demangler is a port of the rustc-demangle crate
-(https://github.com/rust-lang/rustc-demangle), dual-licensed Apache-2.0 OR MIT.
 
 ================================================================================
 LLVM demangler test corpus

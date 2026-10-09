@@ -12,11 +12,12 @@ from smda.SmdaConfig import SmdaConfig
 class _FakeBlock:
     def __init__(self, start, lengths, successors=()):
         self.start = start
-        self._lengths = lengths
+        self.end = start + sum(lengths)
+        self.arch = "block-arch"
         self.outgoing_edges = [SimpleNamespace(target=SimpleNamespace(start=target)) for target in successors]
 
     def __iter__(self):
-        return iter([([], length) for length in self._lengths])
+        raise AssertionError("rendering instruction text is the cost this interface avoids")
 
 
 class _FakeFunction:
@@ -50,11 +51,13 @@ class _FakeBinaryView:
             SimpleNamespace(start=0x402000, end=0x402008, data_length=8),
         ]
         self.calls = 0
+        self.length_queries = []
 
     def get_function_at(self, offset):
         return next((function for function in self.functions if function.start == offset), None)
 
-    def get_instruction_length(self, offset):
+    def get_instruction_length(self, offset, arch=None):
+        self.length_queries.append((offset, arch))
         return len(self.CODE.get(offset, b""))
 
     def read(self, offset, length):
@@ -109,6 +112,50 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.assertEqual(self.interface.getBlocks(0x401234), [])
         self.assertEqual(self.interface.getInstructionBytes(0x401000), bytes.fromhex("e805000000"))
         self.assertEqual(self.interface.getInstructionBytes(0x401234), b"")
+
+    def test_blocks_are_decoded_once_with_the_block_architecture(self):
+        self.interface.getBlocks(0x401000)
+        self.interface.getCodeOutRefs(0x401000)
+        self.assertEqual(
+            [query for query in self.bv.length_queries if query[0] < 0x40100A].count((0x401000, "block-arch")), 1
+        )
+        self.assertEqual(self.bv.length_queries.count((0x401005, "block-arch")), 1)
+
+    def test_instruction_bytes_come_from_the_decoded_block(self):
+        self.interface.getBlocks(0x401000)
+        self.bv.length_queries.clear()
+        self.assertEqual(self.interface.getInstructionBytes(0x401005), b"\xc3")
+        self.assertEqual(self.bv.length_queries, [])
+
+    def test_zero_length_instruction_ends_the_block(self):
+        self.bv.functions[1].basic_blocks = [_FakeBlock(0x40100A, [2, 1, 4])]
+        self.bv.CODE = {**self.bv.CODE, 0x40100D: b""}
+        self.assertEqual(self.interface.getBlocks(0x40100A), [[0x40100A, 0x40100C]])
+
+    def test_instruction_crossing_the_block_end_is_listed_and_read_with_the_default_architecture(self):
+        self.bv.functions[0].basic_blocks = [_FakeBlock(0x401000, [3])]
+        self.assertEqual(self.interface.getBlocks(0x401000), [[0x401000]])
+        self.bv.length_queries.clear()
+        self.assertEqual(self.interface.getInstructionBytes(0x401000), bytes.fromhex("e805000000"))
+        self.assertEqual(self.bv.length_queries, [(0x401000, None)])
+
+    def test_short_block_read_leaves_instructions_uncached(self):
+        read = self.bv.read
+        self.bv.read = lambda offset, length: read(offset, length)[:1]
+        self.assertEqual(self.interface.getBlocks(0x401000), [[0x401000, 0x401005]])
+        self.bv.read = read
+        self.bv.length_queries.clear()
+        self.assertEqual(self.interface.getInstructionBytes(0x401000), bytes.fromhex("e805000000"))
+        self.assertEqual(self.interface.getInstructionBytes(0x401005), b"\xc3")
+        self.assertEqual(self.bv.length_queries, [(0x401000, None), (0x401005, None)])
+
+    def test_make_function_drops_decoded_blocks(self):
+        self.bv.create_user_function = lambda offset: object()
+        self.interface.getBlocks(0x40100A)
+        self.bv.CODE = {**self.bv.CODE, 0x40100A: b"\x90", 0x40100B: b"\x31\xc0"}
+        self.assertEqual(self.interface.getBlocks(0x40100A), [[0x40100A, 0x40100C]])
+        self.assertTrue(self.interface.makeFunction(0x401020))
+        self.assertEqual(self.interface.getBlocks(0x40100A), [[0x40100A, 0x40100B]])
 
     def test_code_refs_are_fallthrough_and_calls(self):
         self.assertEqual(self.interface.getCodeOutRefs(0x401000), [(0x401000, 0x401005), (0x401000, 0x40100A)])

@@ -12,13 +12,7 @@ from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.rust_demangler import demangle
 from smda.common.labelprovider.rust_demangler.rust import TypeNotFoundError
 from smda.common.labelprovider.rust_demangler.rust_legacy import LegacyDemangler, UnableToLegacyDemangle
-from smda.common.labelprovider.rust_demangler.rust_v0 import (
-    Ident,
-    Parser,
-    Printer,
-    UnableTov0Demangle,
-    V0Demangler,
-)
+from smda.common.labelprovider.rust_demangler.rust_v0 import UnableTov0Demangle, V0Demangler
 from smda.common.labelprovider.RustSymbolEvidence import is_rust_language_evidence
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
 
@@ -136,15 +130,12 @@ class TestRustDemangler(unittest.TestCase):
         demangled.encode("utf-8")
 
     def test_v0_undecodable_punycode_still_falls_back_to_the_raw_form(self):
-        ident = Ident("", "!not-punycode!")
-        ident.display()
-        self.assertEqual(ident.disp, "punycode{!not-punycode!}")
+        self.assertEqual(demangle("_RCu4_2d9b"), "punycode{2d9b}")
 
-    def test_v0_empty_const_hex_nibbles_raise_demangler_error(self):
-        # `Kh_` (u8 const with zero hex nibbles) previously escaped as a bare
-        # ValueError from int("", 16) instead of the demangler's own error type
-        with self.assertRaises(UnableTov0Demangle):
-            demangle("_RIC1aKh_E")
+    def test_v0_empty_const_hex_nibbles_read_as_zero(self):
+        # `Kh_` is a u8 const with zero hex nibbles; rustc-demangle accepts the empty
+        # nibble run and prints it as 0 rather than refusing the name
+        self.assertEqual(demangle("_RIC1aKh_E"), "a::<0>")
 
     def test_v0_non_c_abi_fn_type_demangles(self):
         # the skip-pass abi validation was inverted, rejecting every valid
@@ -165,7 +156,6 @@ class TestRustDemangler(unittest.TestCase):
         across calls, causing symbols without dots to get stale suffixes appended.
         """
         # First demangle a symbol that would have a suffix (contains .llvm.)
-        # Note: .llvm. suffix gets stripped during processing
         symbol_with_suffix = "_RNvC3foo3bar.llvm.1234567890abcdef"
         _result1 = demangle(symbol_with_suffix)  # noqa: F841
 
@@ -179,21 +169,16 @@ class TestRustDemangler(unittest.TestCase):
 
     def test_v0_lifetime_letter_mapping(self):
         """Ensure lifetime indexes map to alphabet letters starting at 'a'."""
-
-        printer = Printer(None, "", bound=1)
-        printer.print_lifetime_from_index(1)
-        self.assertEqual(printer.out, "'a")
-
-        printer = Printer(None, "", bound=3)
-        printer.print_lifetime_from_index(2)
-        self.assertEqual(printer.out, "'b")
+        self.assertEqual(
+            demangle("_RINvCsgJQ98GVk1lE_5types7witnessFG0_RL1_hRL0_tERL1_hEB2_"),
+            "types::witness::<for<'a, 'b> fn(&'a u8, &'b u16) -> &'a u8>",
+        )
 
     def test_v0_lifetime_invalid_depth_raises(self):
         """Invalid lifetime depths should raise demangling errors."""
-
-        printer = Printer(None, "", bound=0)
+        # one lifetime bound by the binder, and a reference to a second
         with self.assertRaises(UnableTov0Demangle):
-            printer.print_lifetime_from_index(2)
+            demangle("_RINvCsgJQ98GVk1lE_5types7witnessFG_RL2_hEB2_")
 
     def test_v0_demangles_impl_path_generic_args(self):
         """Impl-block/generic-instantiation ("I" tag) paths must demangle correctly.
@@ -221,8 +206,10 @@ class TestRustDemangler(unittest.TestCase):
             "_ZN3foo3barE",
         ]
 
+        # rustc-demangle drops a ".llvm." suffix only when its hash is uppercase hex, the
+        # way LLVM writes one; any other suffix is kept and spelled after the path
         expected = [
-            "foo::bar",
+            "foo::bar.llvm.1234567890abcdef",
             "123foo::bar",
             "123foo::bar",
             "foo::bar",
@@ -238,8 +225,6 @@ class TestRustDemangler(unittest.TestCase):
 
         with self.assertRaises(UnableToLegacyDemangle):
             LegacyDemangler().demangle("_Z3fooE")
-        with self.assertRaises(UnableToLegacyDemangle):
-            LegacyDemangler().demangle("_ZN3$u$E")
         with self.assertRaises(UnableTov0Demangle):
             V0Demangler().demangle("_NvC3foo")
         with self.assertRaises(UnableTov0Demangle):
@@ -268,30 +253,17 @@ class TestRustDemangler(unittest.TestCase):
         # the v0 demangler shares the class through digit_10/digit_62/hex_nibbles
         for name in ("_RNvC\U00010e60", "_RNvC1a²"):
             self.assertIsInstance(demangle_itanium_symbol(name), str)
-        # digit_62 decodes base-62 backref indices; a category-No "digit" must be
-        # rejected as a non-digit instead of reaching int()
+        # a category-No "digit" must be rejected as a non-digit instead of reaching int()
         with self.assertRaises(UnableTov0Demangle):
-            Parser("\U00010e60", 0).digit_62()
+            demangle("_RNvC\U00010e60")
 
-    def test_v0_backref_path_updates_parent_printer_output(self):
-        """Backref path printers should copy string output back to the caller."""
 
-        class FakeParser:
-            def eat(self, token):
-                return token == "B"
-
-        class FakeBackrefPrinter:
-            out = "prefix::Backref"
-
-            def print_path_maybe_open_generics(self):
-                return True
-
-        printer = Printer(FakeParser(), "prefix::", bound=0)
-
-        with mock.patch.object(printer, "backref_printer", return_value=FakeBackrefPrinter()):
-            self.assertTrue(printer.print_path_maybe_open_generics())
-
-        self.assertEqual(printer.out, "prefix::Backref")
+class TestRustHashOnlySymbol(unittest.TestCase):
+    def test_a_legacy_name_holding_only_a_hash_is_not_read_as_cpp(self):
+        name = "_ZN17h0000000000000000E"
+        self.assertFalse(is_rust_language_evidence(name))
+        self.assertEqual(demangle_itanium_symbol(name), name)
+        self.assertEqual(demangle_itanium_symbol("_" + name), "_" + name)
 
 
 class TestRustSymbolProvider(unittest.TestCase):
