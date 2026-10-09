@@ -24,8 +24,6 @@ from smda.common.TailcallAnalyzer import TailcallAnalyzer
 from smda.DisassemblyResult import DisassemblyResult
 
 LOGGER = logging.getLogger(__name__)
-# instructions after which straight-line code has nowhere to fall through to
-_STRAIGHT_LINE_TERMINATORS = frozenset({"ret", "retn", "jmp", "ljmp", "hlt", "ud2"})
 
 # a leading sign is preserved so that negative displacements ("[rip - 0x20]") resolve correctly
 _REFERENCED_ADDR_RE = re.compile(r"(?P<sign>[+-])?\s*0x(?P<value>[a-fA-F0-9]+)")
@@ -245,23 +243,6 @@ class RecursiveDisassembler:
             current_start_addr,
         )
         return True
-
-    @staticmethod
-    def _straightLineEnd(state, start_addr):
-        """Where the adjacent instructions a candidate decoded from its start end, if in a ret or jmp.
-
-        Anything else ends the run because the next byte was never decoded, not because the code
-        stopped there, so the bytes after it say nothing about where the next function begins.
-        """
-        end = start_addr
-        last_mnemonic = None
-        for address, size, mnemonic, *_ in sorted(state.instructions if state is not None else []):
-            if address > end:
-                break
-            if address + size > end:
-                end = address + size
-                last_mnemonic = mnemonic.split(" ")[-1]
-        return end if last_mnemonic in _STRAIGHT_LINE_TERMINATORS else None
 
     def analyzeFunction(self, start_addr, as_gap=False):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
@@ -513,7 +494,7 @@ class RecursiveDisassembler:
                 # start looking directly after our new function
             else:
                 self.fc_manager.updateAnalysisAborted(gap_candidate, "Gap candidate did not fulfil function criteria.")
-                self.fc_manager.failed_gap_extent_end = self._straightLineEnd(state, gap_candidate)
+                self.fc_manager.noteFailedGapCandidate(state, gap_candidate)
             next_gap = self.fc_manager.getNextGap(dont_skip=True)
             gap_candidate = self.fc_manager.nextGapCandidate(next_gap)
         LOGGER.debug("Finished gap analysis, functions: %d", len(self.disassembly.functions))

@@ -80,14 +80,12 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
-- **(intel)** Resume the gap scan past a failed candidate on binaries padded with nops. The resume from #338 only
-  reads int3 runs, which GCC and Clang do not emit between ELF functions, so a failed candidate there still
-  abandoned the rest of its gap. When the code the failed candidate decoded straight from its start ends in `ret`
-  or `jmp` and nothing but nops follow up to a 16-byte boundary, the scan resumes at that boundary. *Measured on
-  18 static x64 ELF builds (lz4, zstd, brotli x gcc/clang x O0/O2/Os) against their symbol tables:* +2 true
-  positives, +1 false positive, nothing lost. *Malpedia CI corpus:* 152/155 files identical; one Akira ELF
-  finds 109 more functions (95 of them 16-byte aligned, most opening on a prologue) and two Konni samples one
-  more each; nothing is lost. Not reproducible from the bundled fixtures, which do not move.
+- **(intel)** Resume the gap scan past a failed candidate on binaries padded with nops. The int3 resume from #338
+  never fires on GCC/Clang ELFs, so when the failed candidate's straight-line code ends in `ret`/`jmp` and only
+  nops follow up to a 16-byte boundary, the scan now resumes there. Only capstone's `nop` counts, so old i386
+  binutils fillers (`lea esi, [esi]`, `mov esi, esi`) are not padding: Delphi emits `lea eax, [eax]` inside code.
+  *Reproduced by reviewer on 866 stripped x86/x64 ELFs against their symbol tables:* +464/-2 true starts,
+  +2/-6 false starts. *Malpedia CI corpus:* 152/155 files identical, +111 functions, none lost. (#381)
 
 ### Security
 

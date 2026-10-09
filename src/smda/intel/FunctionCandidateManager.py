@@ -111,6 +111,8 @@ _FAILED_GAP_RESUME_WINDOW = 4096
 #: Alignment a resumed entry has to already sit on. Compilers align function entries; a byte
 #: that follows padding without being aligned is padding inside something else.
 _ENTRY_ALIGNMENT = 16
+#: Instructions after which straight-line code has nowhere to fall through to.
+_STRAIGHT_LINE_TERMINATORS = frozenset({"ret", "retn", "jmp", "ljmp", "hlt", "ud2"})
 
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
@@ -124,9 +126,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         #: begins where an earlier one ends and is therefore inside that function's body
         self._seeded_prologues = ()
         self._retained_pad = None
+        #: where the straight-line code of the last gap candidate that failed ends, if it did
+        self.failed_gap_extent_end = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._retained_pad = None
+        self.failed_gap_extent_end = None
         # the gap scan decodes potential NOP instructions, so it needs an x86 capstone
         # matching the binary's bitness; build it before the base init runs discovery
         self.capstone = Cs(CS_ARCH_X86, CS_MODE_32)
@@ -201,6 +206,22 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             is_alignment_sequence = False
         return is_alignment_sequence
 
+    def noteFailedGapCandidate(self, state, start_addr):
+        """Record where the adjacent instructions the candidate decoded from its start end.
+
+        Only a run ending in a ret or jmp counts. Anything else ends because the next byte was
+        never decoded, not because the code stopped there, so the bytes after it say nothing
+        about where the next function begins.
+        """
+        decoded = {ins[0]: ins for ins in state.instructions} if state is not None else {}
+        end = start_addr
+        last_mnemonic = None
+        while end in decoded:
+            _, size, mnemonic, *_ = decoded[end]
+            end += size
+            last_mnemonic = mnemonic.split(" ")[-1]
+        self.failed_gap_extent_end = end if last_mnemonic in _STRAIGHT_LINE_TERMINATORS else None
+
     def _failedGapResumeTarget(self):
         """The first address past the next int3 run after the failed candidate, when aligned.
 
@@ -210,6 +231,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         adjacent functions steps over it in one move. The answer can fall past the end of the
         gap, which is why the caller takes the nearer of it and the next gap.
         """
+        # consumed here whatever the answer, so it never carries over to a later candidate
+        extent_end = self.failed_gap_extent_end
+        self.failed_gap_extent_end = None
         if self.gap_pointer is None or self.disassembly is None:
             return None
         binary_info = self.disassembly.binary_info
@@ -221,13 +245,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # a slice from a negative offset reads the tail of the image instead of failing
             return None
         targets = [
-            self._paddedExtentEnd(gap_pointer, binary_info.base_addr),
+            self._paddedExtentEnd(extent_end, gap_pointer, binary_info.base_addr),
             self._int3ResumeTarget(gap_pointer, start),
         ]
         targets = [target for target in targets if target is not None]
         return min(targets) if targets else None
 
-    def _paddedExtentEnd(self, gap_pointer, base_addr):
+    def _paddedExtentEnd(self, end, gap_pointer, base_addr):
         """The aligned address the failed candidate's own code runs up to, through nop padding.
 
         GCC and Clang pad ELF functions with nops rather than int3, so the int3 rule below never
@@ -236,8 +260,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         the code the candidate decoded straight from its start ends in nothing but padding up to
         an aligned address, that address is where the next function starts.
         """
-        end = self.failed_gap_extent_end
-        self.failed_gap_extent_end = None
         if end is None or end <= gap_pointer:
             return None
         offset = end - base_addr

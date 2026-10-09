@@ -11,6 +11,7 @@ the failed candidate and the end of its gap was never offered as a candidate at 
 import logging
 import struct
 import unittest
+from types import SimpleNamespace
 
 from capstone import CS_ARCH_X86, CS_MODE_64, Cs
 
@@ -209,6 +210,46 @@ class PaddedExtentResumeTest(unittest.TestCase):
     def testAnExtentThatDoesNotAdvanceNamesNothing(self):
         manager = self._manager(b"\x90" * 0x20, 0x401100)
         self.assertIsNone(manager._failedGapResumeTarget())
+
+
+class FailedCandidateExtentTest(unittest.TestCase):
+    """What a failed candidate's analysis state leaves for the resume, and when it is dropped."""
+
+    @staticmethod
+    def _state(*instructions):
+        return SimpleNamespace(
+            instructions=[(address, size, mnemonic, "", b"") for address, size, mnemonic in instructions]
+        )
+
+    def testARunEndingInAJumpIsRecorded(self):
+        manager = managerAt(0x401100, bufferWithCode(0x401100, b""))
+        # decoded out of order, as a recursive walk leaves them
+        state = self._state((0x401104, 2, "jmp"), (0x401100, 2, "test"), (0x401102, 2, "je"))
+        manager.noteFailedGapCandidate(state, 0x401100)
+        self.assertEqual(manager.failed_gap_extent_end, 0x401106)
+
+    def testARunEndingInAnythingElseIsNot(self):
+        manager = managerAt(0x401100, bufferWithCode(0x401100, b""))
+        manager.noteFailedGapCandidate(self._state((0x401100, 2, "test"), (0x401102, 2, "je")), 0x401100)
+        self.assertIsNone(manager.failed_gap_extent_end)
+
+    def testTheRunStopsAtTheFirstUndecodedByte(self):
+        manager = managerAt(0x401100, bufferWithCode(0x401100, b""))
+        state = self._state((0x401100, 2, "je"), (0x401110, 1, "ret"))
+        manager.noteFailedGapCandidate(state, 0x401100)
+        self.assertIsNone(manager.failed_gap_extent_end)
+
+    def testAnEarlyReturnStillDropsTheRecordedExtent(self):
+        manager = managerAt(0x401100, bufferWithCode(0x401100, b""))
+        manager.failed_gap_extent_end = 0x401102
+        manager.gap_pointer = None
+        self.assertIsNone(manager._failedGapResumeTarget())
+        self.assertIsNone(manager.failed_gap_extent_end)
+
+    def testTheSharedManagerRecordsNothing(self):
+        manager = managerAt(0x401100, bufferWithCode(0x401100, b""), manager_class=CommonFunctionCandidateManager)
+        manager.noteFailedGapCandidate(self._state((0x401100, 1, "ret")), 0x401100)
+        self.assertFalse(hasattr(manager, "failed_gap_extent_end"))
 
 
 class PaddedExtentResumeEndToEndTest(unittest.TestCase):
