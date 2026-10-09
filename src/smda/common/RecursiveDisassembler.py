@@ -494,6 +494,7 @@ class RecursiveDisassembler:
                 # start looking directly after our new function
             else:
                 self.fc_manager.updateAnalysisAborted(gap_candidate, "Gap candidate did not fulfil function criteria.")
+                self.fc_manager.noteFailedGapCandidate(state, gap_candidate)
             next_gap = self.fc_manager.getNextGap(dont_skip=True)
             gap_candidate = self.fc_manager.nextGapCandidate(next_gap)
         LOGGER.debug("Finished gap analysis, functions: %d", len(self.disassembly.functions))

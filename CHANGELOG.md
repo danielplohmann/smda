@@ -108,6 +108,12 @@ past roughly six lines it belongs in the PR the entry links.
   go1.24.7 reproducer, windows and linux amd64 (not bundled):* `image/draw.DrawMask` drops from 1,065 / 549 blocks
   to 238. *Malpedia CI corpus:* 154/155 files identical; one Akira ELF goes -13/+4, as a recovered table removes a
   false function that had split a gap. Bundled fixtures keep their golden results. (#363)
+- **(intel)** Resume the gap scan past a failed candidate on binaries padded with nops. The int3 resume from #338
+  never fires on GCC/Clang ELFs, so when the failed candidate's straight-line code ends in `ret`/`jmp` and only
+  nops follow up to a 16-byte boundary, the scan now resumes there. Only capstone's `nop` counts, so old i386
+  binutils fillers (`lea esi, [esi]`, `mov esi, esi`) are not padding: Delphi emits `lea eax, [eax]` inside code.
+  *Reproduced by reviewer on 866 stripped x86/x64 ELFs against their symbol tables:* +464/-2 true starts,
+  +2/-6 false starts. *Malpedia CI corpus, before #380:* 152/155 files identical, +111 functions, none lost. (#381)
 
 ### Security
 

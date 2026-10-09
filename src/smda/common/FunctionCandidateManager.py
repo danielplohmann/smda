@@ -304,6 +304,13 @@ class FunctionCandidateManager:
         LOGGER.debug("getNextGap(%s) final gap_ptr: 0x%08x", dont_skip, next_gap)
         return next_gap
 
+    def noteFailedGapCandidate(self, state, start_addr):
+        """Called with the analysis state of a gap candidate that failed, before the next gap.
+
+        A backend whose resume target depends on what the candidate decoded reads it here; the
+        rest pay nothing for it.
+        """
+
     def _failedGapResumeTarget(self):
         """Where to resume after a gap candidate failed to become a function, or None.
 
