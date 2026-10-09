@@ -3,9 +3,9 @@
 import re
 from functools import lru_cache
 
-import pycxxfilt
+import demangle
 
-from .RustSymbolEvidence import is_rust_language_evidence
+from .RustSymbolEvidence import is_rust_hash_only_symbol, is_rust_language_evidence
 
 _ITANIUM_PREFIXES = ("__Z", "_Z")
 _MSVC_CPP_DECORATED_FUNCTION = re.compile(r"^\?[^@]+(?:@[^@]+)*@@.+Z$")
@@ -15,18 +15,16 @@ _MSVC_CPP_DECORATED_DATA = re.compile(r"^\?[^@]+(?:@[^@]+)*@@[0-9].+$")
 
 @lru_cache(maxsize=4096)
 def demangle_itanium_symbol(name):
-    """Return a readable C++ name using pycxxfilt's vendored LLVM demangler."""
+    """Return a readable C++ name, spelled the way llvm-cxxfilt spells it.
+
+    The scheme is forced rather than detected: a legacy Rust name shares the _ZN prefix,
+    and is turned away here so that RustSymbolProvider can claim it.
+    """
     if not name or not name.startswith(_ITANIUM_PREFIXES):
         return name
-    if is_rust_language_evidence(name):
+    if is_rust_language_evidence(name) or is_rust_hash_only_symbol(name):
         return name
-    try:
-        demangled = pycxxfilt.demangle(name)
-    except ValueError:
-        return name
-    if demangled and demangled != name:
-        return demangled
-    return name
+    return demangle.demangle(name, language="itanium")
 
 
 def is_itanium_cpp_symbol(name):

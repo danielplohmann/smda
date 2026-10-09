@@ -90,7 +90,6 @@ DECLINED = [
     "?g@@YAXPAUS@@PA1@Z",  # argument back-reference past the end of the table
     "?g@@YAX0@Z",  # argument back-reference with nothing recorded yet
     "?f@@YAXPAHPB0@Z",  # a qualifier in front of a back-reference, which MSVC does not form
-    "?f@@YAXZZ",  # variadic marker with no parameter before it
     "?f@@YAX_",  # truncated extended type
     # a parameter list is closed by the throw specification, so a name that stops before it
     # is truncated however plausible the prefix looks
@@ -220,11 +219,6 @@ class MsvcAnonymousNamespaceTestSuite(unittest.TestCase):
         for mangled, expected in ANONYMOUS_NAMESPACE:
             with self.subTest(mangled=mangled):
                 self.assertEqual(demangle_msvc_symbol(mangled), expected)
-
-    def test_a_discriminator_that_is_not_hexadecimal_is_refused(self):
-        for mangled in ("?x@?A0@@3HA", "?x@?A0x@@3HA", "?x@?A0xZZ@@3HA"):
-            with self.subTest(mangled=mangled):
-                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
 
 MEMBER_POINTERS_AND_INTEGERS = [
@@ -436,12 +430,8 @@ COMPLETING_DECLINED = [
     "??__EFoo@@3HA",  # what runs code takes a signature, never a storage class
     "??_C@_12ABCDEFGH@hi?$AA@",  # a wide literal spells its bytes differently
     "??_C@_02ABCDEFGH@h?$Qi?$AA@",  # a byte is written as two nibbles from "A" to "P"
-    "??_C@_02ABCDEFGH@h?zi?$AA@",  # and an escape names one of ten characters
-    "??_C@_05ABCDEFGH@hi?$AA@",  # the length counts the bytes, terminator included
     "??_C@_02ABCDEFGH@hi?$AA@X",  # and nothing follows the literal
     "??_9Base@@$RB7AA",  # a thunk through a virtual base names an access this does not
-    # a conversion operator is named by its return, which a template argument list displaces
-    "??$?BH@S@@QEAAAEAU0@H@Z",
     "??_7Base@@3HA",  # a vftable is written with its own storage class and no other
     "??__EFoo@@51",  # and what runs code takes no storage class at all, guard or otherwise
 ]
@@ -573,10 +563,6 @@ class MsvcMemberQualifierTestSuite(unittest.TestCase):
     def test_a_qualifier_the_table_does_not_hold_is_refused(self):
         self.assertEqual(demangle_msvc_symbol("??$f@$$A8@@GZAHXZ@@YAXXZ"), "??$f@$$A8@@GZAHXZ@@YAXXZ")
 
-    def test_a_qualified_fragment_that_is_neither_a_namespace_nor_a_scope_is_refused(self):
-        # "?Q" names no scope: the numbers stop at P and "?A" is the unnamed namespace
-        self.assertEqual(demangle_msvc_symbol("?x@?Q@@3HA"), "?x@?Q@@3HA")
-
 
 class MsvcTrailingQualifierTestSuite(unittest.TestCase):
     def test_the_storage_forms_a_data_symbol_may_take(self):
@@ -620,7 +606,7 @@ class MsvcUnalignedAndLiteralTestSuite(unittest.TestCase):
                 self.assertEqual(demangle_msvc_symbol(mangled), expected)
 
     def test_an_unknown_double_underscore_operator_is_refused(self):
-        for mangled in ("??__L_deg@@YAHO@Z", "??__@@YAHO@Z"):
+        for mangled in ("??__@@YAHO@Z",):
             with self.subTest(mangled=mangled):
                 self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 
@@ -749,6 +735,43 @@ class MsvcProbedRuleTestSuite(unittest.TestCase):
 
     def test_shapes_those_rules_forbid_are_refused(self):
         for mangled in PROBED_DECLINED:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), mangled)
+
+
+# Well-formed shapes the previous in-tree demangler refused, each with llvm-undname's own
+# spelling: a variadic with no named parameter, operator co_await, the extended "?a".."?z"
+# literal escapes, a wide literal and a literal MSVC truncated to its first 32 bytes.
+REFERENCE_READS = [
+    ("?f@@YAXZZ", "void __cdecl f(...)"),
+    ("??__L_deg@@YAHO@Z", "int __cdecl _deg::operator co_await(long double)"),
+    ("??_C@_03ABCDEFGH@h?zi?$AA@", '"h\\xFAi"'),
+    ("??_C@_13ABCDEFGH@?$AAh?$AA?$AA@", 'L"h"'),
+    ("??_C@_0CB@ABCDEFGH@abcdefghijklmnopqrstuvwxyzabcdef@", '"abcdefghijklmnopqrstuvwxyzabcdef"...'),
+]
+
+# Malformed names llvm-undname reads past, refused here so a wrong expansion never becomes a
+# label.
+MALFORMED = [
+    "??_C@_02ABCDEFGH@h?zi?$AA@",  # the length counts four bytes as three
+    "??_C@_05ABCDEFGH@hi?$AA@",  # and three as six, with nothing truncated
+    "??_C@_0CB@ABCDEFGH@abcdefghijklmnopqrstuvwxyzabcde@",  # a truncated literal keeps 32 bytes
+    "??$?BH@S@@QEAAAEAU0@H@Z",  # a conversion operator takes no parameters
+    "?x@?A0@@3HA",  # an unnamed-namespace discriminator is hexadecimal
+    "?x@?A0x@@3HA",
+    "?x@?A0xZZ@@3HA",
+    "?x@?Q@@3HA",  # "?Q" opens none of the scope forms
+]
+
+
+class MsvcReferenceReadsTestSuite(unittest.TestCase):
+    def test_shapes_the_reference_reads_are_spelled_the_way_it_spells_them(self):
+        for mangled, expected in REFERENCE_READS:
+            with self.subTest(mangled=mangled):
+                self.assertEqual(demangle_msvc_symbol(mangled), expected)
+
+    def test_malformed_names_the_reference_reads_are_refused(self):
+        for mangled in MALFORMED:
             with self.subTest(mangled=mangled):
                 self.assertEqual(demangle_msvc_symbol(mangled), mangled)
 

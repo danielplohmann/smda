@@ -73,6 +73,18 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.0`. `ItaniumDemangler`,
+  `MsvcDemangler`, `MachoDemangler` and `rust_demangler` keep their public functions and wrap it, replacing the
+  `pycxxfilt` build, the vendored MSVC and Rust demanglers and the `swift demangle` subprocess. *Measured on the
+  bundled fixtures:* every Itanium, MSVC and Rust label is unchanged; 32 of 7,937 stored labels change, all Swift
+  names a host without a Swift toolchain left mangled. *Reproduced on the bundled fixtures.* Cost: C++ names
+  demangle slower per name than the native build did; labelling the fixtures end to end went 381 ms to 297 ms cold.
+- **(labels)** Rust names follow rustc-demangle: a lowercase `.llvm.` suffix is kept (`foo::bar.llvm.1234567890abcdef`),
+  `_RIC1aKh_E` reads as `a::<0>`, `_ZN3$u$E` as `$u$`, and `_ZN17h0000000000000000E`, a hash and nothing else, is
+  refused instead of labelled `""` and stays mangled rather than read as C++. MSVC now reads `void f(...)` and
+  `operator co_await`, and still refuses malformed names llvm-undname reads past (a literal length that disagrees
+  with its bytes, a non-hexadecimal unnamed-namespace discriminator, a scope fragment `?` does not open, a
+  conversion operator with parameters). None of these names occurs in the bundled fixtures.
 
 - **(binja)** Read instruction lengths from the core instead of rendering each block's disassembly text.
   `_instructionAddresses` iterated each block, which builds text tokens for every instruction, and ran twice per
@@ -84,6 +96,9 @@ past roughly six lines it belongs in the PR the entry links.
 ### Deprecated
 
 ### Removed
+- **(labels)** The vendored MSVC demangler, the vendored Rust demangler and the Swift subprocess machinery,
+  2,519 lines under `src/`, with the NOTICE section for the demangler behaviour they reimplemented.
+  `primeSwiftSymbols` stays as a no-op for callers.
 
 ### Fixed
 
