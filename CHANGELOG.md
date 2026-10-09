@@ -87,6 +87,13 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
+  by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
+  backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's
+  go1.24.7 reproducer, windows and linux amd64 (not bundled):* `image/draw.DrawMask` drops from 1,065 / 549 blocks
+  to 238. *Malpedia CI corpus:* 154/155 files identical; one Akira ELF goes -13/+4, as a recovered table removes a
+  false function that had split a gap. Bundled fixtures keep their golden results. (#363)
+
 ### Security
 
 ### Compatibility
