@@ -5,7 +5,9 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from capstone import CS_AC_WRITE, CS_GRP_BRANCH_RELATIVE, CS_GRP_CALL, CS_GRP_INT, CS_GRP_IRET, CS_GRP_JUMP, CS_GRP_RET
 
+from smda.common.ExceptionHandling import reraise_non_operational_exception
 from smda.common.SmdaFunction import SmdaFunction
+from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
 from smda.synthesis import sniffBinaryFormat
 
@@ -15,7 +17,11 @@ _UNICODE_RE = re.compile(b"(?:[\x09-\x0d\x20-\x7e]\x00)*")
 
 # Go and Rust strings carry their own length; a larger one is a misread header, not a literal
 MAX_SIZED_STRING_LEN = 0x10000
-_SIZED_STRING_WHITESPACE = "\t\n\r\x0b\x0c"
+# C0 and C1 controls other than whitespace and ESC; ANSI escapes, NBSP and a BOM stay accepted
+_SIZED_STRING_REJECT_RE = re.compile("[\x00-\x08\x0e-\x1a\x1c-\x1f\x7f-\x9f]")
+# rustc embeds its own source path, commit hash included, in the panic locations of every binary
+# linking std; a bare "/rustc/" substring is too easy to come by to switch extraction modes on
+_RUSTC_PATH_RE = re.compile(rb"/rustc/[0-9a-f]{40}/")
 _MEMORY_SLOT_RE = re.compile(r"\[(?P<base>[a-z][a-z0-9]*)(?:\s*(?P<sign>[+-])\s*(?P<disp>0x[0-9a-f]+|\d+))?\]")
 # how far around a pointer load the matching length load is looked for
 _LENGTH_SCAN_WINDOW = 6
@@ -38,6 +44,7 @@ _REGISTER_ALIASES = {
 _GO_ARGUMENT_REGISTERS = ("rax", "rbx", "rcx", "rdi", "rsi", "r8", "r9", "r10", "r11")
 _SYSV_ARGUMENT_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
 _WIN64_ARGUMENT_REGISTERS = ("rcx", "rdx", "r8", "r9")
+_RUST_RETURN_PAIR = {"rax": "rdx"}
 
 # ported back from our PR to capa v4.0.0
 # https://github.com/mandiant/capa/blob/v4.0.0/capa/features/extractors/smda/insn.py
@@ -174,13 +181,26 @@ def read_sized_string(smda_report: SmdaReport, offset: int, length: int) -> Opti
     the next literal and say nothing about where this one stops; the length has to come from the
     reference instead.
     """
+    cache = smda_report._string_cache
+    cache_key = ("sized", offset, length)
+    if cache_key in cache:
+        return cache[cache_key]
+    res = _read_sized_string(smda_report, offset, length)
+    if len(cache) > 10000:
+        cache.clear()
+    cache[cache_key] = res
+    return res
+
+
+def _read_sized_string(smda_report: SmdaReport, offset: int, length: int) -> Optional[Tuple[str, str]]:
     if not 0 < length <= MAX_SIZED_STRING_LEN or not smda_report.isAddrWithinMemoryImage(offset):
         return None
     if not _within_mapped_section(smda_report, offset):
         return None
-    # a referenced slot holding an address is a pointer table or slice header; a short length
-    # would otherwise accept its low bytes, which are often printable
-    if _looks_like_pointer(smda_report, offset):
+    # a referenced slot holding an address is a pointer table or slice header; a length shorter
+    # than a pointer would otherwise accept its low bytes, which are often printable
+    word_size = 8 if smda_report.bitness == 64 else 4
+    if length < word_size and _looks_like_pointer(smda_report, offset):
         return None
     raw = read_bytes(smda_report, offset, num_bytes=length)
     if len(raw) != length:
@@ -190,9 +210,37 @@ def read_sized_string(smda_report: SmdaReport, offset: int, length: int) -> Opti
         decoded = raw.decode("utf-8").rstrip("\x00")
     except UnicodeDecodeError:
         return None
-    if not decoded or not all(char.isprintable() or char in _SIZED_STRING_WHITESPACE for char in decoded):
+    if not decoded or _SIZED_STRING_REJECT_RE.search(decoded):
         return None
     return decoded, "ascii" if decoded.isascii() else "utf8"
+
+
+def _starts_string_run(smda_report: SmdaReport, offset: int) -> bool:
+    """True when the byte before offset cannot end a printable string, so a string at offset is
+    the first of its run, as each entry of a C string table is.
+
+    Go and Rust literals are packed without separators, so one in the middle of such a run is
+    preceded by the last byte of the previous literal instead.
+    """
+    buffer = smda_report.buffer
+    base_addr = smda_report.base_addr
+    if buffer is None or base_addr is None:
+        return False
+    rva = offset - base_addr
+    if rva == 0:
+        return True
+    if not 0 < rva <= len(buffer):
+        return False
+    # whitespace, printable ASCII and UTF-8 continuation bytes are what a string can end with
+    previous = buffer[rva - 1]
+    return not (0x09 <= previous <= 0x0D or 0x20 <= previous <= 0x7E or 0x80 <= previous <= 0xBF)
+
+
+def _c_string_at(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str]]:
+    """The NUL-terminated string at offset, when the bytes there look like a C string table entry."""
+    if not _within_mapped_section(smda_report, offset) or not _starts_string_run(smda_report, offset):
+        return None
+    return read_string(smda_report, offset)
 
 
 def read_go_string(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str]]:
@@ -200,6 +248,12 @@ def read_go_string(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, 
 
     This is the layout of a Go string header and of a Rust &str, so it serves both.
     """
+    result = _read_string_header(smda_report, offset)
+    return result[:2] if result else None
+
+
+def _read_string_header(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str, int]]:
+    """Like read_go_string(), and also returns the address the header points at."""
     if not smda_report.isAddrWithinMemoryImage(offset):
         return None
     word_size = 8 if smda_report.bitness == 64 else 4
@@ -208,9 +262,10 @@ def read_go_string(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, 
     length_bytes = read_bytes(smda_report, offset + word_size, num_bytes=word_size)
     if len(string_pointer_bytes) < word_size or len(length_bytes) < word_size:
         return None
-    string_pointer = struct.unpack(word_format, string_pointer_bytes)[0]
+    string_pointer = int(struct.unpack(word_format, string_pointer_bytes)[0])
     length = struct.unpack(word_format, length_bytes)[0]
-    return read_sized_string(smda_report, string_pointer, length)
+    result = read_sized_string(smda_report, string_pointer, length)
+    return (result[0], result[1], string_pointer) if result else None
 
 
 def _parse_immediate(operand: str) -> Optional[int]:
@@ -244,18 +299,20 @@ def _length_registers(smda_report: SmdaReport, mode: str) -> Dict[str, str]:
         registers = _GO_ARGUMENT_REGISTERS
     else:
         binary_format = sniffBinaryFormat(smda_report.xheader or smda_report.buffer)
+        sysv = dict(zip(_SYSV_ARGUMENT_REGISTERS[:-1], _SYSV_ARGUMENT_REGISTERS[1:], strict=True))
+        win64 = dict(zip(_WIN64_ARGUMENT_REGISTERS[:-1], _WIN64_ARGUMENT_REGISTERS[1:], strict=True))
         if binary_format == "pe":
-            registers = _WIN64_ARGUMENT_REGISTERS
+            pairs = win64
         elif binary_format in ("elf", "macho") or smda_report.abi in ("SYSTEMV", "LINUX"):
-            registers = _SYSV_ARGUMENT_REGISTERS
+            pairs = sysv
         else:
-            sysv = dict(zip(_SYSV_ARGUMENT_REGISTERS[:-1], _SYSV_ARGUMENT_REGISTERS[1:], strict=True))
-            win64 = dict(zip(_WIN64_ARGUMENT_REGISTERS[:-1], _WIN64_ARGUMENT_REGISTERS[1:], strict=True))
-            return {
+            pairs = {
                 key: value
                 for key, value in (sysv | win64).items()
                 if key not in sysv or key not in win64 or sysv[key] == win64[key]
             }
+        # a &str returned by value comes back in rax:rdx on either platform
+        return {**pairs, **_RUST_RETURN_PAIR}
     return dict(zip(registers[:-1], registers[1:], strict=True))
 
 
@@ -418,7 +475,13 @@ def _fallthrough_instructions(blocks_by_start, block_instructions) -> list:
     current = block_instructions
     while current and len(following) < _LENGTH_SCAN_WINDOW:
         last = current[-1]
-        if _scan_boundary(last) or not getattr(last, "bytes", None):
+        if not getattr(last, "bytes", None):
+            break
+        try:
+            if _scan_boundary(last):
+                break
+        except Exception as exc:
+            reraise_non_operational_exception(exc)
             break
         successor = blocks_by_start.get(last.offset + len(last.bytes) // 2)
         if successor is None:
@@ -431,7 +494,51 @@ def _fallthrough_instructions(blocks_by_start, block_instructions) -> list:
 def _language_mode(smda_report: SmdaReport) -> Optional[str]:
     scores = smda_report.language if isinstance(smda_report.language, dict) else {}
     best = max(("go", "rust"), key=lambda name: scores.get(name, 0.0))
-    return best if scores.get(best, 0.0) > 0.5 else None
+    if scores.get(best, 0.0) <= 0.5:
+        return None
+    if best == "rust" and not _has_rustc_path(smda_report):
+        return None
+    return best
+
+
+def _has_rustc_path(smda_report: SmdaReport) -> bool:
+    if smda_report._rustc_path_seen is None:
+        buffer = smda_report.buffer
+        if buffer is None:
+            # the buffer can be attached later; only remember an answer drawn from one
+            return False
+        smda_report._rustc_path_seen = bool(_RUSTC_PATH_RE.search(buffer))
+    return smda_report._rustc_path_seen
+
+
+def _c_strings_for_refs(
+    smda_report: SmdaReport, insn: SmdaInstruction, data_refs: List[int]
+) -> Iterator[Tuple[str, Optional[int], int, str]]:
+    """The NUL-terminated path for references that did not pair with a length. Only targets that
+    start a C string are read; one inside a run of packed literals would take the ones after it too."""
+    for data_ref in data_refs:
+        for v in derefs(smda_report, data_ref):
+            string_result = _c_string_at(smda_report, v)
+            if string_result:
+                string_read, string_type = string_result
+                yield string_read.rstrip("\x00"), insn.offset, v, string_type
+
+
+def _sized_string_for_ref(
+    smda_report: SmdaReport, instructions, index: int, data_ref: int, word_size: int, registers: Dict[str, str]
+) -> Optional[Tuple[str, str, int]]:
+    """(string, type, string address) for a Go/Rust reference, or None to use the NUL-terminated path."""
+    try:
+        length = _immediate_length(instructions, index, word_size, registers)
+    except Exception as exc:
+        # the pairing re-decodes instructions; a failure there costs this reference, not the report
+        reraise_non_operational_exception(exc)
+        length = None
+    if length:
+        result = read_sized_string(smda_report, data_ref, length)
+        if result:
+            return result[0], result[1], data_ref
+    return _read_string_header(smda_report, data_ref)
 
 
 def read_string(smda_report: SmdaReport, offset: int, maxlen: Optional[int] = None) -> Optional[Tuple[str, str]]:
@@ -492,18 +599,16 @@ def extract_strings(f: SmdaFunction, mode: Optional[str] = None) -> Iterator[Tup
             instructions = block_instructions + _fallthrough_instructions(blocks_by_start, block_instructions)
             for index, insn in enumerate(block_instructions):
                 data_refs = list(insn.getDataRefs())
-                if len(data_refs) != 1:
-                    continue
-                data_ref = data_refs[0]
-                string_result = None
-                length = _immediate_length(instructions, index, word_size, registers)
-                if length:
-                    string_result = read_sized_string(smda_report, data_ref, length)
-                if string_result is None:
-                    string_result = read_go_string(smda_report, data_ref)
-                if string_result:
-                    string_read, string_type = string_result
-                    yield string_read, insn.offset, data_ref, string_type
+                if len(data_refs) == 1:
+                    sized = _sized_string_for_ref(smda_report, instructions, index, data_refs[0], word_size, registers)
+                    if sized:
+                        string_read, string_type, string_addr = sized
+                        yield string_read, insn.offset, string_addr, string_type
+                        continue
+                if mode == "rust":
+                    # Go mode never had the NUL-terminated path; Rust binaries did before sized reads
+                    # and carry C code (CRT, vendored libraries, FFI) whose strings only it finds
+                    yield from _c_strings_for_refs(smda_report, insn, data_refs)
     else:
         for insn in f.getInstructions():
             for data_ref in insn.getDataRefs():

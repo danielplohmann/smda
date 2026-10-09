@@ -136,6 +136,9 @@ class TestStringExtractorGoStackStrings(unittest.TestCase):
         )
 
 
+_RUSTC_PATH = b"/rustc/" + b"0123456789abcdef0123456789abcdef01234567" + b"/library"
+
+
 def _report_with(blobs, bitness=64, base=0x400000, size=0x100):
     """A report whose buffer holds each (rva, bytes) pair; strings are packed back to back like Go/Rust rodata."""
     buffer = bytearray(size)
@@ -167,6 +170,27 @@ class TestStringExtractorSizedStrings(unittest.TestCase):
         self.assertIsNone(read_sized_string(report, report.base_addr + 0x40, 0))
         self.assertIsNone(read_sized_string(report, report.base_addr + 0x40, 0x100000))
         self.assertIsNone(read_sized_string(report, report.base_addr + 0xF0, 0x20))
+
+    def test_escapes_nbsp_and_bom_are_kept_other_controls_are_not(self):
+        for text, accepted in (("\x1b[31mred", True), ("a\u00a0b", True), ("\ufeffbom", True), ("a\x01b", False)):
+            with self.subTest(text=text):
+                encoded = text.encode()
+                report = _report_with([(0x20, encoded)])
+                result = read_sized_string(report, report.base_addr + 0x20, len(encoded))
+                self.assertEqual(result is not None, accepted)
+
+    def test_sized_reads_are_cached(self):
+        report = _report_with([(0x20, b"cached")])
+        self.assertEqual(read_sized_string(report, report.base_addr + 0x20, 6), ("cached", "ascii"))
+        self.assertIn(("sized", report.base_addr + 0x20, 6), report._string_cache)
+        report.buffer = bytes(len(report.buffer))
+        self.assertEqual(read_sized_string(report, report.base_addr + 0x20, 6), ("cached", "ascii"))
+
+    def test_literal_reading_as_an_address_in_a_high_32bit_image(self):
+        # "abcj" is 0x6a636261, inside an image based at 0x6a000000
+        report = _report_with([(0x20, b"abcjk")], bitness=32, base=0x6A000000)
+        report.binary_size = 0x1000000
+        self.assertEqual(read_sized_string(report, report.base_addr + 0x20, 5), ("abcjk", "ascii"))
 
     def test_rejects_targets_in_unmapped_sections(self):
         # a zero-based ELF lists .comment/.debug_* at address 0; the header there is not a literal
@@ -323,7 +347,7 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_mode_follows_report_language(self):
-        report = _report_with([(0x40, b"smdaRustMarker")], base=self.base)
+        report = _report_with([(0x3F, b"xsmdaRustMarkerNext"), (0x80, _RUSTC_PATH)], base=self.base)
         report.language = {"rust": 0.6, "go": 0.0}
         function = _StubFunction(
             report,
@@ -333,6 +357,84 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
             ],
         )
         self.assertEqual(list(extract_strings(function)), [("smdaRustMarker", 0x10, self.base + 0x40, "ascii")])
+
+    def test_rust_score_without_a_rustc_path_keeps_the_generic_path(self):
+        # LanguageAnalyzer scores Rust on a bare "/rustc/" substring, which any sample can carry
+        report = _report_with([(0x40, b"/dev/watchdog\x00"), (0x80, b"/rustc/")], base=self.base)
+        report.language = {"rust": 0.6, "go": 0.0}
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "mov", "esi, 2"),
+            ],
+        )
+        self.assertEqual(list(extract_strings(function)), [("/dev/watchdog", 0x10, self.base + 0x40, "ascii")])
+
+    def test_rust_unpaired_reference_reads_a_c_string(self):
+        report = _report_with([(0x40, b"Mingw-w64 runtime failure:\n\x00")], base=self.base)
+        function = _StubFunction(
+            report, [_StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40])]
+        )
+        self.assertEqual(
+            list(extract_strings(function, mode="rust")),
+            [("Mingw-w64 runtime failure:\n", 0x10, self.base + 0x40, "ascii")],
+        )
+
+    def test_unpaired_reference_inside_a_packed_run_reads_nothing(self):
+        report = _report_with([(0x3F, b"xkindtruemain\x00")], base=self.base)
+        function = _StubFunction(
+            report, [_StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40])]
+        )
+        for mode in ("go", "rust"):
+            with self.subTest(mode=mode):
+                self.assertEqual(list(extract_strings(function, mode=mode)), [])
+
+    def test_go_unpaired_reference_keeps_no_nul_terminated_path(self):
+        report = _report_with([(0x40, b"plainCString\x00")], base=self.base)
+        function = _StubFunction(
+            report, [_StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40])]
+        )
+        self.assertEqual(list(extract_strings(function, mode="go")), [])
+
+    def test_rust_str_returned_in_rax_rdx(self):
+        result = self._extract(
+            [
+                _StubInstruction(0x10, "lea", "rax, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "mov", "edx, 4"),
+                _StubInstruction(0x1C, "ret", ""),
+            ],
+            mode="rust",
+            blobs=[(0x3F, b"xsmdaGoMarker")],
+        )
+        self.assertEqual(result, [("smda", 0x10, self.base + 0x40, "ascii")])
+
+    def test_header_reference_records_the_string_address(self):
+        base = self.base
+        report = _report_with(
+            [(0x10, (base + 0x41).to_bytes(8, "little") + (5).to_bytes(8, "little")), (0x40, b"xhelloworld")],
+            base=base,
+        )
+        function = _StubFunction(report, [_StubInstruction(0x30, "lea", "rax, [rip]", data_refs=[base + 0x10])])
+        self.assertEqual(list(extract_strings(function, mode="go")), [("hello", 0x30, base + 0x41, "ascii")])
+
+    def test_failing_pairing_costs_only_that_reference(self):
+        class _Undecodable(_StubInstruction):
+            def getDetailed(self):
+                raise ValueError("capstone could not re-decode the instruction")
+
+        report = _report_with(
+            [(0x10, (self.base + 0x41).to_bytes(8, "little") + (5).to_bytes(8, "little")), (0x40, b"xhelloworld")],
+            base=self.base,
+        )
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x30, "lea", "rax, [rip]", data_refs=[self.base + 0x10]),
+                _Undecodable(0x37, "mov", "ebx, 4"),
+            ],
+        )
+        self.assertEqual(list(extract_strings(function, mode="go")), [("hello", 0x30, self.base + 0x41, "ascii")])
 
     def test_unknown_language_keeps_nul_terminated_reads(self):
         report = _report_with([(0x40, b"plainCString\x00")], base=self.base)
@@ -346,7 +448,9 @@ class TestStringExtractorDecodedPairs(unittest.TestCase):
     base = 0x400000
 
     def _extract(self, code, mode="go", header=None, abi=None, split_at=None, architecture="intel", bitness=64):
-        report = _report_with([(0x40, b"helloworldotherstring")], base=self.base, bitness=bitness)
+        # the byte before the literal makes it sit inside a packed run, as Go and Rust lay them out, so
+        # the C-string fallback for unpaired references leaves it alone
+        report = _report_with([(0x3F, b"xhelloworldotherstring")], base=self.base, bitness=bitness)
         report.architecture = architecture
         report.xheader = header
         report.abi = abi
