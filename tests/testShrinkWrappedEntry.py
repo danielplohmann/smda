@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
 
-from smda.aarch64.definitions import direct_branch_target, flows_into
+from smda.aarch64.definitions import direct_branch_target, flows_into, is_frame_setup
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
 from smda.Disassembler import Disassembler
@@ -33,6 +33,8 @@ FRAME_RECORD = 0xA9BF7BFD  # stp x29, x30, [sp, #-0x10]!
 SAVE_D8_D9 = 0x6DBE27E8  # stp d8, d9, [sp, #-0x20]!
 SAVE_D10_D11 = 0x6D012FEA  # stp d10, d11, [sp, #0x10]
 PACIASP = 0xD503233F
+SUB_SP_0X40 = 0xD10103FF  # sub sp, sp, #0x40
+TBNZ_W9_14 = 0x37700069  # tbnz w9, #14, <pc + 12>
 #: a double constant between functions: its low word decodes as `b.hi`, its high word not at all
 DATA_LOW = 0x54442D18
 DATA_HIGH = 0xBFE921FB
@@ -76,6 +78,8 @@ class WordEncodingTest(unittest.TestCase):
             SAVE_D10_D11: "stp d10, d11, [sp, #0x10]",
             _cbnz(BASE, BASE + 12): f"cbnz x0, #{BASE + 12:#x}",
             _b_eq(BASE, BASE - 8): f"b.eq #{BASE - 8:#x}",
+            SUB_SP_0X40: "sub sp, sp, #0x40",
+            TBNZ_W9_14: f"tbnz w9, #0xe, #{BASE + 12:#x}",
         }
         for word, text in expected.items():
             insn = next(md.disasm(word.to_bytes(4, "little"), BASE))
@@ -86,7 +90,14 @@ class WordEncodingTest(unittest.TestCase):
         self.assertEqual(direct_branch_target(_b_eq(BASE, BASE - 8), BASE), BASE - 8)
         self.assertEqual(direct_branch_target(_b(BASE, BASE - 0x100), BASE), BASE - 0x100)
         self.assertEqual(direct_branch_target(_cbnz(BASE, BASE + 12), BASE), BASE + 12)
+        self.assertEqual(direct_branch_target(TBNZ_W9_14, BASE), BASE + 12)
+        self.assertEqual(direct_branch_target(TBNZ_W9_14 | 0x7FFE0, BASE), BASE - 4)
         self.assertIsNone(direct_branch_target(_bl(BASE, BASE + 8), BASE))
+
+    def testAStackAllocationIsFrameSetup(self):
+        self.assertTrue(is_frame_setup(SUB_SP_0X40))
+        self.assertTrue(is_frame_setup(SAVE_D8_D9))
+        self.assertFalse(is_frame_setup(LDR_X3_X2))
 
     def testAnUnconditionalBranchDoesNotEnterTheWordItTargets(self):
         # how a function tail-calls the one laid out after it
@@ -159,6 +170,37 @@ class HoistedEntryWalkTest(unittest.TestCase):
             self.assertEqual(
                 {addr for addr, candidate in manager.candidates.items() if candidate.is_exception_handler}, {expected}
             )
+
+    def testAMisalignedOrOutOfImageAddressHasNoEntry(self):
+        manager = self._manager([NOP, _cbnz(BASE + 4, BASE + 16), MOV_W0_7, RET, SAVE_X19_X20])
+        self.assertIsNone(manager.hoistedEntryBefore(BASE + 18))
+        self.assertIsNone(manager.hoistedEntryBefore(BASE - 4))
+
+    def testARunOfFloatingPointSavesIsSeededWhereItStarts(self):
+        words = [RET, SAVE_D8_D9, SAVE_D10_D11, FRAME_RECORD]
+        for records, from_record in (((1,), True), ((), False)):
+            manager = self._manager(words, records=records)
+            manager.candidates = {}
+            manager._admitPrologueRunEntry(BASE + 4)
+            self.assertEqual(set(manager.candidates), {BASE + 4})
+            self.assertEqual(manager.candidates[BASE + 4].is_exception_handler, from_record)
+
+    def testARunEntryThatIsItselfEnteredIsNotSeeded(self):
+        manager = self._manager([NOP, _cbnz(BASE + 4, BASE + 16), MOV_W0_7, RET, SAVE_D8_D9, FRAME_RECORD])
+        manager.candidates = {}
+        manager._admitPrologueRunEntry(BASE + 16)
+        self.assertEqual(manager.candidates, {})
+
+    def testHoistedRecordsAreAdmittedWhenTheTimeoutTripsAfterTheRecords(self):
+        manager = self._manager([NOP, _cbnz(BASE + 4, BASE + 16), MOV_W0_7, RET, SAVE_X19_X20, SAVE_LR])
+        manager.candidates = {}
+        manager._call_targets = set()
+        manager.locateSymbolCandidates = lambda: None
+        manager.locatePeExceptionCandidates = lambda: manager._admitExceptionRecordEntry(BASE + 16, SAVE_X19_X20)
+        trips = iter((False, True))
+        manager._candidateTimeoutTripped = lambda: next(trips)
+        manager.locateCandidates()
+        self.assertEqual(set(manager.candidates), {BASE + 4})
 
 
 class ShrinkWrappedEntryInAGapTest(unittest.TestCase):
