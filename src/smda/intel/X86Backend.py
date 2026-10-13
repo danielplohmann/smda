@@ -407,7 +407,9 @@ class X86Backend(ArchBackend):
             if jump_destination in d.disassembly.functions:
                 # case = "TAILCALL!"
                 state.setSanelyEnding(True)
-            elif jump_destination in d.fc_manager.getFunctionStartCandidates():
+            elif jump_destination in d.fc_manager.getFunctionStartCandidates() and self._isEvidencedEntry(
+                d, jump_destination
+            ):
                 # it's tough to decide whether this should be disassembled here or not. topic of "code-sharing functions".
                 # case = "TAILCALL?"
                 pass
@@ -416,6 +418,18 @@ class X86Backend(ArchBackend):
                 state.addBlockToQueue(jump_destination)
             state.addCodeRef(i_address, jump_destination, by_jump=True)
         state.setBlockEndingInstruction(True)
+
+    @staticmethod
+    def _isEvidencedEntry(d, addr):
+        """Whether a jump target that is a candidate is more than a prologue-shaped block.
+
+        MSVC places the body of a function behind an early `ret` and branches to it with a
+        jcc; the body opens with a prologue, which makes it a candidate. A candidate with
+        nothing but its bytes behind it is such a block and belongs to the function jumping
+        to it. A candidate without a record (one gap analysis found) is kept as before.
+        """
+        candidate = d.fc_manager.getFunctionCandidate(addr)
+        return candidate is None or candidate.hasEntryEvidence()
 
     def _analyzeLoopInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i

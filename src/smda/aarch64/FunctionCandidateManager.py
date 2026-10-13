@@ -31,6 +31,7 @@ import struct
 import sys
 
 import lief
+from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
 from smda.utility.MachoBinary import get_macho_stub_ranges
@@ -47,21 +48,30 @@ from .definitions import (
     BL_IMM_SIGN_BIT,
     BL_MASK,
     BL_VALUE,
+    BLR_MASK,
+    BLR_VALUE,
     BR_MASK,
     BR_VALUE,
     BTI_J,
+    BTI_PROLOGUES,
+    HOISTED_ENTRY_WINDOW,
     INSTRUCTION_SIZE,
     LDR_UNSIGNED_64_MASK,
     LDR_UNSIGNED_64_VALUE,
     NOP,
+    PAC_PROLOGUES,
     RET_MASK,
     RET_VALUE,
     adrp_page_value,
+    ends_flow,
+    flows_into,
     is_bti_landing_pad,
     is_conditional_branch,
     is_exception_record_entry,
+    is_frame_setup,
     is_function_prologue,
     is_trap,
+    is_unconditional_branch,
     rd_field,
     rn_field,
 )
@@ -116,6 +126,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # reaches init(), and the reference scan writes to them from its first call
         self._call_targets = set()
         self._metadata_candidates = set()
+        self._exception_record_begins = set()
+        self._hoisted_exception_records = []
+        self._capstone = None
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         # Reset the memoized executable-section ranges, the Mach-O fixup state and the
@@ -126,6 +139,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self._macho_fixup_state = None
         self._call_targets = set()
         self._metadata_candidates = set()
+        self._exception_record_begins = set()
+        self._hoisted_exception_records = []
         super().init(disassembly, cbAnalysisTimeout)
 
     def hasCommonPrologue(self, addr):
@@ -144,11 +159,17 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return
         self.locatePeExceptionCandidates()
         if self._candidateTimeoutTripped():
+            self._admitHoistedExceptionRecords()
             return
         # what the coverage test below compares its call targets against: everything the image
         # says about itself, which is not the same set as what has been booked by now
-        self._metadata_candidates = set(self.candidates) | self._languageMetadataStarts()
+        self._metadata_candidates = (
+            set(self.candidates)
+            | {record_start for record_start, _ in self._hoisted_exception_records}
+            | self._languageMetadataStarts()
+        )
         self.locateReferenceCandidates()
+        self._admitHoistedExceptionRecords()
         if self._candidateTimeoutTripped():
             return
         if not self._metadataNamedTheCallTargets():
@@ -286,6 +307,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if length:
                 self._pdata_ranges.append((addr, addr + length, flag == 2))
                 self._pdata_range_starts = None
+            self._exception_record_begins.add(addr)
             if flag == 2:
                 # a packed fragment of another function's body: its begin word continues that
                 # function rather than starting one, so it names no candidate
@@ -301,15 +323,42 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             begin_word = int.from_bytes(begin_word_bytes, "little")
             if not is_exception_record_entry(begin_word):
                 continue
-            self.addExceptionCandidate(addr)
+            self._admitExceptionRecordEntry(addr, begin_word)
 
     def _admitCarvedExceptionRecord(self, base_addr, begin_rva):
+        self._exception_record_begins.add(base_addr + begin_rva)
         begin_word_bytes = self.disassembly.getRawBytes(begin_rva, INSTRUCTION_SIZE)
         if begin_word_bytes is None or len(begin_word_bytes) < INSTRUCTION_SIZE:
             return
-        if not is_exception_record_entry(int.from_bytes(begin_word_bytes, "little")):
+        begin_word = int.from_bytes(begin_word_bytes, "little")
+        if not is_exception_record_entry(begin_word):
             return
-        self.addExceptionCandidate(base_addr + begin_rva)
+        self._admitExceptionRecordEntry(base_addr + begin_rva, begin_word)
+
+    def _admitExceptionRecordEntry(self, addr, begin_word):
+        """Seed the function whose exception record begins at `addr`.
+
+        MSVC starts an ARM64 record at the frame setup, and when it shrink-wraps a function,
+        the check that returns early without a frame sits ahead of that setup with no record
+        of its own. The record then names the body and the entry is the hoisted check, unless
+        the record's start is called directly, which the call scan settles later
+        (`_admitHoistedExceptionRecords`).
+        """
+        if (is_function_prologue(begin_word) or is_frame_setup(begin_word)) and not self._isSymbolCandidate(addr):
+            entry = self.hoistedEntryBefore(addr)
+            if entry is not None:
+                self._hoisted_exception_records.append((addr, entry))
+                return
+        self.addExceptionCandidate(addr)
+
+    def _admitHoistedExceptionRecords(self):
+        for record_start, entry in self._hoisted_exception_records:
+            self.addExceptionCandidate(record_start if record_start in self._call_targets else entry)
+        self._hoisted_exception_records = []
+
+    def _isSymbolCandidate(self, addr):
+        candidate = self.candidates.get(addr)
+        return candidate is not None and candidate.is_symbol
 
     def _readArm64ExceptionRecord(self, binary, size, offset, previous_begin):
         """Return a validated ARM64 RUNTIME_FUNCTION pair at offset, or None.
@@ -395,6 +444,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 return
             begin_rva, unwind_data = struct.unpack_from("<II", binary, table_offset + index * _ARM64_PDATA_ENTRY_SIZE)
             if unwind_data & 0x3 == 2:
+                self._exception_record_begins.add(base_addr + begin_rva)
                 # a packed fragment continues another function's body, so its begin address is
                 # not a function start - the parsed directory path skips these for the same
                 # reason. The record still has to read as valid, or the run that found the
@@ -855,8 +905,103 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     continue
                 if not self._passesCodeFilter(addr):
                     continue
+                if addr not in self._call_targets and not self._isSymbolCandidate(addr):
+                    entry = self.hoistedEntryBefore(addr)
+                    if entry is not None:
+                        # the frame setup of a function entered a few words earlier
+                        self._admitPrologueRunEntry(entry)
+                        continue
                 self.addPrologueCandidate(addr)
                 self.setInitialCandidate(addr)
+
+    def _admitPrologueRunEntry(self, entry):
+        """Seed `entry` when the words from it to the recognized store are all frame setup.
+
+        Such a run is the prologue itself, opening with a save this scan does not recognize
+        (an FP register pair, a stack allocation). An exception record starting there names
+        the function, and is admitted although its first word is not one
+        `is_exception_record_entry` accepts. A run opening with an early-exit check is left
+        to the call scan and the gap scan, as it does not read as an entry on its own.
+        """
+        word = self._wordAtOffset(entry - self.disassembly.binary_info.base_addr)
+        # a recognized prologue at `entry` is this scan's or the record pass's to judge, and a
+        # frame setup the code before it enters is not where the function starts either
+        if (
+            word is None
+            or not is_frame_setup(word)
+            or is_function_prologue(word)
+            or self.hoistedEntryBefore(entry) is not None
+        ):
+            return
+        if entry in self._exception_record_begins:
+            self.addExceptionCandidate(entry)
+        else:
+            self.addPrologueCandidate(entry)
+        self.setInitialCandidate(entry)
+
+    def hoistedEntryBefore(self, addr):
+        """Where a function starts whose frame setup at `addr` the code before it enters, or None.
+
+        A prologue word is a function start only when nothing runs into it. MSVC shrink-wraps:
+        a check that can return without a frame comes first and the register saves follow, so
+        the saves are reached from that check by a branch or by falling through. A prologue
+        that saves FP registers or allocates the stack before the recognized store is entered
+        the same way. Walks back to the nearest boundary - padding, a call (code ahead of the
+        frame setup cannot call, the link register is not saved yet), the start of another
+        exception record, or at most `HOISTED_ENTRY_WINDOW` words - and returns the first
+        address from which the code reaches every word up to `addr` and `addr` itself. Where
+        no padding separates two functions, the walk runs into the previous one, whose return
+        then stops the code from reaching `addr` from there.
+
+        PAC and BTI words mark an entry or an indirect-branch target by design and are never
+        moved.
+        """
+        base = self.disassembly.binary_info.base_addr
+        offset = addr - base
+        if offset < 0 or offset % INSTRUCTION_SIZE:
+            return None
+        words = self._wordsView()
+        index = offset // INSTRUCTION_SIZE
+        if index >= len(words) or words[index] in PAC_PROLOGUES or words[index] in BTI_PROLOGUES:
+            return None
+        first = index
+        bounded = False
+        while first > 0 and index - first < HOISTED_ENTRY_WINDOW:
+            word = words[first - 1]
+            if word in (0, NOP) or (word & BL_MASK) == BL_VALUE or (word & BLR_MASK) == BLR_VALUE:
+                bounded = True
+                break
+            first -= 1
+            if base + first * INSTRUCTION_SIZE in self._exception_record_begins:
+                bounded = True
+                break
+        bounded = bounded or first == 0
+        for start in range(first, index):
+            # an entry follows a boundary, or the end of the function before it
+            if not (start == first and bounded) and not ends_flow(words[start - 1]):
+                continue
+            run = words[start:index]
+            # an early-exit check has a conditional branch; a prologue that does more before
+            # the recognized store has nothing but frame setup
+            if not any(is_conditional_branch(word) and not is_unconditional_branch(word) for word in run) and not all(
+                is_frame_setup(word) for word in run
+            ):
+                continue
+            entry = base + start * INSTRUCTION_SIZE
+            if self._passesCodeFilter(entry) and flows_into(run, entry, addr) and self._decodesAsCode(entry, run):
+                return entry
+        return None
+
+    def _decodesAsCode(self, addr, words):
+        """Whether `words`, found at `addr`, all decode, so that they are not a data island.
+
+        Constants placed between functions read as branches often enough to pass the walk
+        above, and an undecodable word among them is what gives them away.
+        """
+        if self._capstone is None:
+            self._capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        data = b"".join(word.to_bytes(INSTRUCTION_SIZE, "little") for word in words)
+        return sum(1 for _ in self._capstone.disasm_lite(data, addr)) == len(words)
 
     def addTailcallCandidate(self, addr):
         """Book a tailcall target, and queue it - which the shared base leaves to its caller.

@@ -102,6 +102,14 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- Keep a shrink-wrapped function's frame setup in the function whose early-exit check runs ahead of it. On AArch64
+  an exception record or prologue that the code before it branches or falls into seeds that code instead, unless
+  it is called or named; on x86 a jcc into a candidate with nothing but a prologue behind it stays in the function.
+  *Measured against `ddffed4` on python.org's 3.13.7 `python313.dll` (not bundled), PDB functions as truth:* ARM64
+  without the PDB gains 24 entries and loses 1 (`__gsfailure`, reached by `b.ne` from `__security_check_cookie`
+  the way `sqlite3_errcode` reaches its body), splits inside functions 55 to 23; with the PDB and on x86 nothing
+  is lost. FROSTYFERRET drops one start its LC_FUNCTION_STARTS does not declare. (#384)
+
 - **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
   by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
   backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's
@@ -112,6 +120,8 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
+- Function boundaries move on AArch64 images with shrink-wrapped functions, and on x86 code that jumps over an
+  early `ret` into a prologue. (#384)
 
 ## [v4.9.0] - 2026-09-28
 
