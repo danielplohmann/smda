@@ -244,7 +244,7 @@ class RecursiveDisassembler:
         )
         return True
 
-    def analyzeFunction(self, start_addr, as_gap=False):
+    def analyzeFunction(self, start_addr, as_gap=False, known_data_bytes=None):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         binary_info = self.disassembly.binary_info
         if binary_info is None:
@@ -252,6 +252,8 @@ class RecursiveDisassembler:
         self.tailcall_analyzer.initFunction()
         i = None
         state = self.backend.createAnalysisState(start_addr, self.disassembly)
+        if known_data_bytes:
+            state.data_bytes.update(known_data_bytes)
         if state.isProcessedFunction():
             self.fc_manager.updateAnalysisAborted(
                 start_addr,
@@ -296,9 +298,14 @@ class RecursiveDisassembler:
             analyze_instruction = self.backend.analyzeInstruction
             add_instruction = state.addInstruction
             processed_bytes = state.processed_bytes
+            data_bytes = state.data_bytes
             while True:
                 for i in cache:
                     i_address, i_size, i_mnemonic, i_op_str = i
+                    # a table this function reads (a switch's jump table) is not code, however
+                    # its bytes decode: the block ran into it past a call that does not return
+                    if i_address in data_bytes or i_address + i_size - 1 in data_bytes:
+                        break
 
                     i_op_str = i_op_str.strip()
                     i_relative_address = i_address - binary_info.base_addr
@@ -394,6 +401,10 @@ class RecursiveDisassembler:
                         start_addr,
                         self.fc_manager.getFunctionCandidate(start_addr),
                     )
+        if known_data_bytes is None and not state.data_bytes.isdisjoint(state.processed_bytes):
+            # blocks are taken last-in first-out, so a path that runs into a table can be decoded
+            # before the dispatch that reads the table is; once more, with the tables known
+            return self.analyzeFunction(start_addr, as_gap, known_data_bytes=state.data_bytes)
         state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis(as_gap)
         if analysis_result:

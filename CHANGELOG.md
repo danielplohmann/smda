@@ -110,6 +110,15 @@ past roughly six lines it belongs in the PR the entry links.
   the way `sqlite3_errcode` reaches its body), splits inside functions 55 to 23; with the PDB and on x86 nothing
   is lost. FROSTYFERRET drops one start its LC_FUNCTION_STARTS does not declare. (#384)
 
+- **(intel)** Stop decoding a function at a switch table it reads. MSVC puts the table right after the function's
+  last block, and when that block ends in a call that does not return, decoding ran on into the table and from it
+  into the next function. A function that reached a table before the dispatch reading it is analyzed once more
+  with the table known. The byte table of a two-level switch, which nothing but its `movzx` reads, is booked as
+  data too, so the gap scan no longer starts functions in it. *Measured against `ddffed4` on python.org's 3.13.7
+  `python313.dll` x86 (not bundled), PDB functions as truth:* 2 functions recovered, none lost, starts inside
+  functions 116 to 43; the official sqlite 3.54 x86 DLL drops 44 starts and x64 one, ARM64 and clang builds are
+  unchanged. (#384)
+
 - **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
   by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
   backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's
@@ -120,8 +129,9 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
-- Function boundaries move on AArch64 images with shrink-wrapped functions, and on x86 code that jumps over an
-  early `ret` into a prologue. (#384)
+- Function boundaries move on AArch64 images with shrink-wrapped functions, on x86 code that jumps over an
+  early `ret` into a prologue, and on x86/x64 functions with switch tables behind a call that does not return or
+  two-level switches. (#384)
 
 ## [v4.9.0] - 2026-09-28
 
