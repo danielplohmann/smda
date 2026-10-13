@@ -1,0 +1,288 @@
+{
+ "schema_version": 1,
+ "xor_scheme": "byte ^ (index % 256)",
+ "issue": "https://github.com/danielplohmann/smda/issues/384",
+ "truth": "expected_functions are the functions of cases.obj from the linker map (link /MAP): virtual address, name as the map spells it, static or public. Each should be one SMDA function starting at that address, with no other SMDA function starting inside it.",
+ "fixtures": [
+  {
+   "id": "msvc/smda384/x86-O2",
+   "path": "msvc_smda384_x86_O2_xored",
+   "pdb_path": "msvc_smda384_x86_O2_pdb_xored",
+   "architecture": "intel",
+   "bitness": 32,
+   "base_addr": 268435456,
+   "size": 11264,
+   "raw_sha256": "ae5e1ef228cbe95602fd60d3001db31b02e70bf5579254f375f5eab68b1868e9",
+   "xor_sha256": "c803ad880cd912609191ca0bbd596329c43265cf998ce33cf9ba5a9bef5ecb14",
+   "pdb_size": 413696,
+   "pdb_raw_sha256": "fb32b665733d008cb98cfa1041f1704c570fb723ba36e3a21b4261cc563e5941",
+   "pdb_xor_sha256": "6faf2c0f85e4d2909d44c357a916fb1e8fb8c55fca2bb0152575b7212a779c4b",
+   "feature_tags": [
+    "msvc",
+    "pdb",
+    "function-boundaries"
+   ],
+   "provenance": {
+    "sources": "src/cases.c, src/helpers.c, src/repro.h",
+    "compiler": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x86",
+    "linker": "Microsoft (R) Incremental Linker Version 14.51.36260.0",
+    "vc_tools": "14.51.36231",
+    "windows_sdk": "10.0.26100.0\\",
+    "cl_flags": "/c /O2 /MD /Zi /FS /W3 /Brepro",
+    "link_flags": "/DLL /DEBUG:FULL /INCREMENTAL:NO /Brepro /OPT:REF /OPT:NOICF /MACHINE:X86 /PDBALTPATH:%_PDB% /MAP"
+   },
+   "expected_functions": [
+    {
+     "va": 268440192,
+     "name": "_case_a5_errcode",
+     "static": false
+    },
+    {
+     "va": 268440256,
+     "name": "_case_b1_implies",
+     "static": false
+    },
+    {
+     "va": 268440432,
+     "name": "_case_b2_whitespace",
+     "static": false
+    },
+    {
+     "va": 268440864,
+     "name": "_case_b3_control",
+     "static": false
+    },
+    {
+     "va": 268441136,
+     "name": "_case_b4_aggregate",
+     "static": false
+    },
+    {
+     "va": 268441280,
+     "name": "_repro_functions",
+     "static": false
+    },
+    {
+     "va": 268439552,
+     "name": "_case_a6_errcode",
+     "static": true
+    },
+    {
+     "va": 268439616,
+     "name": "_case_a1_errcode",
+     "static": true
+    },
+    {
+     "va": 268439680,
+     "name": "_case_a2_unistr",
+     "static": true
+    },
+    {
+     "va": 268439840,
+     "name": "_case_a3_concat",
+     "static": true
+    },
+    {
+     "va": 268439968,
+     "name": "_case_a4_strftime",
+     "static": true
+    }
+   ],
+   "known_failures_smda_4_9_0": {
+    "no_pdb": [
+     "_case_b2_whitespace: split at +0xd5 after ret",
+     "_case_b4_aggregate: entry missed (jump table of _case_b3_control decoded as code)"
+    ],
+    "with_pdb": [
+     "_case_b2_whitespace: split at +0xd5 after ret",
+     "_case_b4_aggregate: entry missed (jump table of _case_b3_control decoded as code)"
+    ]
+   }
+  },
+  {
+   "id": "msvc/smda384/x64-O2",
+   "path": "msvc_smda384_x64_O2_xored",
+   "pdb_path": "msvc_smda384_x64_O2_pdb_xored",
+   "architecture": "intel",
+   "bitness": 64,
+   "base_addr": 6442450944,
+   "size": 13824,
+   "raw_sha256": "78cf6bc165befbe8612b97ff6beb68ecc9360a47a5c4f85a24390fe724239f25",
+   "xor_sha256": "9985c4e64e46afc21ab982911fb4f37f173105c3415796bd5ad1c03af7312378",
+   "pdb_size": 421888,
+   "pdb_raw_sha256": "3993bdaee8cc1b30ed30505ebca399278ca688526b24d2a7713ee8f7aa57fe8b",
+   "pdb_xor_sha256": "25a4c39c6a4c88bac98d7e4c54bac09e77bae3d327461d0a7990820974fbf106",
+   "feature_tags": [
+    "msvc",
+    "pdb",
+    "function-boundaries"
+   ],
+   "provenance": {
+    "sources": "src/cases.c, src/helpers.c, src/repro.h",
+    "compiler": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for x64",
+    "linker": "Microsoft (R) Incremental Linker Version 14.51.36260.0",
+    "vc_tools": "14.51.36231",
+    "windows_sdk": "10.0.26100.0\\",
+    "cl_flags": "/c /O2 /MD /Zi /FS /W3 /Brepro",
+    "link_flags": "/DLL /DEBUG:FULL /INCREMENTAL:NO /Brepro /OPT:REF /OPT:NOICF /MACHINE:X64 /PDBALTPATH:%_PDB% /MAP"
+   },
+   "expected_functions": [
+    {
+     "va": 6442455776,
+     "name": "case_a5_errcode",
+     "static": false
+    },
+    {
+     "va": 6442455856,
+     "name": "case_b1_implies",
+     "static": false
+    },
+    {
+     "va": 6442456096,
+     "name": "case_b2_whitespace",
+     "static": false
+    },
+    {
+     "va": 6442456592,
+     "name": "case_b3_control",
+     "static": false
+    },
+    {
+     "va": 6442456896,
+     "name": "case_b4_aggregate",
+     "static": false
+    },
+    {
+     "va": 6442457072,
+     "name": "repro_functions",
+     "static": false
+    },
+    {
+     "va": 6442455040,
+     "name": "case_a1_errcode",
+     "static": true
+    },
+    {
+     "va": 6442455120,
+     "name": "case_a2_unistr",
+     "static": true
+    },
+    {
+     "va": 6442455312,
+     "name": "case_a3_concat",
+     "static": true
+    },
+    {
+     "va": 6442455456,
+     "name": "case_a4_strftime",
+     "static": true
+    },
+    {
+     "va": 6442455696,
+     "name": "case_a6_errcode",
+     "static": true
+    }
+   ],
+   "known_failures_smda_4_9_0": {
+    "no_pdb": [
+     "case_b2_whitespace: split at +0x10d after ret"
+    ],
+    "with_pdb": [
+     "case_b2_whitespace: split at +0x10d after ret"
+    ]
+   }
+  },
+  {
+   "id": "msvc/smda384/arm64-O2",
+   "path": "msvc_smda384_arm64_O2_xored",
+   "pdb_path": "msvc_smda384_arm64_O2_pdb_xored",
+   "architecture": "aarch64",
+   "bitness": 64,
+   "base_addr": 6442450944,
+   "size": 14336,
+   "raw_sha256": "f3eb556e2df6ea87f3b986962630b04b1e6395f05c4f2ebf14a248c9d345134c",
+   "xor_sha256": "53a934c8a01d50910618f9f7a29c0080467fa23d6af656e973c8fe5ec38d8c36",
+   "pdb_size": 520192,
+   "pdb_raw_sha256": "eb5447ad0845db058fe0eec4ec64f6bfa841870f20d9c49875976478cf1c497b",
+   "pdb_xor_sha256": "5c9b886db8d58f2042e6dca04025bd2e898cf5e0da0a7d6dcfd076d359a105f0",
+   "feature_tags": [
+    "msvc",
+    "pdb",
+    "function-boundaries"
+   ],
+   "provenance": {
+    "sources": "src/cases.c, src/helpers.c, src/repro.h",
+    "compiler": "Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36260 for ARM64",
+    "linker": "Microsoft (R) Incremental Linker Version 14.51.36260.0",
+    "vc_tools": "14.51.36231",
+    "windows_sdk": "10.0.26100.0\\",
+    "cl_flags": "/c /O2 /MD /Zi /FS /W3 /Brepro",
+    "link_flags": "/DLL /DEBUG:FULL /INCREMENTAL:NO /Brepro /OPT:REF /OPT:NOICF /MACHINE:ARM64 /PDBALTPATH:%_PDB% /MAP"
+   },
+   "expected_functions": [
+    {
+     "va": 6442456368,
+     "name": "case_a5_errcode",
+     "static": false
+    },
+    {
+     "va": 6442456464,
+     "name": "case_b1_implies",
+     "static": false
+    },
+    {
+     "va": 6442456736,
+     "name": "case_b2_whitespace",
+     "static": false
+    },
+    {
+     "va": 6442456992,
+     "name": "case_b3_control",
+     "static": false
+    },
+    {
+     "va": 6442457296,
+     "name": "case_b4_aggregate",
+     "static": false
+    },
+    {
+     "va": 6442457536,
+     "name": "repro_functions",
+     "static": false
+    },
+    {
+     "va": 6442455536,
+     "name": "case_a1_errcode",
+     "static": true
+    },
+    {
+     "va": 6442455632,
+     "name": "case_a2_unistr",
+     "static": true
+    },
+    {
+     "va": 6442455824,
+     "name": "case_a3_concat",
+     "static": true
+    },
+    {
+     "va": 6442456000,
+     "name": "case_a4_strftime",
+     "static": true
+    },
+    {
+     "va": 6442456272,
+     "name": "case_a6_errcode",
+     "static": true
+    }
+   ],
+   "known_failures_smda_4_9_0": {
+    "no_pdb": [
+     "case_a2_unistr: split at +0x8 after cbz (shrink-wrapped prologue)",
+     "case_a3_concat: entry missed, start at +0x20 (shrink-wrapped prologue)"
+    ],
+    "with_pdb": []
+   }
+  }
+ ]
+}
