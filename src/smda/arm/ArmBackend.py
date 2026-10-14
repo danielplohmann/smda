@@ -580,6 +580,17 @@ class ArmBackend(ArchBackend):
         if previous_instruction is None:
             state.arm_pending.clear()
             state.arm_movw.clear()
+        go_image = d.fc_manager.isGoImage()
+        if go_image:
+            # Go's A32 nop is ``andeq r0, r0, r0``, the all-zero word: the compiler emits one
+            # for an inline mark without an instruction to sit on and after a final call that
+            # does not return, so a zero word is code there
+            state.suspicious_ins_count = 0
+            if previous_instruction is not None and d.fc_manager.isGoFunctionStart(i_address):
+                # pclntab is complete: running into a listed start leaves the function, as the
+                # runtime's crash stubs (a store to a bad address) do
+                self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
+                return True
 
         self._recordDataRefs(d, instruction, state, base, thumb)
 
@@ -606,7 +617,7 @@ class ArmBackend(ArchBackend):
                 if (
                     i_address in state.data_bytes
                     or i_address in d.disassembly.data_map
-                    or not any(self._bytesAt(d, i_address, i_size) or b"\x01")
+                    or (not go_image and not any(self._bytesAt(d, i_address, i_size) or b"\x01"))
                 ):
                     # the call is followed by a literal this code loads, or by a zero word that
                     # no compiler emits as an instruction (``movs r0, r0`` / ``andeq r0, r0, r0``):

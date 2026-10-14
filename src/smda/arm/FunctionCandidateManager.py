@@ -110,6 +110,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self._relocated_slots = None
         self._exec_ranges = None
         self._container_thumb = None
+        #: function starts a Go image's pclntab lists, and the span from its first to its last
+        self._go_starts = frozenset()
+        self._go_span = (0, 0)
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._resetModeState()
@@ -313,6 +316,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
     def addPointerCandidate(self, value, source, pc_relative=False, from_thumb=False):
         """A code address held in data or materialised by code (literal, ``movw``/``movt``)."""
+        if self._go_starts and value not in self._go_starts:
+            # pclntab names every start of a Go image; anything else is a constant
+            return False
         target = value & ~1
         thumb = bool(value & 1)
         if not thumb and pc_relative and from_thumb and self._declaredThumb(target) is not False:
@@ -361,6 +367,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     # --- discovery ------------------------------------------------------------
     def locateCandidates(self):
         self.locateSymbolCandidates()
+        self._locateGoCandidates()
         for locate in (
             self.locateUnwindIndexCandidates,
             self.locateReferenceCandidates,
@@ -374,6 +381,35 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return
         self.locateLangSpecCandidates()
         self.identified_alignment = self._identifyAlignment()
+
+    def _locateGoCandidates(self):
+        """Function starts from a Go image's pclntab.
+
+        The Go toolchain only emits A32 for AArch32 (no GOARM level selects Thumb), so every
+        listed start is an A32 entry and the block around it is A32 code, whatever the
+        instruction-set probe would read from it. The table is complete for Go code, which
+        makes these starts as strong as symbols.
+        """
+        if not self.lang_analyzer.checkGo():
+            return
+        starts = {addr & ~1 for addr in self.lang_analyzer.getGoObjects()}
+        starts = frozenset(addr for addr in starts if self._passesCodeFilter(addr) and self.isExecutable(addr))
+        base = self.disassembly.binary_info.base_addr
+        for addr in starts:
+            self.noteMode(addr, False, authoritative=True)
+            self._strong_starts.add(addr)
+            self._block_modes[(addr - base) // _MODE_BLOCK_SIZE] = False
+            self.addLanguageSpecCandidate(addr, "go")
+        self._go_starts = starts
+        if starts:
+            self._go_span = (min(starts), max(starts))
+
+    def isGoImage(self):
+        """Whether the image is Go with a readable pclntab."""
+        return bool(self._go_starts)
+
+    def isGoFunctionStart(self, addr):
+        return addr in self._go_starts
 
     def _identifyAlignment(self):
         # An inferred alignment floor only discards candidates, and on AArch32 there is
@@ -662,6 +698,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         image_start = binary_info.base_addr
         image_end = image_start + binary_info.binary_size
         exec_low, exec_high = exec_ranges[0][0], max(end for _, end in exec_ranges)
+        go_starts = self._go_starts
         for section_start, section_end in data_ranges:
             scan_start = max((section_start + 3) & ~3, image_start)
             scan_end = min(section_end, image_end)
@@ -682,6 +719,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                     return
                 value = int.from_bytes(data[offset : offset + 4], "little")
+                if go_starts and value not in go_starts:
+                    # Go data is full of words that land in code, and Go code is never
+                    # Thumb: only a pointer naming a pclntab start is one
+                    continue
                 target = value & ~1
                 if not exec_low <= target < exec_high or not in_exec(target) or not self._passesCodeFilter(target):
                     continue
@@ -1017,6 +1058,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             if self._isPadding(addr, thumb):
                 self.gap_pointer += step
+                continue
+            if self._go_span[0] <= addr < self._go_span[1]:
+                # pclntab lists every function of the Go text: what is left between them
+                # is literal pools, each behind the ``b`` the assembler places ahead of it
+                self.gap_pointer = self._go_span[1]
                 continue
             if self._pdata_ranges:
                 containing = self.declaredExceptionRangeContaining(addr)

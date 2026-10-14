@@ -4,7 +4,9 @@ The fixtures are clang builds of the lz4 library with their symbol tables remove
 ``arm_lz4_mixed_O2`` interleaves A32 and T32 functions at -O2, ``arm_lz4_mixed_Os``
 alternates A32 and T32 object files at -Os, ``arm_lz4_thumb_Os`` is T32 at -Os, and ``armnt_lz4_dll`` is a Windows on ARM (ARMNT, T32 only) DLL importing
 from kernel32. ``arm_ground_truth.json`` holds the function starts and instruction sets
-the unstripped builds and the linker map name.
+the unstripped builds and the linker map name. ``arm_go_stripped`` is a Go 1.24 program
+built with ``GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0`` and ``-ldflags="-s -w"``; its own
+pclntab, which lists the same starts as the unstripped build's symbol table, is the truth.
 """
 
 import json
@@ -15,6 +17,8 @@ from pathlib import Path
 import lief
 import pytest
 
+from smda.common.BinaryInfo import BinaryInfo
+from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.utility.ElfFileLoader import ElfFileLoader
@@ -134,6 +138,22 @@ class ArmCorpusRecoveryTest(unittest.TestCase):
         }
         self.assertGreater(len(functions), 150)
         self.assertEqual(sorted(hex(a) for a in called - functions), [])
+        self.assertFalse(any(function.architecture_metadata["thumb"] for function in report.getFunctions()))
+
+    def test_stripped_go_image(self):
+        # Go emits A32 only and fills its code with zero-word nops and with data words that
+        # land in code: pclntab has to decide every start, in A32
+        raw = _load("arm_go_stripped_xored")
+        mapped = ElfFileLoader.mapBinary(raw)
+        binary_info = BinaryInfo(mapped)
+        binary_info.raw_data = raw
+        binary_info.base_addr = ElfFileLoader.getBaseAddress(raw)
+        provider = GoSymbolProvider(SmdaConfig())
+        provider.update(binary_info)
+        truth = dict.fromkeys(provider.getFunctionSymbols(), False)
+        self.assertGreater(len(truth), 1000)
+        report = Disassembler(_config()).disassembleUnmappedBuffer(raw)
+        self._assertRecovery("arm_go_stripped_xored", report, recall=0.99, precision=0.99, truth=truth)
         self.assertFalse(any(function.architecture_metadata["thumb"] for function in report.getFunctions()))
 
     def test_report_round_trip_keeps_the_instruction_set(self):
