@@ -109,6 +109,11 @@ class SmdaReport:
     _derefs_cache: Dict[int, List[int]]
     # whether the buffer carries a rustc toolchain path, looked up once by StringExtractor
     _rustc_path_seen: Optional[bool] = None
+    # characters held by _string_cache, so sized reads of up to 64 KiB cannot grow it unbounded
+    _string_cache_chars = 0
+    # StringExtractor: sorted data reference targets, and the (pointer, length) register pairs per mode
+    _referenced_targets: Optional[List[int]] = None
+    _length_registers: Dict[str, Dict[str, str]]
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False
@@ -121,6 +126,7 @@ class SmdaReport:
         # starts with empty caches rather than relying on monkey-patched attributes.
         self._string_cache: Dict[Any, Optional[Tuple[str, str]]] = {}
         self._derefs_cache: Dict[int, List[int]] = {}
+        self._length_registers: Dict[str, Dict[str, str]] = {}
         # start every construction path with an empty CFG so accessors like
         # num_functions/getFunction work on reports without a disassembly
         # (e.g. controlled error reports for unsupported architectures);

@@ -179,6 +179,14 @@ class TestStringExtractorSizedStrings(unittest.TestCase):
                 result = read_sized_string(report, report.base_addr + 0x20, len(encoded))
                 self.assertEqual(result is not None, accepted)
 
+    def test_string_cache_is_bounded_by_characters(self):
+        report = _report_with([(0x20, b"cached")])
+        report._string_cache_chars = 1 << 22
+        report._string_cache["stale"] = None
+        read_sized_string(report, report.base_addr + 0x20, 6)
+        self.assertNotIn("stale", report._string_cache)
+        self.assertEqual(report._string_cache_chars, 6)
+
     def test_sized_reads_are_cached(self):
         report = _report_with([(0x20, b"cached")])
         self.assertEqual(read_sized_string(report, report.base_addr + 0x20, 6), ("cached", "ascii"))
@@ -245,7 +253,8 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
     base = 0x400000
 
     def _extract(self, instructions, mode="go", bitness=64, blobs=None, architecture="intel"):
-        report = _report_with(blobs or [(0x40, b"smdaGoMarkerhello there ")], bitness=bitness, base=self.base)
+        # the run ends in a byte no C string ends with, so a reference that pairs no length reads nothing
+        report = _report_with(blobs or [(0x40, b"smdaGoMarkerhello there \x01")], bitness=bitness, base=self.base)
         report.architecture = architecture
         return list(extract_strings(_StubFunction(report, instructions), mode=mode))
 
@@ -381,21 +390,104 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
             [("Mingw-w64 runtime failure:\n", 0x10, self.base + 0x40, "ascii")],
         )
 
-    def test_unpaired_reference_inside_a_packed_run_reads_nothing(self):
+    def test_unpaired_reference_stops_at_the_next_referenced_literal(self):
         report = _report_with([(0x3F, b"xkindtruemain\x00")], base=self.base)
         function = _StubFunction(
-            report, [_StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40])]
+            report,
+            [
+                _StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x44]),
+            ],
         )
+        report.getFunctions = lambda: [function]
         for mode in ("go", "rust"):
             with self.subTest(mode=mode):
-                self.assertEqual(list(extract_strings(function, mode=mode)), [])
+                self.assertEqual(
+                    list(extract_strings(function, mode=mode)),
+                    [("kind", 0x10, self.base + 0x40, "ascii"), ("truemain", 0x17, self.base + 0x44, "ascii")],
+                )
 
-    def test_go_unpaired_reference_keeps_no_nul_terminated_path(self):
-        report = _report_with([(0x40, b"plainCString\x00")], base=self.base)
+    def test_unpaired_reference_reads_a_c_string_in_both_modes(self):
+        report = _report_with([(0x40, b"plainCString\x00"), (0x50, b"ab\x00")], base=self.base)
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x50]),
+            ],
+        )
+        self.assertEqual(
+            list(extract_strings(function, mode="rust")),
+            [("plainCString", 0x10, self.base + 0x40, "ascii"), ("ab", 0x17, self.base + 0x50, "ascii")],
+        )
+        # Go has no NUL-terminated literals of its own; very short hits there are data
+        self.assertEqual(
+            list(extract_strings(function, mode="go")), [("plainCString", 0x10, self.base + 0x40, "ascii")]
+        )
+
+    def test_unpaired_reference_to_a_stored_address_reads_nothing(self):
+        # 0x464820 is " HF\0", a NUL-terminated printable run that is really a pointer
+        report = _report_with([(0x40, (0x464820).to_bytes(8, "little"))], base=self.base, size=0x70000)
         function = _StubFunction(
             report, [_StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40])]
         )
-        self.assertEqual(list(extract_strings(function, mode="go")), [])
+        self.assertEqual(list(extract_strings(function, mode="rust")), [])
+
+    def test_length_cutting_a_c_string_falls_back_to_it(self):
+        # C code linked into a Rust binary: open("/dev/watchdog", 2) pairs the flags as a length
+        report = _report_with([(0x40, b"/dev/watchdog\x00")], base=self.base)
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "mov", "esi, 2"),
+                _StubInstruction(0x15, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40]),
+            ],
+        )
+        self.assertEqual(
+            list(extract_strings(function, mode="rust")), [("/dev/watchdog", 0x15, self.base + 0x40, "ascii")]
+        )
+
+    def test_length_ending_where_another_literal_starts_is_kept(self):
+        report = _report_with([(0x40, b"smdaGoMarker\x00")], base=self.base)
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "mov", "esi, 4"),
+                _StubInstruction(0x1C, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x44]),
+                _StubInstruction(0x23, "mov", "esi, 8"),
+            ],
+        )
+        report.getFunctions = lambda: [function]
+        self.assertEqual(
+            list(extract_strings(function, mode="rust")),
+            [("smda", 0x10, self.base + 0x40, "ascii"), ("GoMarker", 0x1C, self.base + 0x44, "ascii")],
+        )
+
+    def test_go_build_id_alone_keeps_the_generic_path(self):
+        # Go mode comes only from a found pclntab; a C binary can carry the build ID string
+        report = _report_with([(0x40, b"/dev/watchdog\x00"), (0x80, b'Go build ID: "abcdefabcdef"')], base=self.base)
+        report.language = {"rust": 0.0, "go": 0.6}
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "mov", "ebx, 2"),
+                _StubInstruction(0x15, "lea", "rax, [rip + 0x30]", data_refs=[self.base + 0x40]),
+            ],
+        )
+        self.assertEqual(list(extract_strings(function)), [("/dev/watchdog", 0x15, self.base + 0x40, "ascii")])
+
+    def test_rust_wins_a_tie_with_go(self):
+        report = _report_with([(0x3F, b"xsmdaRustMarkerNext"), (0x80, _RUSTC_PATH)], base=self.base)
+        report.language = {"rust": 0.6, "go": 0.6}
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "mov", "esi, 0xe"),
+            ],
+        )
+        self.assertEqual(list(extract_strings(function)), [("smdaRustMarker", 0x10, self.base + 0x40, "ascii")])
 
     def test_rust_str_returned_in_rax_rdx(self):
         result = self._extract(
@@ -448,9 +540,8 @@ class TestStringExtractorDecodedPairs(unittest.TestCase):
     base = 0x400000
 
     def _extract(self, code, mode="go", header=None, abi=None, split_at=None, architecture="intel", bitness=64):
-        # the byte before the literal makes it sit inside a packed run, as Go and Rust lay them out, so
-        # the C-string fallback for unpaired references leaves it alone
-        report = _report_with([(0x3F, b"xhelloworldotherstring")], base=self.base, bitness=bitness)
+        # a packed run with no NUL at its end, so a reference that pairs no length reads nothing
+        report = _report_with([(0x3F, b"xhelloworldotherstring\x01")], base=self.base, bitness=bitness)
         report.architecture = architecture
         report.xheader = header
         report.abi = abi
@@ -644,8 +735,21 @@ class TestSynthesizedUtf8Strings(unittest.TestCase):
         report = types.SimpleNamespace(getFunctions=lambda: [function])
         self.assertEqual(
             list(BinarySynthesizer(report)._iterStringRefs()),
-            [(0x40, "größe".encode() + b"\x00"), (0x50, b"plain\x00")],
+            [(0x47, b"\x00"), (0x55, b"\x00"), (0x40, "größe".encode()), (0x50, b"plain")],
         )
+
+    def test_terminators_do_not_overwrite_packed_literals(self):
+        function = types.SimpleNamespace(
+            stringrefs=[
+                {"string": "true", "ins_addr": 0x10, "data_addr": 0x40, "type": "ascii"},
+                {"string": "false", "ins_addr": 0x20, "data_addr": 0x44, "type": "ascii"},
+            ]
+        )
+        report = types.SimpleNamespace(getFunctions=lambda: [function])
+        planted = bytearray(0x10)
+        for data_addr, content in BinarySynthesizer(report)._iterStringRefs():
+            planted[data_addr - 0x40 : data_addr - 0x40 + len(content)] = content
+        self.assertEqual(bytes(planted[:10]), b"truefalse\x00")
 
 
 if __name__ == "__main__":
