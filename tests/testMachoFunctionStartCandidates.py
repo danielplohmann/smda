@@ -56,16 +56,19 @@ class MachoFunctionStartFixtureTestSuite(unittest.TestCase):
         self.assertEqual(off.status, "ok")
         self.assertEqual(on.status, "ok")
         # The primary pass now finds fifteen more of the linker's own entries than it used to
-        # (143 of the table's 147, against 128), and the total with the table pass on is
-        # unchanged at 274 -- so what the table adds shrinks by exactly what the primary pass
+        # (143 of the table's 147, against 128), and the total with the table pass on stayed
+        # at 274 -- so what the table adds shrinks by exactly what the primary pass
         # learned to reach on its own, which is the shape a real recovery improvement has and
         # an invented one does not. Two sources: the no-return call boundary ends a caller
         # that runs into its neighbour, and the interior tests now consult the live function
         # set rather than only the candidate snapshot taken before analysis, which is what
         # unblocked a run of branch veneers whose targets gap analysis had discovered.
-        # Every one of the fifteen is an address LC_FUNCTION_STARTS declares.
-        self.assertEqual(off.num_functions, 271)
-        self.assertEqual(on.num_functions, 274)
+        # Every one of the fifteen is an address LC_FUNCTION_STARTS declares. One start the
+        # table does not declare went with #384: the frame setup at 0x10000573c sits behind
+        # its function's `cbz x1` and now stays part of the function at 0x100005718, with the
+        # table pass on or off.
+        self.assertEqual(off.num_functions, 270)
+        self.assertEqual(on.num_functions, 273)
         table = _table_addresses(buffer)
         off_starts = {function.offset for function in off.getFunctions()}
         on_starts = {function.offset for function in on.getFunctions()}

@@ -95,6 +95,8 @@ MIN_RETURN_WORDS = 4
 MAX_BYTES_PER_RETURN_WORD = 64 * 1024
 BR_MASK = 0xFFFFFC1F
 BR_VALUE = 0xD61F0000  # br Xn (indirect branch)
+BLR_MASK = 0xFFFFFC1F
+BLR_VALUE = 0xD63F0000  # blr Xn (indirect call)
 CBZ_CBNZ_MASK = 0x7E000000
 CBZ_CBNZ_VALUE = 0x34000000
 TBZ_TBNZ_MASK = 0x7E000000
@@ -341,6 +343,105 @@ def is_exception_record_entry(word):
     ):
         return True
     return (word & MOVZ_64_MASK) == MOVZ_64_VALUE and (word & 0x1F) in _IP_REGISTERS
+
+
+# --- shrink-wrapped entries ------------------------------------------------
+def direct_branch_target(word, pc):
+    """Target of a direct `b`, `b.<cond>`/`bc.<cond>`, `cbz`/`cbnz` or `tbz`/`tbnz` at `pc`.
+
+    None for any other word. `bl` shares the imm26 layout with `b` but is a call, not a
+    branch, and is not decoded here.
+    """
+    if (word & B_MASK) == B_VALUE:
+        imm, bits = word & 0x03FFFFFF, 26
+    elif (word & BCOND_MASK) == BCOND_VALUE or (word & CBZ_CBNZ_MASK) == CBZ_CBNZ_VALUE:
+        imm, bits = (word >> 5) & 0x7FFFF, 19
+    elif (word & TBZ_TBNZ_MASK) == TBZ_TBNZ_VALUE:
+        imm, bits = (word >> 5) & 0x3FFF, 14
+    else:
+        return None
+    if imm & (1 << (bits - 1)):
+        imm -= 1 << bits
+    return pc + imm * INSTRUCTION_SIZE
+
+
+# stack allocation and callee-saved register stores into the frame: `sub sp, sp, #imm`
+# (either shift), and stp/str of an X, D or Q register to an sp base, pre-indexed or
+# at an offset. These are what a prologue runs ahead of the store `is_function_prologue`
+# recognizes when it saves FP registers or allocates the frame first.
+_SUB_SP_ANY_SHIFT_MASK = 0xFF8003FF
+_FRAME_STORE_PAIR_MASK = 0xFFC00000
+_FRAME_STORE_PAIR_VALUES = frozenset({0xA9800000, 0xA9000000, 0x6D800000, 0x6D000000, 0xAD800000, 0xAD000000})
+_FRAME_STORE_PREINDEX_MASK = 0xFFE00C00
+_FRAME_STORE_PREINDEX_VALUES = frozenset({0xF8000C00, 0xFC000C00, 0x3C800C00})
+_FRAME_STORE_OFFSET_MASK = 0xFFC00000
+_FRAME_STORE_OFFSET_VALUES = frozenset({0xF9000000, 0xFD000000, 0x3D800000})
+
+
+def is_frame_setup(word):
+    """Whether a word allocates stack or stores a register into the frame at an sp base."""
+    if (word & _SUB_SP_ANY_SHIFT_MASK) == SUB_SP_IMM_VALUE:
+        return True
+    if (word >> 5) & 0x1F != _SP:
+        return False
+    return (
+        (word & _FRAME_STORE_PAIR_MASK) in _FRAME_STORE_PAIR_VALUES
+        or (word & _FRAME_STORE_PREINDEX_MASK) in _FRAME_STORE_PREINDEX_VALUES
+        or (word & _FRAME_STORE_OFFSET_MASK) in _FRAME_STORE_OFFSET_VALUES
+    )
+
+
+#: how many words ahead of a frame setup a hoisted early-exit check may begin
+HOISTED_ENTRY_WINDOW = 16
+# retaa/retab: the pointer-auth returns, outside RET_MASK's `ret {Xn}` space
+_RET_AUTH_MASK = 0xFFFFFBFF
+_RET_AUTH_VALUE = 0xD65F0BFF
+
+
+def is_unconditional_branch(word):
+    """True for `b` and the always-taken `b.al`/`b.nv`/`bc.al`/`bc.nv` (no fall-through)."""
+    return (word & B_MASK) == B_VALUE or ((word & BCOND_MASK) == BCOND_VALUE and (word & 0xE) == 0xE)
+
+
+def ends_flow(word):
+    """True for a word execution does not continue past: a return, `br`, `b` or a trap."""
+    return (
+        (word & RET_MASK) == RET_VALUE
+        or (word & _RET_AUTH_MASK) == _RET_AUTH_VALUE
+        or (word & BR_MASK) == BR_VALUE
+        or is_unconditional_branch(word)
+        or is_trap(word)
+    )
+
+
+def flows_into(words, pc, end):
+    """Whether code from `pc` reaches each word before `end`, and `end` itself.
+
+    `words` holds the instruction words from `pc` up to `end`. A word is reached when the
+    word before it falls through to it or a reached branch targets it. A branch back past
+    `pc` means `pc` is not where this code is entered, so it fails the test. Branches past
+    `end` are fine: an early exit may jump into the body or to its epilogue.
+    """
+    reached = {pc}
+    for offset, word in enumerate(words):
+        addr = pc + offset * INSTRUCTION_SIZE
+        if addr not in reached:
+            return False
+        target = direct_branch_target(word, addr)
+        falls_through = True
+        if target is not None:
+            if target < pc:
+                return False
+            falls_through = not is_unconditional_branch(word)
+            # an unconditional `b` to `end` is how a function tail-calls the next one, so
+            # only a conditional branch or falling through enters `end` from here
+            if falls_through or target != end:
+                reached.add(target)
+        elif ends_flow(word):
+            falls_through = False
+        if falls_through:
+            reached.add(addr + INSTRUCTION_SIZE)
+    return end in reached
 
 
 def looksLikeAArch64(buffer):

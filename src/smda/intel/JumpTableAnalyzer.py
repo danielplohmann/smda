@@ -35,6 +35,17 @@ _BASEREG_TABLE_RE = re.compile(
 _X64_BONUS_OFFSET_RE = re.compile(r"[a-z0-9]{2,3},.*0x[0-9a-f]+\]")
 _SCALED_INDEX_RE = re.compile(r"\[(?:[a-z][a-z0-9]{1,3} \+ )?(?P<index>[a-z][a-z0-9]{1,3})\*[1248]")
 _IMMEDIATE_RE = re.compile(r"^(?:0x[0-9a-f]+|[0-9]+)$")
+# The byte table of a two-level switch, which maps the switch value to the case number that
+# indexes the jump table. MSVC emits it for a switch with many values and few cases, and places
+# it after the jump table: absolute on x86, an RVA off a register holding the image base on x64.
+#   movzx ecx, byte ptr [ecx + 0x10001440]
+#   movzx ecx, byte ptr [r10 + rcx + 0x1528]
+_INDEX_TABLE_RE = re.compile(
+    r"^(?P<destination>[a-z][a-z0-9]{1,4}), byte ptr "
+    r"\[(?:(?P<base>[a-z][a-z0-9]{1,3}) \+ )?(?P<index>[a-z][a-z0-9]{1,3}) \+ (?P<displacement>0x[0-9a-f]+|[0-9]+)\]$"
+)
+# how far ahead of the dispatch the byte table is read
+_INDEX_TABLE_WINDOW = 4
 _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]{1,4}")
 # 32-bit writes zero the upper half, so these are the widths an `and` bounds the whole register at
 _FULL_WIDTH_REGISTER_RE = re.compile(r"^(?:r[a-z]{2}|e[a-z]{2}|r(?:[89]|1[0-5])d?)$")
@@ -370,6 +381,68 @@ class JumpTableAnalyzer:
             tracked = set()
         return mask_bound or untied_size
 
+    def _recordIndexTable(self, jump_instruction, state, backtracked):
+        """Book the byte table a two-level switch reads its case number from as data.
+
+        Only the jump table is read through the dispatch, so nothing else marks the byte table,
+        and its bytes, sitting between two functions, then decode as code.
+        """
+        jump_instruction_address = jump_instruction[0]
+        case_registers = set()
+        window = [(None, None, None, stripFlatSegmentOverride(jump_instruction[3])), *backtracked[::-1]]
+        for position, instruction in enumerate(window[: _INDEX_TABLE_WINDOW + 1]):
+            operands = instruction[3]
+            scaled = _SCALED_INDEX_RE.search(operands)
+            if scaled:
+                case_registers.add(canonicalRegister(scaled.group("index")))
+            match = _INDEX_TABLE_RE.match(operands) if instruction[2] == "movzx" else None
+            if match is None or canonicalRegister(match.group("destination")) not in case_registers:
+                continue
+            preceding = backtracked[: len(backtracked) - position]
+            displacement = match.group("displacement")
+            address = int(displacement, 16 if displacement.startswith("0x") else 10)
+            if match.group("base"):
+                # the base register holds the image base, not a table, so nothing is booked at it
+                image_base = self._ripRelativeBase(match.group("base"), preceding, None)
+                if image_base is None:
+                    return
+                address += image_base
+            entries = sorted(entry for source, entry in state.data_refs if source == jump_instruction_address)
+            bound = self._findJumpTableSize(preceding, {self._operandKey(match.group("index"))})
+            extent = self._indexTableExtent(address, bound, entries)
+            if extent is not None:
+                state.addDataRef(instruction[0], extent[0], size=extent[1], is_table=True)
+            return
+
+    def _indexTableExtent(self, address, bound, entries):
+        """Where the byte table read at `address` lies, as (start, length), or None.
+
+        Every byte in it is a case number, smaller than the jump table's entry count. Indexed
+        from 0, the table is `bound` bytes at `address`. A switch whose smallest value is not 0
+        is read with a bias folded into `address`, so the table starts later, and MSVC puts it
+        right behind the jump table; its compare bounds a value the table is not indexed with,
+        so it runs up to the first byte that is not a case number, which has to be the padding
+        or the alignment the next function starts at.
+        """
+        if not entries:
+            return None
+        entry_size = entries[1] - entries[0] if len(entries) > 1 else 4
+        start = entries[-1] + entry_size
+        # a range over the jump table itself is a biased address, whatever its bytes are
+        if bound and (address >= start or address + bound <= entries[0]):
+            case_numbers = self.disassembly.getBytes(address, bound)
+            if case_numbers is not None and len(case_numbers) == bound and max(case_numbers) < len(entries):
+                return address, bound
+        if not address < start <= address + 0xFF:
+            return None
+        following = self.disassembly.getBytes(start, 0x100)
+        if not following:
+            return None
+        length = next((index for index, value in enumerate(following) if value >= len(entries)), None)
+        if not length or (following[length] != 0xCC and (start + length) % 16):
+            return None
+        return start, length
+
     def _directHandler(self, jump_instruction_op_str, state, backtracked):
         """Locate an absolute jump table and the width of one of its entries."""
         register = jump_instruction_op_str.lower()
@@ -425,6 +498,8 @@ class JumpTableAnalyzer:
     def _ripRelativeBase(self, base_register, preceding, state):
         """The address a rip-relative `lea` left in base_register, reading back from the table.
 
+        It is booked as an 8-byte table in `state`; pass None for a base that is not a table.
+
         Carrying the value past a write the walk does not model would resolve the base from
         before that write, which names a different table rather than none, so the walk ends at
         the first instruction that is not known to leave the register alone. The window is the
@@ -445,7 +520,8 @@ class JumpTableAnalyzer:
             ):
                 # getReferencedAddr() preserves the displacement sign
                 off_jumptable = instruction[0] + instruction[1] + self.disassembler.getReferencedAddr(operands)
-                state.addDataRef(instruction[0], off_jumptable, size=8)
+                if state is not None:
+                    state.addDataRef(instruction[0], off_jumptable, size=8)
                 return off_jumptable
             if self._writesRegister(mnemonic, operands, canonical_base) is not False:
                 return None
@@ -541,7 +617,9 @@ class JumpTableAnalyzer:
                     break
                 jump_targets.add(entry)
                 if state is not None:
-                    state.addDataRef(jump_instruction_address, off_jumptable + index * entry_size, size=entry_size)
+                    state.addDataRef(
+                        jump_instruction_address, off_jumptable + index * entry_size, size=entry_size, is_table=True
+                    )
         return sorted(jump_targets)
 
     def _extractRelativeTableOffsets(
@@ -597,6 +675,7 @@ class JumpTableAnalyzer:
                             jump_instruction_address,
                             off_jumptable + bonus_offset + index * 4,
                             size=4,
+                            is_table=True,
                         )
                 elif not alternative_base:
                     break
@@ -630,6 +709,7 @@ class JumpTableAnalyzer:
                     jump_instruction_address,
                     jumptable_address + i * entry_size,
                     size=entry_size,
+                    is_table=True,
                 )
                 jumptable_addresses.append(table_entry)
         return jumptable_addresses
@@ -706,6 +786,8 @@ class JumpTableAnalyzer:
             table_offsets = self._resolveRegisterBaseTable(
                 jump_instruction_address, jump_instruction_op_str, state, backtracked, jumptable_size
             )
+        if table_offsets:
+            self._recordIndexTable(jump_instruction, state, backtracked)
         # if False and off_jumptable and table_offsets:
         #     print("  Found jump table: 0x%x -> %d" % (off_jumptable, len(table_offsets)))
         #     for offset in sorted(list(set(table_offsets))):

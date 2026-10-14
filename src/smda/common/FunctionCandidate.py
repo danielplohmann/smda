@@ -100,6 +100,24 @@ class FunctionCandidate:
         """
         return False
 
+    def hasEntryEvidence(self):
+        """Whether anything besides the bytes at the address says a function starts here.
+
+        A symbol, an exception record, a call, language metadata, a stub or tailcall chain,
+        or an indirect-branch landing pad all do. A prologue shape, the alignment or a gap
+        scan hit do not: a compiler emits the same bytes inside a function, behind an early
+        return.
+        """
+        return bool(
+            self.is_symbol
+            or self.is_exception_handler
+            or self.call_ref_sources
+            or self.lang_spec is not None
+            or self.is_stub
+            or self.is_tailcall
+            or self.isLandingPadEntry()
+        )
+
     def addCallRef(self, source_addr):
         previous_size = len(self.call_ref_sources)
         self.call_ref_sources.add(source_addr)
