@@ -45,6 +45,8 @@ _ELF_MACHINE_TYPES = {
 # through the unknown-machine-type fallback below.
 _PLT_SECTION_NAMES = frozenset({".plt", ".plt.sec", ".plt.got", ".iplt"})
 _GOT_SECTION_NAMES = (".got.plt", ".got")
+# the largest common maximum page size: a linker starts the next PT_LOAD within one page of the previous one
+_MAX_HEADER_SEGMENT_GAP = 0x10000
 
 
 def _resolve_elf_machine(elffile):
@@ -112,6 +114,18 @@ def _calculate_base_address(elffile):
                 addr = segment.virtual_address - segment.file_offset
                 if addr >= 0:
                     candidates.append(addr)
+        else:
+            # a linker leaves the PT_LOAD that maps the ELF header without any section when nothing
+            # else read-only goes there (no .rodata, no build-id note); the image a loader maps still
+            # starts at that segment, so take it when it ends within a page of the sections
+            section_base = min(candidates)
+            for segment in _get_load_segments(elffile):
+                if (
+                    segment.file_offset == 0
+                    and segment.virtual_address < section_base
+                    and section_base - (segment.virtual_address + segment.virtual_size) <= _MAX_HEADER_SEGMENT_GAP
+                ):
+                    candidates.append(segment.virtual_address)
     else:
         # go for segments only instead
         base_addr = 0

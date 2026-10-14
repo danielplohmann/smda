@@ -10,6 +10,8 @@ from smda.Disassembler import Disassembler
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.MemoryFileLoader import MemoryFileLoader
 
+HEADER_SEGMENT_FIXTURE = "elf_header_segment_aarch64_xored"
+
 
 class _HashableNamespace(SimpleNamespace):
     # ElfFileLoader's internal helpers (_calculate_base_address, _get_boundaries,
@@ -63,6 +65,46 @@ class TestElfFileLoader(unittest.TestCase):
             with self.subTest(expected=hex(expected)):
                 parsed = _HashableNamespace(sections=[], segments=segments)
                 self.assertEqual(ElfFileLoader.getBaseAddress(b"", parsed=parsed), expected)
+
+    def test_base_address_covers_a_header_segment_without_sections(self):
+        def load(virtual_address, file_offset, virtual_size):
+            return SimpleNamespace(
+                type=lief.ELF.Segment.TYPE.LOAD,
+                virtual_address=virtual_address,
+                file_offset=file_offset,
+                virtual_size=virtual_size,
+            )
+
+        text = SimpleNamespace(virtual_address=0x200B4, offset=0xB4, size=0x78)
+        for segments, expected in (
+            # the header segment ends one 64 KiB page below .text, as a linker lays it out
+            ([load(0x10000, 0, 0xB4), load(0x200B4, 0xB4, 0x78)], 0x10000),
+            # further away it is not adjacent to the image, keep the section base
+            ([load(0x0, 0, 0xB4), load(0x200B4, 0xB4, 0x78)], 0x20000),
+            # a PT_LOAD that does not map the header is not considered
+            ([load(0x10000, 0x10, 0xB4), load(0x200B4, 0xB4, 0x78)], 0x20000),
+        ):
+            with self.subTest(expected=hex(expected)):
+                parsed = _HashableNamespace(sections=[text], segments=segments)
+                self.assertEqual(ElfFileLoader.getBaseAddress(b"", parsed=parsed), expected)
+
+    def test_header_segment_without_sections_is_mapped(self):
+        # AArch64 ELF whose first PT_LOAD holds only the ELF and program headers, built with
+        #   clang --target=aarch64-linux-gnu -O1 -ffreestanding -nostdlib -static -fuse-ld=lld -Wl,--build-id=none
+        # from three small functions, then llvm-strip (clang/lld 18.1.3); with no build-id note
+        # and no .rodata, no section lands in that segment
+        raw = self._load_fixture(HEADER_SEGMENT_FIXTURE)
+        loader = MemoryFileLoader(raw, map_file=True)
+
+        self.assertEqual(loader.getBaseAddress(), 0x200000)
+        self.assertEqual(loader.getData()[:4], b"\x7fELF")
+        report = Disassembler().disassembleBuffer(loader.getData(), loader.getBaseAddress())
+        self.assertEqual(report.architecture, "aarch64")
+        # a buffer carries no entry point, so it finds the functions the file does, less the entry
+        buffer_functions = {function.offset for function in report.getFunctions()}
+        file_functions = {function.offset for function in Disassembler().disassembleUnmappedBuffer(raw).getFunctions()}
+        self.assertTrue(buffer_functions)
+        self.assertLessEqual(buffer_functions, file_functions)
 
     def test_sectionless_elf_maps_like_its_sectioned_original(self):
         for fixture_name in ("bashlite_xored", "mirai_i386_xored", "aarch64_static_xored", "mirai_m68k_xored"):
