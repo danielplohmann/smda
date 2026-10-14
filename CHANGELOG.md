@@ -73,14 +73,19 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
-- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.6.0`, where an installed
+- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.1`, where an installed
   plugin cannot replace a built-in scheme unless the caller asks. `ItaniumDemangler`, `MsvcDemangler`,
   `MachoDemangler` and `rust_demangler` keep their public functions and wrap it, replacing the `pycxxfilt` build, the
   vendored MSVC and Rust demanglers and the `swift demangle` subprocess. *Measured on the bundled fixtures:* every
   Itanium, MSVC and Rust label is unchanged; 32 of 7,937 stored labels change, all Swift names a host without a Swift
-  toolchain left mangled. *Reproduced on the bundled fixtures.* 0.6.0 returns the same output as 0.5.1 for all 20,430
-  names the test suite passes it. Cost: C++ names demangle slower per name than the native build did; labelling the
-  fixtures end to end went 381 ms to 297 ms cold, measured on 0.5.0. (#379, #383)
+  toolchain left mangled. *Reproduced on the bundled fixtures.* Cost: C++ names demangle slower per name than the
+  native build did; labelling the fixtures end to end went 381 ms to 297 ms cold, measured on 0.5.0. (#379, #383)
+- **(labels)** Bump `demangle` to `==0.6.0`. Labels move on non-ASCII and ARM64e names: Itanium and Swift source-name
+  lengths count UTF-8 bytes, as GCC and Clang mangle them, so `_ZN4main5caféE` reads as `main::café` where it was
+  refused, `_Z4cafév` is now refused, and `$s4main5caféV1fyyF` reads as `main.café.f() -> ()` instead of
+  `maincaféV.f() -> ()`. MSVC ARM64e `__ptrauth` names, refused before, now demangle, and Swift `~Deinitable` is
+  rendered by name. Rust gains bounds checks on oversized lengths with no output change found. *Measured on the
+  bundled fixtures:* 8,282 labels, 0 changed; no fixture name is non-ASCII. *Reproduced by reviewer.* (#387)
 - **(labels)** Rust names follow rustc-demangle: a lowercase `.llvm.` suffix is kept (`foo::bar.llvm.1234567890abcdef`),
   `_RIC1aKh_E` reads as `a::<0>`, `_ZN3$u$E` as `$u$`, and `_ZN17h0000000000000000E`, a hash and nothing else, is
   refused instead of labelled `""` and stays mangled rather than read as C++. MSVC now reads `void f(...)` and
