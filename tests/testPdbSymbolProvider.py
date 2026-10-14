@@ -10,6 +10,7 @@ from smda.common.BinaryInfo import BinaryInfo
 from smda.common.labelprovider import PdbSymbolProvider as pdb_module
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider, _demangleSymbolName
 from smda.common.labelprovider.rust_demangler import demangle
+from smda.common.labelprovider.rust_demangler.rust_legacy import UnableToLegacyDemangle
 from smda.Disassembler import Disassembler
 
 BASE_ADDR = 0x400000
@@ -359,8 +360,9 @@ class PdbSymbolDemanglingTestSuite(unittest.TestCase):
         self.assertEqual(_demangleSymbolName("_ZN4test4funcEv"), "_ZN4test4funcEv")
 
     def test_a_legacy_name_that_is_only_a_hash_keeps_its_original_spelling(self):
+        # nothing is left to spell once the hash is dropped, so the name is refused
         name = "_ZN17h0000000000000000E"
-        self.assertEqual(demangle(name), "")
+        self.assertRaises(UnableToLegacyDemangle, demangle, name)
         self.assertEqual(_demangleSymbolName(name), name)
 
     def test_an_msvc_decorated_name_is_demangled(self):

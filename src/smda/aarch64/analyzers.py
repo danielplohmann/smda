@@ -759,7 +759,7 @@ class AArch64JumpTableAnalyzer:
 
             if d.disassembly.binary_info.isInCodeAreas(target):
                 targets.append(target)
-                state.addDataRef(jump_instruction_address, entry_addr, size=entry_size)
+                state.addDataRef(jump_instruction_address, entry_addr, size=entry_size, is_table=True)
             else:
                 break
 

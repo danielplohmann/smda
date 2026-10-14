@@ -46,10 +46,14 @@ dependencies = [
     # only loads at all once capstone.arm64* has been imported - so 6.x is a port, not an
     # import-order fix. Measured against 6.0.0a10.
     "capstone<6",
+    # every label smda writes comes from demangle, so its output changes only through a
+    # reviewed bump of this pin. smda never calls load_plugins(); a host application that
+    # calls load_plugins() or register_language() in the same process can still replace a
+    # built-in scheme and change or drop Itanium, MSVC and Swift labels without an error.
+    "demangle==0.6.0",
     "dncil",
     "dnfile",
     "lief>=0.16.0",
-    "pycxxfilt>=0.1.0",
     "purepdb>=0.3.0",
 ]
 
