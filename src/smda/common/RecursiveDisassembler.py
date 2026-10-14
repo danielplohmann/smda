@@ -225,15 +225,7 @@ class RecursiveDisassembler:
             return False
         if owner_fn not in self.disassembly.functions:
             return False
-        owner_state = self.backend.createAnalysisState(owner_fn, self.disassembly)
-        # Rebuild a minimal state from the disassembly's stored instructions
-        # so revertAnalysis can undo code_map/ins2fn/function_borders entries.
-        owner_state.instructions = [
-            instruction for block in self.disassembly.functions[owner_fn] for instruction in block
-        ]
-        owner_state.code_refs = set()
-        owner_state.data_refs = set()
-        owner_state.revertAnalysis()
+        self._revertStoredFunction(owner_fn)
         self.fc_manager.updateAnalysisAborted(
             owner_fn, f"Reverted: absorbed by tailcall candidate 0x{current_start_addr:08x}"
         )
@@ -242,6 +234,41 @@ class RecursiveDisassembler:
             owner_fn,
             current_start_addr,
         )
+        return True
+
+    def _revertStoredFunction(self, function_addr):
+        owner_state = self.backend.createAnalysisState(function_addr, self.disassembly)
+        # Rebuild a minimal state from the disassembly's stored instructions
+        # so revertAnalysis can undo code_map/ins2fn/function_borders entries.
+        owner_state.instructions = [
+            instruction for block in self.disassembly.functions[function_addr] for instruction in block
+        ]
+        owner_state.code_refs = set()
+        owner_state.data_refs = set()
+        owner_state.revertAnalysis()
+
+    def absorbFunction(self, function_addr, current_start_addr):
+        """Undo a function so the one being analyzed decodes its blocks as its own.
+
+        For a function that turns out to be the body of another one: a prologue-shaped block
+        behind an early return that won the candidate order against the function it belongs to.
+        Its analysis state also leaves the tailcall pass, which would otherwise revert it again
+        and take the addresses away from the function that now owns them.
+
+        A gap function is left alone: the gap pass runs after the candidate order, so its
+        functions (thunk tables, code no reference reached) did not win against anything.
+
+        Returns True if the function was undone.
+        """
+        if function_addr == current_start_addr or function_addr not in self.disassembly.functions:
+            return False
+        candidate = self.fc_manager.candidates.get(function_addr)
+        if candidate is None or candidate.is_gap_candidate:
+            return False
+        self._revertStoredFunction(function_addr)
+        self.tailcall_analyzer.discardFunction(function_addr)
+        self.fc_manager.updateAnalysisAborted(function_addr, f"Reverted: body of function 0x{current_start_addr:08x}")
+        LOGGER.debug("Reverted function 0x%08x (body of 0x%08x)", function_addr, current_start_addr)
         return True
 
     def _restoreRevertedGapFunctions(self, gap_functions):

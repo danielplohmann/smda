@@ -116,6 +116,14 @@ past roughly six lines it belongs in the PR the entry links.
   lost, starts inside functions 116 to 43. The official sqlite 3.54 DLL drops 44 (x86) and 1 (x64) false starts that
   sat inside switch tables. (#384)
 
+- **(intel)** Keep the body behind an early `ret` in its function when the body is analyzed first. The candidate
+  order put the body's prologue ahead of an entry with four calls or fewer, or one reached only through a pointer
+  or a jump thunk, and the entry's jcc then took the body for a tailcall. The jcc now undoes such a function and
+  decodes it as its own, with the same rule as for a body not yet analyzed; gap functions are left alone. *On the
+  official sqlite 3.46.1 DLL, x86 (not bundled):* the fallback bodies of 4 CRT float-to-integer helpers, each
+  reached only by its entry's jcc, rejoin their entries; the x64 DLL, python.org's 3.12.7 embeddable x86/x64 DLLs and the
+  bundled x86/x64 fixtures are identical. (#388)
+
 - **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
   by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
   backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's

@@ -27,6 +27,9 @@ class TailcallAnalyzer:
         self.__tmp_jumps.clear()
         self.__functions.append(function_state)
 
+    def discardFunction(self, start_addr):
+        self.__functions = [function for function in self.__functions if function.start_addr != start_addr]
+
     def getTailcalls(self):
         result = []
         # jumps sorted by (destination, source)

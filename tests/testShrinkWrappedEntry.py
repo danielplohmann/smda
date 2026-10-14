@@ -243,10 +243,10 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
 
     HOST = 0x40
 
-    def _image(self, host=HOST):
+    def _image(self, host=HOST, calls=8):
         image = bytearray(b"\xcc" * 0x80)
         caller = bytearray()
-        for _ in range(8):  # enough call references to put the host ahead of the body's prologue
+        for _ in range(calls):  # 5 or more put the host ahead of the body's prologue in the order
             caller += b"\xe8" + (host - (len(caller) + 5)).to_bytes(4, "little", signed=True)
         caller += b"\xc3"
         image[: len(caller)] = caller
@@ -262,10 +262,10 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
         image[host : host + len(body)] = body
         return bytes(image)
 
-    def _assertTheBodyStaysInTheFunction(self, host):
+    def _assertTheBodyStaysInTheFunction(self, host, calls=8):
         config = SmdaConfig()
         config.WITH_STRINGS = False
-        report = Disassembler(config).disassembleBuffer(self._image(host), 0x1000, bitness=32)
+        report = Disassembler(config).disassembleBuffer(self._image(host, calls), 0x1000, bitness=32)
         self.assertEqual(report.status, "ok")
         functions = {function.offset - 0x1000: function for function in report.getFunctions()}
         self.assertNotIn(host + 7, functions)
@@ -278,6 +278,13 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
     def testAnAlignedBodyRightBehindTheReturnStaysInTheFunction(self):
         # the body lands on 0x50: aligned, but behind the `ret` rather than behind padding
         self._assertTheBodyStaysInTheFunction(0x49)
+
+    def testTheBodyStaysInTheFunctionWhenItIsAnalyzedFirst(self):
+        # with four calls or fewer the body's prologue outranks the host, so the body is a
+        # function already when the host's jcc reaches it (#388)
+        for calls in (0, 1, 4):
+            with self.subTest(calls=calls):
+                self._assertTheBodyStaysInTheFunction(self.HOST, calls)
 
 
 class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
@@ -292,7 +299,7 @@ class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
     TARGET = BASE + 0xA0
     TAKER = BASE + 0xC0
 
-    def _image(self):
+    def _image(self, calls=8):
         image = bytearray(b"\xcc" * 0x200)
 
         def put(address, data):
@@ -302,7 +309,7 @@ class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
             return (destination - (source + size)).to_bytes(4, "little", signed=True)
 
         caller = bytearray()
-        for _ in range(8):  # enough call references to analyze the jumper before the target
+        for _ in range(calls):  # 8 analyze the jumper before the target, none after it
             caller += b"\xe8" + rel(self.BASE + len(caller), 5, self.JUMPER)
         caller += b"\xe8" + rel(self.BASE + len(caller), 5, self.TAKER) + b"\xc3"
         put(self.BASE, caller)
@@ -313,13 +320,15 @@ class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
         return bytes(image)
 
     def testTheTargetStaysAFunctionOfItsOwn(self):
-        config = SmdaConfig()
-        config.WITH_STRINGS = False
-        report = Disassembler(config).disassembleBuffer(self._image(), self.BASE, bitness=32)
-        functions = {function.offset: function for function in report.getFunctions()}
-        self.assertIn(self.TARGET, functions)
-        self.assertEqual(functions[self.TARGET].num_instructions, 5)
-        self.assertEqual(functions[self.JUMPER].num_instructions, 4)
+        for calls in (8, 0):
+            with self.subTest(calls=calls):
+                config = SmdaConfig()
+                config.WITH_STRINGS = False
+                report = Disassembler(config).disassembleBuffer(self._image(calls), self.BASE, bitness=32)
+                functions = {function.offset: function for function in report.getFunctions()}
+                self.assertIn(self.TARGET, functions)
+                self.assertEqual(functions[self.TARGET].num_instructions, 5)
+                self.assertEqual(functions[self.JUMPER].num_instructions, 4)
 
 
 if __name__ == "__main__":

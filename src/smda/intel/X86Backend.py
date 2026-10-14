@@ -407,8 +407,15 @@ class X86Backend(ArchBackend):
         d.tailcall_analyzer.addJump(i_address, jump_destination)
         if jump_destination:
             if jump_destination in d.disassembly.functions:
-                # case = "TAILCALL!"
-                state.setSanelyEnding(True)
+                if self._isEvidencedEntry(d, jump_destination) or not d.absorbFunction(
+                    jump_destination, state.start_addr
+                ):
+                    # case = "TAILCALL!"
+                    state.setSanelyEnding(True)
+                else:
+                    # case = "BODY-ANALYZED-FIRST": the body's prologue ranked it ahead of this
+                    # function in the candidate order; it is undone and decoded here instead
+                    state.addBlockToQueue(jump_destination)
             elif jump_destination in d.fc_manager.getFunctionStartCandidates() and self._isEvidencedEntry(
                 d, jump_destination
             ):
