@@ -411,7 +411,7 @@ class JumpTableAnalyzer:
             bound = self._findJumpTableSize(preceding, {self._operandKey(match.group("index"))})
             extent = self._indexTableExtent(address, bound, entries)
             if extent is not None:
-                state.addDataRef(instruction[0], extent[0], size=extent[1])
+                state.addDataRef(instruction[0], extent[0], size=extent[1], is_table=True)
             return
 
     def _indexTableExtent(self, address, bound, entries):
@@ -617,7 +617,9 @@ class JumpTableAnalyzer:
                     break
                 jump_targets.add(entry)
                 if state is not None:
-                    state.addDataRef(jump_instruction_address, off_jumptable + index * entry_size, size=entry_size)
+                    state.addDataRef(
+                        jump_instruction_address, off_jumptable + index * entry_size, size=entry_size, is_table=True
+                    )
         return sorted(jump_targets)
 
     def _extractRelativeTableOffsets(
@@ -673,6 +675,7 @@ class JumpTableAnalyzer:
                             jump_instruction_address,
                             off_jumptable + bonus_offset + index * 4,
                             size=4,
+                            is_table=True,
                         )
                 elif not alternative_base:
                     break
@@ -706,6 +709,7 @@ class JumpTableAnalyzer:
                     jump_instruction_address,
                     jumptable_address + i * entry_size,
                     size=entry_size,
+                    is_table=True,
                 )
                 jumptable_addresses.append(table_entry)
         return jumptable_addresses

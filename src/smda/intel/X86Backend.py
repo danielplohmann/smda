@@ -30,8 +30,10 @@ from .MnemonicTfIdf import MnemonicTfIdf
 
 LOGGER = logging.getLogger(__name__)
 
-# what a toolchain that emits CET landing pads aligns a function entry to
+# what MSVC and a toolchain that emits CET landing pads align a function entry to
 _ENTRY_ALIGNMENT = 16
+# the filler a compiler pads up to an aligned function entry with
+_ALIGNMENT_PADDING = frozenset((0xCC, 0x90))
 
 # a call/jmp through a pointer slot the sample computes itself ("dword ptr [ebx + 0x2c]"),
 # the shape a runtime-built import table is used through. An index register is excluded on
@@ -426,10 +428,15 @@ class X86Backend(ArchBackend):
         MSVC places the body of a function behind an early `ret` and branches to it with a
         jcc; the body opens with a prologue, which makes it a candidate. A candidate with
         nothing but its bytes behind it is such a block and belongs to the function jumping
-        to it. A candidate without a record (one gap analysis found) is kept as before.
+        to it, unless it sits on an aligned address behind padding: the body follows its `ret`
+        directly, while padding is what a compiler leaves in front of a function of its own,
+        such as one that only a pointer (a callback, a vtable slot) reaches. A candidate
+        without a record (one gap analysis found) is kept as before.
         """
         candidate = d.fc_manager.getFunctionCandidate(addr)
-        return candidate is None or candidate.hasEntryEvidence()
+        if candidate is None or candidate.hasEntryEvidence():
+            return True
+        return addr % _ENTRY_ALIGNMENT == 0 and d.disassembly.getByte(addr - 1) in _ALIGNMENT_PADDING
 
     def _analyzeLoopInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i

@@ -137,7 +137,10 @@ class X64IndexTableTest(unittest.TestCase):
         booked = []
         state = SimpleNamespace(
             data_refs={(self.JUMP, self.TABLE + 4 * index) for index in range(5)},
-            addDataRef=lambda source, target, size=1: booked.append((target, size)),
+            # a booking that is not marked as a table would not stop decoding, so it shows as such
+            addDataRef=lambda source, target, size=1, is_table=False: booked.append(
+                (target, size) if is_table else (target, size, "not a table")
+            ),
         )
         analyzer._recordIndexTable((self.JUMP, 2, "jmp", "rdx"), state, list(window))
         return booked

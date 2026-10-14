@@ -242,16 +242,15 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
     The body is a prologue candidate and nothing else; the jcc keeps it in the function."""
 
     HOST = 0x40
-    BODY = HOST + 7
 
-    def _image(self):
+    def _image(self, host=HOST):
         image = bytearray(b"\xcc" * 0x80)
         caller = bytearray()
         for _ in range(8):  # enough call references to put the host ahead of the body's prologue
-            caller += b"\xe8" + (self.HOST - (len(caller) + 5)).to_bytes(4, "little", signed=True)
+            caller += b"\xe8" + (host - (len(caller) + 5)).to_bytes(4, "little", signed=True)
         caller += b"\xc3"
         image[: len(caller)] = caller
-        host = (
+        body = (
             b"\x80\x79\x28\x00"  # cmp byte ptr [ecx + 0x28], 0
             b"\x74\x01"  # je body
             b"\xc3"  # ret
@@ -260,18 +259,67 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
             b"\x5d"  # pop ebp
             b"\xc3"  # ret
         )
-        image[self.HOST : self.HOST + len(host)] = host
+        image[host : host + len(body)] = body
         return bytes(image)
 
-    def testTheBodyStaysInTheFunction(self):
+    def _assertTheBodyStaysInTheFunction(self, host):
         config = SmdaConfig()
         config.WITH_STRINGS = False
-        report = Disassembler(config).disassembleBuffer(self._image(), 0x1000, bitness=32)
+        report = Disassembler(config).disassembleBuffer(self._image(host), 0x1000, bitness=32)
         self.assertEqual(report.status, "ok")
         functions = {function.offset - 0x1000: function for function in report.getFunctions()}
-        self.assertNotIn(self.BODY, functions)
-        offsets = {instruction.offset - 0x1000 for instruction in functions[self.HOST].getInstructions()}
-        self.assertIn(self.BODY, offsets)
+        self.assertNotIn(host + 7, functions)
+        offsets = {instruction.offset - 0x1000 for instruction in functions[host].getInstructions()}
+        self.assertIn(host + 7, offsets)
+
+    def testTheBodyStaysInTheFunction(self):
+        self._assertTheBodyStaysInTheFunction(self.HOST)
+
+    def testAnAlignedBodyRightBehindTheReturnStaysInTheFunction(self):
+        # the body lands on 0x50: aligned, but behind the `ret` rather than behind padding
+        self._assertTheBodyStaysInTheFunction(0x49)
+
+
+class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
+    """x86: a jcc into a function that sits aligned behind padding does not absorb it.
+
+    Only a pointer reaches the target (a callback, a vtable slot), so it has no call reference,
+    but the compiler placed it as a function of its own, unlike a body behind an early `ret`.
+    """
+
+    BASE = 0x401000
+    JUMPER = BASE + 0x80
+    TARGET = BASE + 0xA0
+    TAKER = BASE + 0xC0
+
+    def _image(self):
+        image = bytearray(b"\xcc" * 0x200)
+
+        def put(address, data):
+            image[address - self.BASE : address - self.BASE + len(data)] = data
+
+        def rel(source, size, destination):
+            return (destination - (source + size)).to_bytes(4, "little", signed=True)
+
+        caller = bytearray()
+        for _ in range(8):  # enough call references to analyze the jumper before the target
+            caller += b"\xe8" + rel(self.BASE + len(caller), 5, self.JUMPER)
+        caller += b"\xe8" + rel(self.BASE + len(caller), 5, self.TAKER) + b"\xc3"
+        put(self.BASE, caller)
+        put(self.JUMPER, b"\x85\xc9\x0f\x85" + rel(self.JUMPER + 2, 6, self.TARGET) + b"\x31\xc0\xc3")
+        put(self.TARGET, b"\x55\x8b\xec\x8b\x45\x08\x5d\xc3")  # push ebp; mov ebp, esp; ...; ret
+        # push offset target; call dword ptr [eax]
+        put(self.TAKER, b"\x55\x8b\xec\x68" + self.TARGET.to_bytes(4, "little") + b"\xff\x10\x83\xc4\x04\x5d\xc3")
+        return bytes(image)
+
+    def testTheTargetStaysAFunctionOfItsOwn(self):
+        config = SmdaConfig()
+        config.WITH_STRINGS = False
+        report = Disassembler(config).disassembleBuffer(self._image(), self.BASE, bitness=32)
+        functions = {function.offset: function for function in report.getFunctions()}
+        self.assertIn(self.TARGET, functions)
+        self.assertEqual(functions[self.TARGET].num_instructions, 5)
+        self.assertEqual(functions[self.JUMPER].num_instructions, 4)
 
 
 if __name__ == "__main__":

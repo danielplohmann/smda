@@ -108,33 +108,33 @@ class SwitchTableAfterNoReturnCallTest(unittest.TestCase):
         self.assertFalse(candidates[base + self.NEXT].analysis_aborted)
 
 
-class DatumAfterNoReturnCallTest(unittest.TestCase):
-    """A function of one block that ends where the datum it reads begins is still a function."""
+class CodeTheFunctionReadsTest(unittest.TestCase):
+    """Only a switch table stops decoding: code a function reads as data is still decoded.
 
-    HOST = 0x40
-    FATAL = 0x30
-    DATUM = HOST + 11
+    A breakpoint check, a self-patching stub or a packer reads its own bytes, and in a buffer
+    without code areas nothing tells that read apart from a read of data.
+    """
 
-    def testTheBlockEndsAtTheDatumAndCounts(self):
-        image = bytearray(b"\xcc" * 0x80)
-        image[:6] = b"\xe8" + (self.HOST - 5).to_bytes(4, "little", signed=True) + b"\xc3"
-        image[self.FATAL : self.FATAL + 2] = b"\xeb\xfe"  # jmp $, never returns
-        host = (
-            b"\xa1"
-            + (BASE + self.DATUM).to_bytes(4, "little")  # mov eax, dword ptr [datum]
-            + b"\x50"  # push eax
-            + b"\xe8"
-            + (self.FATAL - (self.HOST + 11)).to_bytes(4, "little", signed=True)  # call fatal
+    def testTheBytesItReadsStayInTheFunction(self):
+        image = bytearray(b"\xcc" * 0x100)
+        body = (
+            b"\x55\x8b\xec"  # push ebp; mov ebp, esp
+            + b"\x80\x3d"
+            + (BASE + 0x10).to_bytes(4, "little")
+            + b"\xcc"  # cmp byte ptr [BASE + 0x10], 0xcc
+            + b"\x74\x09"  # je done
+            + b"\x90" * 4
+            + b"\xb8\x01\x00\x00\x00"  # BASE + 0x10: mov eax, 1
+            + b"\x5d\xc3"  # done: pop ebp; ret
         )
-        image[self.HOST : self.DATUM] = host
-        image[self.DATUM : self.DATUM + 4] = b"\x05\x00\x00\x00"  # decodes as `add eax, ...`
+        image[: len(body)] = body
         config = SmdaConfig()
         config.WITH_STRINGS = False
         report = Disassembler(config).disassembleBuffer(bytes(image), BASE, bitness=32)
         functions = {function.offset - BASE: function for function in report.getFunctions()}
-        self.assertIn(self.HOST, functions)
-        offsets = {instruction.offset - BASE for instruction in functions[self.HOST].getInstructions()}
-        self.assertEqual(offsets, {self.HOST, self.HOST + 5, self.HOST + 6})
+        offsets = {instruction.offset - BASE for instruction in functions[0].getInstructions()}
+        self.assertIn(0x10, offsets)
+        self.assertEqual(functions[0].num_instructions, 11)
 
 
 class RestoreRevertedGapFunctionsTest(unittest.TestCase):

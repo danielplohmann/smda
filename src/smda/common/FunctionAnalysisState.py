@@ -40,6 +40,8 @@ class FunctionAnalysisState:
         self.call_memreg_ins = []
         self.block_start = 0xFFFFFFFF
         self.data_bytes = set()
+        # the part of data_bytes that a switch dispatch reads as its table; decoding stops there
+        self.table_bytes = set()
         self.data_refs = set()
         self.code_refs_from = {}
         self.code_refs_to = {}
@@ -136,9 +138,11 @@ class FunctionAnalysisState:
             if not any(to == addr_to for _, to in self.jump_refs):
                 self.jump_targets.discard(addr_to)
 
-    def addDataRef(self, addr_from, addr_to, size=1):
+    def addDataRef(self, addr_from, addr_to, size=1, is_table=False):
         self.data_refs.add((addr_from, addr_to))
         self.data_bytes.update(range(addr_to, addr_to + size))
+        if is_table:
+            self.table_bytes.update(range(addr_to, addr_to + size))
 
     def backtrackInstructions(self, addr_from, num_instructions):
         if not self._instructions_sorted:

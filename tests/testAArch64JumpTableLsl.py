@@ -59,7 +59,7 @@ class TestAArch64JumpTableLsl(unittest.TestCase):
             def backtrackInstructions(self, addr_from, num_instructions):
                 return self.instructions
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
@@ -127,7 +127,7 @@ class TestAArch64JumpTableLsl(unittest.TestCase):
             def backtrackInstructions(self, addr_from, num_instructions):
                 return self.instructions
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
@@ -194,7 +194,7 @@ class TestAArch64JumpTableLsl(unittest.TestCase):
             def backtrackInstructions(self, addr_from, num_instructions):
                 return self.instructions
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
