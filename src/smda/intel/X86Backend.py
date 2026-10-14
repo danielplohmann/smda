@@ -34,6 +34,9 @@ LOGGER = logging.getLogger(__name__)
 _ENTRY_ALIGNMENT = 16
 # the filler a compiler pads up to an aligned function entry with
 _ALIGNMENT_PADDING = frozenset((0xCC, 0x90))
+# how far behind its entry an early-return body is taken back from a function of its own
+_BODY_REACH = 0x100
+_RET = 0xC3
 
 # a call/jmp through a pointer slot the sample computes itself ("dword ptr [ebx + 0x2c]"),
 # the shape a runtime-built import table is used through. An index register is excluded on
@@ -407,8 +410,10 @@ class X86Backend(ArchBackend):
         d.tailcall_analyzer.addJump(i_address, jump_destination)
         if jump_destination:
             if jump_destination in d.disassembly.functions:
-                if self._isEvidencedEntry(d, jump_destination) or not d.absorbFunction(
-                    jump_destination, state.start_addr
+                if (
+                    self._isEvidencedEntry(d, jump_destination)
+                    or not self._isBodyBehindReturn(d, jump_destination, state.start_addr)
+                    or not d.absorbFunction(jump_destination, state)
                 ):
                     # case = "TAILCALL!"
                     state.setSanelyEnding(True)
@@ -444,6 +449,17 @@ class X86Backend(ArchBackend):
         if candidate is None or candidate.hasEntryEvidence():
             return True
         return addr % _ENTRY_ALIGNMENT == 0 and d.disassembly.getByte(addr - 1) in _ALIGNMENT_PADDING
+
+    @staticmethod
+    def _isBodyBehindReturn(d, addr, start_addr):
+        """Whether a function the jcc reaches sits where an early-return body does.
+
+        The body follows the `ret` of the check right after the entry. A function that is
+        further away, before the entry, or behind anything but a `ret` (padding such as
+        `lea ecx, [ecx]`, or the end of a function the jcc does not belong to) is one of its own
+        even without evidence: `_ftol2` behind its padding, a hotpatchable `mov edi, edi` entry.
+        """
+        return 0 < addr - start_addr <= _BODY_REACH and d.disassembly.getByte(addr - 1) == _RET
 
     def _analyzeLoopInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i
