@@ -63,21 +63,25 @@ class SwitchTableAfterNoReturnCallTest(unittest.TestCase):
     def _functions(self, guard_first):
         config = SmdaConfig()
         config.WITH_STRINGS = False
-        report = Disassembler(config).disassembleBuffer(self._image(guard_first), BASE, bitness=32)
+        disassembler = Disassembler(config)
+        report = disassembler.disassembleBuffer(self._image(guard_first), BASE, bitness=32)
         self.assertEqual(report.status, "ok")
-        return {
+        functions = {
             function.offset - BASE: {instruction.offset - BASE for instruction in function.getInstructions()}
             for function in report.getFunctions()
         }
+        return functions, disassembler.disassembler.disassembly
 
     def testTheTableEndsTheFunctionAndTheNextOneStartsAfterIt(self):
         for guard_first in (False, True):
             with self.subTest(guard_first=guard_first):
-                functions = self._functions(guard_first)
+                functions, disassembly = self._functions(guard_first)
                 host = functions[self.HOST]
                 self.assertTrue({self.CASE_0, self.CASE_1, self.DEFAULT, self.ERROR + 2} <= host)
                 self.assertEqual({offset for offset in host if offset >= self.TABLE}, set())
                 self.assertIn(self.NEXT, functions)
+                fatal_call = BASE + self.ERROR + 2
+                self.assertNotIn(BASE + self.TABLE, disassembly.code_refs_from.get(fatal_call, ()))
 
 
 if __name__ == "__main__":

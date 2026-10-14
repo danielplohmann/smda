@@ -138,6 +138,11 @@ class X64IndexTableTest(unittest.TestCase):
     def testTheIndexTableIsFoundOffTheImageBase(self):
         self.assertIn((self.INDEX, 0xDA), self._record(self.WINDOW))
 
+    def testDecimalDisplacementWithoutHexPrefixIsResolved(self):
+        window = list(self.WINDOW)
+        window[7] = (0x180001443, 9, "movzx", f"ecx, byte ptr [r10 + rcx + {self.INDEX - self.IMAGE_BASE}]")
+        self.assertIn((self.INDEX, 0xDA), self._record(window))
+
     def testAnUnresolvedImageBaseBooksNothing(self):
         window = [instruction for instruction in self.WINDOW if instruction[2] != "lea"]
         self.assertEqual(self._record(window), [])

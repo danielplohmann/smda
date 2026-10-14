@@ -42,7 +42,7 @@ _IMMEDIATE_RE = re.compile(r"^(?:0x[0-9a-f]+|[0-9]+)$")
 #   movzx ecx, byte ptr [r10 + rcx + 0x1528]
 _INDEX_TABLE_RE = re.compile(
     r"^(?P<destination>[a-z][a-z0-9]{1,4}), byte ptr "
-    r"\[(?:(?P<base>[a-z][a-z0-9]{1,3}) \+ )?(?P<index>[a-z][a-z0-9]{1,3}) \+ (?P<displacement>0x[0-9a-f]+)\]$"
+    r"\[(?:(?P<base>[a-z][a-z0-9]{1,3}) \+ )?(?P<index>[a-z][a-z0-9]{1,3}) \+ (?P<displacement>0x[0-9a-f]+|[0-9]+)\]$"
 )
 # how far ahead of the dispatch the byte table is read
 _INDEX_TABLE_WINDOW = 4
@@ -399,7 +399,8 @@ class JumpTableAnalyzer:
             if match is None or canonicalRegister(match.group("destination")) not in case_registers:
                 continue
             preceding = backtracked[: len(backtracked) - position]
-            address = int(match.group("displacement"), 16)
+            displacement = match.group("displacement")
+            address = int(displacement, 16 if displacement.startswith("0x") else 10)
             if match.group("base"):
                 image_base = self._ripRelativeBase(match.group("base"), preceding, state)
                 if image_base is None:

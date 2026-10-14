@@ -305,6 +305,8 @@ class RecursiveDisassembler:
                     # a table this function reads (a switch's jump table) is not code, however
                     # its bytes decode: the block ran into it past a call that does not return
                     if i_address in data_bytes or i_address + i_size - 1 in data_bytes:
+                        if previous_i is not None and previous_i[0] + previous_i[1] == i_address:
+                            state.removeCodeRef(previous_i[0], i_address)
                         break
 
                     i_op_str = i_op_str.strip()
