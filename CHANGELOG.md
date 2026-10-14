@@ -73,10 +73,14 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 - **(utility)** `extract_strings` reads Go and Rust strings at their real length, taken from the paired length
   load or a (pointer, length) header, decoded as UTF-8; `data_addr` is the string's address either way. Adds
-  `mode="rust"`; with no mode, Rust needs a `/rustc/<commit>/` path in the image as well as the language score.
-  Unpaired Rust references keep the NUL-terminated read for C strings. *Measured on bundled fixtures:*
-  `rust_pe_gnu` 2657 -> 2173 refs, strings over 200 chars 820 -> 10, 6 of 7 MinGW CRT strings kept (one cut
-  to "M" by an unrelated length register); `mirai_x64` with `/rustc/` appended is identical to master.
+  `mode="rust"`, picked with no mode when the Rust score and a `/rustc/<commit>/` path agree; Go mode still needs
+  a pclntab. A reference without a usable length keeps the NUL-terminated read, stopped at the next referenced
+  address. *Measured on `24d3bdf`, bundled fixtures, not yet reproduced:* `rust_pe_gnu` 2657 -> 2909 refs,
+  strings over 200 chars 820 -> 1, all 7 MinGW CRT strings whole, synthesis plants all 1513 strings intact; 3
+  master refs lost, all pointer bytes. Cost: `mirai_x64` with an in-image `/rustc/` path runs in Rust mode,
+  162 -> 166 refs, 1 pointer read lost, 16 shortened (11 tail-merged C strings cut where a referenced suffix
+  starts, `"\r\n"` -> `"\r"`; 5 table entries read at the length passed with them); a planted `Go build ID`
+  leaves it identical. String extraction on `rust_pe_gnu` takes about 0.5 s longer than on master (4.5 s). (#382)
 
 ### Changed
 - **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.0`. `ItaniumDemangler`,
@@ -118,6 +122,9 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
+- **(utility)** String output changes on every binary extracted in Go or Rust mode: strings stop at their real
+  length instead of running into the next literal, some are added or dropped, and UTF-8 ones carry the new
+  `utf8` type. Nothing in mcrit, mcrit-plugin or capa reads `type` or `data_addr`. (#382)
 
 ## [v4.9.0] - 2026-09-28
 
