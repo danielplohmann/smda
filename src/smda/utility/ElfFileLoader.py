@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import struct
 import sys
 
 import lief
@@ -44,6 +45,10 @@ _ELF_MACHINE_TYPES = {
 # through the unknown-machine-type fallback below.
 _PLT_SECTION_NAMES = frozenset({".plt", ".plt.sec", ".plt.got", ".iplt"})
 _GOT_SECTION_NAMES = (".got.plt", ".got")
+# a dynamic table holds a few dozen entries; stop looking for its DT_NULL well past that
+_MAX_DYNAMIC_ENTRIES = 1024
+_DT_STRTAB = 5
+_DT_SYMTAB = 6
 
 
 def _resolve_elf_machine(elffile):
@@ -68,6 +73,22 @@ def _resolve_elf_machine(elffile):
         elif identity_class == lief.ELF.Header.CLASS.ELF32:
             bitness = 32
     return architecture, bitness, has_backend
+
+
+def _is_dynamic_table(data, offset, size, is_64bit, byte_order):
+    """Whether ``data[offset:offset + size]`` reads as a DT_NULL-terminated table naming a symbol table."""
+    entry_format = byte_order + ("qQ" if is_64bit else "iI")
+    entry_size = struct.calcsize(entry_format)
+    if offset < 0:
+        return False
+    num_entries = min(size, len(data) - offset) // entry_size
+    tags = set()
+    for index in range(min(num_entries, _MAX_DYNAMIC_ENTRIES)):
+        tag, _value = struct.unpack_from(entry_format, data, offset + index * entry_size)
+        if tag == 0:
+            return {_DT_STRTAB, _DT_SYMTAB} <= tags
+        tags.add(tag)
+    return False
 
 
 def align(v, alignment):
@@ -399,3 +420,52 @@ class ElfFileLoader:
             for section in sections
             if section.name == section_name and section.virtual_address
         ]
+
+    @staticmethod
+    def unmapImage(image, parsed):
+        """Rebuild the file layout of an ELF image whose PT_LOAD segments sit at their p_vaddr.
+
+        lief reads an ELF by file offset, so handed a mapped image it looks for the dynamic table, and
+        through it the dynamic symbols, at the wrong place once a segment is mapped away from its file
+        offset. Returns None unless the dynamic table is found at its address but not at its file
+        offset, i.e. unless ``image`` is a mapped image rather than a file. Section headers are never
+        loaded, so the rebuilt view drops them rather than pointing lief at whatever lies there.
+        """
+        if not isinstance(parsed, lief.ELF.Binary) or len(image) < 0x40 or image[4] not in (1, 2):
+            return None
+        segments = list(parsed.segments)
+        loads = [segment for segment in segments if segment.type == lief.ELF.Segment.TYPE.LOAD]
+        headers = [segment for segment in loads if segment.file_offset == 0]
+        dynamic = [segment for segment in segments if segment.type == lief.ELF.Segment.TYPE.DYNAMIC]
+        if not headers or len(dynamic) != 1:
+            return None
+        # the image starts with the ELF header, so its first byte is the address of file offset 0
+        image_base = headers[0].virtual_address
+        dynamic = dynamic[0]
+        is_64bit = image[4] == 2
+        byte_order = ">" if image[5] == 2 else "<"
+        mapped_offset = dynamic.virtual_address - image_base
+        if mapped_offset == dynamic.file_offset:
+            return None
+        if _is_dynamic_table(image, dynamic.file_offset, dynamic.physical_size, is_64bit, byte_order):
+            return None
+        if not _is_dynamic_table(image, mapped_offset, dynamic.physical_size, is_64bit, byte_order):
+            return None
+        file_size = max(segment.file_offset + segment.physical_size for segment in loads)
+        if file_size > len(image):
+            return None
+        file_view = bytearray(file_size)
+        for segment in loads:
+            source = segment.virtual_address - image_base
+            if source < 0:
+                continue
+            content = image[source : source + segment.physical_size]
+            file_view[segment.file_offset : segment.file_offset + len(content)] = content
+        # e_shoff, then e_shnum and e_shstrndx
+        if is_64bit:
+            struct.pack_into(byte_order + "Q", file_view, 0x28, 0)
+            struct.pack_into(byte_order + "HH", file_view, 0x3C, 0, 0)
+        else:
+            struct.pack_into(byte_order + "I", file_view, 0x20, 0)
+            struct.pack_into(byte_order + "HH", file_view, 0x30, 0, 0)
+        return bytes(file_view)
