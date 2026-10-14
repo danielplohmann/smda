@@ -81,6 +81,12 @@ past roughly six lines it belongs in the PR the entry links.
   libppsspp_jni.so 7,080 to 4,385 MB, ARM libvlc.so 13,276 to 8,049 MB, CPU 9-16% lower, reports identical. *Not
   reproducible on the bundled fixtures, which are too small; their reports are identical too.* Cost: `code_map` is
   read-only and maps a byte to its function, not its instruction, which no reader used.
+- **(core)** Suspend the cyclic garbage collector while a buffer is analysed. Analysis builds millions of long-lived
+  objects and almost no cycles, so every full collection walked the whole growing heap and freed nothing: 41 of
+  139 CPU seconds on ARM libppsspp_jni.so. *Measured on the entry above, samples not bundled:* CPU libjvm.so 105 to
+  75 s, libpython3.12.so 21 to 16 s, ARM libppsspp_jni.so 138 to 102 s, RSS and reports unchanged. *Bundled
+  fixtures are too small to show it; their reports are identical.* Cost: the collector is off process-wide for the
+  analysis, and the first collections afterwards walk the heap once, in `toDict()` libjvm.so 11 to 18 s.
 
 ### Deprecated
 
