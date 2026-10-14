@@ -19,6 +19,8 @@ IDIOMS is ``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000`` of:
 import unittest
 from pathlib import Path
 
+from capstone.arm import ARM_CC_AL, ARM_CC_EQ, ARM_CC_NE
+
 from smda.arm.ArmInstructionEscaper import ArmInstructionEscaper
 from smda.arm.definitions import (
     a32_branch_target,
@@ -28,6 +30,7 @@ from smda.arm.definitions import (
     split_mnemonic,
     t32_call_target,
 )
+from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 
@@ -325,6 +328,64 @@ class ArmBlockEndTest(unittest.TestCase):
             [[0x10000, 0x10004], [0x10008, 0x1000C], [0x10010, 0x10014]],
         )
         self.assertEqual(function.num_instructions, 6)
+
+
+class ArmDetailedInItBlockTest(unittest.TestCase):
+    def _detailed(self, code, oep=1):
+        report = Disassembler(_config()).disassembleBuffer(bytes.fromhex(code), BASE, 32, oep=oep, architecture="arm")
+        for serialized in (False, True):
+            if serialized:
+                report = SmdaReport.fromDict(report.toDict())
+            instructions = list(report.getFunction(BASE).getInstructions())
+            for instruction in instructions:
+                detailed = instruction.getDetailed()
+                self.assertEqual((detailed.mnemonic, detailed.op_str), (instruction.mnemonic, instruction.operands))
+        return {instruction.mnemonic: instruction.getDetailed().cc for instruction in instructions}
+
+    def test_it(self):
+        # cmp r0, #0; it eq; moveq r0, #1; bx lr
+        self.assertEqual(self._detailed("002808bf01207047")["moveq"], ARM_CC_EQ)
+
+    def test_itt(self):
+        # cmp r0, #0; itt eq; moveq r0, #1; bxeq lr; movs r0, #2; bx lr
+        conditions = self._detailed("002804bf0120704702207047")
+        self.assertEqual(
+            (conditions["moveq"], conditions["bxeq"], conditions["movs"]), (ARM_CC_EQ, ARM_CC_EQ, ARM_CC_AL)
+        )
+
+    def test_ite(self):
+        # cmp r0, #0; ite eq; moveq r0, #1; movne r0, #2; bx lr
+        conditions = self._detailed("00280cbf012002207047")
+        self.assertEqual((conditions["moveq"], conditions["movne"]), (ARM_CC_EQ, ARM_CC_NE))
+
+    def test_itttt_over_a_wide_instruction(self):
+        # cmp r0, #0; itttt eq; moveq r0, #1; moveq.w r1, #1; moveq r2, #1; moveq r3, #1; movs r0, #2; bx lr
+        conditions = self._detailed("002801bf01204ff001010122012302207047")
+        self.assertEqual((conditions["moveq.w"], conditions["movs"]), (ARM_CC_EQ, ARM_CC_AL))
+
+    def test_an_it_block_at_the_function_start(self):
+        # ite eq; moveq r0, #1; movne r0, #2; bx lr
+        conditions = self._detailed("0cbf012002207047")
+        self.assertEqual((conditions["moveq"], conditions["movne"]), (ARM_CC_EQ, ARM_CC_NE))
+
+    def test_a_corrupt_it_leaves_the_instruction_decoded_alone(self):
+        report = Disassembler(_config()).disassembleBuffer(
+            bytes.fromhex("002804bf0120704702207047"), BASE, 32, oep=1, architecture="arm"
+        )
+        serialized = report.toDict()
+        for block in serialized["xcfg"][BASE]["blocks"].values():
+            for instruction in block:
+                if instruction[0] == BASE + 2:
+                    instruction[1] = "zzzz"
+        function = SmdaReport.fromDict(serialized).getFunction(BASE)
+        self.assertEqual(function.getInstructionAt(BASE + 4).getDetailed().mnemonic, "movs")
+
+    def test_a32_conditions_are_unchanged(self):
+        # cmp r0, #0; moveq r0, #1; bxeq lr; mov r0, #2; bx lr
+        conditions = self._detailed("000050e30100a0031eff2f010200a0e31eff2fe1", oep=0)
+        self.assertEqual(
+            (conditions["moveq"], conditions["bxeq"], conditions["mov"]), (ARM_CC_EQ, ARM_CC_EQ, ARM_CC_AL)
+        )
 
 
 class ArmLiteralAfterCallTest(unittest.TestCase):

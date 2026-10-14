@@ -208,6 +208,7 @@ class SmdaFunction:
     strongly_connected_components = None
     tfidf = None
     _basic_blocks: Optional[List["SmdaBasicBlock"]] = None
+    _instructions_by_offset: Optional[Dict[Optional[int], "SmdaInstruction"]] = None
 
     def __init__(self, disassembly=None, function_offset=None, config=None, smda_report=None):
         self.smda_report = smda_report
@@ -440,6 +441,12 @@ class SmdaFunction:
         for block in self.getBlocks():
             yield from block.getInstructions()
 
+    def getInstructionAt(self, offset: int) -> Optional["SmdaInstruction"]:
+        index = self._instructions_by_offset
+        if index is None:
+            index = self._instructions_by_offset = {ins.offset: ins for block in self.blocks.values() for ins in block}
+        return index.get(offset)
+
     def getInstructionsForBlock(self, offset: Optional[int]) -> List["SmdaInstruction"]:
         if offset is None:
             offset = self.offset
@@ -592,6 +599,7 @@ class SmdaFunction:
         self._sorted_block_keys = sorted(self.blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
         self._basic_blocks = None
+        self._instructions_by_offset = None
 
     @staticmethod
     def _normalizeDalvikStringRefs(stringrefs: Any):
@@ -816,6 +824,7 @@ class SmdaFunction:
             smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins, smda_function) for ins in block]
         smda_function._sorted_block_keys = sorted(smda_function.blocks.keys())
         smda_function._basic_blocks = None
+        smda_function._instructions_by_offset = None
         smda_function.apirefs = LazyIntKeyDict(function_dict["apirefs"])
         smda_function.blockrefs = LazyIntKeyDict(function_dict["blockrefs"])
         smda_function.inrefs = function_dict["inrefs"]

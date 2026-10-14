@@ -86,6 +86,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(arm)** Keep an IT block's condition in `SmdaInstruction.getDetailed()`. A T32 instruction re-decoded alone lost
+  it (`bxeq lr` came back as `bx lr`, `moveq` as `movs`); one whose decode disagrees with the recorded mnemonic is
+  now decoded again together with the `it` up to four instructions back in its function, as `ArmCapstone` does.
+  *Measured on `0c306eb`:* bundled fixtures, recorded/detailed mismatches 781/150/828 to 0 on `arm_lz4_thumb_Os`,
+  `arm_lz4_mixed_O2`, `armnt_lz4_dll`; A32, Intel and AArch64 detail bit-identical. *Reproduced on bundled
+  fixtures.* *Cost:* about 4% of `getDetailed()` time on Thumb-heavy reports, none elsewhere.
 
 ### Security
 
