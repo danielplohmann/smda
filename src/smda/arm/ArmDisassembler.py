@@ -18,13 +18,13 @@ class ArmDisassembler(RecursiveDisassembler):
     def __init__(self, config, forced_bitness=None):
         super().__init__(config, ArmBackend(), forced_bitness=forced_bitness)
 
-    def analyzeFunction(self, start_addr, as_gap=False):
+    def analyzeFunction(self, start_addr, as_gap=False, known_table_bytes=None):
         if self.capstone is None or self.fc_manager is None:
-            return super().analyzeFunction(start_addr, as_gap=as_gap)
+            return super().analyzeFunction(start_addr, as_gap=as_gap, known_table_bytes=known_table_bytes)
         thumb = self.fc_manager.isThumb(start_addr)
         self.capstone.binary_info = self.disassembly.binary_info
         self.capstone.setThumb(thumb)
-        state = super().analyzeFunction(start_addr, as_gap=as_gap)
+        state = super().analyzeFunction(start_addr, as_gap=as_gap, known_table_bytes=known_table_bytes)
         if start_addr in self.disassembly.functions:
             self.disassembly.function_metadata[start_addr] = {"thumb": thumb}
         return state
