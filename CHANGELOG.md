@@ -73,12 +73,33 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v4.10.0] - 2026-10-14
+
+### Changed
 - **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.1`, where an installed
-  plugin cannot replace a built-in scheme unless the caller asks. The four demangler modules keep their public
-  functions and wrap it, replacing the `pycxxfilt` build, the vendored MSVC and Rust demanglers and the `swift
-  demangle` subprocess. *Measured on the bundled fixtures:* every Itanium, MSVC and Rust label is unchanged; 32 of
-  7,937 stored labels change, all Swift names a host without a Swift toolchain left mangled. *Reproduced on the
-  bundled fixtures.* Cost: C++ names demangle slower per name; labelling the fixtures went 381 ms to 297 ms cold.
+  plugin cannot replace a built-in scheme unless the caller asks. `ItaniumDemangler`, `MsvcDemangler`,
+  `MachoDemangler` and `rust_demangler` keep their public functions and wrap it, replacing the `pycxxfilt` build, the
+  vendored MSVC and Rust demanglers and the `swift demangle` subprocess. *Measured on the bundled fixtures:* every
+  Itanium, MSVC and Rust label is unchanged; 32 of 7,937 stored labels change, all Swift names a host without a Swift
+  toolchain left mangled. *Reproduced on the bundled fixtures.* Cost: C++ names demangle slower per name than the
+  native build did; labelling the fixtures end to end went 381 ms to 297 ms cold, measured on 0.5.0. (#379, #383)
+- **(labels)** Bump `demangle` to `==0.6.0`. Labels move on non-ASCII and ARM64e names: Itanium and Swift source-name
+  lengths count UTF-8 bytes, as GCC and Clang mangle them, so `_ZN4main5caféE` reads as `main::café` where it was
+  refused, `_Z4cafév` is now refused, and `$s4main5caféV1fyyF` reads as `main.café.f() -> ()` instead of
+  `maincaféV.f() -> ()`. MSVC ARM64e `__ptrauth` names, refused before, now demangle, and Swift `~Deinitable` is
+  rendered by name. Rust gains bounds checks on oversized lengths with no output change found. *Measured on the
+  bundled fixtures:* 8,282 labels, 0 changed; no fixture name is non-ASCII. *Reproduced by reviewer.* (#387)
 - **(labels)** Rust names follow rustc-demangle: a lowercase `.llvm.` suffix is kept (`foo::bar.llvm.1234567890abcdef`),
   `_RIC1aKh_E` reads as `a::<0>`, `_ZN3$u$E` as `$u$`, and `_ZN17h0000000000000000E`, a hash and nothing else, is
   refused instead of labelled `""` and stays mangled rather than read as C++. MSVC now reads `void f(...)` and
@@ -92,8 +113,6 @@ past roughly six lines it belongs in the PR the entry links.
   `getInstructionBytes` from one read per block. *Measured on `2247ee6` with Binary Ninja 6.0 on a 2,329-function
   x64 PE, not bundled, median of three:* `exportBinaryView` 7.39 s to 2.15 s, report identical. Cost: one bytes
   object per instruction is held for the lifetime of the interface. (#378)
-
-### Deprecated
 
 ### Removed
 - **(labels)** The vendored MSVC demangler, the vendored Rust demangler and the Swift subprocess machinery,
@@ -139,8 +158,6 @@ past roughly six lines it belongs in the PR the entry links.
   binutils fillers (`lea esi, [esi]`, `mov esi, esi`) are not padding: Delphi emits `lea eax, [eax]` inside code.
   *Reproduced by reviewer on 866 stripped x86/x64 ELFs against their symbol tables:* +464/-2 true starts,
   +2/-6 false starts. *Malpedia CI corpus, before #380:* 152/155 files identical, +111 functions, none lost. (#381)
-
-### Security
 
 ### Compatibility
 - Function boundaries move on AArch64 images with shrink-wrapped functions, on x86 code that jumps over an early
@@ -912,7 +929,8 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.9.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.10.0...HEAD
+[v4.10.0]: https://github.com/danielplohmann/smda/compare/v4.9.0...v4.10.0
 [v4.9.0]: https://github.com/danielplohmann/smda/compare/v4.8.0...v4.9.0
 [v4.8.0]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0
 [v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
