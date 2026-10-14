@@ -119,10 +119,13 @@ past roughly six lines it belongs in the PR the entry links.
 - **(intel)** Keep the body behind an early `ret` in its function when the body is analyzed first. The candidate
   order put the body's prologue ahead of an entry with four calls or fewer, or one reached only through a pointer
   or a jump thunk, and the entry's jcc then took the body for a tailcall. The jcc now undoes such a function and
-  decodes it as its own, with the same rule as for a body not yet analyzed; gap functions are left alone. *On the
-  official sqlite 3.46.1 DLL, x86 (not bundled):* the fallback bodies of 4 CRT float-to-integer helpers, each
-  reached only by its entry's jcc, rejoin their entries; the x64 DLL, python.org's 3.12.7 embeddable x86/x64 DLLs and the
-  bundled x86/x64 fixtures are identical. (#388)
+  decodes it as its own, but only a non-gap function without entry evidence that starts right behind a `ret`,
+  at most 0x100 bytes after the entry; if the entry then fails, the undone function is analyzed again.
+  *Measured on `dd41bf3` against `0802f7c`, 255 x86/x64 PEs (python.org 3.5.4, 3.6.8, 3.8.10 and 3.12.7
+  embeddable, VS2008-built cp27 wheels, mingw-w64 DLLs, sqlite 3.46.1; not bundled; plus the bundled fixtures):* 12
+  functions fewer in 3 files, all the non-SSE fallback bodies of CRT float-to-integer helpers reached only by
+  their entry's jcc; nothing else moves. Not reproduced by a reviewer. Cost: none measured (sqlite x86 20-21 s
+  both). (#388)
 
 - **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
   by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
