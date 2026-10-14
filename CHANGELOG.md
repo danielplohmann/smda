@@ -86,12 +86,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
-- **(arm)** Keep an IT block's condition in `SmdaInstruction.getDetailed()`. A T32 instruction re-decoded alone lost
-  it (`bxeq lr` came back as `bx lr`, `moveq` as `movs`); one whose decode disagrees with the recorded mnemonic is
-  now decoded again together with the `it` up to four instructions back in its function, as `ArmCapstone` does.
-  *Measured on `0c306eb`:* bundled fixtures, recorded/detailed mismatches 781/150/828 to 0 on `arm_lz4_thumb_Os`,
-  `arm_lz4_mixed_O2`, `armnt_lz4_dll`; A32, Intel and AArch64 detail bit-identical. *Reproduced on bundled
-  fixtures.* *Cost:* about 4% of `getDetailed()` time on Thumb-heavy reports, none elsewhere.
+- **(arm)** Keep an IT block's condition in `SmdaInstruction.getDetailed()` and in reports `Exporter` builds from a
+  frontend. Both decoded a T32 instruction alone and lost it (`bxeq lr` read as `bx lr`, `moveq` as `movs`); both now
+  decode it together with its `it`, as `ArmCapstone` does. *Measured on `0c306eb`:* bundled fixtures, 781/150/828
+  instructions on `arm_lz4_thumb_Os`, `arm_lz4_mixed_O2`, `armnt_lz4_dll` now match the native report, in
+  `getDetailed()` and in an export replaying its blocks; analysis output and A32, Intel and AArch64 detail
+  bit-identical. *Reproduced on bundled fixtures.* *Cost:* about 4% of `getDetailed()` time on Thumb-heavy reports.
 
 ### Security
 
