@@ -36,6 +36,7 @@ LOGGER = logging.getLogger(__name__)
 
 _HEX_OPERAND = re.compile(r"#(0x[0-9a-fA-F]+|\d+)$")
 #: a literal-pool access: ``[pc]`` or ``[pc, #imm]`` (A8.8.64 LDR (literal) and friends)
+_PC_RELATIVE_BASES = {"add": "add", "sub": "sub", "adr": "adr", "addw": "add", "subw": "sub"}
 _PC_LITERAL = re.compile(r"\[pc(?:, #(-?(?:0x[0-9a-fA-F]+|\d+)))?\]")
 _IMMEDIATE = re.compile(r"#(-?(?:0x[0-9a-fA-F]+|\d+))")
 #: literal loads and the width of the datum each one reads
@@ -284,8 +285,9 @@ class ArmBackend(ArchBackend):
                             self._recordValue(d, state, i_address, value, allow_code=allow_code)
                             pending[destination] = value
                 return
-            if base in ("add", "sub", "adr") and not i_op_str.startswith("pc"):
-                self._recordPcRelative(d, instruction, state, base, thumb, pending)
+            if base in _PC_RELATIVE_BASES and not i_op_str.startswith("pc"):
+                # ``adr.w`` reads as ``addw``/``subw rd, pc, #imm``
+                self._recordPcRelative(d, instruction, state, _PC_RELATIVE_BASES[base], thumb, pending)
                 return
         if base == "adr":
             immediate = _IMMEDIATE.search(i_op_str)
@@ -306,7 +308,8 @@ class ArmBackend(ArchBackend):
                 if low is not None:
                     value = (value << 16) | low
                     pending[destination] = value
-                    self._recordValue(d, state, i_address, value)
+                    if not self._followedByPcAdd(d, i_address + instruction[1], destination, thumb):
+                        self._recordValue(d, state, i_address, value)
                 return
             if base == "movw":
                 state.arm_movw[destination] = value
@@ -315,6 +318,22 @@ class ArmBackend(ArchBackend):
         if pending:
             destination = i_op_str.split(",", 1)[0].strip()
             pending.pop(destination, None)
+
+    @staticmethod
+    def _followedByPcAdd(d, address, register, thumb):
+        """Whether one of the next two instructions adds pc to ``register``: the
+        ``movw``/``movt`` pair then built an offset, not an address."""
+        data = ArmBackend._bytesAt(d, address, 8)
+        if data is None:
+            return False
+        engine = d.capstone.thumb if thumb else d.capstone.arm
+        for _address, _size, mnemonic, op_str in engine.disasm_lite(bytes(data), address, 2):
+            operands = [operand.strip() for operand in op_str.split(",")]
+            if split_mnemonic(mnemonic)[0] == "add" and "pc" in operands and register in operands:
+                return True
+            if operands and operands[0] == register:
+                return False
+        return False
 
     def _recordPcRelative(self, d, instruction, state, base, thumb, pending):
         i_address, _i_size, _i_mnemonic, i_op_str = instruction
@@ -353,7 +372,7 @@ class ArmBackend(ArchBackend):
         if not d.fc_manager.isExecutable(value & ~1):
             state.addDataRef(i_address, value)
         elif allow_code:
-            d.fc_manager.addPointerCandidate(value, i_address, pc_relative=pc_relative)
+            d.fc_manager.addPointerCandidate(value, i_address, pc_relative=pc_relative, from_thumb=d.capstone.is_thumb)
 
     # --- control flow -------------------------------------------------------
     def _analyzeCall(self, d, instruction, state, base, thumb):
@@ -389,6 +408,10 @@ class ArmBackend(ArchBackend):
         state.addBlockToQueue(i_address + i_size)
         d.tailcall_analyzer.addJump(i_address, target)
         if target in d.disassembly.functions:
+            state.setSanelyEnding(True)
+        elif target != state.start_addr and target in d.fc_manager.getDeclaredFunctionStarts():
+            # a conditional tailcall into an entry a symbol or unwind record states
+            d.fc_manager.noteMode(target, d.capstone.is_thumb)
             state.setSanelyEnding(True)
         else:
             state.addBlockToQueue(target)
@@ -559,6 +582,19 @@ class ArmBackend(ArchBackend):
             state.arm_movw.clear()
 
         self._recordDataRefs(d, instruction, state, base, thumb)
+
+        if (
+            previous_instruction is not None
+            and i_address != state.start_addr
+            and i_address in d.fc_manager.getDeclaredFunctionStarts()
+            and i_address not in d.disassembly.code_map
+        ):
+            # the code runs into an entry a symbol or unwind record states, not decoded yet:
+            # that is another function, which this one reaches by falling through
+            if d.config.RESOLVE_TAILCALLS:
+                d.fc_manager.addTailcallCandidate(i_address, thumb)
+            self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
+            return True
 
         if previous_instruction is not None:
             previous_base, previous_condition, _ = split_mnemonic(previous_instruction[2])

@@ -105,6 +105,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         #: (start, end, thumb) of sections whose instruction set is known from their contents
         self._section_modes = []
         self._strong_starts = set()
+        # the subset stated by the image itself: symbols and unwind records
+        self._declared_starts = set()
         self._relocated_slots = None
         self._exec_ranges = None
         self._container_thumb = None
@@ -152,11 +154,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         for symbol in self._elfSymbols(lief_binary):
             name = symbol.name
             value = symbol.value
-            if name.startswith(("$a", "$t", "$d")) and (len(name) == 2 or name[2] == "."):
+            # lief hands a name that is not valid UTF-8 back as bytes
+            if isinstance(name, str) and name.startswith(("$a", "$t", "$d")) and (len(name) == 2 or name[2] == "."):
                 mapping.append((value + base_adjust, name[1]))
             elif symbol.type == lief.ELF.Symbol.TYPE.FUNC and value and symbol.shndx != 0:
                 self.noteMode(value, authoritative=True)
                 self._strong_starts.add(value & ~1)
+                self._declared_starts.add(value & ~1)
         entry = lief_binary.header.entrypoint
         if entry:
             self.noteMode(entry, authoritative=True)
@@ -273,6 +277,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         records and direct calls. A branch to one of these is a tailcall."""
         return self._strong_starts
 
+    def getDeclaredFunctionStarts(self):
+        """Starts the image states itself, in symbols and unwind records: code that runs or
+        branches into one of these has reached another function."""
+        return self._declared_starts
+
     # --- candidate registration ------------------------------------------------
     def ensureCandidate(self, addr):
         is_new = super().ensureCandidate(addr)
@@ -302,10 +311,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self._candidate_offsets.add(target)
         return target in self.candidates
 
-    def addPointerCandidate(self, value, source, pc_relative=False):
+    def addPointerCandidate(self, value, source, pc_relative=False, from_thumb=False):
         """A code address held in data or materialised by code (literal, ``movw``/``movt``)."""
         target = value & ~1
         thumb = bool(value & 1)
+        if not thumb and pc_relative and from_thumb and self._declaredThumb(target) is not False:
+            # Thumb code's ``adr`` names its tables and literals, which sit at even addresses;
+            # only an address something else states to be A32 is an A32 entry
+            return False
         if not thumb and (target & 3 or (self._declaredThumb(target) if pc_relative else self.isThumb(target))):
             # an even address in Thumb code is not an entry: interworking needs bit 0 set
             return False
@@ -488,12 +501,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not self.disassembly.isAddrWithinMemoryImage(start) or not self._passesCodeFilter(start):
                 continue
             self._strong_starts.add(start)
+            self._declared_starts.add(start)
             self.addExceptionCandidate(start)
 
     def _locatePdataCandidates(self, lief_binary):
-        """Function starts from a PE ARMNT exception directory.
+        """Function starts from a PE ARMNT or Windows CE exception directory.
 
-        Each RUNTIME_FUNCTION is two words, the first the function's RVA with the Thumb bit
+        Each ARMNT RUNTIME_FUNCTION is two words, the first the function's RVA with the Thumb bit
         set; the second holds either packed unwind data (flag bits 1:0 non-zero, function
         length in bits 12:2 in halfwords) or the RVA of its .xdata record.
         """
@@ -505,17 +519,26 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if not data:
             return
         data = bytes(data)
+        armnt = lief_binary.header.machine == lief.PE.Header.MACHINE_TYPES.ARMNT
         for index in range(0, len(data) - 7, 8):
             if index % (_TIMEOUT_POLL_INTERVAL * 8) == 0 and self._candidateTimeoutTripped():
                 return
             begin, unwind = struct.unpack_from("<II", data, index)
             if not begin:
                 continue
-            start = self.noteMode(base + begin, authoritative=True)
-            length = self._pdataFunctionLength(unwind)
+            if armnt:
+                start = self.noteMode(base + begin, authoritative=True)
+                length = self._pdataFunctionLength(unwind)
+            else:
+                # Windows CE: PrologLen:8 | FuncLen:22 | 32Bit:1 | ExceptionFlag:1, the length
+                # counted in instructions of the set the 32Bit flag names
+                a32 = bool(unwind >> 30 & 1)
+                start = self.noteMode(begin if begin >= base else base + begin, not a32, authoritative=True)
+                length = (unwind >> 8 & 0x3FFFFF) * (A32_INSTRUCTION_SIZE if a32 else T16_INSTRUCTION_SIZE)
             if length:
                 self._pdata_ranges.append((start, start + length, False))
             self._strong_starts.add(start)
+            self._declared_starts.add(start)
             self.addExceptionCandidate(start)
 
     def _pdataFunctionLength(self, unwind):
@@ -638,6 +661,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self._relocated_slots = relocated
         image_start = binary_info.base_addr
         image_end = image_start + binary_info.binary_size
+        exec_low, exec_high = exec_ranges[0][0], max(end for _, end in exec_ranges)
         for section_start, section_end in data_ranges:
             scan_start = max((section_start + 3) & ~3, image_start)
             scan_end = min(section_end, image_end)
@@ -645,14 +669,21 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not data:
                 continue
             data = bytes(data)
-            for count, offset in enumerate(range(0, len(data) - 3, 4)):
+            if relocated is not None:
+                # only the relocated words can hold addresses: visit those, not every word
+                offsets = sorted(
+                    slot - scan_start
+                    for slot in relocated
+                    if scan_start <= slot <= scan_start + len(data) - 4 and not (slot - scan_start) & 3
+                )
+            else:
+                offsets = range(0, len(data) - 3, 4)
+            for count, offset in enumerate(offsets):
                 if count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                     return
-                if relocated is not None and scan_start + offset not in relocated:
-                    continue
                 value = int.from_bytes(data[offset : offset + 4], "little")
                 target = value & ~1
-                if not in_exec(target) or not self._passesCodeFilter(target):
+                if not exec_low <= target < exec_high or not in_exec(target) or not self._passesCodeFilter(target):
                     continue
                 thumb = bool(value & 1)
                 if not thumb and (
@@ -974,10 +1005,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if addr in self.disassembly.code_map:
                 self.gap_pointer = self.getNextGap()
                 continue
-            if addr in self.disassembly.data_map or self.isMappedData(addr):
-                self.gap_pointer += step
-                continue
             if exec_ranges and not in_exec(addr):
+                # jump to the next executable range instead of stepping through data
+                index = bisect.bisect_right(exec_starts, addr)
+                if index >= len(exec_starts):
+                    return None
+                self.gap_pointer = exec_starts[index]
+                continue
+            if addr in self.disassembly.data_map or self.isMappedData(addr):
                 self.gap_pointer += step
                 continue
             if self._isPadding(addr, thumb):

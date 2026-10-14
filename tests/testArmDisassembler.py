@@ -270,6 +270,150 @@ class ArmPieImportTest(unittest.TestCase):
         self.assertEqual(text[0x198], 9)
 
 
+class ArmBlockEndTest(unittest.TestCase):
+    # f: cmp r0, #0; beq L; mov r0, #1; bx lr, with L: mov r0, #0; bx lr right ahead of f
+    BUFFER = bytes.fromhex("0000a0e31eff2fe1000050e3fbffff0a0100a0e31eff2fe1")
+
+    def test_a_block_ends_at_a_return(self):
+        report = Disassembler(_config()).disassembleBuffer(self.BUFFER, BASE, 32, oep=8, architecture="arm")
+        function = report.getFunction(BASE + 8)
+        self.assertEqual(
+            [[instruction.offset for instruction in block.getInstructions()] for block in function.getBlocks()],
+            [[0x10000, 0x10004], [0x10008, 0x1000C], [0x10010, 0x10014]],
+        )
+        self.assertEqual(function.num_instructions, 6)
+
+
+class ArmLiteralAfterCallTest(unittest.TestCase):
+    """``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000`` of:
+
+    entry    mov fp, #0; ldr r1, 1f; add r1, pc, r1; bl start_c; 1: .word 0xfffefcdc
+             (musl's _start: the word after the call decodes as no A32 instruction)
+    start_c  push {r4, lr}; bl f; bl g; pop {r4, pc}
+    f        push {r4, lr}; cmp r0, #0; beq 2f; ldr r0, 3f; pop {r4, pc}; 2: bl die
+             3: .word 0x12345678, 0x13579bdf (the pool behind the call, loaded by the other path)
+    g        push {r4, lr}; mov r0, #1; bl leaf; pop {r4, pc}
+    die      b die
+    leaf     mov r0, #0; bx lr
+    """
+
+    BUFFER = bytes.fromhex(
+        "00b0a0e304109fe501108fe0000000ebdcfcfeff10402de9010000eb080000eb1080bde810402de9000050e3"
+        "0100000a04009fe51080bde8050000eb78563412df9b571310402de90100a0e3010000eb1080bde8feffffea"
+        "0000a0e31eff2fe1"
+    )
+
+    def test_a_call_followed_by_data_ends_the_function(self):
+        report = _disassemble(self.BUFFER)
+        self.assertEqual(
+            {function.offset: function.num_instructions for function in report.getFunctions()},
+            {0x10000: 4, 0x10014: 4, 0x10024: 6, 0x10044: 4, 0x10054: 1, 0x10058: 2},
+        )
+
+
+class ArmElfReferenceTest(unittest.TestCase):
+    # clang -O2 --target=armv7a-linux-gnueabi -nostdlib, ld.lld --no-rosegment (``.rodata`` shares
+    # the executable segment, as old GNU ld and the Android NDK lay it out), stripped, of:
+    #   const char msg[] = "\x2d\xe9\xf0\x41 hello, this is rodata, not code";
+    #   const char tbl[] = "\x10\xb5 some other string";
+    #   const char *get(int i) { return i ? msg : tbl; }
+    #   void _start(void) { volatile const char *p = get(1); (void)p; for (;;) ; }
+    RODATA_POINTERS = bytes.fromhex(
+        "7f454c4601010100000000000000000002002800010000006001010034000000e40100000002000534002000"
+        "050028000700060006000000340000003400010034000100a0000000a0000000040000000400000001000000"
+        "0000000000000100000001006401000064010000050000000000010051e57464000000000000000000000000"
+        "0000000000000000060000000000000004000000d4000000d4000100d4000100180000001800000004000000"
+        "0400000001000070ec000000ec000100ec000100180000001800000004000000040000000400000008000000"
+        "03000000474e5500e7e6763a6772503a54000000010000006c0000000100000068000000010000002de9f041"
+        "2068656c6c6f2c207468697320697320726f646174612c206e6f7420636f64650010b520736f6d65206f7468"
+        "657220737472696e6700000010209fe510109fe5000050e30210a0010100a0e11eff2fe12901010004010100"
+        "feffffea4135000000616561626900012b00000043322e303900060a0741080109020e001101120414011500"
+        "1703180119011a021e0122012601002e41524d2e6578696478002e74657874002e41524d2e61747472696275"
+        "746573002e6e6f74652e676e752e6275696c642d6964002e7368737472746162002e726f6461746100000000"
+        "0000000000000000000000000000000000000000000000000000000000000000000000000000000022000000"
+        "0700000002000000d4000100d400000018000000000000000000000004000000000000000100000001000070"
+        "82000000ec000100ec00000018000000040000000000000004000000000000003f0000000100000002000000"
+        "04010100040100003a000000000000000000000001000000000000000c000000010000000600000040010100"
+        "4001000024000000000000000000000004000000000000001200000003000070000000000000000064010000"
+        "3600000000000000000000000100000000000000350000000300000000000000000000009a01000047000000"
+        "00000000000000000100000000000000"
+    )
+    # ``llvm-mc -triple=thumbv7a-none-eabi`` + ``ld.lld -Ttext=0x10000``, stripped, of:
+    #   entry (T32) push {r7, lr}; movw r0, #0x30; movt r0, #1; add r0, pc; adr.w r1, message
+    #               ldr r0, [r0]; blx work; pop {r7, pc}; .word 0x11111111
+    #   work  (A32) push {r4-r6, lr}; mov r4, #0; mov r5, #10; 1: add r4, r4, r5
+    #               subs r5, r5, #1 (0x10030, the value movw/movt build); bne 1b; mov r0, r4; pop
+    #   message     .asciz "hello" in .rodata
+    THUMB_PIC = bytes.fromhex(
+        "7f454c46010101000000000000000000020028000100000001000100340000006c0100000002000534002000"
+        "050028000400030006000000340000003400010034000100a0000000a0000000040000000400000001000000"
+        "000000000000010000000100d4000000d4000000040000000001000001000000000100000000010000000100"
+        "4c0000004c0000000500000000010000010000004c0100004c0101004c010100060000000600000004000000"
+        "0001000051e57464000000000000000000000000000000000000000006000000000000000000000000000000"
+        "00000000000000000000000000000000000000000000000000000000000000000000000080b540f23000c0f2"
+        "010078440ff23c11006800f015f880bd1111111100f020e370402de90040a0e30a50a0e3054084e0015055e2"
+        "fcffff1a0400a0e17080bde87847fde704f01fe52000010068656c6c6f00002e74657874002e736873747274"
+        "6162002e726f6461746100000000000000000000000000000000000000000000000000000000000000000000"
+        "000000000000000001000000010000000600000000000100000100004c000000000000000000000010000000"
+        "000000001100000001000000020000004c0101004c0100000600000000000000000000000100000000000000"
+        "07000000030000000000000000000000520100001900000000000000000000000100000000000000"
+    )
+    # ``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000``, symbols kept, of:
+    #   entry push {r4, lr}; bl f; pop {r4, pc}
+    #   f     cmp r0, #0; bne g; mov r0, #1; bx lr
+    #   g     cmp r0, #2; moveq r0, #0; add r0, r0, #3 (falls through into h)
+    #   h     add r0, r0, #4; bx lr
+    DECLARED_STARTS = bytes.fromhex(
+        "7f454c4601010100000000000000000002002800010000000000010034000000e80100000002000534002000"
+        "0400280006000400060000003400000034000100340001008000000080000000040000000400000001000000"
+        "000000000000010000000100b4000000b4000000040000000001000001000000000100000000010000000100"
+        "3000000030000000050000000001000051e57464000000000000000000000000000000000000000006000000"
+        "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        "00000000000000000000000000000000000000000000000000000000000000000000000010402de9000000eb"
+        "1080bde8000050e30100001a0100a0e31eff2fe1020050e30000a003030080e2040080e21eff2fe14c696e6b"
+        "65723a205562756e7475204c4c442031382e312e33000000000000000000000000000000000000000d000000"
+        "0000010000000000000001000b0000000c0001000000000002000100090000001c0001000000000002000100"
+        "0700000028000100000000000200010001000000000001000000000012000100002e74657874002e636f6d6d"
+        "656e74002e7368737472746162002e737472746162002e73796d7461620000656e7472790068006700660024"
+        "612e300000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        "0100000001000000060000000000010000010000300000000000000000000000040000000000000007000000"
+        "010000003000000000000000300100001a000000000000000000000001000000010000002200000002000000"
+        "00000000000000004c0100006000000005000000050000000400000010000000100000000300000000000000"
+        "00000000ac0100002a000000000000000000000001000000000000001a000000030000000000000000000000"
+        "d60100001200000000000000000000000100000000000000"
+    )
+
+    @staticmethod
+    def _functions(buffer):
+        report = Disassembler(_config()).disassembleUnmappedBuffer(buffer)
+        return {function.offset: function for function in report.getFunctions()}
+
+    def test_a_pointer_into_rodata_is_not_a_function(self):
+        functions = self._functions(self.RODATA_POINTERS)
+        self.assertEqual(sorted(functions), [0x10140, 0x10160])
+
+    def test_movw_movt_building_a_pc_offset_is_not_a_code_address(self):
+        functions = self._functions(self.THUMB_PIC)
+        self.assertEqual(
+            {
+                offset: (function.architecture_metadata["thumb"], function.num_instructions)
+                for offset, function in functions.items()
+            },
+            {0x10000: (True, 8), 0x10020: (False, 8), 0x10040: (True, 1)},
+        )
+        adr_w = next(
+            instruction for instruction in functions[0x10000].getInstructions() if instruction.offset == 0x1000C
+        )
+        self.assertEqual(list(adr_w.getDataRefs()), [0x1014C])
+
+    def test_branches_and_fall_through_into_a_symbol_reach_another_function(self):
+        functions = self._functions(self.DECLARED_STARTS)
+        self.assertEqual(
+            {offset: function.num_instructions for offset, function in functions.items()},
+            {0x10000: 3, 0x1000C: 4, 0x1001C: 3, 0x10028: 2},
+        )
+
+
 class ArmRoutingTest(unittest.TestCase):
     def test_a_headerless_arm_buffer_is_recognised(self):
         body = IDIOMS * 64

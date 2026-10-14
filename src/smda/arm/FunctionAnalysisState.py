@@ -20,6 +20,13 @@ class FunctionAnalysisState(_CommonFunctionAnalysisState):
         self.arm_movw = {}
         self.arm_indirect_jumps = []
 
+    @staticmethod
+    def endsBlock(instruction, refs_from):
+        # ``bx lr`` and ``pop {.., pc}`` share their mnemonics with instructions that fall
+        # through; what ends the block is that nothing follows the instruction
+        del instruction
+        return refs_from is None
+
     def _branchesOutsideImage(self):
         for _address, _size, mnemonic, op_str, _bytes in self.instructions:
             if not op_str.startswith("#") or split_mnemonic(mnemonic)[0] not in ("b", "bl", "blx"):

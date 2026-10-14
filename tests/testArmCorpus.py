@@ -8,9 +8,11 @@ the unstripped builds and the linker map name.
 """
 
 import json
+import struct
 import unittest
 from pathlib import Path
 
+import lief
 import pytest
 
 from smda.Disassembler import Disassembler
@@ -83,6 +85,33 @@ class ArmCorpusRecoveryTest(unittest.TestCase):
         mapped = b"\x00" * 0x40 + mapped[0x40:]
         report = Disassembler(_config()).disassembleBuffer(mapped, base)
         self._assertRecovery(name, report, recall=0.9, precision=0.9)
+
+    def test_a_symbol_name_that_is_not_utf8(self):
+        name = "arm_lz4_mixed_Os_xored"
+        data = bytearray(_load(name))
+        index = data.find(b"LZ4_compress_default\0")
+        data[index + 3] = 0xFF
+        report = Disassembler(_config()).disassembleUnmappedBuffer(bytes(data))
+        self._assertRecovery(name, report, recall=1.0, precision=0.99)
+
+    def test_windows_ce_exception_directory(self):
+        # the ARMNT DLL relabelled as a Windows CE Thumb image (machine 0x1C2), its .pdata
+        # rewritten into that layout: PrologLen:8 | FuncLen:22 (halfwords) | 32Bit:1 | Exc:1
+        name = "armnt_lz4_dll_xored"
+        data = bytearray(_load(name))
+        pe = lief.PE.parse(list(data))
+        directory = pe.data_directory(lief.PE.DataDirectory.TYPES.EXCEPTION_TABLE)
+        table = pe.rva_to_offset(directory.rva)
+        for index in range(0, directory.size, 8):
+            unwind = struct.unpack_from("<I", data, table + index + 4)[0]
+            if unwind & 3:
+                length = ((unwind >> 2) & 0x7FF) * 2
+            else:
+                length = (struct.unpack_from("<I", data, pe.rva_to_offset(unwind))[0] & 0x3FFFF) * 2
+            struct.pack_into("<I", data, table + index + 4, 6 | (length // 2) << 8)
+        struct.pack_into("<H", data, struct.unpack_from("<I", data, 0x3C)[0] + 4, 0x1C2)
+        report = Disassembler(_config()).disassembleUnmappedBuffer(bytes(data))
+        self._assertRecovery(name, report, recall=0.99, precision=0.99)
 
     def test_armnt_dll(self):
         name = "armnt_lz4_dll_xored"
