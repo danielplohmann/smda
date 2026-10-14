@@ -80,6 +80,24 @@ past roughly six lines it belongs in the PR the entry links.
   buffer has no symbols or unwind table to start from and finds fewer functions. (#364)
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+- **(arm)** Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
+  report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
+  returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
+  Thumb bit, so labels land on the address the code starts at. (#364)
+
+## [v4.10.0] - 2026-10-14
+
+### Changed
 - **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.1`, where an installed
   plugin cannot replace a built-in scheme unless the caller asks. `ItaniumDemangler`, `MsvcDemangler`,
   `MachoDemangler` and `rust_demangler` keep their public functions and wrap it, replacing the `pycxxfilt` build, the
@@ -106,8 +124,6 @@ past roughly six lines it belongs in the PR the entry links.
   `getInstructionBytes` from one read per block. *Measured on `2247ee6` with Binary Ninja 6.0 on a 2,329-function
   x64 PE, not bundled, median of three:* `exportBinaryView` 7.39 s to 2.15 s, report identical. Cost: one bytes
   object per instruction is held for the lifetime of the interface. (#378)
-
-### Deprecated
 
 ### Removed
 - **(labels)** The vendored MSVC demangler, the vendored Rust demangler and the Swift subprocess machinery,
@@ -143,13 +159,7 @@ past roughly six lines it belongs in the PR the entry links.
   *Reproduced by reviewer on 866 stripped x86/x64 ELFs against their symbol tables:* +464/-2 true starts,
   +2/-6 false starts. *Malpedia CI corpus, before #380:* 152/155 files identical, +111 functions, none lost. (#381)
 
-### Security
-
 ### Compatibility
-- **(arm)** Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
-  report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
-  returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
-  Thumb bit, so labels land on the address the code starts at. (#364)
 - Function boundaries move on AArch64 images with shrink-wrapped functions, on x86 code that jumps over an early
   `ret` into a prologue, on functions with a switch table behind a call that does not return (any architecture),
   and on x86/x64 two-level switches. (#384)
@@ -919,7 +929,8 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.9.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.10.0...HEAD
+[v4.10.0]: https://github.com/danielplohmann/smda/compare/v4.9.0...v4.10.0
 [v4.9.0]: https://github.com/danielplohmann/smda/compare/v4.8.0...v4.9.0
 [v4.8.0]: https://github.com/danielplohmann/smda/compare/v4.7.0...v4.8.0
 [v4.7.0]: https://github.com/danielplohmann/smda/compare/v4.6.0...v4.7.0
