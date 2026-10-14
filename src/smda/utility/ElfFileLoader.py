@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import sys
+import warnings
 
 import lief
 
@@ -86,6 +87,13 @@ def has_bogus_sections(elffile, base_addr=0):
     return (max_virtual_address - base_addr) > sys.maxsize
 
 
+def _get_load_segments(elffile):
+    with warnings.catch_warnings():
+        # lief warns on every p_type outside its enum, and corrupt program headers carry hundreds
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return [segment for segment in elffile.segments if segment.type == lief.ELF.Segment.TYPE.LOAD]
+
+
 def _calculate_base_address(elffile):
     base_addr = 0
     candidates = [0xFFFFFFFFFFFFFFFF]
@@ -95,6 +103,13 @@ def _calculate_base_address(elffile):
         for section in elffile.sections:
             if section.virtual_address:
                 addr = section.virtual_address - section.offset
+                if addr >= 0:
+                    candidates.append(addr)
+        if len(candidates) == 1:
+            # no mapped sections (e.g. section headers stripped, as UPX leaves them):
+            # apply the same rule to the PT_LOAD segments instead
+            for segment in _get_load_segments(elffile):
+                addr = segment.virtual_address - segment.file_offset
                 if addr >= 0:
                     candidates.append(addr)
     else:
