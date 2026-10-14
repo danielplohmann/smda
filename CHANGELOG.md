@@ -83,12 +83,12 @@ past roughly six lines it belongs in the PR the entry links.
   leaves it identical. String extraction on `rust_pe_gnu` takes about 0.5 s longer than on master (4.5 s). (#382)
 
 ### Changed
-- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.0`. `ItaniumDemangler`,
-  `MsvcDemangler`, `MachoDemangler` and `rust_demangler` keep their public functions and wrap it, replacing the
-  `pycxxfilt` build, the vendored MSVC and Rust demanglers and the `swift demangle` subprocess. *Measured on the
-  bundled fixtures:* every Itanium, MSVC and Rust label is unchanged; 32 of 7,937 stored labels change, all Swift
-  names a host without a Swift toolchain left mangled. *Reproduced on the bundled fixtures.* Cost: C++ names
-  demangle slower per name than the native build did; labelling the fixtures end to end went 381 ms to 297 ms cold.
+- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.1`, where an installed
+  plugin cannot replace a built-in scheme unless the caller asks. The four demangler modules keep their public
+  functions and wrap it, replacing the `pycxxfilt` build, the vendored MSVC and Rust demanglers and the `swift
+  demangle` subprocess. *Measured on the bundled fixtures:* every Itanium, MSVC and Rust label is unchanged; 32 of
+  7,937 stored labels change, all Swift names a host without a Swift toolchain left mangled. *Reproduced on the
+  bundled fixtures.* Cost: C++ names demangle slower per name; labelling the fixtures went 381 ms to 297 ms cold.
 - **(labels)** Rust names follow rustc-demangle: a lowercase `.llvm.` suffix is kept (`foo::bar.llvm.1234567890abcdef`),
   `_RIC1aKh_E` reads as `a::<0>`, `_ZN3$u$E` as `$u$`, and `_ZN17h0000000000000000E`, a hash and nothing else, is
   refused instead of labelled `""` and stays mangled rather than read as C++. MSVC now reads `void f(...)` and
@@ -112,12 +112,32 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- Keep a shrink-wrapped function's frame setup in the function whose early-exit check runs ahead of it: on AArch64
+  the code before an unnamed, uncalled exception record or prologue seeds the function, and on x86 a jcc into a
+  prologue-only candidate stays in the function unless that candidate sits aligned behind padding. Reproduced on the
+  bundled #385 fixtures. *On python.org's 3.13.7 `python313.dll` (not bundled), PDB as truth, against `ddffed4`:*
+  ARM64 without the PDB gains 24 entries, splits inside functions fall from 55 to 23, and `__gsfailure` joins
+  `__security_check_cookie` (pinned in a test); x86 loses nothing. (#384)
+
+- Stop decoding a function at a switch table it reads. MSVC puts the table right after the last block, and when that
+  block ends in a call that does not return, decoding ran on into the table and the next function; a function that
+  reached a table before its dispatch is analyzed again with the table known. A two-level switch's byte table is
+  booked as data, so the gap scan no longer starts functions in it. *Same DLL, x86:* 2 functions recovered, none
+  lost, starts inside functions 116 to 43. The official sqlite 3.54 DLL drops 44 (x86) and 1 (x64) false starts that
+  sat inside switch tables. (#384)
+
 - **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
   by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
   backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's
   go1.24.7 reproducer, windows and linux amd64 (not bundled):* `image/draw.DrawMask` drops from 1,065 / 549 blocks
   to 238. *Malpedia CI corpus:* 154/155 files identical; one Akira ELF goes -13/+4, as a recovered table removes a
   false function that had split a gap. Bundled fixtures keep their golden results. (#363)
+- **(intel)** Resume the gap scan past a failed candidate on binaries padded with nops. The int3 resume from #338
+  never fires on GCC/Clang ELFs, so when the failed candidate's straight-line code ends in `ret`/`jmp` and only
+  nops follow up to a 16-byte boundary, the scan now resumes there. Only capstone's `nop` counts, so old i386
+  binutils fillers (`lea esi, [esi]`, `mov esi, esi`) are not padding: Delphi emits `lea eax, [eax]` inside code.
+  *Reproduced by reviewer on 866 stripped x86/x64 ELFs against their symbol tables:* +464/-2 true starts,
+  +2/-6 false starts. *Malpedia CI corpus, before #380:* 152/155 files identical, +111 functions, none lost. (#381)
 
 ### Security
 
@@ -125,6 +145,9 @@ past roughly six lines it belongs in the PR the entry links.
 - **(utility)** String output changes on every binary extracted in Go or Rust mode: strings stop at their real
   length instead of running into the next literal, some are added or dropped, and UTF-8 ones carry the new
   `utf8` type. Nothing in mcrit, mcrit-plugin or capa reads `type` or `data_addr`. (#382)
+- Function boundaries move on AArch64 images with shrink-wrapped functions, on x86 code that jumps over an early
+  `ret` into a prologue, on functions with a switch table behind a call that does not return (any architecture),
+  and on x86/x64 two-level switches. (#384)
 
 ## [v4.9.0] - 2026-09-28
 

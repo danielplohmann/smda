@@ -1609,7 +1609,7 @@ class TestAArch64AddressMaterialization(unittest.TestCase):
             def __init__(self):
                 self.refs = []
 
-            def addDataRef(self, addr_from, addr_to, size=1):
+            def addDataRef(self, addr_from, addr_to, size=1, is_table=False):
                 del size
                 self.refs.append((addr_from, addr_to))
 
@@ -2061,7 +2061,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def backtrackInstructions(self, addr_from, num_instructions):
                 return self.instructions
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
@@ -2301,7 +2301,7 @@ class TestAArch64Analyzers(unittest.TestCase):
             def backtrackInstructions(self, addr_from, num_instructions):
                 return self.instructions
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
@@ -2470,7 +2470,7 @@ class TestAArch64Analyzers(unittest.TestCase):
                 del num_instructions
                 return [ins for ins in self.instructions if ins[0] < addr_from]
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         fake_state = FakeState(instructions)
@@ -2538,7 +2538,7 @@ class TestAArch64Analyzers(unittest.TestCase):
                 del num_instructions
                 return [ins for ins in self.instructions if ins[0] < addr_from]
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
@@ -2611,7 +2611,7 @@ class TestAArch64Analyzers(unittest.TestCase):
                 del num_instructions
                 return [ins for ins in self.instructions if ins[0] < addr_from]
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []
@@ -2853,7 +2853,7 @@ class TestAArch64Analyzers(unittest.TestCase):
                 del num_instructions
                 return [ins for ins in self.instructions if ins[0] < addr_from]
 
-            def addDataRef(self, from_addr, to_addr, size=1):
+            def addDataRef(self, from_addr, to_addr, size=1, is_table=False):
                 self.data_refs.append((from_addr, to_addr, size))
 
         instructions = []

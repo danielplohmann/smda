@@ -175,7 +175,7 @@ class JumpTableBacktrackWindowTestSuite(unittest.TestCase):
             def __init__(self):
                 self.data_refs = []
 
-            def addDataRef(self, addr_from, addr_to, size=1):
+            def addDataRef(self, addr_from, addr_to, size=1, is_table=False):
                 self.data_refs.append((addr_from, addr_to, size))
 
         analyzer.disassembler = _StubDisassembler()
