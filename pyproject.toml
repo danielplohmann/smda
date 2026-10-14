@@ -47,8 +47,10 @@ dependencies = [
     # import-order fix. Measured against 6.0.0a10.
     "capstone<6",
     # every label smda writes comes from demangle, so its output changes only through a
-    # reviewed bump of this pin
-    "demangle==0.5.1",
+    # reviewed bump of this pin. smda never calls load_plugins(); a host application that
+    # calls load_plugins() or register_language() in the same process can still replace a
+    # built-in scheme, and Itanium, MSVC and Swift names then stay mangled without an error.
+    "demangle==0.6.0",
     "dncil",
     "dnfile",
     "lief>=0.16.0",
