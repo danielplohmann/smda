@@ -241,6 +241,49 @@ class ArmGccIdiomTest(unittest.TestCase):
         )
 
 
+class ArmMsvcIdiomTest(unittest.TestCase):
+    """MSVC's Thumb-2 switch, ``llvm-mc -triple=thumbv7a-none-eabi`` + ``ld.lld -Ttext=0x10000``."""
+
+    # entry  push {r4, lr}; bl bytes; bl halves; pop {r4, pc}
+    # bytes  cmp r0, #3; bhi 9f; b 4f; b0: movs r0, #10; bx lr
+    #        4: adr r3, 1f; ldrsb r3, [r3, r0]; 2: add pc, r3
+    #        1: .byte b0 - 2b - 4, b1 - 2b - 4, b2 - 2b - 4, b3 - 2b - 4; b1..b3: movs r0, #N; bx lr
+    #        9: movs r0, #0; bx lr
+    # halves cmp r0, #2; bhi.w 9f; adr r3, 1f; ldrsh.w r3, [r3, r0, lsl #1]; nop; 2: add pc, r3
+    #        1: .short h0 - 2b - 4, h1 - 2b - 4, h2 - 2b - 4; h0..h2: movs r0, #N; bx lr
+    #        9: movs r0, #0; bx lr
+    ADD_PC_SWITCH = bytes.fromhex(
+        "10b500f003f800f013f810bd03280dd801e00a20704701a31b569f44f402060a0b2070470c2070470d207047"
+        "00207047022800f20e8002a333f9103000bf9f44040008000c0014207047152070471620704700207047"
+    )
+
+    def test_a_signed_offset_table_behind_add_pc_is_followed(self):
+        report = _disassemble(self.ADD_PC_SWITCH)
+        self.assertEqual(sorted(function.offset for function in report.getFunctions()), [0x10000, 0x1000C, 0x10030])
+        self.assertEqual(sorted(report.getFunction(0x1000C).blockrefs[0x10016]), [0x10012, 0x10020, 0x10024, 0x10028])
+        self.assertEqual(sorted(report.getFunction(0x10030).blockrefs[0x10036]), [0x10046, 0x1004A, 0x1004E])
+
+
+class ArmSwitchBoundTest(unittest.TestCase):
+    """``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000``."""
+
+    # entry push {r4, lr}; bl f; bl g; pop {r4, pc}; c0..c3: mov r0, #N; bx lr; def: mov r0, #0; bx lr
+    # f     cmp r0, #4; bhs def; ldr pc, [pc, r0, lsl #2]; nop; .word c0, c1, c2, c3
+    # g     .word msg (pool); ldr r0, pool; bx lr; msg: .asciz "hello world, this is a string not code"
+    HS_GUARD = bytes.fromhex(
+        "10402de90b0000eb130000eb1080bde80a00a0e31eff2fe10b00a0e31eff2fe10c00a0e31eff2fe10d00a0e3"
+        "1eff2fe10000a0e31eff2fe1040050e3fbffff2a00f19fe700f020e31000010018000100200001002800010064"
+        "0001000c001fe51eff2fe168656c6c6f20776f726c642c2074686973206973206120737472696e67206e6f7420"
+        "636f646500"
+    )
+
+    def test_a_higher_or_same_guard_does_not_admit_its_immediate(self):
+        report = _disassemble(self.HS_GUARD)
+        function = report.getFunction(0x10038)
+        self.assertEqual(sorted(function.blockrefs[0x10040]), [0x10010, 0x10018, 0x10020, 0x10028])
+        self.assertFalse([ins.offset for ins in function.getInstructions() if ins.offset >= 0x10064])
+
+
 class ArmPieImportTest(unittest.TestCase):
     """A stripped PIE, ``llvm-mc -triple=armv7a-linux-gnueabi`` + ``ld.lld -pie -Ttext=0x150``
     against a shared object exporting ``puts`` and ``__stack_chk_fail``:

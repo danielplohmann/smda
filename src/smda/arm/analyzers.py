@@ -25,6 +25,8 @@ MAX_TABLE_ENTRIES = 4096
 MAX_STUB_INSTRUCTIONS = 6
 _STUB_BASES = frozenset({"add", "sub", "adr", "ldr", "movw", "movt", "mov", "nop", "bx"})
 _BOUND_BRANCHES = frozenset({"hi", "ls", "hs", "lo", "cs", "cc", "gt", "le", "ge", "lt"})
+#: guard conditions under which the compared immediate is not itself a valid index
+_EXCLUSIVE_BOUNDS = frozenset({"hs", "lo", "cs", "cc", "ge", "lt"})
 #: libgcc's Thumb-1 switch helpers (``__gnu_thumb1_case_*`` in lib1funcs.S), by their
 #: instruction sequence, since a stripped image does not name them: the entry size, whether
 #: an entry is signed, and whether it is a word offset from the aligned table (``si``) rather
@@ -37,6 +39,8 @@ _CASE_HELPERS = {
     ("push", "mov", "add", "lsr", "lsl", "lsl", "ldr", "add", "mov", "pop", "mov"): (4, True, True),
 }
 _CASE_HELPER_LENGTH = max(len(sequence) for sequence in _CASE_HELPERS)
+#: entry size of the signed offset loads feeding MSVC's ``add pc, rt`` switch
+_SIGNED_OFFSET_LOADS = {"ldrsb": 1, "ldrsh": 2}
 
 
 class ArmTfIdf:
@@ -346,7 +350,8 @@ class ArmJumpTableAnalyzer:
     ``ldr pc, [rn, rm, lsl #2]`` (inline behind the instruction or reached through a base
     register); a table of branch instructions entered by ``add pc, pc, rm, lsl #2``; and
     the position-independent ``add pc, rt, rx`` where rx was loaded from a table of
-    offsets relative to rt, the base rt was set up with ``adr`` or a pc-relative ``add``.
+    offsets relative to rt, the base rt was set up with ``adr`` or a pc-relative ``add``;
+    and MSVC's Thumb ``add pc, rt`` taking a signed byte or halfword offset from the pc.
     The index bound comes from the ``cmp`` guarding the dispatch; a table without one is
     read until an entry stops naming code, and a table inside the code section stops
     where its first target begins.
@@ -457,6 +462,8 @@ class ArmJumpTableAnalyzer:
             return []
         writer_base = split_mnemonic(writer[0][2])[0]
         detailed = writer[1]
+        if writer_base in _SIGNED_OFFSET_LOADS and len(operands) == 2:
+            return self._offsetTable(state, ins, context, writer)
         if writer_base == "ldr" and len(detailed.operands) == 2 and detailed.operands[1].type == ARM_OP_MEM:
             memory = detailed.operands[1]
             if not memory.mem.index:
@@ -483,6 +490,35 @@ class ArmJumpTableAnalyzer:
                 jump_address=ins.address,
             )
         return []
+
+    def _offsetTable(self, state, ins, context, writer):
+        # MSVC: adr rt, table ; ldrsb rt, [rt, ri] (ldrsh.w ..., lsl #1) ; add pc, rt
+        thumb = _thumbOf(self.disassembler)
+        if not thumb or norm_reg(ins.reg_name(ins.operands[0].reg)) != "pc":
+            return []
+        detailed = writer[1]
+        entry_size = _SIGNED_OFFSET_LOADS[split_mnemonic(writer[0][2])[0]]
+        if len(detailed.operands) != 2 or detailed.operands[1].type != ARM_OP_MEM:
+            return []
+        memory = detailed.operands[1]
+        shift = memory.shift
+        if not memory.mem.index or memory.mem.disp or (shift.value if shift.type else 0) != entry_size // 2:
+            return []
+        prefix = context[: context.index(writer)]
+        table = self._baseValue(detailed, memory, track(self.disassembler, prefix, thumb), thumb)
+        if table is None:
+            return []
+        index = norm_reg(detailed.reg_name(memory.mem.index))
+        origin = pc_value(ins.address, thumb)
+        return self._readTable(
+            state,
+            ins.address,
+            table,
+            entry_size,
+            self._bound(prefix, index),
+            lambda entry: (origin + entry) & 0xFFFFFFFE,
+            signed=True,
+        )
 
     @staticmethod
     def _lastWriter(context, register):
@@ -616,26 +652,33 @@ class ArmJumpTableAnalyzer:
 
         Follows the index back through register copies and a spill to and reload from the
         stack, which is how unoptimised code carries it from its ``cmp`` to the dispatch.
+        The branch closest behind the ``cmp`` decides whether its immediate is itself a valid
+        index: ``hi``/``gt`` leaving or ``ls``/``le`` reaching the dispatch admit it,
+        ``hs``/``ge`` leaving or ``lo``/``lt`` reaching it do not.
         """
         tracked = {index}
         slots = set()
         # comparisons met walking backwards whose register is not yet known to hold the
         # index: -O0 code stores the value to its stack slot before comparing it
         compared = {}
+        condition = None
         for pair in reversed(context):
             ins, detailed = pair
-            base, condition, _ = split_mnemonic(ins[2])
+            base, branch, _ = split_mnemonic(ins[2])
             operands = detailed.operands
             if not operands:
                 continue
             first = operands[0]
             first_reg = norm_reg(detailed.reg_name(first.reg)) if first.type == ARM_OP_REG else None
             if base == "cmp" and first_reg is not None and len(operands) == 2 and operands[1].type == ARM_OP_IMM:
+                entries = operands[1].imm + (0 if condition in _EXCLUSIVE_BOUNDS else 1)
+                condition = None
                 if first_reg in tracked:
-                    return operands[1].imm + 1
-                compared.setdefault(first_reg, operands[1].imm + 1)
+                    return entries
+                compared.setdefault(first_reg, entries)
                 continue
-            if base == "b" and condition in _BOUND_BRANCHES:
+            if base == "b" and branch in _BOUND_BRANCHES:
+                condition = branch
                 continue
             if first_reg is None:
                 continue
