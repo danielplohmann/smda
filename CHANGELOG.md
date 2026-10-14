@@ -73,12 +73,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
-- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.0`. `ItaniumDemangler`,
-  `MsvcDemangler`, `MachoDemangler` and `rust_demangler` keep their public functions and wrap it, replacing the
-  `pycxxfilt` build, the vendored MSVC and Rust demanglers and the `swift demangle` subprocess. *Measured on the
-  bundled fixtures:* every Itanium, MSVC and Rust label is unchanged; 32 of 7,937 stored labels change, all Swift
-  names a host without a Swift toolchain left mangled. *Reproduced on the bundled fixtures.* Cost: C++ names
-  demangle slower per name than the native build did; labelling the fixtures end to end went 381 ms to 297 ms cold.
+- **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.1`, where an installed
+  plugin cannot replace a built-in scheme unless the caller asks. The four demangler modules keep their public
+  functions and wrap it, replacing the `pycxxfilt` build, the vendored MSVC and Rust demanglers and the `swift
+  demangle` subprocess. *Measured on the bundled fixtures:* every Itanium, MSVC and Rust label is unchanged; 32 of
+  7,937 stored labels change, all Swift names a host without a Swift toolchain left mangled. *Reproduced on the
+  bundled fixtures.* Cost: C++ names demangle slower per name; labelling the fixtures went 381 ms to 297 ms cold.
 - **(labels)** Rust names follow rustc-demangle: a lowercase `.llvm.` suffix is kept (`foo::bar.llvm.1234567890abcdef`),
   `_RIC1aKh_E` reads as `a::<0>`, `_ZN3$u$E` as `$u$`, and `_ZN17h0000000000000000E`, a hash and nothing else, is
   refused instead of labelled `""` and stays mangled rather than read as C++. MSVC now reads `void f(...)` and
