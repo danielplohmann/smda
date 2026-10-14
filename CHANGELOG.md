@@ -71,19 +71,13 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
-- Add a 32-bit ARM backend (`arm`) covering A32 and Thumb/T32 in one image. The instruction set is chosen per
-  function (symbol and pointer bit 0, `blx`, `$a`/`$t`/`$d` mapping symbols, the ARMNT container, and a return-encoding
-  density probe for headerless buffers) and recorded as `architecture_metadata["thumb"]`; IT blocks keep their
-  conditions. Candidates come from `.ARM.exidx`/ARMNT `.pdata`, BL/BLX scans, relocated data pointers and prologues;
-  `tbb`/`tbh`, `ldr pc` and `add pc` switch tables, switches through libgcc's Thumb-1 `__gnu_thumb1_case_*` helpers,
-  PLT/IAT stubs, linker veneers (a Thumb `bx pc` veneer is one function, not one per instruction set) and
-  `mov lr, pc` calls are resolved, and an `ArmInstructionEscaper` gives PicHash/OpcHash. ELF, PE (0x1C0/0x1C2/0x1C4) and Mach-O ARM inputs, raw
-  buffers, synthesis and the IDA exporter are routed to it. *Measured on this branch:* 14 stripped clang builds of
-  lz4/brotli/zstd (A32, T32, mixed; -O0/-O2/-Os) recover 4,827 of 4,839 symbol-table functions (98.3-100% per
-  build) for 19 extra starts (94.5-100% precision per build, mixed brotli lowest), none in the wrong instruction
-  set; the ARMNT lz4 DLL recovers all 159 named functions. Only the two lz4 ELF builds and the DLL are bundled, as
-  `tests/testArmCorpus.py` fixtures. *Cost:* headerless dumps of the same builds drop to 75-99.9% recall, mixed
-  mode worst.
+- **(arm)** Add a 32-bit ARM backend for A32 and Thumb/T32 code in ELF, PE (ARMNT, Windows CE), Mach-O armv7 and raw
+  buffers, choosing the instruction set per function (`architecture_metadata["thumb"]`). Starts come from symbols,
+  `.ARM.exidx`/`.pdata`, Go pclntab, calls and relocated pointers; switch tables, PLT/IAT stubs and veneers are
+  followed, and `ArmInstructionEscaper` gives PicHash/OpcHash. *Measured on `77f3385`:* 264 stripped Debian bookworm
+  armhf/armel binaries against their dbgsym symbols, 97.3%/95.4% of 91,686 functions found, 677/974 false starts, none
+  in the wrong mode, 1.9 s per file. Not reproduced: the corpus is not bundled, the 10 ARM fixtures are. *Cost:* a raw
+  buffer has no symbols or unwind table to start from and finds fewer functions. (#364)
 
 ### Changed
 - **(labels)** Read every mangled symbol through the `demangle` package, pinned at `==0.5.1`, where an installed
@@ -152,10 +146,10 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
-- Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
+- **(arm)** Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
   report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
   returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
-  Thumb bit, so labels land on the address the code starts at.
+  Thumb bit, so labels land on the address the code starts at. (#364)
 - Function boundaries move on AArch64 images with shrink-wrapped functions, on x86 code that jumps over an early
   `ret` into a prologue, on functions with a switch table behind a call that does not return (any architecture),
   and on x86/x64 two-level switches. (#384)
