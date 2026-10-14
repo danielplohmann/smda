@@ -330,7 +330,9 @@ class RelativeTableDataClaimTest(unittest.TestCase):
             side_effect=lambda offset, size: entries[offset - 0x100 - bonus_offset :][:size]
         )
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         targets = analyzer._extractRelativeTableOffsets(
             jumptable_size=3,
             off_jumptable=0x1100,
@@ -367,7 +369,9 @@ class RelativeTableDataClaimTest(unittest.TestCase):
         analyzer.disassembler.getReferencedAddr = MagicMock(return_value=0x10)
 
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         # getJumpTargets reverses this list, so "add" must come last for an add-mov sequence
         state.backtrackInstructions = MagicMock(
             return_value=[
@@ -436,7 +440,9 @@ class DirectTableScanTest(unittest.TestCase):
     def test_each_consumed_entry_is_claimed_as_data(self):
         analyzer = self._analyzer()
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         analyzer._extractDirectTableOffsets(0, 0x1090, state=state, jump_instruction_address=0x2000)
         self.assertEqual(state.refs, [(0x2000, 0x1090, 4), (0x2000, 0x1094, 4), (0x2000, 0x1098, 4)])
 
@@ -444,7 +450,9 @@ class DirectTableScanTest(unittest.TestCase):
         analyzer = self._analyzer()
         analyzer._directHandler = MagicMock(return_value=(0x1090, 4))
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         state.backtrackInstructions = MagicMock(
             return_value=[(0x1FF0, 5, "mov", "eax, dword ptr [eax*4 + 0x1090]")],
         )
@@ -545,7 +553,9 @@ class ZeroTableEntryTest(unittest.TestCase):
     def test_explicit_table_stops_at_a_zero_entry(self):
         analyzer, _ = self._analyzer([0, self.LIVE], bitness=64)
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
 
         self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, 0x1090), [])
         self.assertEqual(state.refs, [])
@@ -556,7 +566,9 @@ class ZeroTableEntryTest(unittest.TestCase):
         analyzer, _ = self._analyzer([self.LIVE, self.LIVE], bitness=64)
         analyzer.disassembly.getBytes = MagicMock(side_effect=lambda addr, size: struct.pack("<Q", self.LIVE)[:size])
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
 
         self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, 0), [])
         self.assertEqual(state.refs, [])
@@ -566,7 +578,9 @@ class ZeroTableEntryTest(unittest.TestCase):
         reads the same on either side of the fix."""
         analyzer, entry_size = self._analyzer([self.LIVE, self.OUT_OF_IMAGE], bitness=64)
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
 
         self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, 0x1090), [self.LIVE])
         self.assertEqual(state.refs, [(0x2000, 0x1090, entry_size)])
@@ -737,7 +751,9 @@ class RipRelativeBaseTest(unittest.TestCase):
     @staticmethod
     def _state():
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         return state
 
     def test_the_lea_resolves_to_the_address_it_computes(self):
@@ -814,7 +830,9 @@ class RegisterBaseTableTest(unittest.TestCase):
     @staticmethod
     def _state(window):
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         state.backtrackInstructions = MagicMock(return_value=window)
         return state
 
@@ -919,14 +937,18 @@ class CodePointerEntryTest(unittest.TestCase):
         identical reads of absolute code pointers unbounded is what a sweep exists to catch."""
         analyzer = self._analyzer([self.CODE, self.DATA], [(0x1000, 0x1800)])
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
 
         self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, self.TABLE), [self.CODE])
 
     def test_the_branch_reading_the_table_takes_the_same_entry_when_it_is_code(self):
         analyzer = self._analyzer([self.CODE, self.DATA], [(0x1000, 0x2000)])
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
 
         self.assertEqual(analyzer._resolveExplicitTable(0x2000, state, self.TABLE), [self.CODE, self.DATA])
 
@@ -1145,7 +1167,9 @@ class SharedObjectAbsoluteTableTest(unittest.TestCase):
     @staticmethod
     def _state(window):
         state = SimpleNamespace(refs=[])
-        state.addDataRef = lambda addr_from, addr_to, size=1: state.refs.append((addr_from, addr_to, size))
+        state.addDataRef = lambda addr_from, addr_to, size=1, is_table=False: state.refs.append(
+            (addr_from, addr_to, size)
+        )
         state.backtrackInstructions = MagicMock(return_value=window)
         return state
 

@@ -104,6 +104,20 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 
+- Keep a shrink-wrapped function's frame setup in the function whose early-exit check runs ahead of it: on AArch64
+  the code before an unnamed, uncalled exception record or prologue seeds the function, and on x86 a jcc into a
+  prologue-only candidate stays in the function unless that candidate sits aligned behind padding. Reproduced on the
+  bundled #385 fixtures. *On python.org's 3.13.7 `python313.dll` (not bundled), PDB as truth, against `ddffed4`:*
+  ARM64 without the PDB gains 24 entries, splits inside functions fall from 55 to 23, and `__gsfailure` joins
+  `__security_check_cookie` (pinned in a test); x86 loses nothing. (#384)
+
+- Stop decoding a function at a switch table it reads. MSVC puts the table right after the last block, and when that
+  block ends in a call that does not return, decoding ran on into the table and the next function; a function that
+  reached a table before its dispatch is analyzed again with the table known. A two-level switch's byte table is
+  booked as data, so the gap scan no longer starts functions in it. *Same DLL, x86:* 2 functions recovered, none
+  lost, starts inside functions 116 to 43. The official sqlite 3.54 DLL drops 44 (x86) and 1 (x64) false starts that
+  sat inside switch tables. (#384)
+
 - **(intel)** Bound Go 1.22+ type-switch jump tables by the `and` mask on their index (capped at 0xFF, and tightened
   by any `cmp` on the index behind it). Writes to an unrelated register no longer drop the index tie, so since the
   backtrack window is address-ordered the tie can now reach a `cmp` in another block. *Measured on the issue's
@@ -120,6 +134,9 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
+- Function boundaries move on AArch64 images with shrink-wrapped functions, on x86 code that jumps over an early
+  `ret` into a prologue, on functions with a switch table behind a call that does not return (any architecture),
+  and on x86/x64 two-level switches. (#384)
 
 ## [v4.9.0] - 2026-09-28
 
