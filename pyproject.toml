@@ -48,7 +48,7 @@ dependencies = [
     "capstone<6",
     # every label smda writes comes from demangle, so its output changes only through a
     # reviewed bump of this pin
-    "demangle==0.5.0",
+    "demangle==0.5.1",
     "dncil",
     "dnfile",
     "lief>=0.16.0",
