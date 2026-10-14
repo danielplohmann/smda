@@ -84,7 +84,7 @@ MOCK_ELF = _MockElfBinary(
 
 
 class TestElfProviderClassification(unittest.TestCase):
-    def test_itanium_demangler_uses_bundled_pycxxfilt(self):
+    def test_itanium_demangler_spells_names_like_llvm_cxxfilt(self):
         self.assertEqual(demangle_itanium_symbol("_Z3foov"), "foo()")
         self.assertEqual(demangle_itanium_symbol("__Z3uidv"), "uid()")
         self.assertEqual(demangle_itanium_symbol("_ZTV1A"), "vtable for A")

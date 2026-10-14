@@ -17,11 +17,9 @@ from smda.binja.BinjaInterface import BinjaInterface
 class _FakeBlock:
     def __init__(self, start, lengths, successors=()):
         self.start = start
-        self._lengths = lengths
+        self.end = start + sum(lengths)
+        self.arch = None
         self.outgoing_edges = [SimpleNamespace(target=SimpleNamespace(start=target)) for target in successors]
-
-    def __iter__(self):
-        return iter([([], length) for length in self._lengths])
 
 
 class _FakeFunction:
@@ -65,7 +63,7 @@ class _FakeBinaryView:
     def get_function_at(self, offset):
         return next((function for function in self.functions if function.start == offset), None)
 
-    def get_instruction_length(self, offset):
+    def get_instruction_length(self, offset, arch=None):
         return len(self.CODE.get(offset, b""))
 
     def read(self, offset, length):

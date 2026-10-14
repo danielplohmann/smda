@@ -1,5 +1,5 @@
-"""Rust symbol demangling, derived from Team bi0s' rust_demangler (MIT) with
-behaviour reimplemented from Ghidra's Rust demanglers. See NOTICE.
+"""Rust symbol demangling (legacy and v0) through the demangle library, spelled the way
+rustc-demangle's alternate form spells a name: without the disambiguating hash.
 """
 
 from .main import demangle
