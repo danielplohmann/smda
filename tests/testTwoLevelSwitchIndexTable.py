@@ -84,6 +84,13 @@ class IndexTableExtentTest(unittest.TestCase):
         analyzer = self._analyzer(layout)
         self.assertEqual(analyzer._indexTableExtent(BASE, 0x59, [BASE, BASE + 4]), (BASE + 8, 5))
 
+    def testARangeOverTheJumpTableIsNeverTheTableWhateverItsBytes(self):
+        # a bias folded into the address points it at the jump table, whose bytes here are all
+        # small enough to read as case numbers; the table is behind the jump table all the same
+        layout = [0, 1, 0, 0, 1, 0, 0, 0] + [0, 1, 1, 0] + [0xCC] * 4
+        analyzer = self._analyzer(layout)
+        self.assertEqual(analyzer._indexTableExtent(BASE, 8, [BASE, BASE + 4]), (BASE + 8, 4))
+
     def testABiasedTableEndingInCodeIsLeftAlone(self):
         layout = [0xFF] * 8 + [0, 1, 1, 0, 1, 0x55, 0x8B, 0xEC]
         analyzer = self._analyzer(layout)
@@ -136,7 +143,8 @@ class X64IndexTableTest(unittest.TestCase):
         return booked
 
     def testTheIndexTableIsFoundOffTheImageBase(self):
-        self.assertIn((self.INDEX, 0xDA), self._record(self.WINDOW))
+        # r10 holds the image base, which is not a table, so the index table is all that is booked
+        self.assertEqual(self._record(self.WINDOW), [(self.INDEX, 0xDA)])
 
     def testDecimalDisplacementWithoutHexPrefixIsResolved(self):
         window = list(self.WINDOW)

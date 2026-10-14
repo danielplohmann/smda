@@ -402,7 +402,8 @@ class JumpTableAnalyzer:
             displacement = match.group("displacement")
             address = int(displacement, 16 if displacement.startswith("0x") else 10)
             if match.group("base"):
-                image_base = self._ripRelativeBase(match.group("base"), preceding, state)
+                # the base register holds the image base, not a table, so nothing is booked at it
+                image_base = self._ripRelativeBase(match.group("base"), preceding, None)
                 if image_base is None:
                     return
                 address += image_base
@@ -425,12 +426,13 @@ class JumpTableAnalyzer:
         """
         if not entries:
             return None
-        if bound:
+        entry_size = entries[1] - entries[0] if len(entries) > 1 else 4
+        start = entries[-1] + entry_size
+        # a range over the jump table itself is a biased address, whatever its bytes are
+        if bound and (address >= start or address + bound <= entries[0]):
             case_numbers = self.disassembly.getBytes(address, bound)
             if case_numbers is not None and len(case_numbers) == bound and max(case_numbers) < len(entries):
                 return address, bound
-        entry_size = entries[1] - entries[0] if len(entries) > 1 else 4
-        start = entries[-1] + entry_size
         if not address < start <= address + 0xFF:
             return None
         following = self.disassembly.getBytes(start, 0x100)
@@ -496,6 +498,8 @@ class JumpTableAnalyzer:
     def _ripRelativeBase(self, base_register, preceding, state):
         """The address a rip-relative `lea` left in base_register, reading back from the table.
 
+        It is booked as an 8-byte table in `state`; pass None for a base that is not a table.
+
         Carrying the value past a write the walk does not model would resolve the base from
         before that write, which names a different table rather than none, so the walk ends at
         the first instruction that is not known to leave the register alone. The window is the
@@ -516,7 +520,8 @@ class JumpTableAnalyzer:
             ):
                 # getReferencedAddr() preserves the displacement sign
                 off_jumptable = instruction[0] + instruction[1] + self.disassembler.getReferencedAddr(operands)
-                state.addDataRef(instruction[0], off_jumptable, size=8)
+                if state is not None:
+                    state.addDataRef(instruction[0], off_jumptable, size=8)
                 return off_jumptable
             if self._writesRegister(mnemonic, operands, canonical_base) is not False:
                 return None

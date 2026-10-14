@@ -244,6 +244,24 @@ class RecursiveDisassembler:
         )
         return True
 
+    def _restoreRevertedGapFunctions(self, gap_functions):
+        """Analyze again the gap functions a discarded pass reverted and the pass after it left alone.
+
+        A pass that decodes through a switch table can run on into a gap function and revert it.
+        The pass repeated with the table known stops in front of the table, so a reverted gap
+        function it did not reach would otherwise be lost.
+        """
+        for gap_function in gap_functions:
+            if gap_function in self.disassembly.ins2fn:
+                continue
+            candidate = self.fc_manager.candidates.get(gap_function)
+            if candidate is not None:
+                candidate.analysis_aborted = False
+                candidate.abortion_reason = ""
+            self.analyzeFunction(gap_function, as_gap=True)
+            if gap_function not in self.disassembly.functions:
+                self.fc_manager.updateAnalysisAborted(gap_function, "Gap candidate did not fulfil function criteria.")
+
     def analyzeFunction(self, start_addr, as_gap=False, known_data_bytes=None):
         LOGGER.debug("analyzeFunction() starting analysis of candidate @0x%08x", start_addr)
         binary_info = self.disassembly.binary_info
@@ -271,6 +289,7 @@ class RecursiveDisassembler:
             )
             return state
         blocks_processed = 0
+        reverted_gap_functions = []
         while state.hasUnprocessedBlocks():
             blocks_processed += 1
             if blocks_processed % _TIMEOUT_POLL_BLOCKS == 0 and self._analysisTimeoutTripped():
@@ -307,6 +326,9 @@ class RecursiveDisassembler:
                     if i_address in data_bytes or i_address + i_size - 1 in data_bytes:
                         if previous_i is not None and previous_i[0] + previous_i[1] == i_address:
                             state.removeCodeRef(previous_i[0], i_address)
+                        state.setBlockEndingInstruction(True)
+                        state.endBlock()
+                        state.setSanelyEnding(True)
                         break
 
                     i_op_str = i_op_str.strip()
@@ -362,7 +384,9 @@ class RecursiveDisassembler:
                         # Only apply during the tailcall re-drain (as_gap=False),
                         # not during the gap pass itself — gap candidates are
                         # expected to have independent analysis there.
+                        gap_owner = ins2fn.get(i_address)
                         if not as_gap and self._revertGapFunction(i_address, start_addr):
+                            reverted_gap_functions.append(gap_owner)
                             add_instruction(i_address, i_size, i_mnemonic, i_op_str, i_bytes)
                         else:
                             state.setBlockEndingInstruction(True)
@@ -406,7 +430,9 @@ class RecursiveDisassembler:
         if known_data_bytes is None and not state.data_bytes.isdisjoint(state.processed_bytes):
             # blocks are taken last-in first-out, so a path that runs into a table can be decoded
             # before the dispatch that reads the table is; once more, with the tables known
-            return self.analyzeFunction(start_addr, as_gap, known_data_bytes=state.data_bytes)
+            state = self.analyzeFunction(start_addr, as_gap, known_data_bytes=state.data_bytes)
+            self._restoreRevertedGapFunctions(reverted_gap_functions)
+            return state
         state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis(as_gap)
         if analysis_result:
