@@ -7,13 +7,18 @@ instruction sets, so the manager also owns the instruction-set map.
 Instruction-set evidence, strongest first:
 
 * bit 0 of an address the image states - an ELF function symbol or entry point, a PE
-  ``.pdata`` record, a stored code pointer - is the Thumb bit (A2.3.2, interworking);
+  ``.pdata`` record, a stored code pointer - is the Thumb bit (A2.3.2, interworking), as
+  is ``N_ARM_THUMB_DEF`` on a Mach-O symbol;
 * ELF mapping symbols (``$a``/``$t``/``$d``, ARM ELF ABI 4.5.5) name the instruction set
-  of every byte range, and mark literal pools as data;
+  of every byte range, and mark literal pools as data; Mach-O ``LC_DATA_IN_CODE`` marks
+  the tables;
 * the instruction that reached an address: ``bl`` stays in the caller's instruction set,
   ``blx <label>`` switches it;
-* the machine the container names (a PE ``ARMNT`` image is Thumb-2 only);
-* the code around the address, read from which instruction set's returns it holds.
+* the machine the container names: a PE ``ARMNT`` image is Thumb-2 only, and a Mach-O
+  armv7 one has A32 code only where a symbol, a call or its stub sections say so;
+* the code an unwind entry opens with (a frame push, a halfword-aligned start) or covers;
+* the code around the address, read from which instruction set's returns it holds within
+  its executable section, then from the function symbols there and in the whole image.
 
 Candidate sources: symbols, the EHABI index table ``.ARM.exidx`` (ELF) or ``.pdata``
 (PE), direct calls in both instruction sets, stored code pointers, entry prologues and
@@ -28,8 +33,13 @@ import lief
 from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
+from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 
 from .definitions import (
+    A32_BX_MASK,
+    A32_BX_VALUE,
+    A32_COND_AL,
+    A32_COND_MASK,
     A32_INSTRUCTION_SIZE,
     A32_LDR_PC_IP,
     A32_LLD_FILL,
@@ -37,6 +47,7 @@ from .definitions import (
     IT_MNEMONICS,
     T16_BKPT_MASK,
     T16_BKPT_VALUE,
+    T16_BX_LR,
     T16_INSTRUCTION_SIZE,
     T16_LLD_FILL,
     T16_NOPS,
@@ -63,6 +74,17 @@ _PE_MACHINE_ARM = 0x1C0
 _PE_MACHINE_THUMB = 0x1C2
 _PE_MACHINE_ARMNT = 0x1C4
 _EXIDX_CANTUNWIND = 1
+#: Mach-O ARM subtypes that run Thumb-2 code unless a symbol states otherwise: v7, v7f, v7s, v7k, v6m, v7m, v7em
+_MACHO_THUMB_SUBTYPES = frozenset({9, 10, 11, 12, 14, 15, 16})
+_MACHO_N_STAB = 0xE0
+_MACHO_N_TYPE = 0x0E
+_MACHO_N_SECT = 0x0E
+_MACHO_N_ARM_THUMB_DEF = 0x0008
+#: code this many words long or more is classed by how many of them are unconditional A32
+_CODE_MIN_WORDS = 4
+_CODE_A32_SHARE = 0.75
+#: a third of every A32 stub is the literal it loads
+_STUB_A32_SHARE = 0.6
 _PLT_SECTION_NAMES = frozenset({".plt", ".iplt"})
 #: top bytes of every A32 BL (condition AL) and BLX <label> word
 _A32_CALL_TOPBYTE_FILTER = bytes(1 if b in (0xEB, 0xFA, 0xFB) else 0 for b in range(256))
@@ -83,6 +105,26 @@ _INIT_FINI_TAGS = frozenset({lief.ELF.DynamicEntry.TAG.INIT, lief.ELF.DynamicEnt
 _HOIST_REFUSED_BASES = frozenset(
     {"bl", "blx", "blxns", "push", "pop", "stm", "stmdb", "stmfd", "ldm", "svc", "udf", "bkpt"}
 )
+
+
+def _codeThumb(data, a32_share=_CODE_A32_SHARE):
+    """The instruction set of a short, word-aligned run of code, or None when it does not say."""
+    words = struct.unpack_from(f"<{len(data) // 4}I", data)
+    # a bx of any condition in A32, a bx lr in T32
+    arm = sum(1 for word in words if (word & A32_BX_MASK) == A32_BX_VALUE)
+    thumb = struct.unpack_from(f"<{len(data) // 2}H", data).count(T16_BX_LR)
+    if arm != thumb:
+        return thumb > arm
+    if len(words) < _CODE_MIN_WORDS:
+        return None
+    # nearly every A32 instruction is unconditional, while the upper halfwords of T32
+    # code only rarely begin with 0xE (b, or the prefix of a 32-bit instruction)
+    unconditional = sum(1 for word in words if word & A32_COND_MASK == A32_COND_AL) / len(words)
+    if unconditional >= a32_share:
+        return False
+    if unconditional <= 1 - a32_share:
+        return True
+    return None
 
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
@@ -113,6 +155,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         #: function starts a Go image's pclntab lists, and the span from its first to its last
         self._go_starts = frozenset()
         self._go_span = (0, 0)
+        #: the image's A32 code is only what a symbol, a call or a mapping symbol names (ARMNT, Mach-O armv7)
+        self._a32_needs_declaration = False
+        #: sorted function symbol addresses and, per address, whether its symbol states Thumb
+        self._symbol_starts = []
+        self._symbol_thumb_counts = [0]
+        #: starts and ends of the data the image declares inside code (Mach-O LC_DATA_IN_CODE)
+        self._data_in_code_starts = []
+        self._data_in_code_ends = []
 
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._resetModeState()
@@ -124,21 +174,42 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     def _initModeEvidence(self):
         binary_info = self.disassembly.binary_info
         lief_binary = binary_info.getLiefBinary()
+        symbols = []
         if isinstance(lief_binary, lief.ELF.Binary):
-            self._readElfModeEvidence(lief_binary)
+            symbols = self._readElfModeEvidence(lief_binary)
         elif isinstance(lief_binary, lief.PE.Binary):
             machine = int(lief_binary.header.machine)
             if machine == _PE_MACHINE_ARMNT:
                 self._container_thumb = True
+                self._a32_needs_declaration = True
             elif machine == _PE_MACHINE_ARM:
                 self._container_thumb = False
+        elif lief_binary is not None:
+            macho = get_active_macho_binary(lief_binary, bitness=32, architecture="arm")
+            if isinstance(macho, lief.MachO.Binary):
+                symbols = self._readMachoModeEvidence(macho)
         if binary_info.oep is not None:
             self.noteMode(binary_info.base_addr + binary_info.oep)
+        symbols.sort()
+        self._symbol_starts = [addr for addr, _ in symbols]
+        for _, thumb in symbols:
+            self._symbol_thumb_counts.append(self._symbol_thumb_counts[-1] + thumb)
+        arm, thumb = self._symbolVotes(0, float("inf"))
         if self._container_thumb is not None:
             self._default_thumb = self._container_thumb
+        elif arm != thumb:
+            # the instruction set the image's own function symbols state outweighs any byte pattern
+            self._default_thumb = thumb > arm
         else:
             arm, thumb = self._countMarkersInCode()
             self._default_thumb = thumb > arm
+
+    def _symbolVotes(self, start, end):
+        """(A32, T32) counts of the function symbols in [start, end)."""
+        low = bisect.bisect_left(self._symbol_starts, start)
+        high = bisect.bisect_left(self._symbol_starts, end)
+        thumb = self._symbol_thumb_counts[high] - self._symbol_thumb_counts[low]
+        return high - low - thumb, thumb
 
     def _countMarkersInCode(self):
         binary_info = self.disassembly.binary_info
@@ -152,7 +223,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         return arm, thumb
 
     def _readElfModeEvidence(self, lief_binary):
+        """Mapping symbols, the instruction set of every function symbol, A32 PLT sections;
+        returns ``(address, thumb)`` of the function symbols."""
         mapping = []
+        symbols = {}
         base_adjust = 0
         for symbol in self._elfSymbols(lief_binary):
             name = symbol.name
@@ -161,7 +235,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if isinstance(name, str) and name.startswith(("$a", "$t", "$d")) and (len(name) == 2 or name[2] == "."):
                 mapping.append((value + base_adjust, name[1]))
             elif symbol.type == lief.ELF.Symbol.TYPE.FUNC and value and symbol.shndx != 0:
-                self.noteMode(value, authoritative=True)
+                symbols[self.noteMode(value, authoritative=True)] = bool(value & 1)
                 self._strong_starts.add(value & ~1)
                 self._declared_starts.add(value & ~1)
         entry = lief_binary.header.entrypoint
@@ -179,6 +253,57 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         mapping.sort()
         self._mapping_starts = [addr for addr, _ in mapping]
         self._mapping_kinds = [kind for _, kind in mapping]
+        return list(symbols.items())
+
+    def _readMachoModeEvidence(self, macho):
+        """A Mach-O armv7 image is Thumb-2 but for what its symbols state as A32 (no
+        ``N_ARM_THUMB_DEF``) and the stubs reached by ``blx``; ``LC_DATA_IN_CODE`` names the
+        jump tables and literals inside its code. Returns ``(address, thumb)`` of the symbols
+        defined in code."""
+        header = macho.header
+        if header.cpu_type != lief.MachO.Header.CPU_TYPE.ARM or header.cpu_subtype not in _MACHO_THUMB_SUBTYPES:
+            return []
+        self._a32_needs_declaration = True
+        binary_info = self.disassembly.binary_info
+        adjustment = get_macho_address_adjustment(
+            macho, base_addr=binary_info.base_addr, bitness=32, architecture="arm"
+        )
+        code_sections = []
+        for section in macho.sections:
+            if section.size and section.has(lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS):
+                start = section.virtual_address
+                code_sections.append((start, start + section.size))
+                if "stub" in section.name:
+                    # the linker's stubs and lazy-binding helper are A32 in a Thumb image
+                    thumb = _codeThumb(bytes(section.content), _STUB_A32_SHARE)
+                    if thumb is not None:
+                        self._section_modes.append((start + adjustment, start + adjustment + section.size, thumb))
+        symbols = {}
+        for symbol in macho.symbols:
+            raw_type = symbol.raw_type
+            value = symbol.value
+            if raw_type & _MACHO_N_STAB or raw_type & _MACHO_N_TYPE != _MACHO_N_SECT or not value:
+                continue
+            if any(start <= value < end for start, end in code_sections):
+                thumb = bool(symbol.description & _MACHO_N_ARM_THUMB_DEF)
+                symbols[self.noteMode(value + adjustment, thumb, authoritative=True)] = thumb
+        if macho.has_data_in_code:
+            segments = [
+                (segment.file_offset, segment.file_offset + segment.file_size, segment.virtual_address)
+                for segment in macho.segments
+                if segment.file_size
+            ]
+            data_ranges = []
+            for entry in macho.data_in_code.entries:
+                for start, end, address in segments:
+                    if start <= entry.offset < end:
+                        data_start = address + entry.offset - start + adjustment
+                        data_ranges.append((data_start, data_start + entry.length))
+                        break
+            data_ranges.sort()
+            self._data_in_code_starts = [start for start, _ in data_ranges]
+            self._data_in_code_ends = [end for _, end in data_ranges]
+        return list(symbols.items())
 
     @staticmethod
     def _holdsA32PltEntries(section):
@@ -236,6 +361,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         return addr
 
     def _mappingKind(self, addr):
+        if self._data_in_code_starts:
+            index = bisect.bisect_right(self._data_in_code_starts, addr) - 1
+            if index >= 0 and addr < self._data_in_code_ends[index]:
+                return "d"
+        return self._mappingSymbolKind(addr)
+
+    def _mappingSymbolKind(self, addr):
         if not self._mapping_starts:
             return None
         index = bisect.bisect_right(self._mapping_starts, addr) - 1
@@ -254,25 +386,46 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         mode = self._modes.get(addr)
         if mode is not None:
             return mode
-        kind = self._mappingKind(addr)
+        kind = self._mappingSymbolKind(addr)
         if kind in ("t", "a"):
             return kind == "t"
         for start, end, thumb in self._section_modes:
             if start <= addr < end:
                 return thumb
-        return None
+        return self._container_thumb
 
     def _regionThumb(self, addr):
+        """The instruction set the code around `addr` reads as: the markers in the
+        executable section around it, then the function symbols there, then the image's."""
         if self._container_thumb is not None:
             return self._container_thumb
         binary_info = self.disassembly.binary_info
-        block = (addr - binary_info.base_addr) // _MODE_BLOCK_SIZE
+        base = binary_info.base_addr
+        block = (addr - base) // _MODE_BLOCK_SIZE
         mode = self._block_modes.get(block)
+        if mode is not None:
+            return mode
+        block_start = base + block * _MODE_BLOCK_SIZE
+        low = block_start - _MODE_BLOCK_SIZE
+        high = block_start + 2 * _MODE_BLOCK_SIZE
+        section = self._executableRangeAt(addr)
+        if section is not None:
+            # literal pools and tables in a neighbouring data section vote as noise
+            low, high = max(low, section[0]), min(high, section[1])
+        # a block wholly inside one section, or in an image without any, is one region;
+        # any other is one per section
+        if section is None:
+            within = not self._executableRanges()
+        else:
+            within = section[0] <= block_start and block_start + _MODE_BLOCK_SIZE <= section[1]
+        key = block if within else (block, section)
+        mode = self._block_modes.get(key)
         if mode is None:
-            start = block * _MODE_BLOCK_SIZE
-            arm, thumb = countModeMarkers(binary_info.binary, start - _MODE_BLOCK_SIZE, start + 2 * _MODE_BLOCK_SIZE)
+            arm, thumb = countModeMarkers(binary_info.binary, low - base, high - base)
+            if arm == thumb:
+                arm, thumb = self._symbolVotes(low, high)
             mode = self._default_thumb if arm == thumb else thumb > arm
-            self._block_modes[block] = mode
+            self._block_modes[key] = mode
         return mode
 
     def getStrongFunctionStarts(self):
@@ -287,6 +440,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
     # --- candidate registration ------------------------------------------------
     def ensureCandidate(self, addr):
+        if addr & 2 and addr not in self._modes:
+            # an A32 instruction is word aligned
+            self.noteMode(addr, True)
         is_new = super().ensureCandidate(addr)
         if is_new:
             self.candidates[addr].is_thumb = self.isThumb(addr)
@@ -325,8 +481,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # Thumb code's ``adr`` names its tables and literals, which sit at even addresses;
             # only an address something else states to be A32 is an A32 entry
             return False
-        if not thumb and (target & 3 or (self._declaredThumb(target) if pc_relative else self.isThumb(target))):
-            # an even address in Thumb code is not an entry: interworking needs bit 0 set
+        if not thumb and self._refusesA32Pointer(target, pc_relative):
             return False
         if target in self.candidates or not self._passesCodeFilter(target):
             return False
@@ -340,6 +495,17 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self.addCandidate(target, reference_source=source)
         self._candidate_offsets.add(target)
         return True
+
+    def _refusesA32Pointer(self, target, declared_only):
+        """Whether an even code address is no A32 entry: interworking needs bit 0 set for
+        Thumb code, and an image without A32 code but for what it declares has none there.
+        With `declared_only`, the region's instruction set is no evidence against it."""
+        if target & 3:
+            return True
+        declared = self._declaredThumb(target)
+        if declared is not None:
+            return declared
+        return self._a32_needs_declaration or (not declared_only and self._regionThumb(target))
 
     def _followsThumbVeneerPrefix(self, addr):
         # ``bx pc`` continues at the next word: right before it, or before its padding
@@ -439,19 +605,26 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if section.has_characteristic(execute) and section.virtual_size:
                     start = binary_info.base_addr + section.virtual_address
                     ranges.append((start, start + section.virtual_size))
-        if not ranges and self._code_areas:
-            ranges = [(start, end) for start, end in self._code_areas]
+        # the code areas of the image itself: this runs before the base class takes them over
+        code_areas = binary_info.code_areas
+        if not ranges and code_areas:
+            ranges = [(start, end) for start, end in code_areas]
         self._exec_ranges = sorted(ranges)
         return self._exec_ranges
 
     def isExecutable(self, addr):
         """Whether ``addr`` lies in an executable section: ``.rodata`` often shares the
         executable segment, and a pointer to a string there is no code pointer."""
-        ranges = self._executableRanges()
-        if not ranges:
+        if not self._executableRanges():
             return self.disassembly.binary_info.isInCodeAreas(addr)
+        return self._executableRangeAt(addr) is not None
+
+    def _executableRangeAt(self, addr):
+        ranges = self._executableRanges()
         index = bisect.bisect_right(ranges, (addr, float("inf"))) - 1
-        return index >= 0 and addr < ranges[index][1]
+        if index >= 0 and addr < ranges[index][1]:
+            return ranges[index]
+        return None
 
     def _scanRanges(self):
         """``(start, end, thumb)`` spans of code to scan, split where the instruction set changes."""
@@ -533,12 +706,42 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # folds runs of adjacent functions with identical unwind data (all the
         # EXIDX_CANTUNWIND ones, typically) into a single entry, so brotli's 220 functions
         # carry three. The starts are entries; the extents are not function bounds.
+        ordered = sorted(set(starts))
+        for start, following in zip(ordered, ordered[1:] + [None], strict=True):
+            if self._declaredThumb(start) is None:
+                thumb = self._entryThumb(start, following)
+                if thumb is not None:
+                    self.noteMode(start, thumb)
         for start in starts:
             if not self.disassembly.isAddrWithinMemoryImage(start) or not self._passesCodeFilter(start):
                 continue
             self._strong_starts.add(start)
             self._declared_starts.add(start)
             self.addExceptionCandidate(start)
+
+    def _entryThumb(self, start, following):
+        """The instruction set of an unwind entry whose start carries no Thumb bit, or None.
+
+        A halfword-aligned start is Thumb. Otherwise the frame push that opens most entries
+        names it, and failing that the code up to the next entry: A32 runtime helpers sit
+        amid Thumb code and back, so the region around it is the last resort.
+        """
+        if start & 2:
+            return True
+        data = self.disassembly.getBytes(start, 8)
+        if not data or len(data) != 8:
+            return None
+        hw1, hw2, _hw3, hw4 = struct.unpack("<HHHH", data)
+        # the push word of an A32 entry is followed by more unconditional A32
+        if is_a32_prologue(hw1 | hw2 << 16) and hw4 >> 12 == 0xE:
+            return False
+        if is_t32_prologue(hw1, hw2):
+            return True
+        section = self._executableRangeAt(start)
+        if section is None:
+            return None
+        end = min(section[1], start + _MODE_BLOCK_SIZE, following or section[1])
+        return _codeThumb(bytes(self.disassembly.getBytes(start, max(0, end - start)) or b""))
 
     def _locatePdataCandidates(self, lief_binary):
         """Function starts from a PE ARMNT or Windows CE exception directory.
@@ -727,9 +930,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if not exec_low <= target < exec_high or not in_exec(target) or not self._passesCodeFilter(target):
                     continue
                 thumb = bool(value & 1)
-                if not thumb and (
-                    target & 3 or (self._declaredThumb(target) if relocated is not None else self.isThumb(target))
-                ):
+                if not thumb and self._refusesA32Pointer(target, relocated is not None):
                     continue
                 if self._mappingKind(target) == "d":
                     continue
@@ -1047,11 +1248,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.gap_pointer = self.getNextGap()
                 continue
             if exec_ranges and not in_exec(addr):
-                # jump to the next executable range instead of stepping through data
-                index = bisect.bisect_right(exec_starts, addr)
-                if index >= len(exec_starts):
-                    return None
-                self.gap_pointer = exec_starts[index]
+                following = bisect.bisect_right(exec_starts, addr)
+                self.gap_pointer = exec_starts[following] if following < len(exec_starts) else base + size
                 continue
             if addr in self.disassembly.data_map or self.isMappedData(addr):
                 self.gap_pointer += step

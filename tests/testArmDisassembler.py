@@ -457,6 +457,120 @@ class ArmElfReferenceTest(unittest.TestCase):
         )
 
 
+def _loadXored(name):
+    data = (Path(__file__).resolve().parent / name).read_bytes()
+    return bytes(byte ^ (index % 256) for index, byte in enumerate(data))
+
+
+def _functionModes(report):
+    return {
+        function.offset: (function.architecture_metadata["thumb"], function.num_instructions)
+        for function in report.getFunctions()
+    }
+
+
+class ArmInstructionSetEvidenceTest(unittest.TestCase):
+    """Where an image states the instruction set of its code, and where the bytes around a
+    start would mislead. Fixtures are ``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -N
+    --strip-all -Ttext=0x10000`` with ``.comment`` removed, unless stated otherwise."""
+
+    def test_unwind_entries_in_a32_code_are_thumb_by_their_push_or_alignment(self):
+        """``arm_exidx_thumb_in_a32_xored``; only ``.ARM.exidx`` names the Thumb functions:
+
+        _start            (A32) bl leaf0; bl leaf1; bl leaf2; bl leaf3; b .
+        leaf0..leaf3      (A32) add r0, r0, #N; bx lr
+        word_aligned      (T32) push {r4, r5, r7, lr}; movs r4, r0; adds r5, r1, #2
+                                muls r4, r5, r4; pop {r4, r5, r7, pc}
+        halfword_aligned  (T32) adds r0, r0, r1; lsls r0, r0, #2; b word_aligned
+        """
+        report = Disassembler(_config()).disassembleUnmappedBuffer(_loadXored("arm_exidx_thumb_in_a32_xored"))
+        self.assertEqual(
+            _functionModes(report),
+            {
+                0x10000: (False, 5),
+                0x10014: (False, 2),
+                0x1001C: (False, 2),
+                0x10024: (False, 2),
+                0x1002C: (False, 2),
+                0x10034: (True, 5),
+                0x1003E: (True, 3),
+            },
+        )
+
+    def test_unwind_entries_in_thumb_code_are_a32_by_their_code(self):
+        """``arm_exidx_a32_in_thumb_xored``; A32 helpers without a push, as crtbegin has:
+
+        _start            (T32) push {r4, lr}; bl t0; bl t1; bl t2; pop {r4, pc}
+        t0..t2            (T32) adds r0, #N; bx lr
+        call_if_set       (A32) cmp r0, #0; bxeq lr; bx r0
+        register_handler  (A32) mov r1, r0; ldr r0, 1f; ldr r2, 2f; add r0, pc, r0
+                                add r2, pc, r2; b call_if_set; 1: .word 0x40; 2: .word 0x44
+        """
+        report = Disassembler(_config()).disassembleUnmappedBuffer(_loadXored("arm_exidx_a32_in_thumb_xored"))
+        self.assertEqual(
+            _functionModes(report),
+            {
+                0x10000: (True, 5),
+                0x10010: (True, 2),
+                0x10014: (True, 2),
+                0x10018: (True, 2),
+                0x1001C: (False, 3),
+                0x10028: (False, 6),
+            },
+        )
+
+    def test_function_symbols_decide_the_instruction_set_of_unlabelled_code(self):
+        """``arm_dynsym_thumb_default_xored``, linked ``-shared``: no mode markers in
+        ``.text`` and A32 ``bx lr`` words in ``.rodata`` next to it; ``api`` is exported.
+
+            opcodes  .rodata: .word 0xe12fff1e, 0xe12fff1e, 0xe1a0f00e
+            api      (T32) push {r4, lr}; movs r4, r0; adds r0, r4, #5; pop {r4, pc}
+            hidden   (T32) push {r4, r5, r7, lr}; movs r4, r0; adds r5, r1, #2; muls r4, r5, r4
+                           subs r0, r4, r5; pop {r4, r5, r7, pc}
+        """
+        report = Disassembler(_config()).disassembleUnmappedBuffer(_loadXored("arm_dynsym_thumb_default_xored"))
+        self.assertEqual(_functionModes(report), {0x120: (True, 4), 0x128: (True, 6)})
+
+    def test_an_adr_to_a_switch_table_is_no_a32_function_in_a_thumb_only_pe(self):
+        """``armnt_adr_switch_table_xored``, ``llvm-mc -triple=thumbv7-windows-msvc`` +
+        ``lld-link /machine:arm /dll /noentry /export:entry``; the byte table reads as an
+        A32 ``b``:
+
+            entry     push {r4, lr}; bl dispatch; pop {r4, pc}
+            c0..c3    movs r0, #N (adds r0, #1); bx lr - c2: b 9f
+            dispatch  cmp r0, #3; bhi 9f; adr r3, 1f; ldrsb r3, [r3, r0]; add pc, r3
+                      1: .byte c0 - 1b, c1 - 1b, c2 - 1b, c3 - 1b; 9: movs r0, #0; bx lr
+        """
+        report = Disassembler(_config()).disassembleUnmappedBuffer(_loadXored("armnt_adr_switch_table_xored"))
+        modes = _functionModes(report)
+        # the resolved table brings c0..c3 into dispatch
+        self.assertEqual(modes[0x10001018], (True, 15))
+        self.assertEqual([hex(start) for start, (thumb, _) in modes.items() if not thumb], [])
+
+    # A minimal armv7 MH_BUNDLE wrapped around the __text of ``llvm-mc
+    # -triple=thumbv7-apple-ios`` of the PE source above with ``.data_region jt8`` around the
+    # table, plus ``_arm_helper`` (A32: cmp r0, #0; bxeq lr; bx r0); LC_SYMTAB has
+    # N_ARM_THUMB_DEF on _entry and _dispatch only, LC_DATA_IN_CODE names the table.
+    MACHO_ARMV7 = bytes.fromhex(
+        "cefaedfe0c000000090000000800000003000000a400000000000000010000007c0000005f5f544558540000"
+        "000000000000000000400000001000000000000042010000050000000500000001000000000000005f5f7465"
+        "7874000000000000000000005f5f5445585400000000000000000000c040000038000000c000000002000000"
+        "000000000000000000040080000000000000000002000000180000000001000003000000240100001e000000"
+        "2900000010000000f80000000800000010b500f009f810bd0a20013070470d2070470b20704707e0032805d8"
+        "01a31b569f440000e4eef2ea00207047000050e31eff2f0110ff2fe1e400000004000200010000000f010800"
+        "d84000000b0000000f010000ec400000170000000f010800c0400000005f6469737061746368005f61726d5f"
+        "68656c706572005f656e74727900"
+    )
+
+    def test_a_thumb_only_macho_has_a32_code_only_where_a_symbol_states_it(self):
+        report = Disassembler(_config()).disassembleUnmappedBuffer(self.MACHO_ARMV7)
+        modes = _functionModes(report)
+        self.assertNotIn(0x40E4, modes)
+        self.assertEqual(modes[0x40D8], (True, 15))
+        self.assertEqual(modes[0x40EC], (False, 3))
+        self.assertEqual([hex(start) for start, (thumb, _) in modes.items() if not thumb], ["0x40ec"])
+
+
 class ArmRoutingTest(unittest.TestCase):
     def test_a_headerless_arm_buffer_is_recognised(self):
         body = IDIOMS * 64
