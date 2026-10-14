@@ -2270,6 +2270,7 @@ class IntelInstructionEscaper:
         if addr_match:
             offset = int(addr_match.group("dword_offset"), 16)
             disp_size = 4
+            was_detailed = getattr(ins, "detailed", None) is not None
             try:
                 if ins.getDetailed().disp_size == 8:
                     disp_size = 8
@@ -2277,6 +2278,10 @@ class IntelInstructionEscaper:
                 # ValueError: getDetailed() raises it when the stored bytes do not decode;
                 # fall back to the default 32-bit displacement rather than crash here.
                 pass
+            if not was_detailed:
+                # pic hashing reaches here for every pointer operand of the report; left cached,
+                # capstone's full detail, kilobytes of ctypes objects, stays on each of them
+                ins.detailed = None
             pack_format = "<Q" if disp_size == 8 else "<I"
             if "rip -" in ins.operands:
                 # two's complement must use the displacement's own width; hardcoding

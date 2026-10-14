@@ -73,6 +73,14 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(core)** Keep the per-instruction state of large images compact. A lone code reference, the fall-through nearly
+  every instruction has, is stored bare instead of in a one-element set (`AddressRefs`); `code_map` reads `ins2fn`
+  instead of duplicating its per-byte dict; mnemonics are interned, `(mnemonic, size)` tuples shared; pointer
+  escaping drops the capstone detail it decodes; the Delphi VMT scan compares slots in C. *Measured on `af37541` and
+  the ARM branch `0c306eb`, samples not bundled:* RSS after analysis libjvm.so 7,289 to 4,015 MB, ARM
+  libppsspp_jni.so 7,080 to 4,385 MB, ARM libvlc.so 13,276 to 8,049 MB, CPU 9-16% lower, reports identical. *Not
+  reproducible on the bundled fixtures, which are too small; their reports are identical too.* Cost: `code_map` is
+  read-only and maps a byte to its function, not its instruction, which no reader used.
 
 ### Deprecated
 
