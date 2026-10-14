@@ -208,6 +208,17 @@ def resolveImportStub(disassembler, start, thumb):
     ``end`` is the address after the branch, ``slot`` the address of the pointer the stub
     loads and ``value`` the pointer read from it (None when outside the image).
     """
+    cache = disassembler.import_stub_cache
+    if cache is None or cache[0] is not disassembler.disassembly:
+        # every call and branch target is looked up, most of them many times over
+        cache = disassembler.import_stub_cache = (disassembler.disassembly, {})
+    key = (start, thumb)
+    if key not in cache[1]:
+        cache[1][key] = _decodeImportStub(disassembler, start, thumb)
+    return cache[1][key]
+
+
+def _decodeImportStub(disassembler, start, thumb):
     d = disassembler
     capstone = d.capstone
     address = start
@@ -220,8 +231,19 @@ def resolveImportStub(disassembler, start, thumb):
     if not data:
         return None
     engine = capstone.thumb if thumb else capstone.arm
+    data = bytes(data)
+    # most lookups land on an ordinary function: reject it before the detailed decode,
+    # which only a run of stub instructions ending in a transfer can pass
+    for _address, _size, mnemonic, op_str in engine.disasm_lite(data, address, MAX_STUB_INSTRUCTIONS):
+        base, condition, _ = split_mnemonic(mnemonic)
+        if condition not in (None, "al") or base not in _STUB_BASES:
+            return None
+        if base == "bx" or (base in ("ldr", "mov") and op_str.startswith("pc")):
+            break
+    else:
+        return None
     tracker = RegisterTracker(d, thumb)
-    for ins in engine.disasm(bytes(data), address, MAX_STUB_INSTRUCTIONS):
+    for ins in engine.disasm(data, address, MAX_STUB_INSTRUCTIONS):
         base, condition, _ = split_mnemonic(ins.mnemonic)
         if condition not in (None, "al") or base not in _STUB_BASES:
             return None
@@ -450,7 +472,7 @@ class ArmJumpTableAnalyzer:
             return self._absoluteTable(
                 state, ins.address, table, self._bound(prefix, index), _thumbOf(self.disassembler)
             )
-        if writer_base == "add" and len(detailed.operands) == 3:
+        if writer_base == "add" and len(detailed.operands) in (2, 3):
             prefix = context[: context.index(writer)]
             return self._relativeTable(
                 state,
@@ -477,11 +499,14 @@ class ArmJumpTableAnalyzer:
 
     def _relativeTable(self, state, ins, context, tracker, thumb, jump_address=None):
         jump_address = ins.address if jump_address is None else jump_address
-        operands = ins.operands
-        if len(operands) != 3 or operands[1].type != ARM_OP_REG or operands[2].type != ARM_OP_REG:
+        # the two-operand Thumb ``add rd, rm`` adds into its destination
+        operands = ins.operands[-2:] if len(ins.operands) == 3 else ins.operands
+        if len(operands) != 2 or any(operand.type != ARM_OP_REG for operand in operands):
             return []
-        first = norm_reg(ins.reg_name(operands[1].reg))
-        second = norm_reg(ins.reg_name(operands[2].reg))
+        first = norm_reg(ins.reg_name(operands[0].reg))
+        second = norm_reg(ins.reg_name(operands[1].reg))
+        # Thumb offsets carry the interworking bit for the ``bx`` that takes them
+        mask = 0xFFFFFFFE if thumb else 0xFFFFFFFF
         for anchor_reg, loaded_reg in ((first, second), (second, first)):
             anchor = tracker.get(anchor_reg)
             if anchor is None:
@@ -506,7 +531,7 @@ class ArmJumpTableAnalyzer:
                 table,
                 4,
                 self._bound(prefix, index),
-                lambda entry, anchor=anchor: (anchor + entry) & 0xFFFFFFFF,
+                lambda entry, anchor=anchor: (anchor + entry) & mask,
                 signed=True,
             )
         return []
@@ -580,7 +605,7 @@ class ArmJumpTableAnalyzer:
             if inline and table <= target < entry_addr + entry_size:
                 break
             targets.append(target)
-            state.addDataRef(address, entry_addr, size=entry_size)
+            state.addDataRef(address, entry_addr, size=entry_size, is_table=True)
             if inline and target > table and (lowest_target is None or target < lowest_target):
                 lowest_target = target
         return targets

@@ -25,6 +25,7 @@ import logging
 import struct
 
 import lief
+from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
 
@@ -33,6 +34,7 @@ from .definitions import (
     A32_LDR_PC_IP,
     A32_LLD_FILL,
     A32_NOPS,
+    IT_MNEMONICS,
     T16_BKPT_MASK,
     T16_BKPT_VALUE,
     T16_INSTRUCTION_SIZE,
@@ -43,8 +45,11 @@ from .definitions import (
     a32_branch_target,
     countModeMarkers,
     is_a32_prologue,
+    is_a32_return,
     is_t32_prefix,
     is_t32_prologue,
+    is_t32_return,
+    split_mnemonic,
     t32_call_target,
 )
 from .FunctionCandidate import FunctionCandidate
@@ -67,6 +72,17 @@ _T32_CALL_HIGHBYTE_FILTER = bytes(1 if 0xF0 <= b <= 0xF7 else 0 for b in range(2
 _A32_PROLOGUE_TOPBYTE_FILTER = bytes(1 if b in (0xE9, 0xE5, 0xE1) else 0 for b in range(256))
 #: high bytes of every recognised T32 prologue's first halfword
 _T32_PROLOGUE_HIGHBYTE_FILTER = bytes(1 if b in (0xB5, 0xE9, 0xF8) else 0 for b in range(256))
+#: how far ahead of a frame push the code a compiler schedules before it may begin
+HOISTED_ENTRY_WINDOW = 0x20
+#: an early exit ahead of the push jumps forward into the body or to the epilogue, never further
+_HOISTED_BRANCH_REACH = 0x4000
+#: how many instructions behind the push may still act on the flags a compare ahead of it set
+_FLAGS_READ_WINDOW = 6
+_FLAG_SETTING_BASES = frozenset({"cmp", "cmn", "tst", "teq", "cbz", "cbnz"})
+_INIT_FINI_TAGS = frozenset({lief.ELF.DynamicEntry.TAG.INIT, lief.ELF.DynamicEntry.TAG.FINI})
+_HOIST_REFUSED_BASES = frozenset(
+    {"bl", "blx", "blxns", "push", "pop", "stm", "stmdb", "stmfd", "ldm", "svc", "udf", "bkpt"}
+)
 
 
 class FunctionCandidateManager(_CommonFunctionCandidateManager):
@@ -77,6 +93,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         super().__init__(config)
         self._resetModeState()
 
+    _hoist_capstone = None
+    _relocated_slots = None
+
     def _resetModeState(self):
         self._modes = {}
         self._mapping_starts = []
@@ -86,6 +105,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         #: (start, end, thumb) of sections whose instruction set is known from their contents
         self._section_modes = []
         self._strong_starts = set()
+        self._relocated_slots = None
         self._exec_ranges = None
         self._container_thumb = None
 
@@ -140,6 +160,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         entry = lief_binary.header.entrypoint
         if entry:
             self.noteMode(entry, authoritative=True)
+        # _init and _fini come from glibc's A32 crti in a Thumb build too; the dynamic
+        # section states them like every other code address, with bit 0 for Thumb
+        for dynamic_entry in lief_binary.dynamic_entries:
+            if dynamic_entry.tag in _INIT_FINI_TAGS and dynamic_entry.value:
+                self.noteMode(dynamic_entry.value, authoritative=True)
         for section in lief_binary.sections:
             if section.name in _PLT_SECTION_NAMES and section.size and self._holdsA32PltEntries(section):
                 start = section.virtual_address
@@ -369,6 +394,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             ranges = [(start, end) for start, end in self._code_areas]
         self._exec_ranges = sorted(ranges)
         return self._exec_ranges
+
+    def isExecutable(self, addr):
+        """Whether ``addr`` lies in an executable section: ``.rodata`` often shares the
+        executable segment, and a pointer to a string there is no code pointer."""
+        ranges = self._executableRanges()
+        if not ranges:
+            return self.disassembly.binary_info.isInCodeAreas(addr)
+        index = bisect.bisect_right(ranges, (addr, float("inf"))) - 1
+        return index >= 0 and addr < ranges[index][1]
 
     def _scanRanges(self):
         """``(start, end, thumb)`` spans of code to scan, split where the instruction set changes."""
@@ -601,6 +635,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return index >= 0 and addr < exec_ranges[index][1]
 
         relocated = self._relocatedSlots(lief_binary)
+        self._relocated_slots = relocated
         image_start = binary_info.base_addr
         image_end = image_start + binary_info.binary_size
         for section_start, section_end in data_ranges:
@@ -630,6 +665,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.addReferenceCandidate(target, scan_start + offset)
                 self.setInitialCandidate(target)
 
+    def holdsAddress(self, slot):
+        """Whether the word at `slot` can hold an address rather than an offset.
+
+        In an image that is loaded anywhere every stored address carries a relocation, so a
+        literal pool word without one is an offset: PIC code adds it to pc (``ldr r0, [pc,
+        #n]`` then ``add r0, pc, r0``), and read as an address it lands on arbitrary code.
+        """
+        return self._relocated_slots is None or slot in self._relocated_slots
+
     def _relocatedSlots(self, lief_binary):
         """Addresses of the words the loader relocates, or None for an image with no relocations.
 
@@ -653,7 +697,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 for entry in block.entries:
                     if entry.type == highlow:
                         slots.add(base + block.virtual_address + entry.position)
-        return slots or None
+        return slots
 
     def locatePrologueCandidates(self):
         for start, end, thumb in self._scanRanges():
@@ -704,9 +748,177 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return
         if addr in self._modes and self._modes[addr] != thumb:
             return
+        if addr not in self._strong_starts and not self._splitsA32Prologue(addr, thumb):
+            entry = self.hoistedEntryBefore(addr, thumb)
+            if entry is not None:
+                # the frame push of a function entered a few instructions earlier
+                if entry not in self._strong_starts and entry not in self.candidates:
+                    self.noteMode(entry, thumb)
+                    if self.addPrologueCandidate(entry):
+                        self.setInitialCandidate(entry)
+                return
         self.noteMode(addr, thumb)
         if self.addPrologueCandidate(addr) or addr in self.candidates:
             self.setInitialCandidate(addr)
+
+    def _splitsA32Prologue(self, addr, thumb):
+        """Whether a T32 push at `addr` is the upper half of an A32 ``push {.., lr}`` word.
+
+        The lower half of that word reads as a T32 literal load, which would pass for code
+        scheduled ahead of the push and move the A32 function into the wrong instruction set.
+        """
+        if not thumb or addr & 3 != 2:
+            return False
+        data = self.disassembly.getBytes(addr - 2, 4)
+        return bool(data) and len(data) == 4 and is_a32_prologue(int.from_bytes(data, "little"))
+
+    def _endsFlowBefore(self, addr, thumb):
+        """Whether the instruction ending at `addr` is padding or does not fall through."""
+        if thumb:
+            data = self.disassembly.getBytes(addr - 4, 4)
+            if not data or len(data) != 4:
+                return True
+            hw0, hw1 = struct.unpack("<HH", data)
+            if hw1 == 0 or hw1 == T16_LLD_FILL or hw1 in T16_NOPS or (hw1 & 0xF800) == 0xE000:
+                return True
+            if is_t32_prefix(hw0) and not is_t32_prefix(hw1):
+                # a 32-bit instruction ends here: b.w, or a pop.w / ldr.w that loads pc
+                return ((hw0 & 0xF800) == 0xF000 and (hw1 & 0xD000) == 0x9000) or is_t32_return(hw0, hw1)
+            return is_t32_return(hw1)
+        data = self.disassembly.getBytes(addr - 4, 4)
+        if not data or len(data) != 4:
+            return True
+        word = struct.unpack("<I", data)[0]
+        return (
+            word in (0, A32_LLD_FILL)
+            or word in A32_NOPS
+            or is_a32_return(word)
+            or (word & 0xFF000000) == 0xEA000000
+            or (word & 0x0FFFFFF0) == 0x012FFF10
+            and (word & 0xF0000000) == 0xE0000000
+        )
+
+    def hoistedEntryBefore(self, addr, thumb):
+        """Where a function starts whose frame push at `addr` code ahead of it falls into, or None.
+
+        Compilers schedule work ahead of the push: GCC loads the stack-protector guard or a
+        global's GOT offset, or tests an argument and returns early, before saving registers.
+        The push is then not the entry, and a function reached from nothing but its prologue
+        would start too late. Walks back to the nearest instruction that does not fall
+        through (a return, an unconditional branch, padding) at most `HOISTED_ENTRY_WINDOW`
+        bytes away, and accepts the run from there to `addr` only when it decodes exactly up
+        to `addr`, transfers control nowhere but forward, and carries something only code
+        does: a literal load from a pool ahead of it, or a compare that a conditional branch
+        or return acts on. Literal pools sit between functions too, so a run must not read as
+        data: in A32 a conditional instruction with no compare before it, in T32 a halfword
+        below 0x0800 (``lsls``, which is what an address in a pool decodes as).
+        """
+        step = T16_INSTRUCTION_SIZE if thumb else A32_INSTRUCTION_SIZE
+        base = self.disassembly.binary_info.base_addr
+        # the return may sit further back, behind the literal pool of the function before
+        lowest = max(base, addr - 2 * HOISTED_ENTRY_WINDOW)
+        start = addr - step
+        while start >= lowest:
+            if self._endsFlowBefore(start, thumb):
+                break
+            start -= step
+        else:
+            return None
+        # the literal pool of the function before usually sits between its return and
+        # this one's entry, so the run may begin anywhere behind that return
+        start = max(start, addr - HOISTED_ENTRY_WINDOW)
+        while start < addr:
+            if start in self._strong_starts:
+                return None
+            if self._isHoistedEntry(start, addr, thumb):
+                return start
+            start += step
+        return None
+
+    def _hoistDecoder(self, thumb):
+        if self._hoist_capstone is None:
+            self._hoist_capstone = {
+                False: Cs(CS_ARCH_ARM, CS_MODE_ARM),
+                True: Cs(CS_ARCH_ARM, CS_MODE_THUMB),
+            }
+        return self._hoist_capstone[thumb]
+
+    def _isHoistedEntry(self, start, addr, thumb):
+        data = self.disassembly.getBytes(start, addr - start)
+        if not data or len(data) != addr - start or self._mappingKind(start) == "d":
+            return False
+        run = list(self._hoistDecoder(thumb).disasm_lite(bytes(data), start))
+        if not run or sum(instruction[1] for instruction in run) != addr - start:
+            return False
+        verdict = self._isHoistedRun(run, start, addr, thumb, data)
+        if verdict is None:
+            # a compare whose flags only the code behind the push reads: the push leaves them
+            verdict = self._flagsReadAfter(addr, thumb)
+        return verdict
+
+    def _flagsReadAfter(self, addr, thumb):
+        data = self.disassembly.getBytes(addr, 4 * _FLAGS_READ_WINDOW)
+        if not data:
+            return False
+        for index, (_address, _size, mnemonic, _op_str) in enumerate(
+            self._hoistDecoder(thumb).disasm_lite(bytes(data), addr, _FLAGS_READ_WINDOW)
+        ):
+            base, condition, sets_flags = split_mnemonic(mnemonic)
+            if index and (mnemonic in IT_MNEMONICS or (condition is not None and condition != "al")):
+                return True
+            if index and (base in _FLAG_SETTING_BASES or sets_flags):
+                return False
+        return False
+
+    @staticmethod
+    def _isHoistedRun(run, start, addr, thumb, data):
+        """True when the run is code ahead of a push, False when it is not, and None when
+        it is otherwise acceptable but rests on a compare whose flags are read later."""
+        flags_set = False
+        evidence = False
+        for i_address, i_size, i_mnemonic, i_op_str in run:
+            base, condition, sets_flags = split_mnemonic(i_mnemonic)
+            conditional = condition is not None and condition != "al"
+            if thumb and i_size == 2:
+                halfword = data[i_address - start] | (data[i_address - start + 1] << 8)
+                if halfword < 0x0800:
+                    return False
+            if base in _HOIST_REFUSED_BASES or i_op_str.startswith("sp"):
+                return False
+            if i_mnemonic in IT_MNEMONICS:
+                if not flags_set:
+                    return False
+                continue
+            if conditional and not flags_set and base != "b":
+                return False
+            if base in ("b", "cbz", "cbnz"):
+                target = i_op_str.rsplit("#", 1)[-1]
+                try:
+                    target = int(target, 0)
+                except ValueError:
+                    return False
+                if not (conditional or base != "b") or not addr < target < addr + _HOISTED_BRANCH_REACH:
+                    return False
+                evidence = evidence or flags_set or base != "b"
+            elif base in ("bx", "bxns") or i_op_str.startswith("pc"):
+                if not conditional or i_op_str != "lr":
+                    return False
+                evidence = True
+            elif "[pc" in i_op_str:
+                literal = i_op_str.rsplit("#", 1)[-1].rstrip("]") if "#" in i_op_str else "0"
+                try:
+                    offset = int(literal, 0)
+                except ValueError:
+                    return False
+                pool = ((i_address + 4) & ~3 if thumb else i_address + 8) + offset
+                if pool < addr:
+                    return False
+                evidence = True
+            if base in _FLAG_SETTING_BASES or sets_flags:
+                flags_set = True
+        if evidence:
+            return True
+        return None if flags_set else False
 
     # --- gap scan ---------------------------------------------------------------
     def _isPadding(self, addr, thumb):

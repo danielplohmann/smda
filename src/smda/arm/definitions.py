@@ -18,11 +18,20 @@ that the backend relies on was verified against capstone 5.0.7:
   resolved absolute addresses, including the ``Align(PC, 4)`` a T32 ``blx`` applies.
 """
 
+import bisect
+import heapq
 import itertools
+from collections import deque
 
 from capstone import arm_const as _arm_const
 
-from smda.common.instruction_set_probe import countCodeReturnSites, hasDenseReturnRun
+from smda.common.instruction_set_probe import (
+    MAX_PROBES,
+    NEIGHBOURHOOD_BYTES,
+    TEXT_UNIT_SHARE,
+    WINDOW_BYTES,
+    hasDenseReturnRun,
+)
 
 #: condition-code suffixes as capstone spells them (A8.3); ``cs``/``cc`` print as ``hs``/``lo``
 CONDITION_CODES = frozenset(
@@ -80,6 +89,56 @@ def split_mnemonic(mnemonic):
 def is_conditional(mnemonic):
     condition = split_mnemonic(mnemonic)[1]
     return condition is not None and condition != "al"
+
+
+#: imported functions that never return to their caller. A call to one ends the block, and the
+#: compiler places whatever comes next (a literal pool, the next function) straight behind it:
+#: GCC's ``-fstack-protector`` epilogue is ``blx __stack_chk_fail`` followed by the pool.
+NORETURN_APIS = frozenset(
+    {
+        "__stack_chk_fail",
+        "__stack_chk_fail_local",
+        "__fortify_fail",
+        "__chk_fail",
+        "__assert_fail",
+        "__assert_perror_fail",
+        "__assert2",
+        "abort",
+        "exit",
+        "_exit",
+        "_Exit",
+        "quick_exit",
+        "pthread_exit",
+        "err",
+        "errx",
+        "verr",
+        "verrx",
+        "longjmp",
+        "_longjmp",
+        "siglongjmp",
+        "__longjmp_chk",
+        "__cxa_throw",
+        "__cxa_rethrow",
+        "__cxa_bad_cast",
+        "__cxa_bad_typeid",
+        "__cxa_pure_virtual",
+        "__cxa_call_unexpected",
+        "_Unwind_Resume",
+        "_ZSt9terminatev",
+        "ExitProcess",
+        "ExitThread",
+        "FreeLibraryAndExitThread",
+        "RaiseFailFastException",
+        "_CxxThrowException",
+        "_invalid_parameter_noinfo_noreturn",
+        "_amsg_exit",
+    }
+)
+
+
+def is_noreturn_api(api):
+    """Whether an import name resolved for a call target never returns (``@`` versions dropped)."""
+    return bool(api) and api.split("@", 1)[0] in NORETURN_APIS
 
 
 # --- control-flow mnemonic classes (bases, conditions stripped) --------------
@@ -337,15 +396,159 @@ def looksLikeArm(buffer):
     halfword, so a hit is weaker evidence per occurrence; it is counted at halfword
     alignment against the same window density, and hits sitting in UTF-16 text are
     discarded exactly as for the other signatures.
+
+    Each signature is tried on its own, and a miss on one falls through to the next. An
+    earlier version returned the A32 dense-run verdict as soon as a pattern had sixteen hits
+    anywhere in the buffer, so a Thumb-2 image carrying sixteen scattered A32 ``bx lr`` words
+    (a veneer here, a literal there) never reached the T32 test that would have accepted it.
+
+    The T32 test is :func:`_looksLikeThumb`: a halfword return is weak enough that it needs
+    company before it counts, see there.
     """
     for pattern in A32_RETURN_BYTES:
-        if countCodeReturnSites(buffer, pattern, A32_INSTRUCTION_SIZE, MIN_RETURN_SITES) >= MIN_RETURN_SITES:
-            return _denseReturnRun(buffer, pattern, A32_INSTRUCTION_SIZE)
-    return _denseReturnRun(buffer, T16_RETURN_BYTES, T16_INSTRUCTION_SIZE)
+        if hasDenseReturnRun(buffer, pattern, A32_INSTRUCTION_SIZE, MIN_RETURN_SITES):
+            return True
+    # A32 at a halfword offset (a dump cut two bytes into a word) is deliberately not tried:
+    # it doubles the A32 scan, and so the probe's worst case, for a layout no loader produces.
+    return _looksLikeThumb(buffer)
 
 
-def _denseReturnRun(buffer, pattern, alignment):
-    return hasDenseReturnRun(buffer, pattern, alignment, MIN_RETURN_SITES)
+#: T32 ``pop.w {..., pc}`` (A8.8.131 T2): E8BD then a register list with P (bit 15) set and
+#: SP (bit 13) clear; M (bit 14, lr) must be clear too, since loading both lr and pc is
+#: UNPREDICTABLE. Little-endian that is ``bd e8 <list lo> <80..9f>``. MSVC ends nearly every
+#: Thumb-2 function with it (``pop.w {r4-r11, pc}``) and emits ``bx lr`` only from leaves:
+#: 5856 against 21 in one Windows-on-ARM DLL, which ``bx lr`` alone never recognised.
+T32_POP_HW1_BYTES = T32_POP_HW1.to_bytes(2, "little")
+T32_POP_PC_LIST_HI = range(0x80, 0xA0)
+#: T32 ``push.w {..., lr}`` (A8.8.133 T2): E92D with M (bit 14) set and P, SP clear
+T32_PUSH_HW1_BYTES = T32_PUSH_HW1.to_bytes(2, "little")
+T32_PUSH_LR_LIST_HI = range(0x40, 0x60)
+#: ``str.w lr, [sp, #-4]!`` / ``ldr.w pc, [sp], #4``, the single-register frame forms
+T32_SINGLE_FRAME_BYTES = tuple(
+    b"".join(halfword.to_bytes(2, "little") for halfword in pair) for pair in (T32_PUSH_LR_SINGLE, T32_POP_PC_SINGLE)
+)
+#: frame instructions a run of T32 returns must have inside its window. Every Thumb-2 run
+#: measured over Debian armhf, Windows-on-ARM and GCC A32 images held 42 or more; the ASCII
+#: and i386 ``.eh_frame`` runs that used to pass held none: every form carries an E8, E9 or F8
+#: byte, which printable text cannot and those CFA programs did not.
+MIN_T32_FRAME_SITES = 8
+#: per-byte 0/1 tables, so the text tests below run as C-level byte operations: one hit costs
+#: about a microsecond instead of the several a per-unit Python loop takes, which is what lets
+#: the T32 test scan two return patterns within the time the one-pattern probe used to take
+_PRINTABLE_ASCII = bytes(1 if 0x20 <= value < 0x7F else 0 for value in range(256))
+_ASCII_TEXT = bytes(1 if 0x20 <= value < 0x7F or value in (9, 10, 13) else 0 for value in range(256))
+_ZERO = bytes(1 if value == 0 else 0 for value in range(256))
+
+
+def _ones(flags):
+    """Number of 1 bytes in a string of 0/1 bytes."""
+    return flags.count(1)
+
+
+def _both(left, right):
+    """Positions where two equally long 0/1 byte strings are both 1."""
+    return (int.from_bytes(left, "big") & int.from_bytes(right, "big")).bit_count()
+
+
+def _looksLikeTextAt(buffer, offset):
+    """Whether the bytes around a halfword-aligned ``offset`` are ASCII or UTF-16 text.
+
+    ``bx lr`` is ``70 47``, the text "pG", and ``looksLikeText`` only recognises UTF-16.
+    Base64 holds an aligned "pG" every ~7.4 KiB, so a 16-in-64-KiB run turned up by chance in
+    half of all 1 MiB base64 blobs (a notebook with embedded images among them), and a single
+    such blob in an x86 dump sent the whole dump to this backend. A neighbourhood that is
+    TEXT_UNIT_SHARE printable ASCII (tab and line breaks included) is text as well.
+
+    The UTF-16 half is ``looksLikeText`` itself, for a halfword-aligned offset, computed on
+    whole byte strings rather than unit by unit.
+    """
+    start = max(0, offset - NEIGHBOURHOOD_BYTES)
+    window = bytes(buffer[start : offset + NEIGHBOURHOOD_BYTES])
+    if _ones(window.translate(_ASCII_TEXT)) >= len(window) * TEXT_UNIT_SHARE:
+        return True
+    units = len(window) // 2
+    if units < 8:
+        return False
+    low = window[0 : units * 2 : 2]
+    high = window[1 : units * 2 : 2]
+    little = _both(low.translate(_PRINTABLE_ASCII), high.translate(_ZERO))
+    big = _both(high.translate(_PRINTABLE_ASCII), low.translate(_ZERO))
+    return max(little, big) >= units * TEXT_UNIT_SHARE
+
+
+def _occurrences(buffer, needle, last_byte_range=None):
+    """Every offset of ``needle`` (whose 4th byte, if constrained, lies in the range)."""
+    index = buffer.find(needle)
+    while index >= 0:
+        if last_byte_range is None or (index + 3 < len(buffer) and buffer[index + 3] in last_byte_range):
+            yield index
+        index = buffer.find(needle, index + 1)
+
+
+def _alignedSites(buffer, streams):
+    """Halfword-aligned offsets from several occurrence streams, in order, sharing one budget.
+
+    Bounded like ``_codeReturnSites``: MAX_PROBES occurrences, aligned or not, for all the
+    streams together, so a second pattern does not raise the probe's worst case.
+    """
+    for probes, offset in enumerate(heapq.merge(*streams), 1):
+        if probes > MAX_PROBES:
+            return
+        if offset % T16_INSTRUCTION_SIZE == 0:
+            yield offset
+
+
+def _t32ReturnSites(buffer):
+    """T32 returns (``bx lr``, ``pop.w {..., pc}``) not sitting in ASCII or UTF-16 text."""
+    streams = (
+        _occurrences(buffer, T16_RETURN_BYTES),
+        _occurrences(buffer, T32_POP_HW1_BYTES, T32_POP_PC_LIST_HI),
+    )
+    for offset in _alignedSites(buffer, streams):
+        if not _looksLikeTextAt(buffer, offset):
+            yield offset
+
+
+def _t32FrameSites(buffer):
+    """T32 frame pushes and pops. No text test: each only corroborates a run whose returns passed one."""
+    streams = [
+        _occurrences(buffer, T32_PUSH_HW1_BYTES, T32_PUSH_LR_LIST_HI),
+        _occurrences(buffer, T32_POP_HW1_BYTES, T32_POP_PC_LIST_HI),
+    ]
+    streams.extend(_occurrences(buffer, needle) for needle in T32_SINGLE_FRAME_BYTES)
+    return list(_alignedSites(buffer, streams))
+
+
+def _looksLikeThumb(buffer):
+    """Whether MIN_RETURN_SITES T32 returns fall in one window that also holds T32 frames.
+
+    Density alone let two kinds of data through. Base64 is handled by discarding hits in
+    ASCII text. The other is i386 ``.eh_frame``: ``DW_CFA_def_cfa_offset 0x70`` followed by
+    ``DW_CFA_advance_loc 7`` is ``0e 70 47``, and the argument pushes of i386 code step the
+    CFA offset through 0x70 often enough to put 27 aligned ``bx lr`` in one 64 KiB window of a
+    real libxml2. What that data did not hold is a 4-byte ``push.w``/``pop.w`` frame, which
+    every Thumb-2 compiler emits for any function saving more than r4-r7, so a run counts
+    only with MIN_T32_FRAME_SITES of those in the same window.
+
+    A32 code passes this test as well, and is meant to: ``ldm sp!, {..., pc}`` and
+    ``stmdb sp!, {..., lr}`` are E8BD8xxx / E92D4xxx, whose upper halfword followed by the
+    next word's lower one spells the T32 ``pop.w``/``push.w`` at a halfword offset. That is
+    what recognises GCC A32 code returning through ``ldm`` rather than ``bx lr``, and A32 code
+    cut two bytes into a word; the backend still picks the instruction set per function.
+    """
+    recent = deque(maxlen=MIN_RETURN_SITES)
+    frames = None
+    for offset in _t32ReturnSites(buffer):
+        recent.append(offset)
+        if len(recent) < MIN_RETURN_SITES or offset - recent[0] >= WINDOW_BYTES:
+            continue
+        if frames is None:
+            # collected once, on the first dense run, and only ever for a dense run
+            frames = _t32FrameSites(buffer)
+        start = recent[0]
+        if bisect.bisect_left(frames, start + WINDOW_BYTES) - bisect.bisect_left(frames, start) >= MIN_T32_FRAME_SITES:
+            return True
+    return False
 
 
 #: A32 words that cannot be read out of T32 code: ``bx lr``, ``mov pc, lr``,

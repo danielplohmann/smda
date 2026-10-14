@@ -17,6 +17,7 @@ IDIOMS is ``llvm-mc -triple=armv7a-none-eabi`` + ``ld.lld -Ttext=0x10000`` of:
 """
 
 import unittest
+from pathlib import Path
 
 from smda.arm.ArmInstructionEscaper import ArmInstructionEscaper
 from smda.arm.definitions import (
@@ -190,6 +191,83 @@ class ArmThumbOneIdiomTest(unittest.TestCase):
             {0x10000: False, 0x10010: True, 0x10034: True, 0x10048: True, 0x10050: False},
         )
         self.assertEqual(self.report.getFunction(0x10048).num_instructions, 1)
+
+
+class ArmGccIdiomTest(unittest.TestCase):
+    """Shapes GCC emits that the Debian armel/armhf builds showed, each ``llvm-mc
+    -triple=armv7a-none-eabi`` (``thumbv7a`` for the first) + ``ld.lld -Ttext=0x10000``.
+    """
+
+    # entry  (T32) push {r4, lr}; bl dispatch; pop {r4, pc}
+    # dispatch (T32) cmp r0, #3; bhi 9f; adr r1, 1f; ldr.w r0, [r1, r0, lsl #2]; add r1, r0; bx r1
+    #        1: .word (c0 - 1b) + 1 .. (c3 - 1b) + 1; c0..c3: movs r0, #N; bx lr; 9: movs r0, #0; bx lr
+    THUMB_RELATIVE_SWITCH = bytes.fromhex(
+        "10b500f001f810bd032815d802a151f820000144084700bf1100000015000000190000001d0000000a207047"
+        "0b2070470c2070470d20704700207047"
+    )
+    # entry   push {r4, lr}; ldr r0, =...; bl leaf; pop {r4, pc}; .word 0x0001d664, 0x254
+    # hoisted ldr r2, 2f; ldr r3, 3f; add r2, pc, r2; push {r4, lr}; ...; pop {r4, pc}; 2: .word ..; 3: .word ..
+    # early   cmp r0, #0; push {r4, r5, r6, lr}; ldr r4, [r1]; mov r5, r1; mov r6, r2; beq 4f; ...; 4: pop
+    # leaf    mov r0, #7; bx lr
+    HOISTED_ENTRIES = bytes.fromhex(
+        "10402de904009fe5140000eb1080bde864d601005402000018209fe518309fe502208fe010402de9030092e7"
+        "0040a0e1010084e21080bde8e8d4010054020000000050e370402de9004091e50150a0e10260a0e10000000a"
+        "050084e07080bde80700a0e31eff2fe1"
+    )
+    # entry   push {r4, lr}; mov r0, #1; bl fatal; .word 0, 0, 0x10000
+    # fatal   push {r4, lr}; mov r4, r0; bl fatal; pop {r4, pc}
+    ZERO_AFTER_CALL = bytes.fromhex("10402de90100a0e3020000eb00000000000000000000010010402de90040a0e1fcffffeb1080bde8")
+
+    def test_a_thumb_offset_table_behind_add_and_bx_is_followed(self):
+        report = _disassemble(self.THUMB_RELATIVE_SWITCH)
+        self.assertEqual(sorted(function.offset for function in report.getFunctions()), [0x10000, 0x10008])
+        self.assertEqual(
+            sorted(block.offset for block in report.getFunction(0x10008).getBlocks()),
+            [0x10008, 0x1000C, 0x10028, 0x1002C, 0x10030, 0x10034, 0x10038],
+        )
+
+    def test_code_scheduled_ahead_of_the_push_starts_the_function(self):
+        report = _disassemble(self.HOISTED_ENTRIES)
+        self.assertEqual(
+            {function.offset: function.num_instructions for function in report.getFunctions()},
+            {0x10000: 4, 0x10018: 8, 0x10040: 8, 0x10060: 2},
+        )
+
+    def test_a_zero_word_after_a_call_ends_the_function_instead_of_aborting_it(self):
+        report = _disassemble(self.ZERO_AFTER_CALL)
+        self.assertEqual(
+            {function.offset: function.num_instructions for function in report.getFunctions()},
+            {0x10000: 3, 0x10018: 4},
+        )
+
+
+class ArmPieImportTest(unittest.TestCase):
+    """A stripped PIE, ``llvm-mc -triple=armv7a-linux-gnueabi`` + ``ld.lld -pie -Ttext=0x150``
+    against a shared object exporting ``puts`` and ``__stack_chk_fail``:
+
+    main      push {r4, lr}; bl guarded; bl pic_user; pop {r4, pc}
+    guarded   push {r4, lr}; cmp r0, #0; beq 1f; bl puts; pop {r4, pc}; 1: bl __stack_chk_fail
+              .word 0x254, 0x1234 (literal pool right behind the call through the PLT)
+    pic_user  push {r4, lr}; ldr r0, 2f; 3: add r0, pc, r0; bl puts; pop {r4, pc}
+              2: .word message - (3b + 8), an offset that happens to equal other + 0x10
+    other     push {r4, lr}; mov r4, r0; add r0, r4, #1; add r0, r0, #2 .. #6; pop {r4, pc}
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        data = (Path(__file__).resolve().parent / "arm_pie_noreturn_plt_xored").read_bytes()
+        raw = bytes(byte ^ (index % 256) for index, byte in enumerate(data))
+        cls.report = Disassembler(_config()).disassembleUnmappedBuffer(raw)
+
+    def test_a_call_to_a_noreturn_import_ends_the_block(self):
+        guarded = self.report.getFunction(0x160)
+        self.assertEqual(guarded.num_instructions, 6)
+        self.assertIsNotNone(self.report.getFunction(0x180))
+
+    def test_a_pc_relative_offset_is_not_taken_for_a_code_address(self):
+        text = {function.offset: function.num_instructions for function in self.report.getFunctions()}
+        self.assertNotIn(0x1A8, text)
+        self.assertEqual(text[0x198], 9)
 
 
 class ArmRoutingTest(unittest.TestCase):

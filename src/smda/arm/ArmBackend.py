@@ -25,6 +25,7 @@ from .definitions import (
     TRAP_BASES,
     a32_branch_target,
     is_a32_prologue,
+    is_noreturn_api,
     is_t32_prologue,
     split_mnemonic,
 )
@@ -272,12 +273,15 @@ class ArmBackend(ArchBackend):
                 offset = int(literal.group(1), 0) if literal.group(1) else 0
                 pool = ((i_address + 4) & ~3 if thumb else i_address + 8) + offset
                 if size and d.disassembly.isAddrWithinMemoryImage(pool):
-                    state.addDataRef(i_address, pool, size=size)
+                    # a table to the engine: a path decoded into the pool before this load was
+                    # seen (blocks run last-in first-out) is decoded again with the pool known
+                    state.addDataRef(i_address, pool, size=size, is_table=True)
                     if size == 4:
                         value = self._wordAt(d, pool)
                         destination = i_op_str.split(",", 1)[0].strip()
                         if value is not None:
-                            self._recordValue(d, state, i_address, value, allow_code=destination != "pc")
+                            allow_code = destination != "pc" and d.fc_manager.holdsAddress(pool)
+                            self._recordValue(d, state, i_address, value, allow_code=allow_code)
                             pending[destination] = value
                 return
             if base in ("add", "sub", "adr") and not i_op_str.startswith("pc"):
@@ -346,8 +350,7 @@ class ArmBackend(ArchBackend):
         disassembly = d.disassembly
         if not disassembly.isAddrWithinMemoryImage(value & ~1):
             return
-        binary_info = disassembly.binary_info
-        if not binary_info.isInCodeAreas(value & ~1):
+        if not d.fc_manager.isExecutable(value & ~1):
             state.addDataRef(i_address, value)
         elif allow_code:
             d.fc_manager.addPointerCandidate(value, i_address, pc_relative=pc_relative)
@@ -362,9 +365,11 @@ class ArmBackend(ArchBackend):
             return
         target_thumb = thumb if base == "bl" else not thumb
         slot = self._resolvePltSlot(d, target)
-        if slot is not None and d._handleApiTarget(i_address, slot, slot, slot=slot):
-            state.addCodeRef(i_address, target)
-            return
+        if slot is not None:
+            resolved = d._handleApiTarget(i_address, slot, slot, slot=slot)
+            if resolved:
+                state.addCodeRef(i_address, target)
+                return is_noreturn_api(resolved[1])
         d.fc_manager.addCallCandidate(target, target_thumb, i_address)
         d._handleCallTarget(state, i_address, target)
         if thumb and base == "bl":
@@ -377,6 +382,7 @@ class ArmBackend(ArchBackend):
                     state.addCodeRef(i_address, case, by_jump=True)
                 state.setNextInstructionReachable(False)
                 state.setBlockEndingInstruction(True)
+        return False
 
     def _analyzeCondBranch(self, d, instruction, state, target):
         i_address, i_size, _i_mnemonic, _i_op_str = instruction
@@ -561,9 +567,15 @@ class ArmBackend(ArchBackend):
                 and previous_condition in (None, "al")
                 and self._immediateTarget(previous_instruction[3]) is not None
             ):
-                if i_address in state.data_bytes or i_address in d.disassembly.data_map:
-                    # the call is followed by a literal this code loads: the callee does not
-                    # return, and the compiler placed the pool straight after the call
+                if (
+                    i_address in state.data_bytes
+                    or i_address in d.disassembly.data_map
+                    or not any(self._bytesAt(d, i_address, i_size) or b"\x01")
+                ):
+                    # the call is followed by a literal this code loads, or by a zero word that
+                    # no compiler emits as an instruction (``movs r0, r0`` / ``andeq r0, r0, r0``):
+                    # the callee does not return, and the compiler placed a pool straight after
+                    # the call. The load reading the pool may sit in a block not decoded yet.
                     self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
                     return True
                 boundary = self._callFallthroughFunctionStart(d, i_address, thumb)
@@ -586,10 +598,16 @@ class ArmBackend(ArchBackend):
             if target is not None:
                 self._analyzeCondBranch(d, instruction, state, target)
         elif base in CALL_BASES:
-            self._analyzeCall(d, instruction, state, base, thumb)
-            if conditional:
-                # a conditional call still falls through; nothing else to do
-                pass
+            if self._analyzeCall(d, instruction, state, base, thumb) and not conditional:
+                # an import that never returns: what follows the call is not this path's code
+                state.setNextInstructionReachable(False)
+                state.setBlockEndingInstruction(True)
+            elif not conditional and self._isDataAfterCall(d, state, i_address + i_size, thumb):
+                # a literal this function loads, or a word no instruction set decodes, right
+                # behind the call: the callee does not return
+                state.setNextInstructionReachable(False)
+                state.setBlockEndingInstruction(True)
+                state.setSanelyEnding(True)
         elif base in REGISTER_BRANCH_BASES:
             if i_op_str == "lr":
                 self._analyzeReturn(state, instruction, conditional)
@@ -615,6 +633,15 @@ class ArmBackend(ArchBackend):
             else:
                 self._endFunction(state)
         return False
+
+    def _isDataAfterCall(self, d, state, address, thumb):
+        if address in state.data_bytes or address in d.disassembly.data_map:
+            return True
+        data = self._bytesAt(d, address, 4)
+        if not data or len(data) != 4:
+            return False
+        engine = d.capstone.thumb if thumb else d.capstone.arm
+        return next(engine.disasm_lite(bytes(data), address, 1), None) is None
 
     @staticmethod
     def _isLinkedBranch(previous_instruction):
