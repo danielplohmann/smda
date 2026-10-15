@@ -125,7 +125,7 @@ past roughly six lines it belongs in the PR the entry links.
   own (`"="` in the tail of `"url="`); the NUL-terminated read stopped at the suffix's reference. Adds a 1 MB go1.24.7
   linux/amd64 fixture so Go mode is tested on a real pclntab. *Bundled fixtures:* `mirai_x64` with a planted pclntab
   header or `/rustc/` path keeps `url=` and `Cookie: ` (3 refs longer); `rust_pe_gnu` and the Go fixture are
-  unchanged. Chains of suffixes (`"\r\n\r\n"`, `"\r\n"`, `"\n"`) are still cut.
+  unchanged. Chains of suffixes (`"\r\n\r\n"`, `"\r\n"`, `"\n"`) are still cut. (#402)
 
 ### Security
 
