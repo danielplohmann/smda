@@ -71,6 +71,13 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(utility)** `extract_strings` reads Go and Rust strings at their real length, from the paired length load or a
+  (pointer, length) header, as UTF-8, with `data_addr` on the string. Adds `mode="rust"`, picked when the Rust score
+  and a `/rustc/<commit>/` path agree; Go mode still needs a pclntab. A reference without a usable length keeps the
+  NUL-terminated read, stopped at the next referenced address. *Measured on `0575a23`, reproduced by reviewer on
+  bundled fixtures:* `rust_pe_gnu` 2657 -> 2909 refs, strings over 200 chars 820 -> 1, 3 pointer reads lost. Cost:
+  an in-image `/rustc/` path puts `mirai_x64` in Rust mode and shortens 16 of its 162 strings (tail-merged C strings
+  such as `"\r\n"` -> `"\r"`); string extraction on `rust_pe_gnu` went 0.66 s -> 1.12 s on the reviewer's machine. (#382)
 
 ### Changed
 - **(core)** Keep the per-instruction state of large images compact: a lone code reference is stored bare, not in a
@@ -109,12 +116,20 @@ past roughly six lines it belongs in the PR the entry links.
   past the entry, and analyzes it again if the entry does not keep it. *Reproduced by reviewer on 494 benign PEs (not
   bundled):* 70 starts fewer in 55 files, all bodies behind their entry's `ret` (`_RTC_CheckEsp`, `__isa_available`
   helpers, LLVM shrink-wrapped functions), runtime unchanged. (#388, #389)
+- **(utility)** Go mode no longer loses the whole report to an `OverflowError` when a string header's length word is
+  out of range; sized reads stop at 64 KiB. Lengths that cut a C string short now fall back to it, so cgo code keeps
+  `open("/dev/watchdog", 2)` whole. *Bundled fixtures with a pclntab header planted in padding:* `mirai_x64` errored
+  on master and now has 125 refs (162 unplanted); in Go mode 1-character reads are dropped. *go1.24.7 amd64 and 386
+  builds, not bundled, not reproduced:* unchanged by the fallback, 4 two-character reads gained on 386. (#382)
 
 ### Security
 
 ### Compatibility
 - x86 function boundaries move where an early-return body was analyzed before its entry: the body now joins
   the entry instead of standing as a function of its own. (#388, #389)
+- **(utility)** String output changes on every binary extracted in Go or Rust mode: strings stop at their real
+  length instead of running into the next literal, some are added or dropped, and UTF-8 ones carry the new
+  `utf8` type. Nothing in mcrit, mcrit-plugin or capa reads `type` or `data_addr`. (#382)
 
 ## [v4.10.0] - 2026-10-14
 
