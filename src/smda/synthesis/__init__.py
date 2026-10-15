@@ -5,11 +5,8 @@ function bytes at their original virtual addresses and rebuild headers, sections
 and import metadata so the output parses cleanly with analysis tools.
 """
 
+from smda.common.BinaryFormat import FORMAT_ELF, FORMAT_MACHO, FORMAT_PE, sniffBinaryFormat
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer
-
-FORMAT_PE = "pe"
-FORMAT_ELF = "elf"
-FORMAT_MACHO = "macho"
 
 _FORMAT_ALIASES = {
     "pe": FORMAT_PE,
@@ -19,20 +16,6 @@ _FORMAT_ALIASES = {
     "mach-o": FORMAT_MACHO,
     "mach_o": FORMAT_MACHO,
 }
-
-_THIN_MACHO_MAGICS = {b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe"}
-
-
-def sniffBinaryFormat(xheader):
-    if not xheader:
-        return None
-    if xheader[:2] == b"MZ":
-        return FORMAT_PE
-    if xheader[:4] == b"\x7fELF":
-        return FORMAT_ELF
-    if xheader[:4] in _THIN_MACHO_MAGICS:
-        return FORMAT_MACHO
-    return None
 
 
 def createSynthesizer(report, output_format=None) -> BinarySynthesizer:

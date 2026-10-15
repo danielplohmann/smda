@@ -668,10 +668,7 @@ class ArmBackend(ArchBackend):
         elif base in LOAD_MULTIPLE_BASES:
             registers = self._registerList(i_op_str)
             if "pc" in registers:
-                if i_mnemonic.endswith("^") or i_op_str.endswith("^"):
-                    self._endFunction(state)
-                else:
-                    self._analyzeReturn(state, instruction, conditional)
+                self._analyzeReturn(state, instruction, conditional)
         elif base in PC_WRITING_BASES and i_op_str.startswith("pc,"):
             self._analyzePcWrite(d, instruction, state, base, conditional, previous_instruction)
         elif base in TRAP_BASES or base in EXCEPTION_RETURN_BASES:
@@ -718,7 +715,7 @@ class ArmBackend(ArchBackend):
             return
         if _sets_flags_to_pc(instruction) and "lr" in operands[1:]:
             # subs pc, lr, #imm / movs pc, lr: exception return (B9.3.20)
-            self._endFunction(state)
+            self._analyzeReturn(state, instruction, conditional)
             return
         if base == "ldr" and len(operands) == 2 and _PC_LITERAL.fullmatch(operands[1]):
             # ldr pc, [pc, #imm]: an absolute branch through the literal pool (veneers)

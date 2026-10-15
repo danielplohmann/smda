@@ -408,7 +408,6 @@ class SmdaFunction:
 
     # ARM import stubs: the PLT entry (add ip, pc / add ip, ip / ldr pc), lld's literal
     # form, the MSVC movw/movt/ldr/bx thunk and the T32 bx pc prefix in front of any of them
-    _ARM_API_THUNK_BODY = frozenset({"add", "adr", "sub", "ldr", "movw", "movt", "mov", "nop", "bx"})
     _ARM_API_THUNK_MAX_INSNS = 6
 
     def _isArmApiThunk(self):
@@ -417,7 +416,69 @@ class SmdaFunction:
         block = self.blocks.get(self.offset)
         if not block or block[-1].offset not in self.apirefs:
             return False
-        return all(arm_split_mnemonic(ins.mnemonic)[0] in self._ARM_API_THUNK_BODY for ins in block)
+        if any(arm_split_mnemonic(ins.mnemonic)[1] not in (None, "al") for ins in block):
+            return False
+        instructions = list(block)
+        if (
+            instructions
+            and arm_split_mnemonic(instructions[0].mnemonic)[0].split(".", 1)[0] == "bx"
+            and (instructions[0].operands or "").strip().lower() == "pc"
+        ):
+            if len(instructions) == 1:
+                return True
+            instructions.pop(0)
+        instructions = [ins for ins in instructions if arm_split_mnemonic(ins.mnemonic)[0].split(".", 1)[0] != "nop"]
+        if not instructions or len(instructions) > self._ARM_API_THUNK_MAX_INSNS:
+            return False
+        operands = [(ins.operands or "").lower().replace(" ", "") for ins in instructions]
+        bases = [arm_split_mnemonic(ins.mnemonic)[0].split(".", 1)[0] for ins in instructions]
+        final_base, final_operands = bases[-1], operands[-1]
+        if final_base == "ldr" and final_operands.startswith("pc,"):
+            if len(instructions) == 1:
+                return "[pc" in final_operands
+            if len(instructions) != 3 or bases not in (["add", "add", "ldr"], ["ldr", "add", "ldr"]):
+                return False
+            first, second = operands[0], operands[1]
+            if bases[0] == "add":
+                return (
+                    first.startswith(("ip,pc", "r12,pc"))
+                    and second.startswith(("ip,ip", "ip,r12", "r12,ip", "r12,r12"))
+                    and ("[ip" in final_operands or "[r12" in final_operands)
+                )
+            return (
+                first.startswith(("ip,[pc", "r12,[pc"))
+                and second.startswith(("ip,pc", "r12,pc"))
+                and ("[ip" in final_operands or "[r12" in final_operands)
+            )
+        if final_base == "bx":
+            target = final_operands
+        elif final_base == "mov" and final_operands.startswith("pc,"):
+            target = final_operands.split(",", 1)[1]
+        else:
+            return False
+        if target not in {f"r{index}" for index in range(13)} | {"ip"}:
+            return False
+        seeded_address = False
+        for base, op_str in zip(bases[:-1], operands[:-1], strict=True):
+            parts = op_str.split(",", 1)
+            destination = parts[0]
+            source = parts[1] if len(parts) > 1 else ""
+            if destination != target:
+                return False
+            if base in ("movw", "movt") and source.startswith("#"):
+                seeded_address = seeded_address or base == "movw"
+                continue
+            if base == "adr" and source:
+                seeded_address = True
+                continue
+            if base == "ldr" and source.startswith(("[pc", f"[{target}")):
+                seeded_address = seeded_address or source.startswith("[pc")
+                continue
+            if base in ("add", "sub") and source.startswith(("pc", f"{target},")):
+                seeded_address = seeded_address or source.startswith("pc")
+                continue
+            return False
+        return seeded_address
 
     def isExported(self):
         return self.is_exported

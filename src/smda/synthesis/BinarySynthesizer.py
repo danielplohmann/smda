@@ -196,13 +196,20 @@ class BinarySynthesizer:
         return import_map
 
     def _iterStringRefs(self):
+        strings = []
         for smda_function in self.report.getFunctions():
             for stringref in smda_function.stringrefs or []:
                 data_addr = stringref.get("data_addr")
                 string = stringref.get("string")
                 if data_addr is None or not string:
                     continue
-                yield data_addr, string.encode("ascii", errors="ignore") + b"\x00"
+                encoding = "utf-8" if stringref.get("type") == "utf8" else "ascii"
+                strings.append((data_addr, string.encode(encoding, errors="ignore")))
+        # Go and Rust literals are packed without separators, so a terminator can land on the first
+        # byte of the next literal; terminators go first and the strings overwrite them
+        for data_addr, content in strings:
+            yield data_addr + len(content), b"\x00"
+        yield from strings
 
     def _hasHeader(self, min_length=0x40):
         return bool(self.report.xheader) and len(self.report.xheader) >= min_length

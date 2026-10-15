@@ -7,6 +7,7 @@ import os
 import struct
 import zipfile
 import zlib
+from array import array
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from capstone import (
@@ -117,6 +118,10 @@ class SmdaReport:
     data_refs_to = None
     _string_cache: Dict[Any, Optional[Tuple[str, str]]]
     _derefs_cache: Dict[int, List[int]]
+    _rustc_path_seen: Optional[bool] = None
+    _string_cache_chars = 0
+    _referenced_targets: "Optional[array[int]]" = None
+    _length_registers: Dict[str, Dict[str, str]]
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
     _has_codexrefs = False
@@ -129,6 +134,7 @@ class SmdaReport:
         # starts with empty caches rather than relying on monkey-patched attributes.
         self._string_cache: Dict[Any, Optional[Tuple[str, str]]] = {}
         self._derefs_cache: Dict[int, List[int]] = {}
+        self._length_registers: Dict[str, Dict[str, str]] = {}
         # start every construction path with an empty CFG so accessors like
         # num_functions/getFunction work on reports without a disassembly
         # (e.g. controlled error reports for unsupported architectures);

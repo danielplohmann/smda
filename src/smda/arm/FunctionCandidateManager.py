@@ -68,6 +68,9 @@ from .FunctionCandidate import FunctionCandidate
 LOGGER = logging.getLogger(__name__)
 
 _TIMEOUT_POLL_INTERVAL = 4096
+_SCAN_CHUNK_BYTES = _TIMEOUT_POLL_INTERVAL * 4
+_MODE_POLL_SPANS = 64
+_MODE_POLL_BYTES = 0x40000
 #: bytes of surrounding code the instruction-set probe of an address without other evidence reads
 _MODE_BLOCK_SIZE = 0x1000
 _PE_MACHINE_ARM = 0x1C0
@@ -167,11 +170,30 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
     def init(self, disassembly, cbAnalysisTimeout=None):
         self._resetModeState()
         self.disassembly = disassembly
+        self._cb_analysis_timeout = cbAnalysisTimeout
         self._initModeEvidence()
         super().init(disassembly, cbAnalysisTimeout)
 
+    def _canStoreCandidateMetadata(self, addr, entries):
+        if addr in entries:
+            return True
+        cap = getattr(self.config, "MAX_FUNCTION_CANDIDATES", 0)
+        if cap and addr in self.candidates and len(self.candidates) <= cap:
+            return True
+        return not cap or len(entries) < cap
+
+    def _addStrongStart(self, addr):
+        if self._canStoreCandidateMetadata(addr, self._strong_starts):
+            self._strong_starts.add(addr)
+
+    def _addDeclaredStart(self, addr):
+        self._declared_starts.add(addr)
+        self._strong_starts.add(addr)
+
     # --- instruction-set map -------------------------------------------------
     def _initModeEvidence(self):
+        if self._candidateTimeoutTripped():
+            return
         binary_info = self.disassembly.binary_info
         lief_binary = binary_info.getLiefBinary()
         symbols = []
@@ -188,6 +210,8 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             macho = get_active_macho_binary(lief_binary, bitness=32, architecture="arm")
             if isinstance(macho, lief.MachO.Binary):
                 symbols = self._readMachoModeEvidence(macho)
+        if self._candidateTimeoutTripped():
+            return
         if binary_info.oep is not None:
             self.noteMode(binary_info.base_addr + binary_info.oep)
         symbols.sort()
@@ -217,9 +241,20 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         ranges = self._executableRanges() or [(binary_info.base_addr, binary_info.base_addr + len(binary))]
         arm = thumb = 0
         for start, end in ranges:
-            counts = countModeMarkers(binary, start - binary_info.base_addr, end - binary_info.base_addr)
-            arm += counts[0]
-            thumb += counts[1]
+            cursor = start - binary_info.base_addr
+            stop = end - binary_info.base_addr
+            while cursor < stop:
+                if self._candidateTimeoutTripped():
+                    return arm, thumb
+                chunk_end = min(stop, cursor + _MODE_POLL_BYTES)
+                if chunk_end < stop:
+                    chunk_end -= chunk_end % A32_INSTRUCTION_SIZE
+                    if chunk_end <= cursor:
+                        chunk_end = cursor + A32_INSTRUCTION_SIZE
+                counts = countModeMarkers(binary, cursor, chunk_end)
+                arm += counts[0]
+                thumb += counts[1]
+                cursor = chunk_end
         return arm, thumb
 
     def _readElfModeEvidence(self, lief_binary):
@@ -228,7 +263,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         mapping = []
         symbols = {}
         base_adjust = 0
-        for symbol in self._elfSymbols(lief_binary):
+        for index, symbol in enumerate(self._elfSymbols(lief_binary)):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return list(symbols.items())
             name = symbol.name
             value = symbol.value
             # lief hands a name that is not valid UTF-8 back as bytes
@@ -236,17 +273,20 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 mapping.append((value + base_adjust, name[1]))
             elif symbol.type == lief.ELF.Symbol.TYPE.FUNC and value and symbol.shndx != 0:
                 symbols[self.noteMode(value, authoritative=True)] = bool(value & 1)
-                self._strong_starts.add(value & ~1)
-                self._declared_starts.add(value & ~1)
+                self._addDeclaredStart(value & ~1)
         entry = lief_binary.header.entrypoint
         if entry:
             self.noteMode(entry, authoritative=True)
         # _init and _fini come from glibc's A32 crti in a Thumb build too; the dynamic
         # section states them like every other code address, with bit 0 for Thumb
-        for dynamic_entry in lief_binary.dynamic_entries:
+        for index, dynamic_entry in enumerate(lief_binary.dynamic_entries):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return list(symbols.items())
             if dynamic_entry.tag in _INIT_FINI_TAGS and dynamic_entry.value:
                 self.noteMode(dynamic_entry.value, authoritative=True)
-        for section in lief_binary.sections:
+        for index, section in enumerate(lief_binary.sections):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return list(symbols.items())
             if section.name in _PLT_SECTION_NAMES and section.size and self._holdsA32PltEntries(section):
                 start = section.virtual_address
                 self._section_modes.append((start, start + section.size, False))
@@ -269,7 +309,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             macho, base_addr=binary_info.base_addr, bitness=32, architecture="arm"
         )
         code_sections = []
-        for section in macho.sections:
+        for index, section in enumerate(macho.sections):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return []
             if section.size and section.has(lief.MachO.Section.FLAGS.SOME_INSTRUCTIONS):
                 start = section.virtual_address
                 code_sections.append((start, start + section.size))
@@ -279,7 +321,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     if thumb is not None:
                         self._section_modes.append((start + adjustment, start + adjustment + section.size, thumb))
         symbols = {}
-        for symbol in macho.symbols:
+        for index, symbol in enumerate(macho.symbols):
+            if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return list(symbols.items())
             raw_type = symbol.raw_type
             value = symbol.value
             if raw_type & _MACHO_N_STAB or raw_type & _MACHO_N_TYPE != _MACHO_N_SECT or not value:
@@ -338,6 +382,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if thumb is None:
             thumb = bool(addr & 1)
         addr &= ~1
+        if (
+            not authoritative
+            and addr not in self._declared_starts
+            and not self._canStoreCandidateMetadata(addr, self._modes)
+        ):
+            return addr
         if authoritative or addr not in self._modes:
             self._modes[addr] = bool(thumb)
             candidate = self.candidates.get(addr)
@@ -449,26 +499,38 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         return is_new
 
     def addSymbolCandidate(self, addr):
-        return super().addSymbolCandidate(self.noteMode(addr) if addr & 1 else addr)
+        target = addr & ~1 if addr & 1 else addr
+        added = super().addSymbolCandidate(target)
+        if addr & 1 and target in self.candidates:
+            self.noteMode(addr)
+        return added
 
     def addExceptionCandidate(self, addr):
-        return super().addExceptionCandidate(self.noteMode(addr) if addr & 1 else addr)
+        target = addr & ~1 if addr & 1 else addr
+        added = super().addExceptionCandidate(target)
+        if addr & 1 and target in self.candidates:
+            self.noteMode(addr)
+        return added
 
     def addCallCandidate(self, target, thumb, source):
         """A direct call's destination, found while analysing its caller."""
         if thumb and target & 1 or not thumb and target & 3:
             return False
-        target = self.noteMode(target, thumb)
         if not self._passesCodeFilter(target) or not self.disassembly.isAddrWithinMemoryImage(target):
             return False
-        self._strong_starts.add(target)
         if target in self.candidates:
+            self.noteMode(target, thumb)
+            self._addStrongStart(target)
             self._addCappedCallRef(self.candidates[target], source)
             self._all_call_refs[source] = target
             return True
         self.addCandidate(target, reference_source=source)
+        if target not in self.candidates:
+            return False
+        self.noteMode(target, thumb)
+        self._addStrongStart(target)
         self._candidate_offsets.add(target)
-        return target in self.candidates
+        return True
 
     def addPointerCandidate(self, value, source, pc_relative=False, from_thumb=False):
         """A code address held in data or materialised by code (literal, ``movw``/``movt``)."""
@@ -491,8 +553,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # the A32 half of a Thumb veneer is entered by its ``bx pc``; a literal naming it
             # is far more often a constant that happens to match
             return False
-        self.noteMode(target, thumb)
         self.addCandidate(target, reference_source=source)
+        if target not in self.candidates:
+            return False
+        self.noteMode(target, thumb)
         self._candidate_offsets.add(target)
         return True
 
@@ -561,7 +625,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         starts = {addr & ~1 for addr in self.lang_analyzer.getGoObjects()}
         starts = frozenset(addr for addr in starts if self._passesCodeFilter(addr) and self.isExecutable(addr))
         base = self.disassembly.binary_info.base_addr
-        for addr in starts:
+        for index, addr in enumerate(starts):
+            if index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
+                return
             self.noteMode(addr, False, authoritative=True)
             self._strong_starts.add(addr)
             self._block_modes[(addr - base) // _MODE_BLOCK_SIZE] = False
@@ -631,30 +697,52 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         binary_info = self.disassembly.binary_info
         ranges = self._executableRanges() or [(binary_info.base_addr, binary_info.base_addr + len(binary_info.binary))]
         spans = []
-        for start, end in ranges:
+        span_count = 0
+        bytes_since_poll = 0
+        for range_index, (start, end) in enumerate(ranges):
+            if range_index and range_index % _MODE_POLL_SPANS == 0 and self._candidateTimeoutTripped():
+                return spans
             if self._mapping_starts:
-                cuts = [start]
                 first = bisect.bisect_right(self._mapping_starts, start)
                 last = bisect.bisect_left(self._mapping_starts, end)
-                cuts.extend(self._mapping_starts[first:last])
-                cuts.append(end)
-                for span_start, span_end in zip(cuts, cuts[1:], strict=False):
+                span_start = start
+                for span_index in range(last - first + 1):
+                    if span_index and span_index % _MODE_POLL_SPANS == 0 and self._candidateTimeoutTripped():
+                        return spans
+                    span_end = self._mapping_starts[first + span_index] if first + span_index < last else end
                     kind = self._mappingKind(span_start)
                     if kind == "d" or span_start >= span_end:
+                        span_start = span_end
                         continue
                     spans.append((span_start, span_end, kind == "t" if kind else self._regionThumb(span_start)))
+                    span_count += 1
+                    bytes_since_poll += span_end - span_start
+                    span_start = span_end
+                    if span_count % _MODE_POLL_SPANS == 0 or bytes_since_poll >= _MODE_POLL_BYTES:
+                        if self._candidateTimeoutTripped():
+                            return spans
+                        bytes_since_poll = 0
             else:
                 cursor = start
                 while cursor < end:
+                    if (
+                        span_count
+                        and (span_count % _MODE_POLL_SPANS == 0 or bytes_since_poll >= _MODE_POLL_BYTES)
+                        and self._candidateTimeoutTripped()
+                    ):
+                        return spans
                     block_end = min(
                         end, cursor - (cursor - binary_info.base_addr) % _MODE_BLOCK_SIZE + _MODE_BLOCK_SIZE
                     )
                     thumb = self._regionThumb(cursor)
+                    span_bytes = block_end - cursor
                     if spans and spans[-1][2] == thumb and spans[-1][1] == cursor:
                         spans[-1] = (spans[-1][0], block_end, thumb)
                     else:
                         spans.append((cursor, block_end, thumb))
                     cursor = block_end
+                    span_count += 1
+                    bytes_since_poll += span_bytes
         return spans
 
     def locateUnwindIndexCandidates(self):
@@ -698,6 +786,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if offset & 0x40000000:
                 offset -= 0x80000000
             start = (table_start + index + offset) & 0xFFFFFFFF
+            address = start & ~1
+            if self.disassembly.isAddrWithinMemoryImage(address) and self._passesCodeFilter(address):
+                self._addDeclaredStart(address)
             if start & 1:
                 self.noteMode(start)
                 start &= ~1
@@ -715,8 +806,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         for start in starts:
             if not self.disassembly.isAddrWithinMemoryImage(start) or not self._passesCodeFilter(start):
                 continue
-            self._strong_starts.add(start)
-            self._declared_starts.add(start)
             self.addExceptionCandidate(start)
 
     def _entryThumb(self, start, following):
@@ -766,18 +855,19 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if not begin:
                 continue
             if armnt:
-                start = self.noteMode(base + begin, authoritative=True)
+                thumb = bool(begin & 1)
+                start = self.noteMode(base + begin, thumb, authoritative=True)
                 length = self._pdataFunctionLength(unwind)
             else:
                 # Windows CE: PrologLen:8 | FuncLen:22 | 32Bit:1 | ExceptionFlag:1, the length
                 # counted in instructions of the set the 32Bit flag names
                 a32 = bool(unwind >> 30 & 1)
-                start = self.noteMode(begin if begin >= base else base + begin, not a32, authoritative=True)
+                thumb = not a32
+                start = self.noteMode(begin if begin >= base else base + begin, thumb, authoritative=True)
                 length = (unwind >> 8 & 0x3FFFFF) * (A32_INSTRUCTION_SIZE if a32 else T16_INSTRUCTION_SIZE)
             if length:
                 self._pdata_ranges.append((start, start + length, False))
-            self._strong_starts.add(start)
-            self._declared_starts.add(start)
+            self._addDeclaredStart(start)
             self.addExceptionCandidate(start)
 
     def _pdataFunctionLength(self, unwind):
@@ -794,7 +884,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
     def _halfwords(self, start, end):
         binary_info = self.disassembly.binary_info
-        return binary_info.binary[start - binary_info.base_addr : end - binary_info.base_addr]
+        return memoryview(binary_info.binary)[start - binary_info.base_addr : end - binary_info.base_addr]
 
     def locateReferenceCandidates(self):
         """Direct calls: A32 ``bl``/``blx <label>`` words and T32 ``bl``/``blx`` pairs."""
@@ -810,36 +900,44 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         start = (start + 3) & ~3
         data = self._halfwords(start, end)
         usable = len(data) - len(data) % 4
-        tops = data[3:usable:4].translate(_A32_CALL_TOPBYTE_FILTER)
-        index = tops.find(1)
-        while index >= 0:
-            offset = index * 4
-            source = start + offset
-            word = int.from_bytes(data[offset : offset + 4], "little")
-            resolved = a32_branch_target(word, source)
-            if resolved is not None and (resolved[1] or word & 0x01000000):
-                self._bookCall(resolved[0], resolved[1], source)
-            index = tops.find(1, index + 1)
+        for chunk_start in range(0, usable, _SCAN_CHUNK_BYTES):
+            if self._candidateTimeoutTripped():
+                return
+            chunk_end = min(usable, chunk_start + _SCAN_CHUNK_BYTES)
+            tops = bytes(data[chunk_start + 3 : chunk_end : 4]).translate(_A32_CALL_TOPBYTE_FILTER)
+            index = tops.find(1)
+            while index >= 0:
+                offset = chunk_start + index * 4
+                source = start + offset
+                word = int.from_bytes(data[offset : offset + 4], "little")
+                resolved = a32_branch_target(word, source)
+                if resolved is not None and (resolved[1] or word & 0x01000000):
+                    self._bookCall(resolved[0], resolved[1], source)
+                index = tops.find(1, index + 1)
 
     def _scanT32Calls(self, start, end):
         start = (start + 1) & ~1
         data = self._halfwords(start, end)
         usable = len(data) - len(data) % 2
-        highs = data[1:usable:2].translate(_T32_CALL_HIGHBYTE_FILTER)
-        index = highs.find(1)
-        while index >= 0:
-            offset = index * 2
-            if offset + 4 <= usable:
-                hw1 = data[offset] | (data[offset + 1] << 8)
-                hw2 = data[offset + 2] | (data[offset + 3] << 8)
-                source = start + offset
-                resolved = t32_call_target(hw1, hw2, source)
-                if resolved is not None and not self._followsT32Prefix(data, offset):
-                    self._bookCall(resolved[0], resolved[1], source)
-                    # the second halfword of a call cannot start another one
-                    index = highs.find(1, index + 2)
-                    continue
-            index = highs.find(1, index + 1)
+        chunk_size = _SCAN_CHUNK_BYTES - _SCAN_CHUNK_BYTES % 2
+        for chunk_start in range(0, usable, chunk_size):
+            if self._candidateTimeoutTripped():
+                return
+            chunk_end = min(usable, chunk_start + chunk_size)
+            highs = bytes(data[chunk_start + 1 : chunk_end : 2]).translate(_T32_CALL_HIGHBYTE_FILTER)
+            index = highs.find(1)
+            while index >= 0:
+                offset = chunk_start + index * 2
+                if offset + 4 <= usable:
+                    hw1 = data[offset] | (data[offset + 1] << 8)
+                    hw2 = data[offset + 2] | (data[offset + 3] << 8)
+                    source = start + offset
+                    resolved = t32_call_target(hw1, hw2, source)
+                    if resolved is not None and not self._followsT32Prefix(data, offset):
+                        self._bookCall(resolved[0], resolved[1], source)
+                        index = highs.find(1, index + 2)
+                        continue
+                index = highs.find(1, index + 1)
 
     def _bookCall(self, target, thumb, source):
         if not self.disassembly.isAddrWithinMemoryImage(target) or not self._passesCodeFilter(target):
@@ -854,9 +952,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             # as the caller's own set is far more often a halfword-misaligned read of two
             # unrelated instructions than an interworking call
             return
-        self.noteMode(target, thumb)
-        self._strong_starts.add(target)
         self.addReferenceCandidate(target, source)
+        if target not in self.candidates:
+            return
+        self.noteMode(target, thumb)
+        self._addStrongStart(target)
         self.setInitialCandidate(target)
 
     def locateDataPointerCandidates(self):
@@ -934,9 +1034,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     continue
                 if self._mappingKind(target) == "d":
                     continue
-                self.noteMode(target, thumb)
                 self.addReferenceCandidate(target, scan_start + offset)
-                self.setInitialCandidate(target)
+                if target in self.candidates:
+                    self.noteMode(target, thumb)
+                    self.setInitialCandidate(target)
 
     def holdsAddress(self, slot):
         """Whether the word at `slot` can hold an address rather than an offset.
@@ -985,27 +1086,36 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         start = (start + 3) & ~3
         data = self._halfwords(start, end)
         usable = len(data) - len(data) % 4
-        tops = data[3:usable:4].translate(_A32_PROLOGUE_TOPBYTE_FILTER)
-        index = tops.find(1)
-        while index >= 0:
-            offset = index * 4
-            if is_a32_prologue(int.from_bytes(data[offset : offset + 4], "little")):
-                self._bookPrologue(start + offset, False)
-            index = tops.find(1, index + 1)
+        for chunk_start in range(0, usable, _SCAN_CHUNK_BYTES):
+            if self._candidateTimeoutTripped():
+                return
+            chunk_end = min(usable, chunk_start + _SCAN_CHUNK_BYTES)
+            tops = bytes(data[chunk_start + 3 : chunk_end : 4]).translate(_A32_PROLOGUE_TOPBYTE_FILTER)
+            index = tops.find(1)
+            while index >= 0:
+                offset = chunk_start + index * 4
+                if is_a32_prologue(int.from_bytes(data[offset : offset + 4], "little")):
+                    self._bookPrologue(start + offset, False)
+                index = tops.find(1, index + 1)
 
     def _scanT32Prologues(self, start, end):
         start = (start + 1) & ~1
         data = self._halfwords(start, end)
         usable = len(data) - len(data) % 2
-        highs = data[1:usable:2].translate(_T32_PROLOGUE_HIGHBYTE_FILTER)
-        index = highs.find(1)
-        while index >= 0:
-            offset = index * 2
-            hw1 = data[offset] | (data[offset + 1] << 8)
-            hw2 = data[offset + 2] | (data[offset + 3] << 8) if offset + 4 <= usable else None
-            if is_t32_prologue(hw1, hw2) and not self._followsT32Prefix(data, offset):
-                self._bookPrologue(start + offset, True)
-            index = highs.find(1, index + 1)
+        chunk_size = _SCAN_CHUNK_BYTES - _SCAN_CHUNK_BYTES % 2
+        for chunk_start in range(0, usable, chunk_size):
+            if self._candidateTimeoutTripped():
+                return
+            chunk_end = min(usable, chunk_start + chunk_size)
+            highs = bytes(data[chunk_start + 1 : chunk_end : 2]).translate(_T32_PROLOGUE_HIGHBYTE_FILTER)
+            index = highs.find(1)
+            while index >= 0:
+                offset = chunk_start + index * 2
+                hw1 = data[offset] | (data[offset + 1] << 8)
+                hw2 = data[offset + 2] | (data[offset + 3] << 8) if offset + 4 <= usable else None
+                if is_t32_prologue(hw1, hw2) and not self._followsT32Prefix(data, offset):
+                    self._bookPrologue(start + offset, True)
+                index = highs.find(1, index + 1)
 
     @staticmethod
     def _followsT32Prefix(data, offset):
@@ -1026,12 +1136,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if entry is not None:
                 # the frame push of a function entered a few instructions earlier
                 if entry not in self._strong_starts and entry not in self.candidates:
-                    self.noteMode(entry, thumb)
-                    if self.addPrologueCandidate(entry):
+                    added = self.addPrologueCandidate(entry)
+                    if added or entry in self.candidates:
+                        self.noteMode(entry, thumb)
                         self.setInitialCandidate(entry)
                 return
-        self.noteMode(addr, thumb)
-        if self.addPrologueCandidate(addr) or addr in self.candidates:
+        added = self.addPrologueCandidate(addr)
+        if added or addr in self.candidates:
+            self.noteMode(addr, thumb)
             self.setInitialCandidate(addr)
 
     def _splitsA32Prologue(self, addr, thumb):
