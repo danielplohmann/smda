@@ -110,7 +110,7 @@ class SmdaReport:
     _derefs_cache: Dict[int, List[int]]
     _rustc_path_seen: Optional[bool] = None
     _string_cache_chars = 0
-    _referenced_targets: Optional[array[int]] = None
+    _referenced_targets: "Optional[array[int]]" = None
     _length_registers: Dict[str, Dict[str, str]]
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)
