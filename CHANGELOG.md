@@ -79,6 +79,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(loaders)** Start a mapped ELF at its `PT_LOAD` segments where the sections miss them, so the ELF header is
+  mapped. With no section headers (as UPX leaves them) the base was 0; with a header-only first `PT_LOAD` (lld, no
+  `.rodata` or build-id) it sat a page above the header. Either way `disassembleBuffer` lost the header and found no
+  code or the wrong architecture. *Measured on `b34154e`:* the 18 bundled ELF fixtures with section headers zeroed
+  map at their sectioned base and size, was 3 (three overran `MAX_IMAGE_SIZE`). *Reproduced on bundled fixtures.* No
+  cost: base and functions unchanged on the shipped fixtures, 264 Debian armhf/armel and 50 x86 system ELFs.
 
 ### Security
 
