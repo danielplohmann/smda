@@ -116,10 +116,11 @@ class _ModernIdapythonInterface(BackendInterface):
         return idautils.GetIdbDir()
 
     def _cbEnumImports(self, addr, name, ordinal):
+        api_name = name or f"#{ordinal}"
         if self._import_module_name:
-            self._api_map[addr] = self._import_module_name + "!" + name
+            self._api_map[addr] = self._import_module_name + "!" + api_name
         else:
-            self._api_map[addr] = name
+            self._api_map[addr] = api_name
         return True
 
 
