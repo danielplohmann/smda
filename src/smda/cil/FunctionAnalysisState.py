@@ -102,7 +102,6 @@ class FunctionAnalysisState:
     def finalizeAnalysis(self, as_gap=False):
         self.disassembly.function_symbols[self.start_addr] = self.label
         instructions_map = self.disassembly.instructions
-        code_map = self.disassembly.code_map
         ins2fn = self.disassembly.ins2fn
         start_addr = self.start_addr
         instructions = self.instructions
@@ -118,25 +117,11 @@ class FunctionAnalysisState:
                 fn_max = ins_end
             instructions_map[ins_addr] = (ins[2], ins[1])
             for byte_addr in range(ins_addr, ins_end):
-                code_map[byte_addr] = ins_addr
                 ins2fn[byte_addr] = start_addr
         self.disassembly.function_borders[start_addr] = (fn_min, fn_max)
         self.disassembly.data_map.update(self.data_bytes)
         self.disassembly.functions[self.start_addr] = self.getBlocks()
-        code_refs_from = self.disassembly.code_refs_from
-        code_refs_to = self.disassembly.code_refs_to
-        for addr_from, dests in self.code_refs_from.items():
-            outgoing = code_refs_from.get(addr_from)
-            if outgoing is None:
-                code_refs_from[addr_from] = set(dests)
-            else:
-                outgoing.update(dests)
-            for addr_to in dests:
-                incoming = code_refs_to.get(addr_to)
-                if incoming is None:
-                    code_refs_to[addr_to] = {addr_from}
-                else:
-                    incoming.add(addr_from)
+        self.disassembly.mergeCodeRefs(self.code_refs_from)
         for dref in self.data_refs:
             self.disassembly.addDataRefs(dref[0], dref[1])
         if self.is_recursive:
