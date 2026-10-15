@@ -1,6 +1,7 @@
+import os
 import struct
 import unittest
-from tempfile import NamedTemporaryFile
+from tempfile import TemporaryDirectory
 
 import lief
 
@@ -60,10 +61,12 @@ class ArmPeSynthesisTests(unittest.TestCase):
 
         self.assertEqual(int(parsed.header.machine), MACHINE_ARM)
         self.assertEqual(parsed.optional_header.addressof_entrypoint & 1, 0)
-        with NamedTemporaryFile(suffix=".exe") as pe_file:
-            pe_file.write(synthesized)
-            pe_file.flush()
-            rebuilt = Disassembler(SmdaConfig(), backend="arm").disassembleFile(pe_file.name)
+        # an open NamedTemporaryFile cannot be opened again by name on Windows
+        with TemporaryDirectory() as tmp_dir:
+            pe_path = os.path.join(tmp_dir, "synthesized.exe")
+            with open(pe_path, "wb") as pe_file:
+                pe_file.write(synthesized)
+            rebuilt = Disassembler(SmdaConfig(), backend="arm").disassembleFile(pe_path)
         self.assertEqual(rebuilt.architecture, "arm")
         self.assertTrue(any(not function.architecture_metadata.get("thumb") for function in rebuilt.getFunctions()))
 
