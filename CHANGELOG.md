@@ -71,16 +71,13 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
-- **(utility)** `extract_strings` reads Go and Rust strings at their real length, taken from the paired length
-  load or a (pointer, length) header, decoded as UTF-8; `data_addr` is the string's address either way. Adds
-  `mode="rust"`, picked with no mode when the Rust score and a `/rustc/<commit>/` path agree; Go mode still needs
-  a pclntab. A reference without a usable length keeps the NUL-terminated read, stopped at the next referenced
-  address. *Measured on `24d3bdf`, bundled fixtures, not yet reproduced:* `rust_pe_gnu` 2657 -> 2909 refs,
-  strings over 200 chars 820 -> 1, all 7 MinGW CRT strings whole, synthesis plants all 1513 strings intact; 3
-  master refs lost, all pointer bytes. Cost: `mirai_x64` with an in-image `/rustc/` path runs in Rust mode,
-  162 -> 166 refs, 1 pointer read lost, 16 shortened (11 tail-merged C strings cut where a referenced suffix
-  starts, `"\r\n"` -> `"\r"`; 5 table entries read at the length passed with them); a planted `Go build ID`
-  leaves it identical. String extraction on `rust_pe_gnu` takes about 0.5 s longer than on master (4.5 s). (#382)
+- **(utility)** `extract_strings` reads Go and Rust strings at their real length, from the paired length load or a
+  (pointer, length) header, as UTF-8, with `data_addr` on the string. Adds `mode="rust"`, picked when the Rust score
+  and a `/rustc/<commit>/` path agree; Go mode still needs a pclntab. A reference without a usable length keeps the
+  NUL-terminated read, stopped at the next referenced address. *Measured on `0575a23`, reproduced by reviewer on
+  bundled fixtures:* `rust_pe_gnu` 2657 -> 2909 refs, strings over 200 chars 820 -> 1, 3 pointer reads lost. Cost:
+  an in-image `/rustc/` path puts `mirai_x64` in Rust mode and shortens 16 of its 162 strings (tail-merged C strings
+  such as `"\r\n"` -> `"\r"`); string extraction on `rust_pe_gnu` went 0.66 s -> 1.12 s on the reviewer's machine. (#382)
 
 ### Changed
 
@@ -89,6 +86,11 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(utility)** Go mode no longer loses the whole report to an `OverflowError` when a string header's length word is
+  out of range; sized reads stop at 64 KiB. Lengths that cut a C string short now fall back to it, so cgo code keeps
+  `open("/dev/watchdog", 2)` whole. *Bundled fixtures with a pclntab header planted in padding:* `mirai_x64` errored
+  on master and now has 125 refs (162 unplanted); in Go mode 1-character reads are dropped. *go1.24.7 amd64 and 386
+  builds, not bundled, not reproduced:* unchanged by the fallback, 4 two-character reads gained on 386. (#382)
 
 ### Security
 
