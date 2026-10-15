@@ -1,4 +1,5 @@
 import datetime
+import gc
 import hashlib
 import logging
 import traceback
@@ -170,6 +171,10 @@ class Disassembler:
             self._extractStrings(smda_report, mode=mode)
         finally:
             smda_report.buffer = previous_buffer
+            # both are built from this buffer and would otherwise live as long as the report
+            smda_report._referenced_targets = None
+            smda_report._string_cache.clear()
+            smda_report._string_cache_chars = 0
 
     #: backends that record non-buffer-backed strings via disassembly.addStringRef
     #: (the string only exists as a runtime/decode-time side effect, e.g. CIL's
@@ -378,8 +383,17 @@ class Disassembler:
         self._timeout_reported = False
         self._ensureHashes(binary_info)
         if self.disassembler:
-            self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
-            return SmdaReport(self.disassembly, config=self.config)
+            # analysis builds millions of long-lived objects and almost no reference cycles, so
+            # every full collection the allocations trigger walks the whole growing heap for
+            # nothing; on large images that was a third of the run time
+            collecting = gc.isenabled()
+            gc.disable()
+            try:
+                self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
+                return SmdaReport(self.disassembly, config=self.config)
+            finally:
+                if collecting:
+                    gc.enable()
         if not binary_info.has_backend:
             if not binary_info.architecture:
                 if binary_info.format_recognized:

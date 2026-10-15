@@ -36,6 +36,8 @@ compatible with the documented self-pointer scheme.
 import logging
 import struct
 from dataclasses import dataclass, field
+from itertools import compress
+from operator import eq, itemgetter
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import lief
@@ -232,15 +234,26 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         self, profile: DelphiVmtProfile, start_offset: int, end_offset: int
     ) -> Iterable[DelphiClassInfo]:
         """Yield validated VMTs from a single code range."""
-        current_offset = self._align_offset(start_offset, profile.ptr_size)
-        upper_bound = end_offset - profile.ptr_size
-        while current_offset <= upper_bound:
-            target_addr = self._read_ptr(current_offset, profile.ptr_size)
-            if target_addr == self._offset_to_addr(current_offset + profile.self_ptr_distance):
-                class_info = self._build_class_info(profile, current_offset, end_offset)
-                if class_info is not None:
-                    yield class_info
-            current_offset += profile.ptr_size
+        ptr_size = profile.ptr_size
+        first_offset = self._align_offset(start_offset, ptr_size)
+        scan_end = first_offset + max(0, min(end_offset, len(self._binary)) - first_offset) // ptr_size * ptr_size
+        # a slot is a candidate when it holds its own address plus the self-pointer distance.
+        # The slots are compared in C: one Python-level read per slot made this scan dominate
+        # the analysis of large images that are not Delphi but contain the string "TObject".
+        slot_values = map(
+            itemgetter(0),
+            struct.iter_unpack("<I" if ptr_size == 4 else "<Q", memoryview(self._binary)[first_offset:scan_end]),
+        )
+        self_ptr_values = range(
+            self._offset_to_addr(first_offset + profile.self_ptr_distance),
+            self._offset_to_addr(scan_end + profile.self_ptr_distance),
+            ptr_size,
+        )
+        candidate_offsets = range(first_offset, scan_end, ptr_size)
+        for candidate_offset in compress(candidate_offsets, map(eq, slot_values, self_ptr_values)):
+            class_info = self._build_class_info(profile, candidate_offset, end_offset)
+            if class_info is not None:
+                yield class_info
 
     @staticmethod
     def _align_offset(offset: int, alignment: int) -> int:
