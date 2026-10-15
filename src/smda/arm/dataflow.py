@@ -17,41 +17,6 @@ from .definitions import CALL_BASES, LOAD_MULTIPLE_BASES, split_mnemonic
 
 _MASK = 0xFFFFFFFF
 _CALLER_SAVED = ("r0", "r1", "r2", "r3", "ip", "lr")
-#: bases whose first register operand is read rather than written
-_NON_WRITING_BASES = frozenset(
-    {
-        "cmp",
-        "cmn",
-        "tst",
-        "teq",
-        "b",
-        "bx",
-        "bxj",
-        "cbz",
-        "cbnz",
-        "tbb",
-        "tbh",
-        "it",
-        "nop",
-        "push",
-        "vpush",
-        "pld",
-        "pldw",
-        "pli",
-        "svc",
-        "bkpt",
-        "udf",
-        "dmb",
-        "dsb",
-        "isb",
-        "msr",
-        "vmsr",
-        "mcr",
-        "mcrr",
-        "setend",
-        "cps",
-    }
-)
 _REGISTER_ALIASES = {"r9": "sb", "r10": "sl", "r11": "fp", "r12": "ip", "r13": "sp", "r14": "lr", "r15": "pc"}
 
 
@@ -65,8 +30,14 @@ def pc_value(address, thumb, aligned=False):
     return address + 8
 
 
-def _is_store(base):
-    return base.startswith(("str", "stm", "stl", "vst")) or base in ("srsda", "srsdb", "srsia", "srsib")
+def written_registers(ins, base=None):
+    base = split_mnemonic(ins.mnemonic)[0] if base is None else base
+    registers = {norm_reg(ins.reg_name(reg)) for reg in ins.regs_access()[1]}
+    if base in CALL_BASES:
+        registers.update(_CALLER_SAVED)
+    if base in ("mrc", "mrc2", "mrrc", "mrrc2"):
+        registers.update(norm_reg(ins.reg_name(operand.reg)) for operand in ins.operands if operand.type == ARM_OP_REG)
+    return registers
 
 
 class RegisterTracker:
@@ -135,36 +106,15 @@ class RegisterTracker:
         base, condition, _sets_flags = split_mnemonic(mnemonic or ins.mnemonic)
         operands = ins.operands
         conditional = condition is not None and condition != "al"
-        if base in CALL_BASES:
-            for reg in _CALLER_SAVED:
-                self._kill(reg)
-            return
-        if base in LOAD_MULTIPLE_BASES or base in ("vpop",):
-            for operand in operands:
-                if operand.type == ARM_OP_REG:
-                    self._kill(norm_reg(ins.reg_name(operand.reg)))
-            return
-        if not operands or operands[0].type != ARM_OP_REG:
-            return
-        if base in _NON_WRITING_BASES or _is_store(base):
-            self._killWriteback(ins)
-            return
-        dest = norm_reg(ins.reg_name(operands[0].reg))
-        value, slot = self._evaluate(ins, base, operands, dest)
-        self._killWriteback(ins)
+        dest = norm_reg(ins.reg_name(operands[0].reg)) if operands and operands[0].type == ARM_OP_REG else None
+        value, slot = self._evaluate(ins, base, operands, dest) if dest is not None else (None, None)
+        for reg in written_registers(ins, base):
+            self._kill(reg)
         if conditional or value is None:
-            self._kill(dest)
             return
         self._set(dest, value)
         if slot is not None:
             self.slots[dest] = slot
-
-    def _killWriteback(self, ins):
-        if not ins.writeback:
-            return
-        for operand in ins.operands:
-            if operand.type == ARM_OP_MEM:
-                self._kill(norm_reg(ins.reg_name(operand.mem.base)))
 
     def _evaluate(self, ins, base, operands, dest):
         count = len(operands)

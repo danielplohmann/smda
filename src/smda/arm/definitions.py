@@ -76,10 +76,10 @@ def split_mnemonic(mnemonic):
         result = (head + suffix, None, False)
     else:
         rest, condition = head[:-2], head[-2:]
-        if condition in CONDITION_CODES and rest in BASE_MNEMONICS:
-            result = (rest + suffix, condition, False)
-        elif condition in CONDITION_CODES and rest.endswith("s") and rest[:-1] in BASE_MNEMONICS:
+        if condition in CONDITION_CODES and rest.endswith("s") and rest[:-1] in BASE_MNEMONICS:
             result = (rest[:-1] + suffix, condition, True)
+        elif condition in CONDITION_CODES and rest in BASE_MNEMONICS:
+            result = (rest + suffix, condition, False)
         elif head.endswith("s") and head[:-1] in BASE_MNEMONICS:
             result = (head[:-1] + suffix, None, True)
     _SPLIT_MEMO[mnemonic] = result
@@ -364,13 +364,15 @@ def is_t32_prologue(hw1, hw2=None):
 
 def is_return_instruction(mnemonic, op_str):
     """Whether an instruction returns through lr or pops the return address into pc."""
-    base, _condition, _sets_flags = split_mnemonic(mnemonic)
+    base, _condition, sets_flags = split_mnemonic(mnemonic)
     if base in ("bx", "bxns"):
         return op_str.strip() == "lr"
     if base in LOAD_MULTIPLE_BASES:
         return "pc" in op_str and (base == "pop" or op_str.startswith("sp"))
     if base == "mov":
         return op_str.replace(" ", "") == "pc,lr"
+    if sets_flags and op_str.startswith("pc,") and "lr" in (operand.strip() for operand in op_str.split(",")[1:]):
+        return True
     return base == "ldr" and op_str.startswith("pc, [sp")
 
 

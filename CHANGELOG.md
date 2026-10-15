@@ -86,6 +86,17 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(arm)** Invalidate every overwritten register during indirect-target recovery, including multi-register loads,
+  long multiplies, coprocessor reads and store-exclusive status writes. Switch recovery no longer truncates tables
+  using a comparison of an index that was subsequently changed, and conditional exception returns retain their
+  fallthrough. Reproduced by public-API and instruction-level regression tests; unknown switch bounds use the
+  existing bounded conservative scan, which can recover additional candidate cases.
+- **(arm)** Bound scanned-target mode and strong-start metadata alongside function candidates, and poll for timeout
+  within call, prologue and mode-evidence scans. The regression input with a candidate cap of two now retains only
+  two scanned targets instead of 16,382 auxiliary entries; cancellation tests use callbacks rather than timing.
+- **(arm)** Match synthesized PE machine types and entry-point tags to the recovered instruction sets, and distinguish
+  argument-setting wrappers from PLT/IAT thunks using their register and transfer operands. Regression tests cover
+  A32, Thumb and mixed-mode reports, source headers, genuine import stubs and wrappers.
 
 ### Security
 

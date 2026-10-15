@@ -8,9 +8,9 @@ import logging
 import math
 from collections import Counter
 
-from capstone.arm_const import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG
+from capstone.arm_const import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG, ARM_SFT_INVALID
 
-from .dataflow import RegisterTracker, decode, norm_reg, pc_value, precedingInstructions, track
+from .dataflow import RegisterTracker, decode, norm_reg, pc_value, precedingInstructions, track, written_registers
 from .definitions import split_mnemonic
 
 LOGGER = logging.getLogger(__name__)
@@ -524,12 +524,8 @@ class ArmJumpTableAnalyzer:
     def _lastWriter(context, register):
         for pair in reversed(context):
             detailed = pair[1]
-            if not detailed.operands or detailed.operands[0].type != ARM_OP_REG:
-                continue
             base = split_mnemonic(pair[0][2])[0]
-            if base in ("cmp", "cmn", "tst", "teq") or base.startswith("str"):
-                continue
-            if norm_reg(detailed.reg_name(detailed.operands[0].reg)) == register:
+            if register in written_registers(detailed, base):
                 return pair
         return None
 
@@ -680,23 +676,50 @@ class ArmJumpTableAnalyzer:
             if base == "b" and branch in _BOUND_BRANCHES:
                 condition = branch
                 continue
-            if first_reg is None:
-                continue
+            writes = written_registers(detailed, base)
+            if "sp" in writes:
+                slots.clear()
             if base == "str" and len(operands) == 2 and operands[1].type == ARM_OP_MEM:
                 memory = operands[1]
-                if norm_reg(detailed.reg_name(memory.mem.base)) == "sp" and memory.mem.disp in slots:
+                if (
+                    norm_reg(detailed.reg_name(memory.mem.base)) == "sp"
+                    and not memory.mem.index
+                    and memory.mem.disp in slots
+                ):
+                    slots.discard(memory.mem.disp)
+                    if branch not in (None, "al"):
+                        return 0
                     if first_reg in compared:
                         return compared[first_reg]
                     tracked.add(first_reg)
                 continue
-            compared.pop(first_reg, None)
-            if base == "ldr" and first_reg in tracked and len(operands) == 2 and operands[1].type == ARM_OP_MEM:
+            for reg in writes:
+                compared.pop(reg, None)
+            if (
+                base == "ldr"
+                and branch in (None, "al")
+                and first_reg in tracked
+                and len(operands) == 2
+                and operands[1].type == ARM_OP_MEM
+                and not detailed.writeback
+            ):
                 memory = operands[1]
                 if norm_reg(detailed.reg_name(memory.mem.base)) == "sp" and not memory.mem.index:
                     slots.add(memory.mem.disp)
                     tracked.discard(first_reg)
-                continue
-            if base == "mov" and first_reg in tracked and len(operands) == 2 and operands[1].type == ARM_OP_REG:
+                    continue
+            if (
+                base == "mov"
+                and branch in (None, "al")
+                and first_reg in tracked
+                and len(operands) == 2
+                and operands[1].type == ARM_OP_REG
+                and operands[1].shift.type == ARM_SFT_INVALID
+            ):
                 tracked.discard(first_reg)
                 tracked.add(norm_reg(detailed.reg_name(operands[1].reg)))
+                continue
+            tracked.difference_update(writes)
+            if not tracked and not slots:
+                return 0
         return 0
