@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 from smda.ida import IdaDomainInterface as ida_domain_backend
+from smda.ida import IdaIdapythonInterface as idapython_backend
 from smda.ida import IdaInterface as ida_compatibility
 from smda.ida.IdaDomainInterface import IdaDomainInterface
 from smda.ida.IdaIdapythonInterface import Ida84Interface, Ida85Interface
@@ -239,6 +240,21 @@ class TestIdaDomainInterface(unittest.TestCase):
                 0x3000: "symbol",
             },
         )
+
+    def test_idapython_import_map_matches_domain_for_unnamed_ordinal_imports(self):
+        modules = [
+            ("kernel32.dll", [(0x1000, "CreateFileW", 0)]),
+            ("test.dll", [(0x2000, None, 7)]),
+            ("", [(0x3000, "symbol", 0)]),
+        ]
+        fake_nalt = types.SimpleNamespace(
+            get_import_module_qty=lambda: len(modules),
+            get_import_module_name=lambda index: modules[index][0],
+            enum_import_names=lambda index, callback: all(callback(*entry) for entry in modules[index][1]),
+        )
+        with mock.patch.object(idapython_backend, "ida_nalt", fake_nalt, create=True):
+            api_map = Ida85Interface().getApiMap()
+        self.assertEqual(api_map, IdaDomainInterface(database=_FakeDatabase()).getApiMap())
 
     def test_injected_database_is_not_closed(self):
         database = _FakeDatabase()

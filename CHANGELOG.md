@@ -126,6 +126,10 @@ past roughly six lines it belongs in the PR the entry links.
   linux/amd64 fixture so Go mode is tested on a real pclntab. *Bundled fixtures:* `mirai_x64` with a planted pclntab
   header or `/rustc/` path keeps `url=` and `Cookie: ` (3 refs longer); `rust_pe_gnu` and the Go fixture are
   unchanged. Chains of suffixes (`"\r\n\r\n"`, `"\r\n"`, `"\n"`) are still cut. (#402)
+- **(ida)** The IDAPython backend no longer fails the whole export when IDA passes no name for an import by ordinal.
+  `_cbEnumImports` concatenated the missing name and raised `TypeError`; it now writes `module!#<ordinal>`, as the
+  `ida_domain` backend already does. A stubbed `enum_import_names` test reproduces it. IDA 9.4 names such an import
+  itself (`mcritord_23`), so it is not known which IDA versions reach the error. No recovery output changes. (#400)
 
 ### Security
 
