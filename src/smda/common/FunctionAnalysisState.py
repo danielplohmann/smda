@@ -7,9 +7,14 @@ basic-block boundary decisions.
 """
 
 import logging
+import sys
 from operator import itemgetter
 
 LOGGER = logging.getLogger(__name__)
+
+# one shared (mnemonic, size) tuple per distinct pair, so the per-address map of a large image
+# holds references instead of millions of equal tuples; bounded by the instruction set
+_INSTRUCTION_SHAPES = {}
 
 
 class FunctionAnalysisState:
@@ -84,7 +89,8 @@ class FunctionAnalysisState:
         self.current_block = []
 
     def addInstruction(self, i_address, i_size, i_mnemonic, i_op_str, i_bytes):
-        ins = (i_address, i_size, i_mnemonic, i_op_str, i_bytes)
+        # a few hundred distinct mnemonics spread over millions of instructions in a large image
+        ins = (i_address, i_size, sys.intern(i_mnemonic), i_op_str, i_bytes)
         self.instructions.append(ins)
         self._instructions_sorted = False
         self.instruction_start_bytes.add(i_address)
@@ -179,7 +185,7 @@ class FunctionAnalysisState:
     def _finalizeRegularAnalysis(self):
         self.disassembly.function_symbols[self.start_addr] = self.label
         instructions_map = self.disassembly.instructions
-        code_map = self.disassembly.code_map
+        shapes = _INSTRUCTION_SHAPES
         ins2fn = self.disassembly.ins2fn
         start_addr = self.start_addr
         instructions = self.instructions
@@ -193,27 +199,14 @@ class FunctionAnalysisState:
                 fn_min = ins_addr
             if ins_end > fn_max:
                 fn_max = ins_end
-            instructions_map[ins_addr] = (ins[2], ins[1])
+            shape = (ins[2], ins[1])
+            instructions_map[ins_addr] = shapes.setdefault(shape, shape)
             for byte_addr in range(ins_addr, ins_end):
-                code_map[byte_addr] = ins_addr
                 ins2fn[byte_addr] = start_addr
         self.disassembly.function_borders[start_addr] = (fn_min, fn_max)
         self.disassembly.data_map.update(self.data_bytes)
         self.disassembly.functions[self.start_addr] = self.getBlocks()
-        code_refs_from = self.disassembly.code_refs_from
-        code_refs_to = self.disassembly.code_refs_to
-        for addr_from, dests in self.code_refs_from.items():
-            outgoing = code_refs_from.get(addr_from)
-            if outgoing is None:
-                code_refs_from[addr_from] = set(dests)
-            else:
-                outgoing.update(dests)
-            for addr_to in dests:
-                incoming = code_refs_to.get(addr_to)
-                if incoming is None:
-                    code_refs_to[addr_to] = {addr_from}
-                else:
-                    incoming.add(addr_from)
+        self.disassembly.mergeCodeRefs(self.code_refs_from)
         for dref in self.data_refs:
             self.disassembly.addDataRefs(dref[0], dref[1])
         if self.is_recursive:
@@ -275,7 +268,6 @@ class FunctionAnalysisState:
         for ins in self.instructions:
             self.disassembly.instructions.pop(ins[0], None)
             for byte in range(ins[1]):
-                self.disassembly.code_map.pop(ins[0] + byte, None)
                 self.disassembly.ins2fn.pop(ins[0] + byte, None)
         for addr_from, dests in self.code_refs_from.items():
             for addr_to in dests:

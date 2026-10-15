@@ -9,6 +9,7 @@ import lief
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.lief_helper import lief_name, safe_lief_parse
 from smda.utility.MachoFileLoader import MachoFileLoader
 
@@ -141,6 +142,11 @@ class BinaryInfo:
                 self._lief_binary = MachoFileLoader.parseBinary(binary_data)
             else:
                 self._lief_binary = safe_lief_parse(binary_data)
+                if self.is_buffer:
+                    # a mapped ELF image has to be read through its file layout
+                    file_view = ElfFileLoader.unmapImage(binary_data, self._lief_binary)
+                    if file_view:
+                        self._lief_binary = safe_lief_parse(file_view) or self._lief_binary
         return self._lief_binary
 
     def getOep(self):

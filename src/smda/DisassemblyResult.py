@@ -3,6 +3,75 @@ import struct
 
 from smda.common.BasicBlock import BasicBlock
 
+_MISSING = object()
+
+
+class AddressRefs(dict):
+    """Maps an address to the set of addresses it references, or is referenced by.
+
+    Nearly every instruction has exactly one entry here, its fall-through, and a set holding a
+    single address costs 216 bytes. A lone address is therefore stored bare and only becomes a
+    set once a second one arrives. Lookups, items() and values() still return a set, a frozenset
+    for a lone address; change entries through add() and discard(). The remaining dict methods
+    see the stored form.
+    """
+
+    __slots__ = ()
+
+    def __reduce__(self):
+        # dict(self) copies the stored form; pickling through items() would store frozensets
+        return self.__class__, (dict(self),)
+
+    def copy(self):
+        return self.__class__(self)
+
+    def __getitem__(self, addr):
+        refs = dict.__getitem__(self, addr)
+        return frozenset((refs,)) if refs.__class__ is int else refs
+
+    def get(self, addr, default=None):
+        refs = dict.get(self, addr, _MISSING)
+        if refs is _MISSING:
+            return default
+        return frozenset((refs,)) if refs.__class__ is int else refs
+
+    def items(self):
+        for addr, refs in dict.items(self):
+            yield addr, frozenset((refs,)) if refs.__class__ is int else refs
+
+    def values(self):
+        for refs in dict.values(self):
+            yield frozenset((refs,)) if refs.__class__ is int else refs
+
+    def __eq__(self, other):
+        if not isinstance(other, dict):
+            return NotImplemented
+        return len(self) == len(other) and all(addr in other and other[addr] == refs for addr, refs in self.items())
+
+    def __ne__(self, other):
+        equal = self.__eq__(other)
+        return equal if equal is NotImplemented else not equal
+
+    __hash__ = None
+
+    def add(self, addr, ref):
+        refs = dict.get(self, addr)
+        if refs is None:
+            dict.__setitem__(self, addr, ref)
+        elif refs.__class__ is int:
+            if refs != ref:
+                dict.__setitem__(self, addr, {refs, ref})
+        else:
+            refs.add(ref)
+
+    def discard(self, addr, ref):
+        """Remove ref from addr's entry, leaving an empty set behind as a set.discard() would."""
+        refs = dict.get(self, addr)
+        if refs is None or refs == ref:
+            dict.__setitem__(self, addr, set())
+        elif refs.__class__ is not int:
+            refs.discard(ref)
+
 
 class DisassemblyResult:
     def __init__(self):
@@ -12,7 +81,6 @@ class DisassemblyResult:
         self.binary_info = None
         self.identified_alignment = 0
         self.oep = None
-        self.code_map = {}
         self.data_map = set()
         # key: offset, value: {"type": <str>, "instruction_bytes": <hexstr>}
         self.errors = {}
@@ -27,13 +95,14 @@ class DisassemblyResult:
         self.function_metadata = {}
         # stored as key: int(i.address) = (i.size, i.mnemonic, i.op_str)
         self.instructions = {}
+        # key: every byte of every recovered instruction, value: start of the owning function
         self.ins2fn = {}
         self.language = {}
         self.language_guess = None
         self.data_refs_from = {}
         self.data_refs_to = {}
-        self.code_refs_from = {}
-        self.code_refs_to = {}
+        self.code_refs_from = AddressRefs()
+        self.code_refs_to = AddressRefs()
         # key: address of API in target DLL, value: {referencing_addr, api_name, dll_name}
         self.apis = {}
         # key: address of the pointer slot an API was reached through, value: (dll_name, api_name)
@@ -49,6 +118,15 @@ class DisassemblyResult:
         self._confidence_threshold = 0.0
         self.code_areas = []
         self.smda_version = ""
+
+    @property
+    def code_map(self):
+        """The bytes covered by recovered instructions.
+
+        This was a second per-byte dict next to ins2fn, holding the same keys; only membership
+        was ever asked of it.
+        """
+        return self.ins2fn
 
     def setBinaryInfo(self, binary_info):
         self.binary_info = binary_info
@@ -229,24 +307,21 @@ class DisassemblyResult:
         return None
 
     def addCodeRefs(self, addr_from, addr_to):
-        refs_from = self.code_refs_from.get(addr_from)
-        if refs_from is None:
-            self.code_refs_from[addr_from] = {addr_to}
-        else:
-            refs_from.add(addr_to)
-        refs_to = self.code_refs_to.get(addr_to)
-        if refs_to is None:
-            self.code_refs_to[addr_to] = {addr_from}
-        else:
-            refs_to.add(addr_from)
+        self.code_refs_from.add(addr_from, addr_to)
+        self.code_refs_to.add(addr_to, addr_from)
+
+    def mergeCodeRefs(self, code_refs_from):
+        """Add every edge of a function's {addr_from: {addr_to}} map."""
+        add_from = self.code_refs_from.add
+        add_to = self.code_refs_to.add
+        for addr_from, dests in code_refs_from.items():
+            for addr_to in dests:
+                add_from(addr_from, addr_to)
+                add_to(addr_to, addr_from)
 
     def removeCodeRefs(self, addr_from, addr_to):
-        refs_from = self.code_refs_from.get(addr_from, set())
-        refs_from.discard(addr_to)
-        self.code_refs_from[addr_from] = refs_from
-        refs_to = self.code_refs_to.get(addr_to, set())
-        refs_to.discard(addr_from)
-        self.code_refs_to[addr_to] = refs_to
+        self.code_refs_from.discard(addr_from, addr_to)
+        self.code_refs_to.discard(addr_to, addr_from)
 
     def addDataRefs(self, addr_from, addr_to):
         refs_from = self.data_refs_from.get(addr_from)
@@ -316,9 +391,12 @@ class DisassemblyResult:
         for block in blocks:
             for ins in block:
                 ins_addr = ins[0]
-                dests = code_refs_from.get(ins_addr)
+                # the stored form, so the lone fall-through of each instruction is not boxed
+                dests = dict.get(code_refs_from, ins_addr)
                 if dests is None:
                     continue
+                if dests.__class__ is int:
+                    dests = (dests,)
                 external = [
                     to_addr for to_addr in dests if base_addr <= to_addr < max_addr and to_addr not in ins_addrs
                 ]

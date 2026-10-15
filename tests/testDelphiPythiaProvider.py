@@ -109,6 +109,24 @@ class TestDelphiPythiaProvider(unittest.TestCase):
         self.assertIn(0x401310, symbols)
         self.assertIn(0x401350, symbols)
 
+    def test_code_scan_does_not_read_every_slot_individually(self):
+        # one Python-level read per pointer slot made this scan dominate the analysis of large
+        # images that merely contain the string "TObject"; the 0x1000-byte code area has 0x400
+        # slots, while validating the two planted VMTs takes a few dozen reads
+        provider = DelphiPythiaProvider(None)
+        reads = []
+        read_ptr = provider._read_ptr
+
+        def countingReadPtr(offset, ptr_size):
+            reads.append(offset)
+            return read_ptr(offset, ptr_size)
+
+        provider._read_ptr = countingReadPtr
+        provider.update(self._build_binary_info())
+
+        self.assertIn(0x401390, provider.getFunctionSymbols())
+        self.assertLess(len(reads), 0x1000 // 4)
+
     def test_provider_rejects_false_positive_candidate(self):
         provider = DelphiPythiaProvider(None)
         provider.update(self._build_binary_info(invalid_method_ptr=True))

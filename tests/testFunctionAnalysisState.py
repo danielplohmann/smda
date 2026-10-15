@@ -6,7 +6,7 @@ from smda.common.BinaryInfo import BinaryInfo
 from smda.common.FunctionAnalysisState import FunctionAnalysisState
 from smda.common.FunctionCandidateManager import FunctionCandidateManager
 from smda.dalvik.DalvikFunctionAnalysisState import DalvikFunctionAnalysisState
-from smda.DisassemblyResult import DisassemblyResult
+from smda.DisassemblyResult import AddressRefs, DisassemblyResult
 from smda.SmdaConfig import SmdaConfig
 
 
@@ -169,8 +169,10 @@ class _RecordingDisassembly:
         self.recursive_functions = set()
         self.leaf_functions = set()
         self.thunk_functions = set()
-        self.code_refs_from = {}
-        self.code_refs_to = {}
+        self.code_refs_from = AddressRefs()
+        self.code_refs_to = AddressRefs()
+
+    mergeCodeRefs = DisassemblyResult.mergeCodeRefs
 
     def addCodeRefs(self, addr_from, addr_to):
         pass

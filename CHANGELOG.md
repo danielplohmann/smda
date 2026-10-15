@@ -73,12 +73,36 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(core)** Keep the per-instruction state of large images compact: a lone code reference is stored bare, not in a
+  one-element set (`AddressRefs`), `code_map` reads `ins2fn`, mnemonics are interned and pointer escaping drops the
+  capstone detail. *Measured on `af37541`, not bundled:* RSS after analysis libjvm.so 7,289 to 4,015 MB. *Reproduced
+  by reviewer:* peak RSS -26 to -35% on libpython3.14.so, libcrypto.so.3 and an x64 and an ARM64 PE, CPU 1-7% lower,
+  reports identical. Cost: `code_map` can no longer be assigned, writes through it land in `ins2fn`, and its values
+  are function starts; lone `code_refs_from`/`code_refs_to` entries read as frozensets that only `add()` and
+  `discard()` change. (#396)
+- **(core)** Suspend the cyclic garbage collector while a buffer is analysed. Analysis builds millions of long-lived
+  objects and almost no cycles, so every full collection walked the growing heap and freed nothing. *Measured on
+  `af37541`, not bundled, reproduced by reviewer:* analysis CPU on libpython -27% under CPython 3.12 (14.4 to 10.5 s),
+  -5 to -7% under 3.14, whose incremental collector already does less; reports identical. Cost: the collector is off
+  process-wide during analysis, and a `toDict()` right after pays one heap walk (1.0 to 2.2 s on 3.12). (#396)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- **(loaders)** Start a mapped ELF at its `PT_LOAD` segments where the sections miss them, so the ELF header is
+  mapped. With no section headers (as UPX leaves them) the base was 0; with a header-only first `PT_LOAD` (lld, no
+  `.rodata` or build-id) it sat a page above the header. Either way `disassembleBuffer` lost the header and found no
+  code or the wrong architecture. *Measured on `b34154e`:* the 18 bundled ELF fixtures with section headers zeroed
+  map at their sectioned base and size, was 3 (three overran `MAX_IMAGE_SIZE`). *Reproduced on bundled fixtures.* No
+  cost: base and functions unchanged on the shipped fixtures, 264 Debian armhf/armel and 50 x86 system ELFs.
+- **(loaders)** Keep a mapped ELF buffer's dynamic symbols. lief read `disassembleBuffer()`'s image by file offset and
+  so missed the dynamic table of any segment mapped above its offset; `ElfFileLoader.unmapImage` now rebuilds the file
+  layout from the PT_LOADs when the table is found at its address but not at its offset. *Measured on `af37541`:* 7
+  built x86/x64/AArch64 libraries, exported-function labels in buffer mode 0 -> 33 (file 33); the ELF fixtures gain
+  their imports in buffer mode (19, 16, 3), functions/blocks/instructions bit-identical on every pre-existing fixture
+  in every mode. *Reproduced on bundled fixtures.* Cost: one extra lief parse per mapped ELF buffer.
 - **(intel)** Keep the body behind an early `ret` in its function when the body is analyzed first. A body whose
   prologue outranked its entry in the candidate order was a function by the time the entry's jcc reached it; the jcc
   now takes it back when the entry's own code runs without a gap into the `ret` in front of it, at most 0x100 bytes
