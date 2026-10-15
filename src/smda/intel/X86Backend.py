@@ -34,6 +34,9 @@ LOGGER = logging.getLogger(__name__)
 _ENTRY_ALIGNMENT = 16
 # the filler a compiler pads up to an aligned function entry with
 _ALIGNMENT_PADDING = frozenset((0xCC, 0x90))
+# how far behind its entry an early-return body is taken back from a function of its own
+_BODY_REACH = 0x100
+_RET = 0xC3
 
 # a call/jmp through a pointer slot the sample computes itself ("dword ptr [ebx + 0x2c]"),
 # the shape a runtime-built import table is used through. An index register is excluded on
@@ -407,8 +410,17 @@ class X86Backend(ArchBackend):
         d.tailcall_analyzer.addJump(i_address, jump_destination)
         if jump_destination:
             if jump_destination in d.disassembly.functions:
-                # case = "TAILCALL!"
-                state.setSanelyEnding(True)
+                if (
+                    self._isEvidencedEntry(d, jump_destination)
+                    or not self._isBodyBehindReturn(d, jump_destination, state.start_addr, i_address + i_size)
+                    or not d.absorbFunction(jump_destination, state)
+                ):
+                    # case = "TAILCALL!"
+                    state.setSanelyEnding(True)
+                else:
+                    # case = "BODY-ANALYZED-FIRST": the body's prologue ranked it ahead of this
+                    # function in the candidate order; it is undone and decoded here instead
+                    state.addBlockToQueue(jump_destination)
             elif jump_destination in d.fc_manager.getFunctionStartCandidates() and self._isEvidencedEntry(
                 d, jump_destination
             ):
@@ -437,6 +449,31 @@ class X86Backend(ArchBackend):
         if candidate is None or candidate.hasEntryEvidence():
             return True
         return addr % _ENTRY_ALIGNMENT == 0 and d.disassembly.getByte(addr - 1) in _ALIGNMENT_PADDING
+
+    @staticmethod
+    def _isBodyBehindReturn(d, addr, start_addr, fall_through):
+        """Whether a function the jcc reaches sits where an early-return body does.
+
+        The body follows the `ret` of the check right after the entry: the code from the jcc's
+        fall-through decodes without a gap up to the body, ends in that `ret`, and holds no
+        padding and no start of another function. A function further away, before the entry,
+        behind padding (`_ftol2` behind `lea ecx, [ecx]`, a hotpatchable `mov edi, edi` entry)
+        or behind a function of its own is kept even without evidence.
+        """
+        if not 0 < addr - start_addr <= _BODY_REACH or not start_addr < fall_through < addr:
+            return False
+        if d.disassembly.getByte(addr - 1) != _RET:
+            return False
+        binary_info = d.disassembly.binary_info
+        code = binary_info.binary[fall_through - binary_info.base_addr : addr - binary_info.base_addr]
+        functions = d.disassembly.functions
+        end = fall_through
+        mnemonic = None
+        for i_address, i_size, mnemonic, _ in d.capstone.disasm_lite(code, fall_through):
+            if i_address != end or i_address in functions or mnemonic in ("int3", "nop"):
+                return False
+            end += i_size
+        return end == addr and mnemonic is not None and mnemonic.split(" ")[-1] == "ret"
 
     def _analyzeLoopInstruction(self, d, i, state):
         i_address, i_size, i_mnemonic, i_op_str = i

@@ -6,14 +6,18 @@ falls through into them, so they are the body of the function that starts at the
 """
 
 import unittest
+from struct import pack
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
 
 from smda.aarch64.definitions import direct_branch_target, flows_into, is_frame_setup
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.RecursiveDisassembler import RecursiveDisassembler
 from smda.Disassembler import Disassembler
+from smda.intel.FunctionCandidateManager import FunctionCandidateManager as IntelFunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
 from tests.testAArch64HoistedGuardEntry import REGION, SCAFFOLD_ENTRIES, _disassemble, _render, _scaffold
 
@@ -243,10 +247,10 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
 
     HOST = 0x40
 
-    def _image(self, host=HOST):
+    def _image(self, host=HOST, calls=8):
         image = bytearray(b"\xcc" * 0x80)
         caller = bytearray()
-        for _ in range(8):  # enough call references to put the host ahead of the body's prologue
+        for _ in range(calls):  # 5 or more put the host ahead of the body's prologue in the order
             caller += b"\xe8" + (host - (len(caller) + 5)).to_bytes(4, "little", signed=True)
         caller += b"\xc3"
         image[: len(caller)] = caller
@@ -262,10 +266,10 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
         image[host : host + len(body)] = body
         return bytes(image)
 
-    def _assertTheBodyStaysInTheFunction(self, host):
+    def _assertTheBodyStaysInTheFunction(self, host, calls=8):
         config = SmdaConfig()
         config.WITH_STRINGS = False
-        report = Disassembler(config).disassembleBuffer(self._image(host), 0x1000, bitness=32)
+        report = Disassembler(config).disassembleBuffer(self._image(host, calls), 0x1000, bitness=32)
         self.assertEqual(report.status, "ok")
         functions = {function.offset - 0x1000: function for function in report.getFunctions()}
         self.assertNotIn(host + 7, functions)
@@ -278,6 +282,13 @@ class X86BodyBehindAnEarlyReturnTest(unittest.TestCase):
     def testAnAlignedBodyRightBehindTheReturnStaysInTheFunction(self):
         # the body lands on 0x50: aligned, but behind the `ret` rather than behind padding
         self._assertTheBodyStaysInTheFunction(0x49)
+
+    def testTheBodyStaysInTheFunctionWhenItIsAnalyzedFirst(self):
+        # with four calls or fewer the body's prologue outranks the host, so the body is a
+        # function already when the host's jcc reaches it (#388)
+        for calls in (0, 1, 4):
+            with self.subTest(calls=calls):
+                self._assertTheBodyStaysInTheFunction(self.HOST, calls)
 
 
 class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
@@ -292,7 +303,7 @@ class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
     TARGET = BASE + 0xA0
     TAKER = BASE + 0xC0
 
-    def _image(self):
+    def _image(self, calls=8):
         image = bytearray(b"\xcc" * 0x200)
 
         def put(address, data):
@@ -302,7 +313,7 @@ class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
             return (destination - (source + size)).to_bytes(4, "little", signed=True)
 
         caller = bytearray()
-        for _ in range(8):  # enough call references to analyze the jumper before the target
+        for _ in range(calls):  # 8 analyze the jumper before the target, none after it
             caller += b"\xe8" + rel(self.BASE + len(caller), 5, self.JUMPER)
         caller += b"\xe8" + rel(self.BASE + len(caller), 5, self.TAKER) + b"\xc3"
         put(self.BASE, caller)
@@ -313,13 +324,197 @@ class X86PointerReachedFunctionBehindPaddingTest(unittest.TestCase):
         return bytes(image)
 
     def testTheTargetStaysAFunctionOfItsOwn(self):
+        for calls in (8, 0):
+            with self.subTest(calls=calls):
+                config = SmdaConfig()
+                config.WITH_STRINGS = False
+                report = Disassembler(config).disassembleBuffer(self._image(calls), self.BASE, bitness=32)
+                functions = {function.offset: function for function in report.getFunctions()}
+                self.assertIn(self.TARGET, functions)
+                self.assertEqual(functions[self.TARGET].num_instructions, 5)
+                self.assertEqual(functions[self.JUMPER].num_instructions, 4)
+
+
+class X86FunctionAnalyzedBeforeItsJumperTest(unittest.TestCase):
+    """x86: a function analyzed before a jcc reaches it is only taken back as an early-return body.
+
+    The layouts of the #389 review, in a 32-bit buffer of int3 at 0x401000: the target is only
+    absorbed when it follows the `ret` right behind the jumping function's check (#388).
+    """
+
+    BASE = 0x401000
+    A = BASE + 0x80
+    C = BASE + 0x180
+    E = BASE + 0xC0
+    BODY = b"\x55\x8b\xec\x8b\x45\x08\x5d\xc3"  # push ebp; mov ebp, esp; mov eax, [ebp + 8]; pop ebp; ret
+
+    @staticmethod
+    def _rel(source, size, destination):
+        return pack("<i", destination - (source + size))
+
+    def _jcc(self, target, tail=b"\x31\xc0\xc3"):
+        return b"\x85\xc9\x0f\x85" + self._rel(self.A + 2, 6, target) + tail  # test ecx, ecx; jne target
+
+    def _calls(self, *targets):
+        code = bytearray()
+        for target in targets:
+            code += b"\xe8" + self._rel(self.BASE + len(code), 5, target)
+        return bytes(code + b"\xc3")
+
+    def _pointer_taker(self, target):
+        # push ebp; mov ebp, esp; push offset target; call dword ptr [eax]; add esp, 4; pop ebp; ret
+        return b"\x55\x8b\xec\x68" + pack("<I", target) + b"\xff\x10\x83\xc4\x04\x5d\xc3"
+
+    def _functions(self, parts):
+        image = bytearray(b"\xcc" * 0x200)
+        for address, data in parts:
+            image[address - self.BASE : address - self.BASE + len(data)] = data
         config = SmdaConfig()
         config.WITH_STRINGS = False
-        report = Disassembler(config).disassembleBuffer(self._image(), self.BASE, bitness=32)
-        functions = {function.offset: function for function in report.getFunctions()}
-        self.assertIn(self.TARGET, functions)
-        self.assertEqual(functions[self.TARGET].num_instructions, 5)
-        self.assertEqual(functions[self.JUMPER].num_instructions, 4)
+        report = Disassembler(config).disassembleBuffer(bytes(image), self.BASE, bitness=32)
+        return {function.offset: function for function in report.getFunctions()}
+
+    def testATargetBehindPaddingStaysAFunction(self):
+        target = self.BASE + 0xA3
+        functions = self._functions(
+            [
+                (self.BASE, self._calls(self.A, self.C)),
+                (self.A, self._jcc(target)),
+                (target, self.BODY),
+                (self.C, self._pointer_taker(target)),
+            ]
+        )
+        self.assertEqual(functions[target].num_instructions, 5)
+        self.assertEqual(functions[self.A].num_instructions, 4)
+
+    def testATargetIsKeptWhenTheJumperAborts(self):
+        target = self.BASE + 0xA3
+        functions = self._functions(
+            [
+                (self.BASE, self._calls(self.A, self.C)),
+                (self.A, self._jcc(target, b"\x00\x00\x00\x00\xc3")),
+                (target, self.BODY),
+                (self.C, self._pointer_taker(target)),
+            ]
+        )
+        self.assertEqual(functions[target].num_instructions, 5)
+
+    def testABodyIsAnalyzedAgainWhenTheFunctionTakingItAborts(self):
+        # test ecx, ecx; jne body; je zeros; ret; body: ... - the zeros abort the function
+        zeros = self.BASE + 0x140
+        body = self.A + 15
+        check = b"\x85\xc9\x0f\x85" + self._rel(self.A + 2, 6, body)
+        check += b"\x0f\x84" + self._rel(self.A + 8, 6, zeros) + b"\xc3"
+        functions = self._functions(
+            [
+                (self.BASE, self._calls(self.A)),
+                (self.A, check),
+                (body, self.BODY),
+                (zeros, b"\x00\x00\x00\x00\xc3"),
+            ]
+        )
+        self.assertNotIn(self.A, functions)
+        self.assertEqual(functions[body].num_instructions, 5)
+
+    def testAGapThunkBetweenTheJumperAndADistantTargetIsKept(self):
+        target = self.BASE + 0x103
+        functions = self._functions(
+            [
+                (self.A, self._jcc(target)),
+                (self.E, b"\xe9" + self._rel(self.E, 5, target)),  # jmp target
+                (target, self.BODY),
+            ]
+        )
+        self.assertIn(self.E, functions)
+        self.assertEqual(functions[target].num_instructions, 5)
+        self.assertEqual(functions[self.A].num_instructions, 4)
+
+    def testAGapFunctionDoesNotTakeABodyAcrossAnotherFunction(self):
+        # A is a gap function whose jcc reaches a prologue behind the `ret` of a function A+0x20
+        # that nothing references; A's own code does not run into the target
+        target = self.A + 0x30
+        other = b"\x31\xc0" + b"\x40" * 13 + b"\xc3"  # xor eax, eax; inc eax (13 times); ret
+        functions = self._functions([(self.A, self._jcc(target)), (self.A + 0x20, other), (target, self.BODY)])
+        self.assertEqual(functions[self.A].num_instructions, 4)
+        self.assertEqual(functions[self.A + 0x20].num_instructions, 15)
+        self.assertEqual(functions[target].num_instructions, 5)
+
+    def testAGapFunctionDoesNotTakeABodyBehindTwoOtherFunctions(self):
+        target = self.A + 0x30
+        functions = self._functions(
+            [
+                (self.A, self._jcc(target)),
+                (self.A + 0x10, b"\x31\xc0\x40\xc3"),  # xor eax, eax; inc eax; ret
+                # mov edi, edi; push ebp; mov ebp, esp; xor eax, eax; pop ebp; ret
+                (self.A + 0x27, b"\x8b\xff\x55\x8b\xec\x33\xc0\x5d\xc3"),
+                (target, self.BODY),
+            ]
+        )
+        self.assertEqual(
+            sorted(set(functions) & {self.A, self.A + 0x10, self.A + 0x27, target}),
+            [self.A, self.A + 0x10, self.A + 0x27, target],
+        )
+
+    def testABodyIsAnalyzedAgainWhenATimeoutStopsTheFunctionTakingIt(self):
+        # the #388 layout, with the analysis timeout tripping at the poll right after the absorb;
+        # the gap pass, which would find the body on its own, is left out
+        absorb = RecursiveDisassembler.absorbFunction
+        tripped = []
+
+        def absorbFunction(disassembler, function_addr, state):
+            absorbed = absorb(disassembler, function_addr, state)
+            if absorbed:
+                tripped.append(False)
+            return absorbed
+
+        def analysisTimeoutTripped(disassembler, cbAnalysisTimeout=None):
+            if tripped and not tripped[0]:
+                tripped[0] = True
+                return True
+            return False
+
+        host = self.A
+        body = host + 7
+        with (
+            patch("smda.common.RecursiveDisassembler._TIMEOUT_POLL_BLOCKS", 1),
+            patch.object(RecursiveDisassembler, "absorbFunction", absorbFunction),
+            patch.object(RecursiveDisassembler, "_analysisTimeoutTripped", analysisTimeoutTripped),
+            patch.object(
+                IntelFunctionCandidateManager, "nextGapCandidate", lambda manager, start_gap_pointer=None: None
+            ),
+        ):
+            functions = self._functions(
+                [
+                    (self.BASE, self._calls(host)),
+                    # cmp byte ptr [ecx + 0x28], 0; je body; ret; body: ...
+                    (host, b"\x80\x79\x28\x00\x74\x01\xc3" + self.BODY),
+                ]
+            )
+        self.assertEqual(tripped, [True])
+        owned = {i.offset for function in functions.values() for i in function.getInstructions()}
+        self.assertIn(body, owned)
+
+    def testATargetBehindOtherPaddingOrBeforeTheJumperStaysAFunction(self):
+        cases = {
+            "lea ecx, [ecx]": (self.BASE + 0xB0, b"\x8d\x49\x00"),
+            "lea eax, [eax]": (self.BASE + 0xA4, b"\x8d\x40\x00"),
+            "unaligned behind int3": (self.BASE + 0xA3, b"\xcc"),
+            "mov edi, edi entry": (self.BASE + 0xA3, b"\xcc"),
+            "before the jumper": (self.BASE + 0x40, b"\xcc"),
+        }
+        for name, (target, padding) in cases.items():
+            with self.subTest(name):
+                body = (b"\x8b\xff" if "mov edi" in name else b"") + self.BODY
+                functions = self._functions(
+                    [
+                        (self.BASE, self._calls(self.A, self.C)),
+                        (self.A, self._jcc(target)),
+                        (target - len(padding), padding + body),
+                        (self.C, self._pointer_taker(target)),
+                    ]
+                )
+                self.assertIn(target, functions)
+                self.assertEqual(functions[self.A].num_instructions, 4)
 
 
 if __name__ == "__main__":
