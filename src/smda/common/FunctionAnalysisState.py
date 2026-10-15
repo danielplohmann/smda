@@ -57,6 +57,8 @@ class FunctionAnalysisState:
         self.is_sanely_ending = False
         self.has_collision = False
         self.colliding_addresses = set()
+        # functions undone so this one decodes them as its body, analyzed again if it fails
+        self.absorbed_functions = []
         # set a flag that this tailcall has already been resolved so it does not have to be reanalyzed several times
         self.is_tailcall_function = False
         self.is_leaf_function = True

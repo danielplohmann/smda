@@ -103,10 +103,18 @@ past roughly six lines it belongs in the PR the entry links.
   built x86/x64/AArch64 libraries, exported-function labels in buffer mode 0 -> 33 (file 33); the ELF fixtures gain
   their imports in buffer mode (19, 16, 3), functions/blocks/instructions bit-identical on every pre-existing fixture
   in every mode. *Reproduced on bundled fixtures.* Cost: one extra lief parse per mapped ELF buffer.
+- **(intel)** Keep the body behind an early `ret` in its function when the body is analyzed first. A body whose
+  prologue outranked its entry in the candidate order was a function by the time the entry's jcc reached it; the jcc
+  now takes it back when the entry's own code runs without a gap into the `ret` in front of it, at most 0x100 bytes
+  past the entry, and analyzes it again if the entry does not keep it. *Reproduced by reviewer on 494 benign PEs (not
+  bundled):* 70 starts fewer in 55 files, all bodies behind their entry's `ret` (`_RTC_CheckEsp`, `__isa_available`
+  helpers, LLVM shrink-wrapped functions), runtime unchanged. (#388, #389)
 
 ### Security
 
 ### Compatibility
+- x86 function boundaries move where an early-return body was analyzed before its entry: the body now joins
+  the entry instead of standing as a function of its own. (#388, #389)
 
 ## [v4.10.0] - 2026-10-14
 
