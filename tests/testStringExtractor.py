@@ -425,6 +425,48 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
             list(extract_strings(function, mode="go")), [("plainCString", 0x10, self.base + 0x40, "ascii")]
         )
 
+    def test_unpaired_reference_keeps_a_tail_merged_c_string(self):
+        # C compilers store "=" as the tail of "url="; the suffix reference must not cut the longer one
+        report = _report_with([(0x40, b"url=\x00POST\x00")], base=self.base)
+        function = _StubFunction(
+            report,
+            [
+                _StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x40]),
+                _StubInstruction(0x17, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x43]),
+                _StubInstruction(0x1E, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + 0x45]),
+            ],
+        )
+        report.getFunctions = lambda: [function]
+        self.assertEqual(
+            list(extract_strings(function, mode="rust")),
+            [
+                ("url=", 0x10, self.base + 0x40, "ascii"),
+                ("=", 0x17, self.base + 0x43, "ascii"),
+                ("POST", 0x1E, self.base + 0x45, "ascii"),
+            ],
+        )
+
+    def test_unpaired_reference_inside_a_packed_run_stays_cut(self):
+        for name, blob, length in (
+            # the literal follows another one, so the run is packed rather than a C string
+            ("packed", b"xmut bool/\x00", 4),
+            # the suffix starts a UTF-16 string whose high byte reads as the terminator
+            ("utf16", b"\\cmd.exe\\\x00?\x00\\\x00U\x00", 8),
+        ):
+            with self.subTest(name=name):
+                start = 0x45 if name == "packed" else 0x40
+                report = _report_with([(0x40, blob)], base=self.base)
+                function = _StubFunction(
+                    report,
+                    [
+                        _StubInstruction(0x10, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + start]),
+                        _StubInstruction(0x17, "lea", "rcx, [rip + 0x30]", data_refs=[self.base + start + length]),
+                    ],
+                )
+                report.getFunctions = lambda function=function: [function]
+                strings = list(extract_strings(function, mode="rust"))
+                self.assertEqual(strings[0][0], blob[start - 0x40 : start - 0x40 + length].decode())
+
     def test_unpaired_reference_to_a_stored_address_reads_nothing(self):
         # 0x464820 is " HF\0", a NUL-terminated printable run that is really a pointer
         report = _report_with([(0x40, (0x464820).to_bytes(8, "little"))], base=self.base, size=0x70000)
