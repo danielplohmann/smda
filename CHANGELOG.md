@@ -73,20 +73,18 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
-- **(core)** Keep the per-instruction state of large images compact. A lone code reference, the fall-through nearly
-  every instruction has, is stored bare instead of in a one-element set (`AddressRefs`); `code_map` reads `ins2fn`
-  instead of duplicating its per-byte dict; mnemonics are interned, `(mnemonic, size)` tuples shared; pointer
-  escaping drops the capstone detail it decodes; the Delphi VMT scan compares slots in C. *Measured on `af37541` and
-  the ARM branch `0c306eb`, samples not bundled:* RSS after analysis libjvm.so 7,289 to 4,015 MB, ARM
-  libppsspp_jni.so 7,080 to 4,385 MB, ARM libvlc.so 13,276 to 8,049 MB, CPU 9-16% lower, reports identical. *Not
-  reproducible on the bundled fixtures, which are too small; their reports are identical too.* Cost: `code_map` is
-  read-only and maps a byte to its function, not its instruction, which no reader used.
+- **(core)** Keep the per-instruction state of large images compact: a lone code reference is stored bare, not in a
+  one-element set (`AddressRefs`), `code_map` reads `ins2fn`, mnemonics are interned and pointer escaping drops the
+  capstone detail. *Measured on `af37541`, not bundled:* RSS after analysis libjvm.so 7,289 to 4,015 MB. *Reproduced
+  by reviewer:* peak RSS -26 to -35% on libpython3.14.so, libcrypto.so.3 and an x64 and an ARM64 PE, CPU 1-7% lower,
+  reports identical. Cost: `code_map` can no longer be assigned, writes through it land in `ins2fn`, and its values
+  are function starts; lone `code_refs_from`/`code_refs_to` entries read as frozensets that only `add()` and
+  `discard()` change. (#396)
 - **(core)** Suspend the cyclic garbage collector while a buffer is analysed. Analysis builds millions of long-lived
-  objects and almost no cycles, so every full collection walked the whole growing heap and freed nothing: 41 of
-  139 CPU seconds on ARM libppsspp_jni.so. *Measured on the entry above, samples not bundled:* CPU libjvm.so 105 to
-  75 s, libpython3.12.so 21 to 16 s, ARM libppsspp_jni.so 138 to 102 s, RSS and reports unchanged. *Bundled
-  fixtures are too small to show it; their reports are identical.* Cost: the collector is off process-wide for the
-  analysis, and the first collections afterwards walk the heap once, in `toDict()` libjvm.so 11 to 18 s.
+  objects and almost no cycles, so every full collection walked the growing heap and freed nothing. *Measured on
+  `af37541`, not bundled, reproduced by reviewer:* analysis CPU on libpython -27% under CPython 3.12 (14.4 to 10.5 s),
+  -5 to -7% under 3.14, whose incremental collector already does less; reports identical. Cost: the collector is off
+  process-wide during analysis, and a `toDict()` right after pays one heap walk (1.0 to 2.2 s on 3.12). (#396)
 
 ### Deprecated
 
