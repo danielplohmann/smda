@@ -121,6 +121,11 @@ past roughly six lines it belongs in the PR the entry links.
   `open("/dev/watchdog", 2)` whole. *Bundled fixtures with a pclntab header planted in padding:* `mirai_x64` errored
   on master and now has 125 refs (162 unplanted); in Go mode 1-character reads are dropped. *go1.24.7 amd64 and 386
   builds, not bundled, not reproduced:* unchanged by the fallback, 4 two-character reads gained on 386. (#382)
+- **(utility)** Go and Rust mode keep a C string whose last character the compiler also stores as a string of its
+  own (`"="` in the tail of `"url="`); the NUL-terminated read stopped at the suffix's reference. Adds a 1 MB go1.24.7
+  linux/amd64 fixture so Go mode is tested on a real pclntab. *Bundled fixtures:* `mirai_x64` with a planted pclntab
+  header or `/rustc/` path keeps `url=` and `Cookie: ` (3 refs longer); `rust_pe_gnu` and the Go fixture are
+  unchanged. Chains of suffixes (`"\r\n\r\n"`, `"\r\n"`, `"\n"`) are still cut.
 
 ### Security
 

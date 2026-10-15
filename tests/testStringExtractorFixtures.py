@@ -84,6 +84,29 @@ class TestRustPeGnuStrings(unittest.TestCase):
                     self.assertEqual(bytes(image[offset : offset + len(encoded)]), encoded)
 
 
+class TestGoHelloStrings(unittest.TestCase):
+    """go1.24.7 linux/amd64, built with -trimpath -ldflags="-s -w -buildid=" from:
+
+    var table = []string{"alphaTableEntry", "betaTableEntry", "größe"}
+    func greet(name string) string { return "hello there " + name }
+    func main() { println(greet("smdaGoMarker")); for _, t := range table { println(t) } }
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report, cls.strings = _strings(_load_xored_fixture("go_hello_amd64_xored"))
+        cls.texts = {text for _, text in cls.strings}
+
+    def test_literals_are_read_at_their_length(self):
+        for text in ("smdaGoMarker", "hello there "):
+            with self.subTest(text=text):
+                self.assertIn(text, self.texts)
+
+    def test_packed_literals_are_not_read_into_each_other(self):
+        self.assertLessEqual(sum(len(text) > 200 for text in self.texts), 1)
+        self.assertGreater(len(self.strings), 1000)
+
+
 class TestCBinaryLanguageMarkers(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -98,7 +121,7 @@ class TestCBinaryLanguageMarkers(unittest.TestCase):
         # a pclntab header is all Go mode takes; cgo links C code like this into Go binaries
         _, strings = _strings(_planted(self.binary, bytes.fromhex("f1ffffff00000108")))
         texts = {text for _, text in strings}
-        for text in ("/dev/watchdog", "/dev/misc/watchdog"):
+        for text in ("/dev/watchdog", "/dev/misc/watchdog", "url=", "Cookie: "):
             with self.subTest(text=text):
                 self.assertIn(text, texts)
 

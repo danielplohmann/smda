@@ -308,6 +308,28 @@ def _cuts_c_string(smda_report: SmdaReport, offset: int, length: int) -> bool:
     return c_string is not None and c_string[1] == "ascii" and len(c_string[0]) > length
 
 
+def _tail_merged(smda_report: SmdaReport, offset: int, target: int, byte_length: int) -> bool:
+    """True when target, the last character of the NUL-terminated string at offset, is the only other
+    reference into it.
+
+    C compilers merge a string into the tail of a longer one ("=" into "url="), so the suffix has a
+    reference of its own. Packed literals have one at every literal and no NUL after the first.
+    """
+    end = offset + byte_length
+    if end - target > 1:
+        return False
+    if read_bytes(smda_report, end, 1) != b"\x00":
+        return False
+    # target can instead start a UTF-16 string whose first high byte reads as the terminator
+    head = read_bytes(smda_report, target, 6)
+    if len(head) == 6 and all(head[0::2]) and not any(head[1::2]):
+        return False
+    if not _starts_string_run(smda_report, offset):
+        return False
+    following = _next_target(smda_report, target)
+    return following is None or following >= end
+
+
 def read_go_string(smda_report: SmdaReport, offset: int) -> Optional[Tuple[str, str]]:
     """Read the string a (pointer, length) header at offset describes.
 
@@ -598,7 +620,11 @@ def _unsized_strings_for_refs(
                 continue
             next_target = _next_target(smda_report, v)
             byte_length = len(string_read) * (2 if string_type == "unicode" else 1)
-            if next_target is not None and next_target - v < byte_length:
+            if (
+                next_target is not None
+                and next_target - v < byte_length
+                and not _tail_merged(smda_report, v, next_target, byte_length)
+            ):
                 capped = read_string(smda_report, v, next_target - v)
                 if not capped:
                     continue
