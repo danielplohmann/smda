@@ -85,6 +85,12 @@ past roughly six lines it belongs in the PR the entry links.
   code or the wrong architecture. *Measured on `b34154e`:* the 18 bundled ELF fixtures with section headers zeroed
   map at their sectioned base and size, was 3 (three overran `MAX_IMAGE_SIZE`). *Reproduced on bundled fixtures.* No
   cost: base and functions unchanged on the shipped fixtures, 264 Debian armhf/armel and 50 x86 system ELFs.
+- **(loaders)** Keep a mapped ELF buffer's dynamic symbols. lief read `disassembleBuffer()`'s image by file offset and
+  so missed the dynamic table of any segment mapped above its offset; `ElfFileLoader.unmapImage` now rebuilds the file
+  layout from the PT_LOADs when the table is found at its address but not at its offset. *Measured on `af37541`:* 7
+  built x86/x64/AArch64 libraries, exported-function labels in buffer mode 0 -> 33 (file 33); the ELF fixtures gain
+  their imports in buffer mode (19, 16, 3), functions/blocks/instructions bit-identical on every pre-existing fixture
+  in every mode. *Reproduced on bundled fixtures.* Cost: one extra lief parse per mapped ELF buffer.
 
 ### Security
 
