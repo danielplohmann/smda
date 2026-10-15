@@ -505,8 +505,9 @@ class RecursiveDisassembler:
             # independent; the accumulated state has no consumer other than resolveTailcalls.
             if self.config.RESOLVE_TAILCALLS:
                 self.tailcall_analyzer.finalizeFunction(state)
-        if start_addr not in self.disassembly.functions:
-            self._restoreAbsorbedFunctions(state.absorbed_functions)
+        # also when the function finished without reaching an absorbed body (a timeout right
+        # after the absorb); _restoreAbsorbedFunctions skips whatever is owned
+        self._restoreAbsorbedFunctions(state.absorbed_functions)
         self.fc_manager.updateAnalysisFinished(start_addr)
         self.fc_manager.updateCandidates(state)
         return state

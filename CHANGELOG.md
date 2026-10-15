@@ -79,22 +79,18 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
-- **(intel)** Keep the body behind an early `ret` in its function when the body is analyzed first. The candidate
-  order put the body's prologue ahead of an entry with four calls or fewer, or one reached only through a pointer
-  or a jump thunk, and the entry's jcc then took the body for a tailcall. The jcc now undoes such a function and
-  decodes it as its own, but only a non-gap function without entry evidence that starts right behind a `ret`,
-  at most 0x100 bytes after the entry; if the entry then fails, the undone function is analyzed again.
-  *Measured on `dd41bf3` against `0802f7c`, 255 x86/x64 PEs (python.org 3.5.4, 3.6.8, 3.8.10 and 3.12.7
-  embeddable, VS2008-built cp27 wheels, mingw-w64 DLLs, sqlite 3.46.1; not bundled; plus the bundled fixtures):* 12
-  functions fewer in 3 files, all the non-SSE fallback bodies of CRT float-to-integer helpers reached only by
-  their entry's jcc; nothing else moves. Not reproduced by a reviewer. Cost: none measured (sqlite x86 20-21 s
-  both). (#388)
+- **(intel)** Keep the body behind an early `ret` in its function when the body is analyzed first. A body whose
+  prologue outranked its entry in the candidate order was a function by the time the entry's jcc reached it; the jcc
+  now takes it back when the entry's own code runs without a gap into the `ret` in front of it, at most 0x100 bytes
+  past the entry, and analyzes it again if the entry does not keep it. *Reproduced by reviewer on 494 benign PEs (not
+  bundled):* 70 starts fewer in 55 files, all bodies behind their entry's `ret` (`_RTC_CheckEsp`, `__isa_available`
+  helpers, LLVM shrink-wrapped functions), runtime unchanged. (#388, #389)
 
 ### Security
 
 ### Compatibility
 - x86 function boundaries move where an early-return body was analyzed before its entry: the body now joins
-  the entry instead of standing as a function of its own. (#388)
+  the entry instead of standing as a function of its own. (#388, #389)
 
 ## [v4.10.0] - 2026-10-14
 

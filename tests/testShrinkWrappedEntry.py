@@ -8,13 +8,16 @@ falls through into them, so they are the body of the function that starts at the
 import unittest
 from struct import pack
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
 
 from smda.aarch64.definitions import direct_branch_target, flows_into, is_frame_setup
 from smda.aarch64.FunctionCandidateManager import FunctionCandidateManager
 from smda.common.BinaryInfo import BinaryInfo
+from smda.common.RecursiveDisassembler import RecursiveDisassembler
 from smda.Disassembler import Disassembler
+from smda.intel.FunctionCandidateManager import FunctionCandidateManager as IntelFunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
 from tests.testAArch64HoistedGuardEntry import REGION, SCAFFOLD_ENTRIES, _disassemble, _render, _scaffold
 
@@ -425,6 +428,71 @@ class X86FunctionAnalyzedBeforeItsJumperTest(unittest.TestCase):
         self.assertIn(self.E, functions)
         self.assertEqual(functions[target].num_instructions, 5)
         self.assertEqual(functions[self.A].num_instructions, 4)
+
+    def testAGapFunctionDoesNotTakeABodyAcrossAnotherFunction(self):
+        # A is a gap function whose jcc reaches a prologue behind the `ret` of a function A+0x20
+        # that nothing references; A's own code does not run into the target
+        target = self.A + 0x30
+        other = b"\x31\xc0" + b"\x40" * 13 + b"\xc3"  # xor eax, eax; inc eax (13 times); ret
+        functions = self._functions([(self.A, self._jcc(target)), (self.A + 0x20, other), (target, self.BODY)])
+        self.assertEqual(functions[self.A].num_instructions, 4)
+        self.assertEqual(functions[self.A + 0x20].num_instructions, 15)
+        self.assertEqual(functions[target].num_instructions, 5)
+
+    def testAGapFunctionDoesNotTakeABodyBehindTwoOtherFunctions(self):
+        target = self.A + 0x30
+        functions = self._functions(
+            [
+                (self.A, self._jcc(target)),
+                (self.A + 0x10, b"\x31\xc0\x40\xc3"),  # xor eax, eax; inc eax; ret
+                # mov edi, edi; push ebp; mov ebp, esp; xor eax, eax; pop ebp; ret
+                (self.A + 0x27, b"\x8b\xff\x55\x8b\xec\x33\xc0\x5d\xc3"),
+                (target, self.BODY),
+            ]
+        )
+        self.assertEqual(
+            sorted(set(functions) & {self.A, self.A + 0x10, self.A + 0x27, target}),
+            [self.A, self.A + 0x10, self.A + 0x27, target],
+        )
+
+    def testABodyIsAnalyzedAgainWhenATimeoutStopsTheFunctionTakingIt(self):
+        # the #388 layout, with the analysis timeout tripping at the poll right after the absorb;
+        # the gap pass, which would find the body on its own, is left out
+        absorb = RecursiveDisassembler.absorbFunction
+        tripped = []
+
+        def absorbFunction(disassembler, function_addr, state):
+            absorbed = absorb(disassembler, function_addr, state)
+            if absorbed:
+                tripped.append(False)
+            return absorbed
+
+        def analysisTimeoutTripped(disassembler, cbAnalysisTimeout=None):
+            if tripped and not tripped[0]:
+                tripped[0] = True
+                return True
+            return False
+
+        host = self.A
+        body = host + 7
+        with (
+            patch("smda.common.RecursiveDisassembler._TIMEOUT_POLL_BLOCKS", 1),
+            patch.object(RecursiveDisassembler, "absorbFunction", absorbFunction),
+            patch.object(RecursiveDisassembler, "_analysisTimeoutTripped", analysisTimeoutTripped),
+            patch.object(
+                IntelFunctionCandidateManager, "nextGapCandidate", lambda manager, start_gap_pointer=None: None
+            ),
+        ):
+            functions = self._functions(
+                [
+                    (self.BASE, self._calls(host)),
+                    # cmp byte ptr [ecx + 0x28], 0; je body; ret; body: ...
+                    (host, b"\x80\x79\x28\x00\x74\x01\xc3" + self.BODY),
+                ]
+            )
+        self.assertEqual(tripped, [True])
+        owned = {i.offset for function in functions.values() for i in function.getInstructions()}
+        self.assertIn(body, owned)
 
     def testATargetBehindOtherPaddingOrBeforeTheJumperStaysAFunction(self):
         cases = {
