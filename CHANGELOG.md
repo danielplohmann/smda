@@ -121,6 +121,10 @@ past roughly six lines it belongs in the PR the entry links.
   `open("/dev/watchdog", 2)` whole. *Bundled fixtures with a pclntab header planted in padding:* `mirai_x64` errored
   on master and now has 125 refs (162 unplanted); in Go mode 1-character reads are dropped. *go1.24.7 amd64 and 386
   builds, not bundled, not reproduced:* unchanged by the fallback, 4 two-character reads gained on 386. (#382)
+- **(ida)** The IDAPython backend no longer fails the whole export when IDA passes no name for an import by ordinal.
+  `_cbEnumImports` concatenated the missing name and raised `TypeError`; it now writes `module!#<ordinal>`, as the
+  `ida_domain` backend already does. A stubbed `enum_import_names` test reproduces it. IDA 9.4 names such an import
+  itself (`mcritord_23`), so it is not known which IDA versions reach the error. No recovery output changes. (#400)
 
 ### Security
 
