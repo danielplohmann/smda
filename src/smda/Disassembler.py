@@ -162,6 +162,10 @@ class Disassembler:
             self._extractStrings(smda_report, mode=mode)
         finally:
             smda_report.buffer = previous_buffer
+            # both are built from this buffer and would otherwise live as long as the report
+            smda_report._referenced_targets = None
+            smda_report._string_cache.clear()
+            smda_report._string_cache_chars = 0
 
     #: backends that record non-buffer-backed strings via disassembly.addStringRef
     #: (the string only exists as a runtime/decode-time side effect, e.g. CIL's

@@ -408,7 +408,7 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
                 )
 
     def test_unpaired_reference_reads_a_c_string_in_both_modes(self):
-        report = _report_with([(0x40, b"plainCString\x00"), (0x50, b"ab\x00")], base=self.base)
+        report = _report_with([(0x40, b"plainCString\x00"), (0x50, b"a\x00")], base=self.base)
         function = _StubFunction(
             report,
             [
@@ -418,9 +418,9 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
         )
         self.assertEqual(
             list(extract_strings(function, mode="rust")),
-            [("plainCString", 0x10, self.base + 0x40, "ascii"), ("ab", 0x17, self.base + 0x50, "ascii")],
+            [("plainCString", 0x10, self.base + 0x40, "ascii"), ("a", 0x17, self.base + 0x50, "ascii")],
         )
-        # Go has no NUL-terminated literals of its own; very short hits there are data
+        # Go has no NUL-terminated literals of its own; one-character hits there are data
         self.assertEqual(
             list(extract_strings(function, mode="go")), [("plainCString", 0x10, self.base + 0x40, "ascii")]
         )
@@ -434,7 +434,7 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
         self.assertEqual(list(extract_strings(function, mode="rust")), [])
 
     def test_length_cutting_a_c_string_falls_back_to_it(self):
-        # C code linked into a Rust binary: open("/dev/watchdog", 2) pairs the flags as a length
+        # C code linked in by cgo or a Rust crate: open("/dev/watchdog", 2) pairs the flags as a length
         report = _report_with([(0x40, b"/dev/watchdog\x00")], base=self.base)
         function = _StubFunction(
             report,
@@ -443,9 +443,11 @@ class TestStringExtractorLengthFromCode(unittest.TestCase):
                 _StubInstruction(0x15, "lea", "rdi, [rip + 0x30]", data_refs=[self.base + 0x40]),
             ],
         )
-        self.assertEqual(
-            list(extract_strings(function, mode="rust")), [("/dev/watchdog", 0x15, self.base + 0x40, "ascii")]
-        )
+        for mode in ("go", "rust"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    list(extract_strings(function, mode=mode)), [("/dev/watchdog", 0x15, self.base + 0x40, "ascii")]
+                )
 
     def test_length_ending_where_another_literal_starts_is_kept(self):
         report = _report_with([(0x40, b"smdaGoMarker\x00")], base=self.base)

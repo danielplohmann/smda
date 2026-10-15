@@ -7,6 +7,7 @@ import os
 import struct
 import zipfile
 import zlib
+from array import array
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
@@ -107,12 +108,9 @@ class SmdaReport:
     data_refs_to = None
     _string_cache: Dict[Any, Optional[Tuple[str, str]]]
     _derefs_cache: Dict[int, List[int]]
-    # whether the buffer carries a rustc toolchain path, looked up once by StringExtractor
     _rustc_path_seen: Optional[bool] = None
-    # characters held by _string_cache, so sized reads of up to 64 KiB cannot grow it unbounded
     _string_cache_chars = 0
-    # StringExtractor: sorted data reference targets, and the (pointer, length) register pairs per mode
-    _referenced_targets: Optional[List[int]] = None
+    _referenced_targets: Optional[array[int]] = None
     _length_registers: Dict[str, Dict[str, str]]
 
     # on first usage, initialize codexrefs objects for all functions based on inrefs/outrefs (requires knowledge about all functions)

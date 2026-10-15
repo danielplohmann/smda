@@ -4,6 +4,8 @@ import logging
 import os
 import unittest
 
+import pytest
+
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
 from smda.synthesis.BinarySynthesizer import BinarySynthesizer
@@ -11,6 +13,8 @@ from smda.synthesis.BinarySynthesizer import BinarySynthesizer
 from .context import config
 
 logging.disable(logging.CRITICAL)
+
+pytestmark = pytest.mark.slow
 
 # zero padding inside mirai_x64's .rodata
 _MIRAI_RODATA_PADDING = 0xE560
@@ -89,6 +93,14 @@ class TestCBinaryLanguageMarkers(unittest.TestCase):
     def test_go_build_id_does_not_change_the_strings(self):
         _, strings = _strings(_planted(self.binary, b'Go build ID: "abcdefabcdef"'))
         self.assertEqual(strings, self.strings)
+
+    def test_go_mode_keeps_c_strings_whole(self):
+        # a pclntab header is all Go mode takes; cgo links C code like this into Go binaries
+        _, strings = _strings(_planted(self.binary, bytes.fromhex("f1ffffff00000108")))
+        texts = {text for _, text in strings}
+        for text in ("/dev/watchdog", "/dev/misc/watchdog"):
+            with self.subTest(text=text):
+                self.assertIn(text, texts)
 
     def test_rustc_path_keeps_c_strings_whole(self):
         # a C program linking a Rust staticlib carries this path
