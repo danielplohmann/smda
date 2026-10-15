@@ -225,15 +225,7 @@ class RecursiveDisassembler:
             return False
         if owner_fn not in self.disassembly.functions:
             return False
-        owner_state = self.backend.createAnalysisState(owner_fn, self.disassembly)
-        # Rebuild a minimal state from the disassembly's stored instructions
-        # so revertAnalysis can undo code_map/ins2fn/function_borders entries.
-        owner_state.instructions = [
-            instruction for block in self.disassembly.functions[owner_fn] for instruction in block
-        ]
-        owner_state.code_refs = set()
-        owner_state.data_refs = set()
-        owner_state.revertAnalysis()
+        self._revertStoredFunction(owner_fn)
         self.fc_manager.updateAnalysisAborted(
             owner_fn, f"Reverted: absorbed by tailcall candidate 0x{current_start_addr:08x}"
         )
@@ -243,6 +235,63 @@ class RecursiveDisassembler:
             current_start_addr,
         )
         return True
+
+    def _revertStoredFunction(self, function_addr, with_refs=False):
+        owner_state = self.backend.createAnalysisState(function_addr, self.disassembly)
+        # Rebuild a minimal state from the disassembly's stored instructions
+        # so revertAnalysis can undo code_map/ins2fn/function_borders entries.
+        owner_state.instructions = [
+            instruction for block in self.disassembly.functions[function_addr] for instruction in block
+        ]
+        owner_state.code_refs = set()
+        owner_state.data_refs = set()
+        if with_refs:
+            # the refs leave with the code: whoever decodes it next books them again
+            code_refs_from = self.disassembly.code_refs_from
+            data_refs_from = self.disassembly.data_refs_from
+            for instruction in owner_state.instructions:
+                for addr_to in code_refs_from.get(instruction[0], ()):
+                    owner_state.code_refs_from.setdefault(instruction[0], set()).add(addr_to)
+                for addr_to in data_refs_from.get(instruction[0], ()):
+                    owner_state.data_refs.add((instruction[0], addr_to))
+        owner_state.revertAnalysis()
+
+    def absorbFunction(self, function_addr, state):
+        """Undo a function so the one being analyzed decodes its blocks as its own.
+
+        For a function that turns out to be the body of another one: a prologue-shaped block
+        behind an early return that won the candidate order against the function it belongs to.
+        Its analysis state also leaves the tailcall pass, which would otherwise revert it again
+        and take the addresses away from the function that now owns them. If the function being
+        analyzed does not finish, the undone one is analyzed again on its own.
+
+        A gap function is left alone: the gap pass runs after the candidate order, so its
+        functions (thunk tables, code no reference reached) did not win against anything.
+
+        Returns True if the function was undone.
+        """
+        if function_addr == state.start_addr or function_addr not in self.disassembly.functions:
+            return False
+        candidate = self.fc_manager.candidates.get(function_addr)
+        if candidate is None or candidate.is_gap_candidate:
+            return False
+        self._revertStoredFunction(function_addr, with_refs=True)
+        self.tailcall_analyzer.discardFunction(function_addr)
+        self.fc_manager.updateAnalysisAborted(function_addr, f"Reverted: body of function 0x{state.start_addr:08x}")
+        state.absorbed_functions.append(function_addr)
+        LOGGER.debug("Reverted function 0x%08x (body of 0x%08x)", function_addr, state.start_addr)
+        return True
+
+    def _restoreAbsorbedFunctions(self, absorbed_functions):
+        """Analyze again the functions an analysis undid and then did not keep."""
+        for function_addr in absorbed_functions:
+            if function_addr in self.disassembly.ins2fn:
+                continue
+            candidate = self.fc_manager.candidates.get(function_addr)
+            if candidate is not None:
+                candidate.analysis_aborted = False
+                candidate.abortion_reason = ""
+            self.analyzeFunction(function_addr)
 
     def _restoreRevertedGapFunctions(self, gap_functions):
         """Analyze again the gap functions a discarded pass reverted and the pass after it left alone.
@@ -358,6 +407,7 @@ class RecursiveDisassembler:
                                 start_addr,
                                 f"too many suspicious instructions @0x{i_address:08x}",
                             )
+                            self._restoreAbsorbedFunctions(state.absorbed_functions)
                             return state
                     # delegate architecture-specific control-flow analysis to the backend;
                     # a True return means: cut the block here without booking this instruction
@@ -431,8 +481,10 @@ class RecursiveDisassembler:
         if known_table_bytes is None and not state.table_bytes.isdisjoint(state.processed_bytes):
             # blocks are taken last-in first-out, so a path that runs into a table can be decoded
             # before the dispatch that reads the table is; once more, with the tables known
+            absorbed_functions = state.absorbed_functions
             state = self.analyzeFunction(start_addr, as_gap, known_table_bytes=state.table_bytes)
             self._restoreRevertedGapFunctions(reverted_gap_functions)
+            self._restoreAbsorbedFunctions(absorbed_functions)
             return state
         state.label = self.resolveSymbol(state.start_addr)
         analysis_result = state.finalizeAnalysis(as_gap)
@@ -453,6 +505,9 @@ class RecursiveDisassembler:
             # independent; the accumulated state has no consumer other than resolveTailcalls.
             if self.config.RESOLVE_TAILCALLS:
                 self.tailcall_analyzer.finalizeFunction(state)
+        # also when the function finished without reaching an absorbed body (a timeout right
+        # after the absorb); _restoreAbsorbedFunctions skips whatever is owned
+        self._restoreAbsorbedFunctions(state.absorbed_functions)
         self.fc_manager.updateAnalysisFinished(start_addr)
         self.fc_manager.updateCandidates(state)
         return state

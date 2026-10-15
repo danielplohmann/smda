@@ -44,6 +44,18 @@ class TestGetDetailed(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             ins.getDetailed()
 
+    def test_pointer_escaping_does_not_leave_the_detail_cached(self):
+        # pic hashing reaches this for every pointer operand of a report, and a cached capstone
+        # detail is kilobytes per instruction; one cached before is left in place
+        ins = _intel_instruction(0x1000, "488b0500100000", "mov", "rax, qword ptr [rip + 0x1000]", bitness=64)
+        escaped = IntelInstructionEscaper.escapeBinaryPtrRef(ins)
+        self.assertEqual(escaped, "488b05????????")
+        self.assertIsNone(ins.detailed)
+
+        detailed = ins.getDetailed()
+        self.assertEqual(IntelInstructionEscaper.escapeBinaryPtrRef(ins), escaped)
+        self.assertIs(ins.detailed, detailed)
+
     def test_escaper_tolerates_undecodable_bytes(self):
         # getDetailed() now raises ValueError (not AssertionError) on undecodable bytes;
         # escapeBinaryPtrRef must still swallow it and fall back rather than crash.

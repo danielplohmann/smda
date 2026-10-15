@@ -1,4 +1,5 @@
 import datetime
+import gc
 import hashlib
 import logging
 import traceback
@@ -367,8 +368,17 @@ class Disassembler:
         self._timeout_reported = False
         self._ensureHashes(binary_info)
         if self.disassembler:
-            self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
-            return SmdaReport(self.disassembly, config=self.config)
+            # analysis builds millions of long-lived objects and almost no reference cycles, so
+            # every full collection the allocations trigger walks the whole growing heap for
+            # nothing; on large images that was a third of the run time
+            collecting = gc.isenabled()
+            gc.disable()
+            try:
+                self.disassembly = self.disassembler.analyzeBuffer(binary_info, self._callbackAnalysisTimeout)
+                return SmdaReport(self.disassembly, config=self.config)
+            finally:
+                if collecting:
+                    gc.enable()
         if not binary_info.has_backend:
             if not binary_info.architecture:
                 if binary_info.format_recognized:
