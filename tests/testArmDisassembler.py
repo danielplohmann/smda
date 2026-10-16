@@ -610,6 +610,8 @@ class ArmInstructionSetEvidenceTest(unittest.TestCase):
         self.assertEqual(modes[0x10028], (True, 4))
         decoded = {ins.offset for function in report.getFunctions() for ins in function.getInstructions()}
         self.assertNotIn(0x10018, decoded)
+        # the adr names the table, which $d declares data
+        self.assertEqual(sorted(modes), [0x10000, 0x10028])
 
     def test_an_adr_to_a_switch_table_is_no_a32_function_in_a_thumb_only_pe(self):
         """``armnt_adr_switch_table_xored``, ``llvm-mc -triple=thumbv7-windows-msvc`` +
