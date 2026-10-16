@@ -100,6 +100,11 @@ past roughly six lines it belongs in the PR the entry links.
   a bare `object()`, which `getPicBlockHash()` and `getOpcBlockHash()` then returned as the hash. *Measured on
   `ff722ac`:* `cutwail` (file mode) with blocks built but not hashed returned it on all 253 blocks, now on none.
   *Reproduced on bundled fixtures.* No cost; pickles written before this change still load. (#404)
+- **(build)** Declare capstone's lower bound as `>=5.0.2`. `StringExtractor` imports `CS_GRP_BRANCH_RELATIVE`
+  since #382, which capstone 4.x does not have, but only `capstone<6` was declared, so pip resolved 4.0.2 beside
+  dumpulator (`capstone~=4.0.2`), `pip check` passed, and `import smda.Disassembler` raised ImportError. 5.0.0.post1
+  and 5.0.1 import `distutils` and fail on Python 3.12+. *Measured on Python 3.14:* full suite 2397 passed on 5.0.2
+  and 5.0.9 alike; 4.0.2 fails at collection. Cost: smda no longer co-installs with dumpulator 0.2.6. (#405)
 
 ### Security
 
