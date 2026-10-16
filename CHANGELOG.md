@@ -71,6 +71,22 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v5.0.0] - 2026-10-16
+
+### Added
 - **(arm)** Add a 32-bit ARM backend for A32 and Thumb/T32 code in ELF, PE (ARMNT, Windows CE), Mach-O armv7 and raw
   buffers, choosing the instruction set per function (`architecture_metadata["thumb"]`) from its strongest evidence:
   the image's own statements, then decoded instructions, then linear scans. Starts come from symbols,
@@ -91,10 +107,6 @@ past roughly six lines it belongs in the PR the entry links.
   Wall time is inside noise. *Reproduced on bundled fixtures.* Cost: none in output, reports identical on 112 bundled
   fixture and fuzz-corpus inputs; instructions and blocks no longer take attributes outside their slots. (#404)
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 - **(core)** Keep an uncomputed block hash uncomputed across pickle and `deepcopy`. The `_UNSET` sentinel came back as
   a bare `object()`, which `getPicBlockHash()` and `getOpcBlockHash()` then returned as the hash. *Measured on
@@ -105,8 +117,6 @@ past roughly six lines it belongs in the PR the entry links.
   dumpulator (`capstone~=4.0.2`), `pip check` passed, and `import smda.Disassembler` raised ImportError. 5.0.0.post1
   and 5.0.1 import `distutils` and fail on Python 3.12+. *Measured on Python 3.14:* full suite 2397 passed on 5.0.2
   and 5.0.9 alike; 4.0.2 fails at collection. Cost: smda no longer co-installs with dumpulator 0.2.6. (#405)
-
-### Security
 
 ### Compatibility
 - **(arm)** Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
@@ -1015,7 +1025,8 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v4.11.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v5.0.0...HEAD
+[v5.0.0]: https://github.com/danielplohmann/smda/compare/v4.11.0...v5.0.0
 [v4.11.0]: https://github.com/danielplohmann/smda/compare/v4.10.0...v4.11.0
 [v4.10.0]: https://github.com/danielplohmann/smda/compare/v4.9.0...v4.10.0
 [v4.9.0]: https://github.com/danielplohmann/smda/compare/v4.8.0...v4.9.0
