@@ -205,8 +205,14 @@ class Disassembler:
                 # buffer bytes: the generic StringExtractor cannot see them either.
                 continue
             function_strings = analyzer_provided
+            # a string can be reached through more than one ref of the same instruction
+            # (e.g. ARM records both the literal pool word and the value loaded from it)
+            seen_refs = set()
             for string_result in extract_strings(smda_function, mode=mode):
                 string, referencing_addr, string_addr, string_type = string_result
+                if (referencing_addr, string_addr) in seen_refs:
+                    continue
+                seen_refs.add((referencing_addr, string_addr))
                 function_strings.append(
                     {
                         "string": string,
