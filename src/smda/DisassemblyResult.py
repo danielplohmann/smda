@@ -350,17 +350,22 @@ class DisassemblyResult:
         blocks = [block for block in self.functions[func_addr] if block]
         block_starts = {block[0][0] for block in blocks}
         block_refs = {block_start: [] for block_start in sorted(block_starts)}
+        code_refs_from = self.code_refs_from
         for block in blocks:
             last_ins_addr = block[-1][0]
-            if last_ins_addr not in self.code_refs_from:
+            dests = code_refs_from.get(last_ins_addr)
+            if dests is None:
                 continue
-            verified_refs = sorted(block_starts.intersection(self.code_refs_from[last_ins_addr]))
+            verified_refs = sorted([target for target in dests if target in block_starts])
             if verified_refs:
                 block_refs[block[0][0]] = verified_refs
         # block_refs was seeded from sorted(block_starts), so it only needs re-sorting if the
         # exception pass introduced a key that was not already a block start
+        exception_successors = self._getExceptionSuccessors(func_addr, blocks)
+        if not exception_successors:
+            return block_refs
         added_key = False
-        for block_start, successors in self._getExceptionSuccessors(func_addr, blocks).items():
+        for block_start, successors in exception_successors.items():
             merged_successors = set(block_refs.get(block_start, []))
             merged_successors.update(successors)
             block_refs[block_start] = sorted(merged_successors)
@@ -381,27 +386,27 @@ class DisassemblyResult:
     def getOutRefs(self, func_addr):
         code_refs_from = self.code_refs_from
         blocks = self.functions[func_addr]
-        ins_addrs = {ins[0] for block in blocks for ins in block}
+        ins_addrs = set()
+        ref_ins = []
+        for block in blocks:
+            for ins in block:
+                addr = ins[0]
+                ins_addrs.add(addr)
+                dests = dict.get(code_refs_from, addr)
+                if dests is not None:
+                    if dests.__class__ is int:
+                        dests = (dests,)
+                    ref_ins.append((addr, dests))
         # function may be recursive
         ins_addrs.discard(func_addr)
         out_refs = {}
         # reduce outrefs to addresses within the memory image
         base_addr = self.binary_info.base_addr
         max_addr = base_addr + self.binary_info.binary_size
-        for block in blocks:
-            for ins in block:
-                ins_addr = ins[0]
-                # the stored form, so the lone fall-through of each instruction is not boxed
-                dests = dict.get(code_refs_from, ins_addr)
-                if dests is None:
-                    continue
-                if dests.__class__ is int:
-                    dests = (dests,)
-                external = [
-                    to_addr for to_addr in dests if base_addr <= to_addr < max_addr and to_addr not in ins_addrs
-                ]
-                if external:
-                    out_refs[ins_addr] = sorted(external)
+        for ins_addr, dests in ref_ins:
+            external = [to_addr for to_addr in dests if base_addr <= to_addr < max_addr and to_addr not in ins_addrs]
+            if external:
+                out_refs[ins_addr] = sorted(external)
         return out_refs
 
     def isRecursiveFunction(self, func_addr):

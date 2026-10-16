@@ -4,7 +4,6 @@ import hashlib
 import logging
 import re
 import struct
-from operator import itemgetter
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, NoReturn, Optional, Tuple
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
@@ -232,7 +231,10 @@ class SmdaFunction:
             self.outrefs = disassembly.getOutRefs(function_offset)
             self.is_exported = self.offset in disassembly.exported_functions
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
-            self.blockrefs = self.getNormalizedBlockRefs()
+            if self.architecture_metadata and "try_ranges" in self.architecture_metadata:
+                self.blockrefs = self.getNormalizedBlockRefs()
+            else:
+                self._normalized_blockrefs = self.blockrefs
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             candidate = disassembly.candidates.get(function_offset)
             if candidate is not None:
@@ -498,23 +500,26 @@ class SmdaFunction:
             cache_get = cache.get
             for key in self._sorted_block_keys:
                 for instruction in blocks[key]:
-                    cache_key = (
-                        escaper,
-                        instruction.bytes,
-                        instruction.mnemonic,
-                        instruction.operands,
-                        True,
-                        lower_addr,
-                        upper_addr,
-                    )
-                    escaped = cache_get(cache_key)
+                    escaped = instruction._escaped_binary
                     if escaped is None:
-                        # enforce the cap at insertion so even one function with more
-                        # distinct instructions than the limit cannot grow past it
-                        if len(cache) >= _ESCAPE_CACHE_LIMIT:
-                            cache.clear()
-                        escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
-                        cache[cache_key] = escaped
+                        cache_key = (
+                            escaper,
+                            instruction.bytes,
+                            instruction.mnemonic,
+                            instruction.operands,
+                            True,
+                            lower_addr,
+                            upper_addr,
+                        )
+                        escaped = cache_get(cache_key)
+                        if escaped is None:
+                            # enforce the cap at insertion so even one function with more
+                            # distinct instructions than the limit cannot grow past it
+                            if len(cache) >= _ESCAPE_CACHE_LIMIT:
+                                cache.clear()
+                            escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
+                            cache[cache_key] = escaped
+                        instruction._escaped_binary = escaped
                     append(escaped)
         return "".join(escaped_binary_seqs).encode("ascii")
 
@@ -547,14 +552,21 @@ class SmdaFunction:
         coercions are preserved, because the IDA path may hand back non-str mnemonics/operands.
         Precedent for bypassing it: the TF-IDF scoring pass in RecursiveDisassembler.
         """
-        self.blocks = {}
+        blocks = {}
+        from_tuple = SmdaInstruction.from_tuple
+        total_bytes = 0
         for block in disasm_blocks:
             block_start = block[0][0]
-            self.blocks[block_start] = [SmdaInstruction.from_tuple(ins, smda_function=self) for ins in block]
-            # len(hex) == 2 * len(raw), so the per-instruction len(hex)/2 this replaces summed to
-            # the raw byte count; binweight is serialized, so it must stay that value and a float
-            self.binweight += float(sum(map(len, map(itemgetter(4), block))))
-        self._sorted_block_keys = sorted(self.blocks.keys())
+            block_ins = []
+            block_bytes = 0
+            for ins in block:
+                block_ins.append(from_tuple(ins, smda_function=self))
+                block_bytes += ins[1]
+            blocks[block_start] = block_ins
+            total_bytes += block_bytes
+        self.blocks = blocks
+        self.binweight += float(total_bytes)
+        self._sorted_block_keys = sorted(blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
         self._basic_blocks = None
 

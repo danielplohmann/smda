@@ -364,6 +364,7 @@ class RecursiveDisassembler:
             data_map = self.disassembly.data_map
             ins2fn = self.disassembly.ins2fn
             raw_binary = binary_info.binary
+            base_addr = binary_info.base_addr
             analyze_instruction = self.backend.analyzeInstruction
             add_instruction = state.addInstruction
             processed_bytes = state.processed_bytes
@@ -382,7 +383,7 @@ class RecursiveDisassembler:
                         break
 
                     i_op_str = i_op_str.strip()
-                    i_relative_address = i_address - binary_info.base_addr
+                    i_relative_address = i_address - base_addr
                     i_bytes = raw_binary[i_relative_address : i_relative_address + i_size]
                     if debug_logging:
                         LOGGER.debug(

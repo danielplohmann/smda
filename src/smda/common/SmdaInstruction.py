@@ -1,5 +1,5 @@
 import logging
-from typing import Iterator, List, Optional
+from typing import Iterator, List
 
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
@@ -11,20 +11,27 @@ LOGGER = logging.getLogger(__name__)
 
 
 class SmdaInstruction:
-    smda_function = None
-    offset: Optional[int] = None
-    bytes: Optional[str] = None
-    mnemonic: Optional[str] = None
-    operands: Optional[str] = None
-    detailed = None
-    _data_refs: Optional[List[int]] = None
-    # x87 instructions have explicit-WAIT and no-WAIT encodings (e.g. FSTCW vs FNSTCW).
-    # For the WAIT-prefixed form Capstone decodes the 0x9b prefix as a standalone
-    # `wait`/`fwait` instruction, so it must be skipped when picking the operation detail.
+    __slots__ = (
+        "smda_function",
+        "offset",
+        "bytes",
+        "mnemonic",
+        "operands",
+        "detailed",
+        "_data_refs",
+        "_escaped_binary",
+    )
     _WAIT_PREFIX_MNEMONICS = frozenset({"wait", "fwait"})
 
     def __init__(self, ins_list=None, smda_function=None):
         self.smda_function = smda_function
+        self.offset = None
+        self.bytes = None
+        self.mnemonic = None
+        self.operands = None
+        self.detailed = None
+        self._data_refs = None
+        self._escaped_binary = None
         if ins_list is not None:
             self.offset = ins_list[0]
             self.bytes = ins_list[1]
@@ -41,6 +48,9 @@ class SmdaInstruction:
         instruction.mnemonic = mnemonic if mnemonic.__class__ is str else str(mnemonic)
         operands = ins[3]
         instruction.operands = operands if operands.__class__ is str else str(operands)
+        instruction.detailed = None
+        instruction._data_refs = None
+        instruction._escaped_binary = None
         return instruction
 
     def getDataRefs(self) -> Iterator[int]:
@@ -125,9 +135,23 @@ class SmdaInstruction:
         # the cached capstone CsInsn holds ctypes pointers and cannot be pickled; the class-level
         # default makes attribute lookup fall through to None after unpickling, so getDetailed()
         # simply re-creates it on demand
-        state = self.__dict__.copy()
-        state.pop("detailed", None)
-        return state
+        return {
+            slot: getattr(self, slot, None)
+            for slot in (
+                "smda_function",
+                "offset",
+                "bytes",
+                "mnemonic",
+                "operands",
+                "_data_refs",
+                "_escaped_binary",
+            )
+        }
+
+    def __setstate__(self, state):
+        for slot, value in state.items():
+            setattr(self, slot, value)
+        self.detailed = None
 
     def getDetailed(self):
         if self.smda_function is None or self.smda_function.smda_report is None:

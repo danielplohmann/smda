@@ -752,8 +752,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         bit_mask = self.getBitMask()
         words = self._wordsView()
 
-        def in_exec(addr):
-            return any(start <= addr < end for start, end in exec_ranges)
+        if len(exec_ranges) == 1:
+            exec_start, exec_end = exec_ranges[0]
+
+            def in_exec(addr):
+                return exec_start <= addr < exec_end
+        else:
+
+            def in_exec(addr):
+                return any(start <= addr < end for start, end in exec_ranges)
 
         def seed(target, source):
             if target is None:
@@ -1202,8 +1209,15 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         exec_ranges = self._cachedExecutableSectionRanges()
         words = self._wordsView()
 
-        def in_exec(addr):
-            return any(start <= addr < end for start, end in exec_ranges)
+        if exec_ranges and len(exec_ranges) == 1:
+            exec_start, exec_end = exec_ranges[0]
+
+            def in_exec(addr):
+                return exec_start <= addr < exec_end
+        else:
+
+            def in_exec(addr):
+                return any(start <= addr < end for start, end in exec_ranges)
 
         scanned = 0
         while True:

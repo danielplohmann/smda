@@ -680,8 +680,8 @@ class X86Backend(ArchBackend):
             return True
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
         # the engine calls this for every decoded instruction, so the operand is screened for a
-        # bracket here rather than paying a call to find out there is nothing to record
-        if i_op_str and "[" in i_op_str:
+        # bracket and absolute pattern here rather than paying a call to find out there is nothing to record
+        if i_op_str and "[" in i_op_str and ("[0x" in i_op_str or ABSOLUTE_OPERAND_HINT.search(i_op_str) is not None):
             self._recordAbsoluteDataRefs(d, i_address, i_op_str, state)
         if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)

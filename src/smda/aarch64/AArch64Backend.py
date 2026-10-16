@@ -343,6 +343,13 @@ class AArch64Backend(ArchBackend):
         ):
             return
 
+        ins_bytes = d.disassembly.getBytes(i_address, i_size)
+        if not ins_bytes or len(ins_bytes) != i_size:
+            return
+        word_imms = _dataRefImmediatesFromWord(ins_bytes, i_address)
+        if word_imms == ():
+            return
+
         binary_info = d.disassembly.binary_info
         base_addr = binary_info.base_addr
         upper_addr = base_addr + binary_info.binary_size
@@ -350,11 +357,7 @@ class AArch64Backend(ArchBackend):
             # no printed immediate can yield a data ref, so the detail re-decode
             # below would record nothing.
             return
-        ins_bytes = d.disassembly.getBytes(i_address, i_size)
-        if not ins_bytes or len(ins_bytes) != i_size:
-            return
         emitted = set()
-        word_imms = _dataRefImmediatesFromWord(ins_bytes, i_address)
         if word_imms is None:
             detailed = next(d.capstone.disasm(ins_bytes, i_address), None)
             if detailed is None:
