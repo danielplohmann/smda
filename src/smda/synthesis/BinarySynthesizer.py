@@ -6,6 +6,9 @@ LOGGER = logging.getLogger(__name__)
 
 AARCH64_NOP = bytes.fromhex("1f2003d5")
 INTEL_NOP = b"\x90"
+#: A32 ``nop`` and T16 ``nop`` (DDI 0406C A8.8.119)
+ARM_NOP = bytes.fromhex("00f020e3")
+THUMB_NOP = bytes.fromhex("00bf")
 
 
 def align_up(value, alignment):
@@ -162,7 +165,16 @@ class BinarySynthesizer:
                     )
 
     def _nopPadding(self):
-        return AARCH64_NOP if self.report.architecture == "aarch64" else INTEL_NOP
+        if self.report.architecture == "aarch64":
+            return AARCH64_NOP
+        if self.report.architecture == "arm":
+            return THUMB_NOP if self._mostlyThumb() else ARM_NOP
+        return INTEL_NOP
+
+    def _mostlyThumb(self):
+        functions = getattr(self.report, "xcfg", None) or {}
+        modes = [bool((function.architecture_metadata or {}).get("thumb")) for function in functions.values()]
+        return bool(modes) and sum(modes) * 2 > len(modes)
 
     def _nopFill(self, size):
         pattern = self._nopPadding()

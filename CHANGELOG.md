@@ -71,6 +71,16 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(arm)** Add a 32-bit ARM backend for A32 and Thumb/T32 code in ELF, PE (ARMNT, Windows CE), Mach-O armv7 and raw
+  buffers, choosing the instruction set per function (`architecture_metadata["thumb"]`) from its strongest evidence:
+  the image's own statements, then decoded instructions, then linear scans. Starts come from symbols,
+  `.ARM.exidx`/`.pdata`, Go pclntab, calls and relocated pointers; switch tables, PLT/IAT stubs and veneers are
+  followed, IT conditions survive `getDetailed()` and `Exporter`, and `ArmInstructionEscaper` gives PicHash/OpcHash.
+  *Measured on `9b8d24c`:* 264 stripped Debian bookworm armhf/armel binaries against their dbgsym symbols, 97.3%/95.4%
+  of 91,686 functions found, 675/953 false starts, none in the wrong mode, 0.85 s per file; every instruction in the
+  three bundled lz4 ELF fixtures lands on a ground-truth instruction start. Not reproduced: the corpus is not bundled,
+  the 12 ARM fixtures are. *Cost:* a raw buffer has no symbols or unwind table to start from and finds fewer
+  functions. (#364)
 
 ### Changed
 
@@ -83,6 +93,10 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
+- **(arm)** Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
+  report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
+  returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
+  Thumb bit, so labels land on the address the code starts at. (#364)
 
 ## [v4.11.0] - 2026-10-15
 

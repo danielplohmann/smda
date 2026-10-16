@@ -45,6 +45,14 @@ class ElfSymbolProvider(AbstractLabelProvider):
         self._config = config
         # addr:func_name
         self._func_symbols = {}
+        # all ones, or ~1 on 32-bit ARM, where bit 0 of a function symbol's value selects
+        # Thumb (ELF for the ARM Architecture, 5.5.3) and is not part of the address
+        self._code_mask = -1
+
+    def _setCodeMask(self, lief_binary):
+        machine = getattr(getattr(lief_binary, "header", None), "machine_type", None)
+        is_arm = isinstance(machine, lief.ELF.ARCH) and machine == lief.ELF.ARCH.ARM
+        self._code_mask = ~1 if is_arm else -1
 
     def isSymbolProvider(self):
         return True
@@ -58,7 +66,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def _parseOep(self, lief_result):
         # Symbol map keys use absolute VAs; BinaryInfo.getOep() stores a base-relative offset.
         if lief_result:
-            self._func_symbols[lief_result.header.entrypoint] = "original_entry_point"
+            self._func_symbols[lief_result.header.entrypoint & self._code_mask] = "original_entry_point"
 
     def update(self, binary_info):
         self._func_symbols = {}
@@ -67,6 +75,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
         if not isinstance(lief_binary, lief.ELF.Binary):
             return
 
+        self._setCodeMask(lief_binary)
         self._parseOep(lief_binary)
         # Keep only local/defined function symbols here: exported functions plus defined
         # static and dynamic symtab entries (parseSymbols drops undefined imports via value != 0).
@@ -82,7 +91,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
         for function in binary.exported_functions:
             function_name = self._formatSymbolName(function)
             if function_name:
-                function_symbols[function.address] = function_name
+                function_symbols[function.address & self._code_mask] = function_name
         return function_symbols
 
     _isDefinedSymbol = staticmethod(is_defined_elf_symbol)
@@ -136,7 +145,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
             if symbol is not None and symbol.is_function and symbol.value != 0 and self._isDefinedSymbol(symbol):
                 symbol_name = self._formatSymbolName(symbol)
                 if symbol_name:
-                    function_symbols[symbol.value] = symbol_name
+                    function_symbols[symbol.value & self._code_mask] = symbol_name
         return function_symbols
 
     def parseImports(self, lief_binary):
@@ -153,6 +162,7 @@ class ElfSymbolProvider(AbstractLabelProvider):
     def collectSymbols(self, lief_binary):
         if not isinstance(lief_binary, lief.ELF.Binary):
             return {}
+        self._setCodeMask(lief_binary)
         # Keep this legacy map function-only. Data exports are available from
         # BinaryInfo.getExportedSymbols() and SmdaReport.xmetadata["exported_symbols"].
         symbols = {}

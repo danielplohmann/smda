@@ -130,7 +130,6 @@ class TestMachoFileLoader(unittest.TestCase):
         # dispatch without executing fixture content.
         headers = {
             "ppc": struct.pack(">IIIIIII", 0xFEEDFACE, 18, 0, 2, 0, 0, 0),
-            "arm": struct.pack("<IIIIIII", 0xFEEDFACE, 12, 0, 2, 0, 0, 0),
         }
         for architecture, raw in headers.items():
             with self.subTest(architecture=architecture):

@@ -1,6 +1,7 @@
 """Legacy IDAPython adapters for supported IDA SDK generations."""
 
 import contextlib
+import logging
 import re
 
 from smda.export.BackendInterface import BackendInterface
@@ -25,12 +26,15 @@ except ImportError:
 with contextlib.suppress(ImportError):
     import idc
 
+LOGGER = logging.getLogger(__name__)
+
 
 class _ModernIdapythonInterface(BackendInterface):
     def __init__(self):
         self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
+        self._thumb_lookup_failed = False
 
     def getFunctions(self):
         return sorted(idautils.Functions())
@@ -91,6 +95,18 @@ class _ModernIdapythonInterface(BackendInterface):
             ida_nalt.enum_import_names(module_index, self._cbEnumImports)
         return self._api_map
 
+    def isThumb(self, offset):
+        # IDA keeps the ARM instruction set in the ``T`` segment register (0 for A32, 1 for T32)
+        try:
+            import idc
+
+            return idc.get_sreg(offset, "T") == 1
+        except Exception as exc:
+            if not self._thumb_lookup_failed:
+                self._thumb_lookup_failed = True
+                LOGGER.warning("could not read the T segment register (%s), treating functions as A32", exc)
+            return False
+
     def isExternalFunction(self, function_offset):
         segment = ida_segment.getseg(function_offset)
         return ida_segment.get_segm_name(segment) in ["extern", "UNDEF"]
@@ -128,9 +144,12 @@ class Ida84Interface(_ModernIdapythonInterface):
         info = idaapi.get_inf_structure()
         procname = info.procname
         if procname == "ARM":
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32:
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if procname in self._processor_map:
             return self._processor_map[procname]
         raise ValueError("Unsupported Architecture")
@@ -152,9 +171,12 @@ class Ida85Interface(_ModernIdapythonInterface):
     def getArchitecture(self):
         procname = idaapi.inf_get_procname()
         if procname == "ARM":
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32:
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if procname in self._processor_map:
             return self._processor_map[procname]
         raise ValueError("Unsupported Architecture")
