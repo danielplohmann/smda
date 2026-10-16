@@ -72,12 +72,15 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 - **(arm)** Add a 32-bit ARM backend for A32 and Thumb/T32 code in ELF, PE (ARMNT, Windows CE), Mach-O armv7 and raw
-  buffers, choosing the instruction set per function (`architecture_metadata["thumb"]`). Starts come from symbols,
+  buffers, choosing the instruction set per function (`architecture_metadata["thumb"]`) from its strongest evidence:
+  the image's own statements, then decoded instructions, then linear scans. Starts come from symbols,
   `.ARM.exidx`/`.pdata`, Go pclntab, calls and relocated pointers; switch tables, PLT/IAT stubs and veneers are
-  followed, and `ArmInstructionEscaper` gives PicHash/OpcHash. *Measured on `77f3385`:* 264 stripped Debian bookworm
-  armhf/armel binaries against their dbgsym symbols, 97.3%/95.4% of 91,686 functions found, 677/974 false starts, none
-  in the wrong mode, 1.9 s per file. Not reproduced: the corpus is not bundled, the 10 ARM fixtures are. *Cost:* a raw
-  buffer has no symbols or unwind table to start from and finds fewer functions. (#364)
+  followed, IT conditions survive `getDetailed()` and `Exporter`, and `ArmInstructionEscaper` gives PicHash/OpcHash.
+  *Measured on `9b8d24c`:* 264 stripped Debian bookworm armhf/armel binaries against their dbgsym symbols, 97.3%/95.4%
+  of 91,686 functions found, 675/953 false starts, none in the wrong mode, 0.85 s per file; every instruction in the
+  three bundled lz4 ELF fixtures lands on a ground-truth instruction start. Not reproduced: the corpus is not bundled,
+  the 12 ARM fixtures are. *Cost:* a raw buffer has no symbols or unwind table to start from and finds fewer
+  functions. (#364)
 
 ### Changed
 
@@ -86,23 +89,6 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
-- **(arm)** Keep an IT block's condition in `SmdaInstruction.getDetailed()` and in reports `Exporter` builds from a
-  frontend. Both decoded a T32 instruction alone and lost it (`bxeq lr` read as `bx lr`, `moveq` as `movs`); both now
-  decode it together with its `it`, as `ArmCapstone` does. *Measured on `0c306eb`:* bundled fixtures, 781/150/828
-  instructions on `arm_lz4_thumb_Os`, `arm_lz4_mixed_O2`, `armnt_lz4_dll` now match the native report, in
-  `getDetailed()` and in an export replaying its blocks; analysis output and A32, Intel and AArch64 detail
-  bit-identical. *Reproduced on bundled fixtures.* *Cost:* about 4% of `getDetailed()` time on Thumb-heavy reports.
-- **(arm)** Invalidate every overwritten register during indirect-target recovery, including multi-register loads,
-  long multiplies, coprocessor reads and store-exclusive status writes. Switch recovery no longer truncates tables
-  using a comparison of an index that was subsequently changed, and conditional exception returns retain their
-  fallthrough. Reproduced by public-API and instruction-level regression tests; unknown switch bounds use the
-  existing bounded conservative scan, which can recover additional candidate cases.
-- **(arm)** Bound scanned-target mode and strong-start metadata alongside function candidates, and poll for timeout
-  within call, prologue and mode-evidence scans. The regression input with a candidate cap of two now retains only
-  two scanned targets instead of 16,382 auxiliary entries; cancellation tests use callbacks rather than timing.
-- **(arm)** Match synthesized PE machine types and entry-point tags to the recovered instruction sets, and distinguish
-  argument-setting wrappers from PLT/IAT thunks using their register and transfer operands. Regression tests cover
-  A32, Thumb and mixed-mode reports, source headers, genuine import stubs and wrappers.
 
 ### Security
 
