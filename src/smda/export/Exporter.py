@@ -79,7 +79,12 @@ class Exporter:
             out.append((i_address, i_size, i_mnemonic, i_op_str, sub_bytes))
             consumed += i_size
         while consumed < len(instruction_bytes):
-            chunk = 4 if architecture in ("aarch64", "arm") else (len(instruction_bytes) - consumed)
+            if architecture == "arm" and capstone.mode & CS_MODE_THUMB:
+                chunk = 2
+            elif architecture in ("aarch64", "arm"):
+                chunk = 4
+            else:
+                chunk = len(instruction_bytes) - consumed
             chunk = min(chunk, len(instruction_bytes) - consumed)
             sub_bytes = bytes(instruction_bytes[consumed : consumed + chunk])
             bytes_hex = sub_bytes.hex()
