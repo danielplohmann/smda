@@ -592,6 +592,25 @@ class ArmInstructionSetEvidenceTest(unittest.TestCase):
         report = Disassembler(_config()).disassembleUnmappedBuffer(_loadXored("arm_dynsym_thumb_default_xored"))
         self.assertEqual(_functionModes(report), {0x120: (True, 4), 0x128: (True, 6)})
 
+    def test_mapping_symbols_name_the_instruction_set_and_the_data(self):
+        """``arm_mapping_symbols_xored``, ``clang --target=armv7-linux-gnueabihf -fuse-ld=lld
+        -ffreestanding -nostdlib -static -Wl,-N,-Ttext=0x10000,--build-id=none,--entry=0`` of an
+        assembly file with local labels only, ``.comment`` removed: no entry point and no function
+        symbols, ``.symtab`` holds ``$a`` at 0x10000, ``$d`` at 0x10018 and ``$t`` at 0x10028:
+
+            (A32)  push {r4, lr}; adr r1, table; ldr r0, [r1, r0, lsl #2]; ldr r1, pool
+                   add r0, r0, r1; pop {r4, pc}
+            pool   .word 0xe92d4ff0 (reads as push {r4-r11, lr})
+            table  .word 0xe92d4010, 0xe3a00007, 0xe8bd8010 (push {r4, lr}; mov r0, #7; pop {r4, pc})
+            (T32)  push {r7, lr}; movs r0, #42; adds r0, r0, r1; pop {r7, pc}, reached by nothing
+        """
+        report = Disassembler(_config()).disassembleUnmappedBuffer(_loadXored("arm_mapping_symbols_xored"))
+        modes = _functionModes(report)
+        self.assertEqual(modes[0x10000], (False, 6))
+        self.assertEqual(modes[0x10028], (True, 4))
+        decoded = {ins.offset for function in report.getFunctions() for ins in function.getInstructions()}
+        self.assertNotIn(0x10018, decoded)
+
     def test_an_adr_to_a_switch_table_is_no_a32_function_in_a_thumb_only_pe(self):
         """``armnt_adr_switch_table_xored``, ``llvm-mc -triple=thumbv7-windows-msvc`` +
         ``lld-link /machine:arm /dll /noentry /export:entry``; the byte table reads as an
