@@ -80,12 +80,13 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 - **(common)** End the gap scan at the image end, not at the address mask. With no gap left, `getNextGap()` returned
-  `0xFFFFFFFF` on a 32-bit image, which lies below or inside one based at or above 4 GiB or across it, so the intel and
-  ARM scans ran until `TIMEOUT` (300 s by default; never with `TIMEOUT = 0`), as the intel scan did on an image ending
-  at 4 GiB in a non-padding byte. *Measured on `a23d395`:* as buffers at 0x140000000 the 12 fixtures of `tests/` and
-  `tests/msvc_smda384_corpus/` that read as 32-bit, and the ARM tests' idiom buffer, went from `timeout` to `ok` in
-  under 0.1 s. *Reproduced on bundled fixtures.* No cost: reports identical on the other 77 runs of the 32 x86/x64 and
-  AArch64 fixtures there and on every report the ARM tests build.
+  `0xFFFFFFFF` on a 32-bit image, which lies below one based at or above 4 GiB or inside one across it, so the intel and
+  ARM scans could run until `TIMEOUT`, as the intel scan could on an image ending at 4 GiB in a non-padding byte.
+  *Measured on `a23d395`:* as buffers at 0x140000000 the 12 fixtures of `tests/` and `tests/msvc_smda384_corpus/` that
+  read as 32-bit, and the ARM tests' idiom buffer, went from `timeout` to `ok` in under 0.1 s; the other 77 runs of the
+  32 x86/x64 and AArch64 fixtures there, and every ARM test report, are identical. *Reproduced on bundled fixtures.*
+  Cost: across 4 GiB a failed gap no longer resumes at `0xFFFFFFFF`, inside the image, which in 5.0.0's timeout report
+  could reach a function above 4 GiB.
 
 ### Security
 

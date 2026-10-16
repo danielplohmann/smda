@@ -154,8 +154,8 @@ class GapScanEndReportTest(unittest.TestCase):
 class ArmGapScanEndReportTest(unittest.TestCase):
     """The ARM scan rounded the old end marker up to 4 GiB, inside an image based at or across it.
 
-    Above it, 4 GiB is below the base, and the scan walked the unmapped space up to the base a
-    word at a time.
+    Above it, 4 GiB is below the base, and for this A32 buffer the scan walked the unmapped space
+    up to the base a word at a time.
     """
 
     def _report(self, base):
