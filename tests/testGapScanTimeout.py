@@ -88,9 +88,9 @@ class IntelGapScanEndTest(unittest.TestCase):
     """The scan ends at the image end, wherever the image sits in the address space.
 
     It used to end at the address mask, 0xFFFFFFFF for a 32-bit image. That is below the base
-    of an image at 4 GiB or above, where the scan kept coming back to it until the analysis
-    timeout stopped it, and the last byte of one that ends at 4 GiB, where it did the same
-    unless that byte was padding.
+    of an image at 4 GiB or above and the last byte of one that ends at 4 GiB, so the scan could
+    keep coming back to it until the analysis timeout stopped it; on an image ending at 4 GiB,
+    only when that byte was not padding.
     """
 
     def _manager(self, image, base):
