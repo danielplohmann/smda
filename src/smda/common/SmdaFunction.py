@@ -469,7 +469,7 @@ class SmdaFunction:
     def _refuseInstructionWithoutBytes(instruction: "SmdaInstruction") -> NoReturn:
         """Raise rather than hash an instruction that carries no bytes.
 
-        `SmdaInstruction.bytes` is `Optional[str]` because the class default is None and
+        `SmdaInstruction.bytes` is `Optional[str]` because its constructors start it at None and
         `fromDict` copies whatever the report holds; every instruction SMDA itself puts in a
         block is given `ins[4].hex()`, so this is unreachable on a report we produced. It is a
         refusal rather than the `or ""` used elsewhere in this file because those sites are

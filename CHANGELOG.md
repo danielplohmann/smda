@@ -73,22 +73,22 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
-- **(core)** Optimize multi-architecture memory footprint, CFG reference recovery, and opcode decode hot paths. Adds
-  `__slots__` across `SmdaInstruction`, `SmdaBasicBlock`, and Dalvik AST nodes, binds module-level dictionary methods
-  and unrolls single-destination reference merging in `AddressRefs`, pre-screens alignment padding bytes in Intel
-  `_paddingFillsToAlignment`, fast-paths immediate address lookups, and converts Dalvik opcode decode and register formatting
-  to O(1) table lookups with zero-allocation payload scanning loops. *Measured on `7c1b776`:* 2,258 unit tests passing
-  bit-identical (55.7 s); peak RSS consistently reduced across all benchmark targets (-1.36 MB on `cutwail`, -0.70 MB on
-  `aarch64`, -0.56 MB on `njrat`, -0.54 MB on `asprox`, -0.43 MB on `blockblast`); total call counts reduced by -33,520 calls
-  net; speedups achieved across `pe_export` (+10.5%), `blockblast` (+4.5%), `njrat` (+4.6%), `aarch64_static` (+2.0%),
-  `bashlite` (+0.8%), `komplex` (+0.6%), with 100% cryptographic SHA-256 report identity across all 8 multi-architecture
-  fixtures. Cost: none.
+- **(core)** Give `SmdaInstruction` and `SmdaBasicBlock` `__slots__` and cut per-instruction work in the hot paths:
+  block refs skip normalization when a function has no `try_ranges`, `getReferencedAddr` skips its regex without a `0x`,
+  Dalvik decode objects are slotted dataclasses and the AArch64 nibble formatter is unrolled. *Measured on `ff722ac`,*
+  callgrind instructions on the 8 profiling fixtures: -3.4% on 3.13 (`pe_export` -0.2% to `blockblast` -7.8%), -1.7% on
+  3.11; live report memory -6% to -9% (`blockblast` -2.4%). Wall time is inside noise. *Reproduced on bundled fixtures.*
+  Cost: none in output, reports identical on 112 fixture configurations; instructions and blocks take no new attributes.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- **(core)** Keep an uncomputed block hash uncomputed across pickle and `deepcopy`. The `_UNSET` sentinel came back as
+  a bare `object()`, which `getPicBlockHash()` and `getOpcBlockHash()` then returned as the hash. *Measured on
+  `ff722ac`:* `cutwail` pickled with blocks built but not hashed returned it on 253 blocks, now on none. Pickles written
+  before this change still load. No cost.
 
 ### Security
 
