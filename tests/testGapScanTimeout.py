@@ -7,6 +7,7 @@ from smda.Disassembler import Disassembler
 from smda.DisassemblyResult import DisassemblyResult
 from smda.intel.FunctionCandidateManager import FunctionCandidateManager as IntelCandidateManager
 from smda.SmdaConfig import SmdaConfig
+from tests.testArmDisassembler import IDIOMS
 
 BASE = 0x400000
 # Long enough that a single scan crosses the timeout-check interval twice.
@@ -146,6 +147,25 @@ class GapScanEndReportTest(unittest.TestCase):
         self.assertEqual(offsets, [0, 0x10])
         self.assertEqual(offsets, sorted(function.offset - lower for function in lower_report.getFunctions()))
         self.assertEqual(top_report.num_instructions, lower_report.num_instructions)
+
+
+class ArmGapScanEndReportTest(unittest.TestCase):
+    """The ARM scan rounds the old end marker up to 4 GiB, which is the base or inside the image here."""
+
+    def _report(self, base):
+        config = SmdaConfig()
+        config.TIMEOUT = 5
+        config.WITH_STRINGS = False
+        return Disassembler(config).disassembleBuffer(IDIOMS, base, 32, architecture="arm")
+
+    def testAnArmBufferAt4GiBFinishes(self):
+        self.assertEqual(self._report(FOUR_GIB).status, "ok")
+
+    def testAnArmBufferAbove4GiBFinishes(self):
+        self.assertEqual(self._report(0x140000000).status, "ok")
+
+    def testAnArmBufferAcross4GiBFinishes(self):
+        self.assertEqual(self._report(FOUR_GIB - 0x78).status, "ok")
 
 
 if __name__ == "__main__":

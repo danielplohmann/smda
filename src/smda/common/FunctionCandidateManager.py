@@ -252,9 +252,9 @@ class FunctionCandidateManager:
     def _gapScanEnd(self):
         """The gap pointer that means no gap is left: the first address past the image.
 
-        Not the address mask, which is past the image only while the image fits below it: a
-        32-bit image based at 4 GiB or above has the mask below its base, and one that ends at
-        4 GiB has it on its last byte, so the scan would keep offering it until the timeout.
+        Not the address mask, which is past the image only while the image fits below it: for a
+        32-bit image based at, across or ending at 4 GiB the mask lies below its base or inside
+        it, so the scan would keep offering it until the timeout.
         """
         binary_info = self.disassembly.binary_info if self.disassembly is not None else None
         if binary_info is None:
