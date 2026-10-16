@@ -24,6 +24,7 @@ from .definitions import (
     TRAP_BASES,
     a32_branch_target,
     is_a32_prologue,
+    is_load_multiple_return,
     is_noreturn_api,
     is_t32_prologue,
     split_mnemonic,
@@ -697,8 +698,7 @@ class ArmBackend(ArchBackend):
         elif base in TABLE_BRANCH_BASES:
             self._analyzeIndirectJump(d, instruction, state, conditional)
         elif base in LOAD_MULTIPLE_BASES:
-            registers = self._registerList(i_op_str)
-            if "pc" in registers:
+            if is_load_multiple_return(base, i_op_str):
                 self._analyzeReturn(state, instruction, conditional)
         elif base in PC_WRITING_BASES and i_op_str.startswith("pc,"):
             self._analyzePcWrite(d, instruction, state, base, conditional, previous_instruction)

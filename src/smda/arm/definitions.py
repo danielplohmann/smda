@@ -360,13 +360,25 @@ def is_t32_prologue(hw1, hw2=None):
     return (hw1, hw2) == T32_PUSH_LR_SINGLE
 
 
+def is_load_multiple_return(base, op_str):
+    """Whether a block-transfer load writes pc, which returns whatever its base register:
+    ``pop {..., pc}``, ``ldm sp!, {..., pc}`` and the APCS frame's ``ldmdb fp, {..., sp, pc}``."""
+    if base not in LOAD_MULTIPLE_BASES:
+        return False
+    start = op_str.find("{")
+    end = op_str.find("}", start)
+    if start < 0 or end < 0:
+        return False
+    return "pc" in (register.strip() for register in op_str[start + 1 : end].split(","))
+
+
 def is_return_instruction(mnemonic, op_str):
     """Whether an instruction returns through lr or pops the return address into pc."""
     base, _condition, sets_flags = split_mnemonic(mnemonic)
     if base in ("bx", "bxns"):
         return op_str.strip() == "lr"
     if base in LOAD_MULTIPLE_BASES:
-        return "pc" in op_str and (base == "pop" or op_str.startswith("sp"))
+        return is_load_multiple_return(base, op_str)
     if base == "mov":
         return op_str.replace(" ", "") == "pc,lr"
     if sets_flags and op_str.startswith("pc,") and "lr" in (operand.strip() for operand in op_str.split(",")[1:]):
