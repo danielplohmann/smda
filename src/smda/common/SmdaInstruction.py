@@ -1,5 +1,5 @@
 import logging
-from typing import Iterator, List
+from typing import Any, Iterator, List, Optional
 
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
@@ -21,6 +21,14 @@ class SmdaInstruction:
         "_data_refs",
         "_escaped_binary",
     )
+    smda_function: Optional[Any]
+    offset: Optional[int]
+    bytes: Optional[str]
+    mnemonic: Optional[str]
+    operands: Optional[str]
+    detailed: Optional[Any]
+    _data_refs: Optional[List[int]]
+    _escaped_binary: Optional[str]
     _WAIT_PREFIX_MNEMONICS = frozenset({"wait", "fwait"})
 
     def __init__(self, ins_list=None, smda_function=None):
