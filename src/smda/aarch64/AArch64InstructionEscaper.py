@@ -10,6 +10,7 @@ from smda.aarch64.AArch64CapstoneVerification import (
 LOGGER = logging.getLogger(__name__)
 
 _KEEP_MASK_MEMO = {}
+_HEX_DIGITS = "0123456789abcdef"
 # mirrors the _shift_extend class attribute below; additions must be made in both places
 _SHIFT_EXTEND_KEYWORDS = ("lsl", "lsr", "asr", "ror", "sxt", "uxt")
 _SHIFT_EXTEND_IMMEDIATE_RE = re.compile(
@@ -508,7 +509,7 @@ class AArch64InstructionEscaper:
     @staticmethod
     def _wordWithNibbleKeepMaskToHex(word, keep_mask):
         """Render `word` (32-bit) as 8 hex chars in little-endian byte order
-        (byte 0 first, low nibble of each byte first), replacing nibbles
+        (byte 0 first, each byte as two hex digits, high nibble first), replacing nibbles
         whose corresponding bit in `keep_mask` is 0 with "?". `keep_mask`
         is 8 bits, bit n (LSB-first nibble index) = 1 means "keep this
         nibble from the original word".
@@ -522,20 +523,18 @@ class AArch64InstructionEscaper:
         Nibble-granular wildcards give finer PIC-hash signal than byte-level
         wildcards and match aarch64's 4-bit-aligned instruction fields.
         """
-        result = []
-        # Iterate byte 0 (low) -> byte 3 (high), and within each byte the
-        # low nibble first. This matches `ins.bytes` (LE) and the OLD
-        # `_wordWithMaskToHex` convention.
-        for byte_index in range(4):
-            byte = (word >> (byte_index * 8)) & 0xFF
-            for shift in (4, 0):
-                nibble_index = byte_index * 2 + (1 if shift == 4 else 0)
-                keep = (keep_mask >> nibble_index) & 1
-                if keep:
-                    result.append(f"{(byte >> shift) & 0xF:x}")
-                else:
-                    result.append("?")
-        return "".join(result)
+        return "".join(
+            (
+                _HEX_DIGITS[(word >> 4) & 0xF] if keep_mask & 2 else "?",
+                _HEX_DIGITS[word & 0xF] if keep_mask & 1 else "?",
+                _HEX_DIGITS[(word >> 12) & 0xF] if keep_mask & 8 else "?",
+                _HEX_DIGITS[(word >> 8) & 0xF] if keep_mask & 4 else "?",
+                _HEX_DIGITS[(word >> 20) & 0xF] if keep_mask & 32 else "?",
+                _HEX_DIGITS[(word >> 16) & 0xF] if keep_mask & 16 else "?",
+                _HEX_DIGITS[(word >> 28) & 0xF] if keep_mask & 128 else "?",
+                _HEX_DIGITS[(word >> 24) & 0xF] if keep_mask & 64 else "?",
+            )
+        )
 
     @staticmethod
     def _hasExplicitOperands(ins):

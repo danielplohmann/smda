@@ -4,7 +4,6 @@ import hashlib
 import logging
 import re
 import struct
-from operator import itemgetter
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, NoReturn, Optional, Tuple
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
@@ -238,7 +237,12 @@ class SmdaFunction:
             self.outrefs = disassembly.getOutRefs(function_offset)
             self.is_exported = self.offset in disassembly.exported_functions
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
-            self.blockrefs = self.getNormalizedBlockRefs()
+            # getBlockRefs() is already sorted and keyed by block start; only the handler edges
+            # that try_ranges add need the normalization pass
+            if self.architecture_metadata and "try_ranges" in self.architecture_metadata:
+                self.blockrefs = self.getNormalizedBlockRefs()
+            else:
+                self._normalized_blockrefs = self.blockrefs
             self.function_name = disassembly.function_symbols.get(function_offset, "")
             candidate = disassembly.candidates.get(function_offset)
             if candidate is not None:
@@ -505,7 +509,7 @@ class SmdaFunction:
     def _refuseInstructionWithoutBytes(instruction: "SmdaInstruction") -> NoReturn:
         """Raise rather than hash an instruction that carries no bytes.
 
-        `SmdaInstruction.bytes` is `Optional[str]` because the class default is None and
+        `SmdaInstruction.bytes` is `Optional[str]` because its constructors start it at None and
         `fromDict` copies whatever the report holds; every instruction SMDA itself puts in a
         block is given `ins[4].hex()`, so this is unreachable on a report we produced. It is a
         refusal rather than the `or ""` used elsewhere in this file because those sites are
@@ -585,14 +589,23 @@ class SmdaFunction:
         coercions are preserved, because the IDA path may hand back non-str mnemonics/operands.
         Precedent for bypassing it: the TF-IDF scoring pass in RecursiveDisassembler.
         """
-        self.blocks = {}
+        blocks = {}
+        from_tuple = SmdaInstruction.from_tuple
+        total_bytes = 0
         for block in disasm_blocks:
             block_start = block[0][0]
-            self.blocks[block_start] = [SmdaInstruction.from_tuple(ins, smda_function=self) for ins in block]
-            # len(hex) == 2 * len(raw), so the per-instruction len(hex)/2 this replaces summed to
-            # the raw byte count; binweight is serialized, so it must stay that value and a float
-            self.binweight += float(sum(map(len, map(itemgetter(4), block))))
-        self._sorted_block_keys = sorted(self.blocks.keys())
+            block_ins = []
+            block_bytes = 0
+            for ins in block:
+                block_ins.append(from_tuple(ins, smda_function=self))
+                # ins[1] is len(ins[4]) for every backend; binweight is serialized, so it must
+                # stay that raw byte count and a float
+                block_bytes += ins[1]
+            blocks[block_start] = block_ins
+            total_bytes += block_bytes
+        self.blocks = blocks
+        self.binweight += float(total_bytes)
+        self._sorted_block_keys = sorted(blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
         self._basic_blocks = None
         self._instructions_by_offset = None
