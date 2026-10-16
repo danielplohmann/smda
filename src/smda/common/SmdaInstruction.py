@@ -19,7 +19,6 @@ class SmdaInstruction:
         "operands",
         "detailed",
         "_data_refs",
-        "_escaped_binary",
     )
     smda_function: Optional[Any]
     offset: Optional[int]
@@ -28,7 +27,9 @@ class SmdaInstruction:
     operands: Optional[str]
     detailed: Optional[Any]
     _data_refs: Optional[List[int]]
-    _escaped_binary: Optional[str]
+    # x87 instructions have explicit-WAIT and no-WAIT encodings (e.g. FSTCW vs FNSTCW).
+    # For the WAIT-prefixed form Capstone decodes the 0x9b prefix as a standalone
+    # `wait`/`fwait` instruction, so it must be skipped when picking the operation detail.
     _WAIT_PREFIX_MNEMONICS = frozenset({"wait", "fwait"})
 
     def __init__(self, ins_list=None, smda_function=None):
@@ -39,7 +40,6 @@ class SmdaInstruction:
         self.operands = None
         self.detailed = None
         self._data_refs = None
-        self._escaped_binary = None
         if ins_list is not None:
             self.offset = ins_list[0]
             self.bytes = ins_list[1]
@@ -58,13 +58,12 @@ class SmdaInstruction:
         instruction.operands = operands if operands.__class__ is str else str(operands)
         instruction.detailed = None
         instruction._data_refs = None
-        instruction._escaped_binary = None
         return instruction
 
     def getDataRefs(self) -> Iterator[int]:
-        # direct read rather than getattr(): the class-level default covers the unpickled
-        # case the getattr guarded, and it keeps the declared Optional[List[int]] instead
-        # of widening to Any
+        # direct read rather than getattr(): __setstate__ fills every slot, which covers the
+        # unpickled case the getattr guarded, and it keeps the declared Optional[List[int]]
+        # instead of widening to Any
         data_refs_cached = self._data_refs
         if data_refs_cached is not None:
             yield from data_refs_cached
@@ -140,26 +139,15 @@ class SmdaInstruction:
         yield from self._data_refs
 
     def __getstate__(self):
-        # the cached capstone CsInsn holds ctypes pointers and cannot be pickled; the class-level
-        # default makes attribute lookup fall through to None after unpickling, so getDetailed()
-        # simply re-creates it on demand
-        return {
-            slot: getattr(self, slot, None)
-            for slot in (
-                "smda_function",
-                "offset",
-                "bytes",
-                "mnemonic",
-                "operands",
-                "_data_refs",
-                "_escaped_binary",
-            )
-        }
+        # the cached capstone CsInsn holds ctypes pointers and cannot be pickled, so it is left
+        # out and getDetailed() re-creates it on demand
+        return {slot: getattr(self, slot, None) for slot in self.__slots__ if slot != "detailed"}
 
     def __setstate__(self, state):
-        for slot, value in state.items():
-            setattr(self, slot, value)
-        self.detailed = None
+        # pickles written before __slots__ only carry the attributes that were set on the
+        # instance, so a slot missing from the state falls back to None
+        for slot in self.__slots__:
+            setattr(self, slot, None if slot == "detailed" else state.get(slot))
 
     def getDetailed(self):
         if self.smda_function is None or self.smda_function.smda_report is None:

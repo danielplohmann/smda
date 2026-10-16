@@ -456,11 +456,8 @@ _register(0xFE, "const-method-handle", "21c", 2, ref_kind="method_handle", can_t
 _register(0xFF, "const-method-type", "21c", 2, ref_kind="proto", can_throw=True)
 
 
-_REG_NAMES = tuple(f"v{i}" for i in range(256))
-
-
 def _reg_name(register_index):
-    return _REG_NAMES[register_index] if register_index < 256 else f"v{register_index}"
+    return f"v{register_index}"
 
 
 def _format_registers(registers):
@@ -849,47 +846,9 @@ FORMAT_DECODERS["51l"] = _decode_fmt_51l
 # the format decoder is resolved once here rather than per decoded instruction, so the hot path
 # does one int-keyed probe instead of two probes plus a string-keyed lookup; an opcode whose
 # format has no decoder keeps a None and still raises at decode time, exactly as before
-class _OpcodeDict(dict):
-    def __setitem__(self, k, v):
-        super().__setitem__(k, v)
-        self._sync()
-
-    def __delitem__(self, k):
-        super().__delitem__(k)
-        self._sync()
-
-    def clear(self):
-        super().clear()
-        self._sync()
-
-    def update(self, *args, **kwargs):
-        super().update(*args, **kwargs)
-        self._sync()
-
-    def pop(self, *args, **kwargs):
-        res = super().pop(*args, **kwargs)
-        self._sync()
-        return res
-
-    def setdefault(self, *args, **kwargs):
-        res = super().setdefault(*args, **kwargs)
-        self._sync()
-        return res
-
-    def popitem(self):
-        res = super().popitem()
-        self._sync()
-        return res
-
-    def _sync(self):
-        global _OPCODE_DECODE_LIST
-        _OPCODE_DECODE_LIST = tuple(self.get(i) for i in range(256))
-
-
-_OPCODE_DECODE: Dict[int, tuple] = _OpcodeDict(
-    {value: (opcode, FORMAT_DECODERS.get(opcode.fmt)) for value, opcode in OPCODES.items()}
-)
-_OPCODE_DECODE_LIST = tuple(_OPCODE_DECODE.get(i) for i in range(256))
+_OPCODE_DECODE: Dict[int, tuple] = {
+    value: (opcode, FORMAT_DECODERS.get(opcode.fmt)) for value, opcode in OPCODES.items()
+}
 
 
 def _null_resolve(ref_kind, ref_index):
@@ -926,7 +885,7 @@ def decode_instruction_shallow(bytecode, byte_idx):
 
 def decode_instruction(bytecode, byte_idx, resolve_ref):
     opcode_value = bytecode[byte_idx]
-    entry = _OPCODE_DECODE_LIST[opcode_value]
+    entry = _OPCODE_DECODE.get(opcode_value)
     if entry is None:
         raise ValueError(f"Unknown Dalvik opcode 0x{opcode_value:02x}")
     opcode, decoder = entry

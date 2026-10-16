@@ -30,8 +30,6 @@ from .MnemonicTfIdf import MnemonicTfIdf
 
 LOGGER = logging.getLogger(__name__)
 
-GAP_SEQUENCE_FIRST_INTS = frozenset(b[0] for b in GAP_SEQUENCE_FIRST_BYTES)
-
 # what MSVC and a toolchain that emits CET landing pads align a function entry to
 _ENTRY_ALIGNMENT = 16
 # the filler a compiler pads up to an aligned function entry with
@@ -314,12 +312,6 @@ class X86Backend(ArchBackend):
         distance = -addr % 16
         if not distance:
             return False
-        bin_info = getattr(d, "binary_info", None)
-        if bin_info is not None and bin_info.binary is not None:
-            rel = addr - bin_info.base_addr
-            raw = bin_info.binary
-            if rel < 0 or rel >= len(raw) or raw[rel] not in GAP_SEQUENCE_FIRST_INTS:
-                return False
         window = d._getDisasmWindowBuffer(addr)
         if len(window) <= distance or window[:1] not in GAP_SEQUENCE_FIRST_BYTES:
             return False
@@ -688,8 +680,8 @@ class X86Backend(ArchBackend):
             return True
         i_kind = _INS_KIND.get(i_mnemonic_noprefix)
         # the engine calls this for every decoded instruction, so the operand is screened for a
-        # bracket and absolute pattern here rather than paying a call to find out there is nothing to record
-        if i_op_str and "[" in i_op_str and ("[0x" in i_op_str or ABSOLUTE_OPERAND_HINT.search(i_op_str) is not None):
+        # bracket here rather than paying a call to find out there is nothing to record
+        if i_op_str and "[" in i_op_str:
             self._recordAbsoluteDataRefs(d, i_address, i_op_str, state)
         if i_kind == _KIND_CALL:
             self._analyzeCallInstruction(d, i, state)

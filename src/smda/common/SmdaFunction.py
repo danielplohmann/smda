@@ -500,26 +500,23 @@ class SmdaFunction:
             cache_get = cache.get
             for key in self._sorted_block_keys:
                 for instruction in blocks[key]:
-                    escaped = instruction._escaped_binary
+                    cache_key = (
+                        escaper,
+                        instruction.bytes,
+                        instruction.mnemonic,
+                        instruction.operands,
+                        True,
+                        lower_addr,
+                        upper_addr,
+                    )
+                    escaped = cache_get(cache_key)
                     if escaped is None:
-                        cache_key = (
-                            escaper,
-                            instruction.bytes,
-                            instruction.mnemonic,
-                            instruction.operands,
-                            True,
-                            lower_addr,
-                            upper_addr,
-                        )
-                        escaped = cache_get(cache_key)
-                        if escaped is None:
-                            # enforce the cap at insertion so even one function with more
-                            # distinct instructions than the limit cannot grow past it
-                            if len(cache) >= _ESCAPE_CACHE_LIMIT:
-                                cache.clear()
-                            escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
-                            cache[cache_key] = escaped
-                        instruction._escaped_binary = escaped
+                        # enforce the cap at insertion so even one function with more
+                        # distinct instructions than the limit cannot grow past it
+                        if len(cache) >= _ESCAPE_CACHE_LIMIT:
+                            cache.clear()
+                        escaped = escaper.escapeBinary(instruction, True, lower_addr, upper_addr)
+                        cache[cache_key] = escaped
                     append(escaped)
         return "".join(escaped_binary_seqs).encode("ascii")
 

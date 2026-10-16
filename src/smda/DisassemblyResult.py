@@ -4,8 +4,6 @@ import struct
 from smda.common.BasicBlock import BasicBlock
 
 _MISSING = object()
-_dict_get = dict.get
-_dict_setitem = dict.__setitem__
 
 
 class AddressRefs(dict):
@@ -57,20 +55,20 @@ class AddressRefs(dict):
     __hash__ = None
 
     def add(self, addr, ref):
-        refs = _dict_get(self, addr)
+        refs = dict.get(self, addr)
         if refs is None:
-            _dict_setitem(self, addr, ref)
+            dict.__setitem__(self, addr, ref)
         elif refs.__class__ is int:
             if refs != ref:
-                _dict_setitem(self, addr, {refs, ref})
+                dict.__setitem__(self, addr, {refs, ref})
         else:
             refs.add(ref)
 
     def discard(self, addr, ref):
         """Remove ref from addr's entry, leaving an empty set behind as a set.discard() would."""
-        refs = _dict_get(self, addr)
+        refs = dict.get(self, addr)
         if refs is None or refs == ref:
-            _dict_setitem(self, addr, set())
+            dict.__setitem__(self, addr, set())
         elif refs.__class__ is not int:
             refs.discard(ref)
 
@@ -314,24 +312,12 @@ class DisassemblyResult:
 
     def mergeCodeRefs(self, code_refs_from):
         """Add every edge of a function's {addr_from: {addr_to}} map."""
-        code_refs_from_dict = self.code_refs_from
+        add_from = self.code_refs_from.add
         add_to = self.code_refs_to.add
         for addr_from, dests in code_refs_from.items():
             for addr_to in dests:
+                add_from(addr_from, addr_to)
                 add_to(addr_to, addr_from)
-            existing = _dict_get(code_refs_from_dict, addr_from)
-            if existing is None:
-                if len(dests) == 1:
-                    (dest,) = dests
-                    _dict_setitem(code_refs_from_dict, addr_from, dest)
-                else:
-                    _dict_setitem(code_refs_from_dict, addr_from, set(dests))
-            elif existing.__class__ is int:
-                s = {existing}
-                s.update(dests)
-                _dict_setitem(code_refs_from_dict, addr_from, s)
-            else:
-                existing.update(dests)
 
     def removeCodeRefs(self, addr_from, addr_to):
         self.code_refs_from.discard(addr_from, addr_to)
@@ -364,22 +350,17 @@ class DisassemblyResult:
         blocks = [block for block in self.functions[func_addr] if block]
         block_starts = {block[0][0] for block in blocks}
         block_refs = {block_start: [] for block_start in sorted(block_starts)}
-        code_refs_from = self.code_refs_from
         for block in blocks:
             last_ins_addr = block[-1][0]
-            dests = code_refs_from.get(last_ins_addr)
-            if dests is None:
+            if last_ins_addr not in self.code_refs_from:
                 continue
-            verified_refs = sorted([target for target in dests if target in block_starts])
+            verified_refs = sorted(block_starts.intersection(self.code_refs_from[last_ins_addr]))
             if verified_refs:
                 block_refs[block[0][0]] = verified_refs
         # block_refs was seeded from sorted(block_starts), so it only needs re-sorting if the
         # exception pass introduced a key that was not already a block start
-        exception_successors = self._getExceptionSuccessors(func_addr, blocks)
-        if not exception_successors:
-            return block_refs
         added_key = False
-        for block_start, successors in exception_successors.items():
+        for block_start, successors in self._getExceptionSuccessors(func_addr, blocks).items():
             merged_successors = set(block_refs.get(block_start, []))
             merged_successors.update(successors)
             block_refs[block_start] = sorted(merged_successors)
@@ -400,27 +381,27 @@ class DisassemblyResult:
     def getOutRefs(self, func_addr):
         code_refs_from = self.code_refs_from
         blocks = self.functions[func_addr]
-        ins_addrs = set()
-        ref_ins = []
-        for block in blocks:
-            for ins in block:
-                addr = ins[0]
-                ins_addrs.add(addr)
-                dests = dict.get(code_refs_from, addr)
-                if dests is not None:
-                    if dests.__class__ is int:
-                        dests = (dests,)
-                    ref_ins.append((addr, dests))
+        ins_addrs = {ins[0] for block in blocks for ins in block}
         # function may be recursive
         ins_addrs.discard(func_addr)
         out_refs = {}
         # reduce outrefs to addresses within the memory image
         base_addr = self.binary_info.base_addr
         max_addr = base_addr + self.binary_info.binary_size
-        for ins_addr, dests in ref_ins:
-            external = [to_addr for to_addr in dests if base_addr <= to_addr < max_addr and to_addr not in ins_addrs]
-            if external:
-                out_refs[ins_addr] = sorted(external)
+        for block in blocks:
+            for ins in block:
+                ins_addr = ins[0]
+                # the stored form, so the lone fall-through of each instruction is not boxed
+                dests = dict.get(code_refs_from, ins_addr)
+                if dests is None:
+                    continue
+                if dests.__class__ is int:
+                    dests = (dests,)
+                external = [
+                    to_addr for to_addr in dests if base_addr <= to_addr < max_addr and to_addr not in ins_addrs
+                ]
+                if external:
+                    out_refs[ins_addr] = sorted(external)
         return out_refs
 
     def isRecursiveFunction(self, func_addr):

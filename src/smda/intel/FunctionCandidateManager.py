@@ -344,14 +344,11 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if scanned % 4096 == 0 and self._candidateTimeoutTripped():
                 return None
             unskipped_pad = False
-            if (
-                self.gap_pointer < self.disassembly.binary_info.base_addr
-                or self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size < self.gap_pointer
-            ):
+            if self.disassembly.binary_info.base_addr + self.disassembly.binary_info.binary_size < self.gap_pointer:
                 LOGGER.debug("nextGapCandidate() gap_ptr: 0x%08x - finishing", self.gap_pointer)
                 return None
             gap_offset = self.gap_pointer - self.disassembly.binary_info.base_addr
-            if gap_offset < 0 or gap_offset >= self.disassembly.binary_info.binary_size:
+            if gap_offset >= self.disassembly.binary_info.binary_size:
                 return None
             # compatibility with python2/3...
             byte = b""

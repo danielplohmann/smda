@@ -757,9 +757,6 @@ class DalvikDisassembler:
                 targets.append(switch_insn_idx + rel_offset * 2)
         return targets
 
-    def _resolveReference(self, resolver, ref_kind, ref_index):
-        return resolver.formatRef(ref_kind, ref_index)
-
     def _parseTryBlocks(self, raw_data, resolver, bytecode_offset, insns_size_units, tries_size):
         if tries_size == 0:
             return [], []
