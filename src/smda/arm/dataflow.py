@@ -13,7 +13,7 @@ A8.8.12), while a T32 ``add rd, pc`` uses the unaligned value (A8.8.6).
 
 from capstone.arm_const import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG, ARM_SFT_INVALID, ARM_SFT_LSL
 
-from .definitions import CALL_BASES, LOAD_MULTIPLE_BASES, split_mnemonic
+from .definitions import CALL_BASES, LOAD_MULTIPLE_BASES, pc_value, split_mnemonic
 
 _MASK = 0xFFFFFFFF
 _CALLER_SAVED = ("r0", "r1", "r2", "r3", "ip", "lr")
@@ -22,12 +22,6 @@ _REGISTER_ALIASES = {"r9": "sb", "r10": "sl", "r11": "fp", "r12": "ip", "r13": "
 
 def norm_reg(name):
     return _REGISTER_ALIASES.get(name, name)
-
-
-def pc_value(address, thumb, aligned=False):
-    if thumb:
-        return ((address + 4) & ~3) if aligned else address + 4
-    return address + 8
 
 
 def written_registers(ins, base=None):

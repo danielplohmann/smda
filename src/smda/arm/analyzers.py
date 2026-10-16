@@ -229,7 +229,7 @@ def _decodeImportStub(disassembler, start, thumb):
     if thumb:
         prefix = d.disassembly.getBytes(address, 2)
         if prefix and bytes(prefix) == b"\x78\x47":
-            address = (address + 4) & ~3
+            address = pc_value(address, True, aligned=True)
             thumb = False
     data = d.disassembly.getBytes(address, 4 * MAX_STUB_INSTRUCTIONS)
     if not data:

@@ -35,7 +35,6 @@ from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 
-from .dataflow import pc_value
 from .definitions import (
     A32_BKPT_MASK,
     A32_BKPT_VALUE,
@@ -65,6 +64,7 @@ from .definitions import (
     is_t32_prefix,
     is_t32_prologue,
     is_t32_return,
+    pc_value,
     split_mnemonic,
     t32_call_target,
 )
@@ -622,7 +622,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         # ``bx pc`` continues at the next word: right before it, or before its padding
         for prefix in (addr - 2, addr - 4):
             data = self.disassembly.getBytes(prefix, 2)
-            if data and bytes(data) == b"\x78\x47" and (prefix + 4) & ~3 == addr:
+            if data and bytes(data) == b"\x78\x47" and pc_value(prefix, True, aligned=True) == addr:
                 return True
         return False
 

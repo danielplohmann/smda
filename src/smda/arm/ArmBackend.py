@@ -8,7 +8,6 @@ from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 from smda.common.arch.ArchBackend import ArchBackend
 
 from .analyzers import ArmIndirectCallAnalyzer, ArmJumpTableAnalyzer, ArmTfIdf, resolveImportStub
-from .dataflow import pc_value
 from .definitions import (
     A32_INSTRUCTION_SIZE,
     BRANCH_BASES,
@@ -27,6 +26,7 @@ from .definitions import (
     is_load_multiple_return,
     is_noreturn_api,
     is_t32_prologue,
+    pc_value,
     split_mnemonic,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
@@ -554,7 +554,7 @@ class ArmBackend(ArchBackend):
         """
         if cls._bytesAt(d, address, 2) != b"\x78\x47":
             return None
-        arm_address = (address + 4) & ~3
+        arm_address = pc_value(address, True, aligned=True)
         word = cls._wordAt(d, arm_address)
         if word is None or (word & 0xFF000000) != 0xEA000000:
             return None
@@ -565,7 +565,7 @@ class ArmBackend(ArchBackend):
         state.setThunkCall(True)
         # the A32 half cannot be booked in a Thumb function; claiming it keeps the gap
         # sweep from reporting it as a function of its own
-        arm_end = ((i_address + 4) & ~3) + A32_INSTRUCTION_SIZE
+        arm_end = pc_value(i_address, True, aligned=True) + A32_INSTRUCTION_SIZE
         state.addDataRef(i_address, i_address + i_size, size=arm_end - i_address - i_size)
         slot = self._resolvePltSlot(d, i_address)
         if slot is not None and d._handleApiTarget(i_address, slot, slot, slot=slot):

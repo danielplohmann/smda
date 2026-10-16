@@ -293,6 +293,14 @@ def sign_extend(value, bits):
     return (value & (sign - 1)) - (value & sign)
 
 
+def pc_value(address, thumb, aligned=False):
+    """What an instruction at ``address`` reads as pc (A2.3): its address plus 8 in A32 and
+    plus 4 in T32, the latter aligned down to a word for literals, ``adr`` and BLX."""
+    if thumb:
+        return ((address + 4) & ~3) if aligned else address + 4
+    return address + 8
+
+
 def a32_branch_target(word, address):
     """Target of an A32 B/BL/BLX <label>, and whether the destination is Thumb.
 
@@ -301,9 +309,9 @@ def a32_branch_target(word, address):
     """
     if (word & A32_BLX_IMM_MASK) == A32_BLX_IMM_VALUE:
         offset = (sign_extend(word & 0x00FFFFFF, 24) << 2) | ((word >> 23) & 2)
-        return (address + 8 + offset) & 0xFFFFFFFF, True
+        return (pc_value(address, False) + offset) & 0xFFFFFFFF, True
     if (word & A32_BRANCH_MASK) == A32_BRANCH_VALUE and (word & A32_COND_MASK) != 0xF0000000:
-        return (address + 8 + (sign_extend(word & 0x00FFFFFF, 24) << 2)) & 0xFFFFFFFF, False
+        return (pc_value(address, False) + (sign_extend(word & 0x00FFFFFF, 24) << 2)) & 0xFFFFFFFF, False
     return None
 
 
@@ -327,8 +335,8 @@ def t32_call_target(hw1, hw2, address):
     imm = (s << 24) | (i1 << 23) | (i2 << 22) | ((hw1 & 0x3FF) << 12) | ((hw2 & 0x7FF) << 1)
     offset = sign_extend(imm, 25)
     if is_bl:
-        return (address + 4 + offset) & 0xFFFFFFFF, True
-    return (((address + 4) & ~3) + (offset & ~3)) & 0xFFFFFFFF, False
+        return (pc_value(address, True) + offset) & 0xFFFFFFFF, True
+    return (pc_value(address, True, aligned=True) + (offset & ~3)) & 0xFFFFFFFF, False
 
 
 def is_t32_prefix(halfword):
