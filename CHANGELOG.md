@@ -86,7 +86,7 @@ past roughly six lines it belongs in the PR the entry links.
   `tests/msvc_smda384_corpus/` that read as 32-bit, and the ARM tests' idiom buffer, went from `timeout` to `ok` in
   under 0.1 s; the other 77 runs of the 32 x86/x64 and AArch64 fixtures there, and every ARM test report, are identical.
   *Reproduced on bundled fixtures.* Cost: across 4 GiB a failed gap no longer resumes at `0xFFFFFFFF`, inside the image,
-  which in 5.0.0's timeout report could reach a function above 4 GiB.
+  which in 5.0.0's timeout report could reach a function above 4 GiB. (#407)
 
 ### Security
 
