@@ -11,7 +11,7 @@ from collections import Counter
 from capstone.arm_const import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG, ARM_SFT_INVALID
 
 from .dataflow import RegisterTracker, decode, norm_reg, pc_value, precedingInstructions, track, written_registers
-from .definitions import split_mnemonic
+from .definitions import CALL_BASES, split_mnemonic
 
 LOGGER = logging.getLogger(__name__)
 
@@ -477,9 +477,10 @@ class ArmJumpTableAnalyzer:
         address = call_instruction[0]
         origin = address + call_instruction[1]
         context = _context(self.disassembler, state, address)
+        condition = None
         if not context:
-            context = self._branchContext(state, address)
-        bound = self._bound(context, "r0")
+            context, condition = self._branchContext(state, address)
+        bound = self._bound(context, "r0", condition)
         if word_offsets:
             table = (origin + 3) & ~3
             return self._readTable(
@@ -490,12 +491,12 @@ class ArmJumpTableAnalyzer:
         )
 
     def _branchContext(self, state, address):
-        # the straight-line context of a conditional branch to ``address``
+        # the straight-line context of a conditional branch to ``address``, and its condition
         for ins in state.instructions:
             base, condition, _ = split_mnemonic(ins[2])
             if base == "b" and condition in _BOUND_BRANCHES and ins[3] == f"#0x{address:x}":
-                return decode(self.disassembler, precedingInstructions(state, ins[0] + ins[1], CONTEXT_INSTRUCTIONS))
-        return []
+                return decode(self.disassembler, precedingInstructions(state, ins[0], CONTEXT_INSTRUCTIONS)), condition
+        return [], None
 
     def getJumpTargets(self, jump_instruction, state):
         d = self.disassembler
@@ -505,12 +506,12 @@ class ArmJumpTableAnalyzer:
             return []
         ins = decoded[0][1]
         thumb = _thumbOf(d)
-        base = split_mnemonic(jump_instruction[2])[0]
+        base, condition, _ = split_mnemonic(jump_instruction[2])
         context = _context(d, state, address)
         tracker = track(d, context, thumb)
         operands = ins.operands
         if base in ("tbb", "tbh") and operands and operands[0].type == ARM_OP_MEM:
-            return self._tableBranch(state, ins, context, tracker, 1 if base == "tbb" else 2)
+            return self._tableBranch(state, ins, context, tracker, 1 if base == "tbb" else 2, condition)
         if not operands or operands[0].type != ARM_OP_REG:
             return self._registerBranch(state, ins, context, tracker)
         if base == "ldr" and len(operands) == 2 and operands[1].type == ARM_OP_MEM:
@@ -519,12 +520,13 @@ class ArmJumpTableAnalyzer:
                 return []
             table = self._baseValue(ins, memory, tracker, thumb)
             index = norm_reg(ins.reg_name(memory.mem.index))
-            return self._absoluteTable(state, address, table, self._bound(context, index), thumb)
+            return self._absoluteTable(state, address, table, self._bound(context, index, condition), thumb)
         if base == "add" and len(operands) == 3:
             left, right = operands[1], operands[2]
             if left.type == ARM_OP_REG and norm_reg(ins.reg_name(left.reg)) == "pc" and right.type == ARM_OP_REG:
                 index = norm_reg(ins.reg_name(right.reg))
-                return self._branchTable(state, address, pc_value(address, thumb), self._bound(context, index))
+                bound = self._bound(context, index, condition)
+                return self._branchTable(state, address, pc_value(address, thumb), bound)
             return self._relativeTable(state, ins, context, tracker, thumb)
         return self._registerBranch(state, ins, context, tracker)
 
@@ -663,7 +665,7 @@ class ArmJumpTableAnalyzer:
 
         return self._readTable(state, address, table, 4, bound, target)
 
-    def _tableBranch(self, state, ins, context, tracker, entry_size):
+    def _tableBranch(self, state, ins, context, tracker, entry_size, condition):
         memory = ins.operands[0]
         thumb = True
         table = self._baseValue(ins, memory, tracker, thumb)
@@ -674,7 +676,12 @@ class ArmJumpTableAnalyzer:
         index = norm_reg(ins.reg_name(memory.mem.index))
         origin = ins.address + 4
         return self._readTable(
-            state, ins.address, table, entry_size, self._bound(context, index), lambda entry: origin + 2 * entry
+            state,
+            ins.address,
+            table,
+            entry_size,
+            self._bound(context, index, condition),
+            lambda entry: origin + 2 * entry,
         )
 
     def _branchTable(self, state, address, table, bound):
@@ -727,21 +734,26 @@ class ArmJumpTableAnalyzer:
         return targets
 
     @staticmethod
-    def _bound(context, index):
+    def _bound(context, index, condition=None):
         """Entry count from the comparison guarding the dispatch, or 0 when none is found.
 
         Follows the index back through register copies and a spill to and reload from the
         stack, which is how unoptimised code carries it from its ``cmp`` to the dispatch.
         The branch closest behind the ``cmp`` decides whether its immediate is itself a valid
         index: ``hi``/``gt`` leaving or ``ls``/``le`` reaching the dispatch admit it,
-        ``hs``/``ge`` leaving or ``lo``/``lt`` reaching it do not.
+        ``hs``/``ge`` leaving or ``lo``/``lt`` reaching it do not. ``condition`` is the one
+        under which the end of ``context`` reaches the dispatch (``ldrls pc``, or the branch
+        to a case helper), when there is one. A write predicated on the condition of a
+        conditional exit behind the ``cmp`` (clang's ``itt hi; movhi r0, #-1; bxhi lr``)
+        only happens on the way out of range, so it leaves the index alone.
         """
         tracked = {index}
         slots = set()
         # comparisons met walking backwards whose register is not yet known to hold the
         # index: -O0 code stores the value to its stack slot before comparing it
         compared = {}
-        condition = None
+        # conditions under which an instruction met so far leaves before the dispatch
+        exits = set()
         for pair in reversed(context):
             ins, detailed = pair
             base, branch, _ = split_mnemonic(ins[2])
@@ -753,14 +765,18 @@ class ArmJumpTableAnalyzer:
             if base == "cmp" and first_reg is not None and len(operands) == 2 and operands[1].type == ARM_OP_IMM:
                 entries = operands[1].imm + (0 if condition in _EXCLUSIVE_BOUNDS else 1)
                 condition = None
+                exits.clear()
                 if first_reg in tracked:
                     return entries
                 compared.setdefault(first_reg, entries)
                 continue
-            if base == "b" and branch in _BOUND_BRANCHES:
-                condition = branch
-                continue
             writes = written_registers(detailed, base)
+            if branch in _BOUND_BRANCHES and (base == "b" or (base not in CALL_BASES and "pc" in writes)):
+                condition = branch
+                exits.add(branch)
+                continue
+            if branch in exits:
+                continue
             if "sp" in writes:
                 slots.clear()
             if base == "str" and len(operands) == 2 and operands[1].type == ARM_OP_MEM:
