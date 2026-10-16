@@ -19,7 +19,6 @@ FIXTURES = Path(__file__).resolve().parent
 
 # every bundled sample of an instruction set SMDA has no backend for
 UNSUPPORTED_FIXTURES = {
-    "mirai_arm_xored": "arm",
     "mirai_mips_xored": "mips",
     "mirai_mipsel_xored": "mips",
     "mirai_ppc_xored": "ppc",
@@ -40,6 +39,7 @@ SUPPORTED_FIXTURES = (
     "komplex_xored",
     "rust_pe_gnu_xored",
     "aarch64_static_xored",
+    "mirai_arm_xored",
     "blockblast_classes_xored",
     "njrat_xored",
 )

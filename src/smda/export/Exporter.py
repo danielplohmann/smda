@@ -1,8 +1,19 @@
 import datetime
 import logging
 
-from capstone import CS_ARCH_ARM64, CS_ARCH_X86, CS_MODE_32, CS_MODE_64, CS_MODE_LITTLE_ENDIAN, Cs
+from capstone import (
+    CS_ARCH_ARM,
+    CS_ARCH_ARM64,
+    CS_ARCH_X86,
+    CS_MODE_32,
+    CS_MODE_64,
+    CS_MODE_ARM,
+    CS_MODE_LITTLE_ENDIAN,
+    CS_MODE_THUMB,
+    Cs,
+)
 
+from smda.arm.definitions import IT_MNEMONICS
 from smda.DisassemblyResult import DisassemblyResult
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +36,12 @@ class Exporter:
     def _initCapstone(self):
         if self.architecture == "aarch64":
             self.capstone = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+        elif self.architecture == "arm":
+            self._arm_capstones = {
+                False: Cs(CS_ARCH_ARM, CS_MODE_ARM | CS_MODE_LITTLE_ENDIAN),
+                True: Cs(CS_ARCH_ARM, CS_MODE_THUMB | CS_MODE_LITTLE_ENDIAN),
+            }
+            self.capstone = self._arm_capstones[False]
         elif self.bitness == 64:
             self.capstone = Cs(CS_ARCH_X86, CS_MODE_64)
         else:
@@ -62,7 +79,12 @@ class Exporter:
             out.append((i_address, i_size, i_mnemonic, i_op_str, sub_bytes))
             consumed += i_size
         while consumed < len(instruction_bytes):
-            chunk = 4 if architecture == "aarch64" else (len(instruction_bytes) - consumed)
+            if architecture == "arm" and capstone.mode & CS_MODE_THUMB:
+                chunk = 2
+            elif architecture in ("aarch64", "arm"):
+                chunk = 4
+            else:
+                chunk = len(instruction_bytes) - consumed
             chunk = min(chunk, len(instruction_bytes) - consumed)
             sub_bytes = bytes(instruction_bytes[consumed : consumed + chunk])
             bytes_hex = sub_bytes.hex()
@@ -74,9 +96,26 @@ class Exporter:
         return out
 
     def _convertInstruction(self, offset, instruction_bytes):
-        return self._splitInstructionBytes(
+        # Capstone applies an IT instruction's conditions only to the instructions decoded in the
+        # same call (see ArmCapstone), so one an IT governs is decoded again from the it itself
+        pending = self._it_blocks.pop(offset, None) if self._it_blocks else None
+        if pending is not None and self.capstone is not None:
+            anchor, code, remaining = pending
+            code += bytes(instruction_bytes)
+            decoded = list(self.capstone.disasm_lite(code, anchor))
+            if decoded and decoded[-1][0] == offset and sum(ins[1] for ins in decoded) == len(code):
+                i_address, i_size, i_mnemonic, i_op_str = decoded[-1]
+                if remaining > 1:
+                    self._it_blocks[offset + i_size] = (anchor, code, remaining - 1)
+                return [(i_address, i_size, i_mnemonic, i_op_str, bytes(instruction_bytes))]
+        converted = self._splitInstructionBytes(
             self.capstone, offset, instruction_bytes, self.architecture, self.disassembly.errors
         )
+        if self.architecture == "arm" and self.capstone is self._arm_capstones[True]:
+            for i_address, i_size, i_mnemonic, _i_op_str, i_bytes in converted:
+                if i_mnemonic in IT_MNEMONICS:
+                    self._it_blocks[i_address + i_size] = (i_address, i_bytes, len(i_mnemonic) - 1)
+        return converted
 
     def analyzeBuffer(self, binary_info, cb_analysis_timeout=None):
         """instead of performing a full analysis, collect the frontend's analysis and convert it into a report"""
@@ -87,6 +126,8 @@ class Exporter:
         # recursive_functions and leaf_functions into the new report - and a
         # Disassembler(backend="IDA") is pinned, so it is never rebuilt between runs.
         self.disassembly = DisassemblyResult()
+        # T32 instructions an IT governs, by address: (it address, bytes from the it up to here, how many remain)
+        self._it_blocks = {}
         self.disassembly.smda_version = self.config.VERSION
         self.disassembly.setConfidenceThreshold(self.config.CONFIDENCE_THRESHOLD)
         self.disassembly.analysis_start_ts = datetime.datetime.now(datetime.timezone.utc)
@@ -108,6 +149,11 @@ class Exporter:
             if self.interface.isExternalFunction(function_offset):
                 continue
             converted_function = []
+            if self.architecture == "arm":
+                thumb = bool(self.interface.isThumb(function_offset))
+                self.capstone = self._arm_capstones[thumb]
+                self._it_blocks.clear()
+                self.disassembly.function_metadata[function_offset] = {"thumb": thumb}
             for block in self.interface.getBlocks(function_offset):
                 converted_block = []
                 for instruction_offset in block:

@@ -39,7 +39,9 @@ from collections import deque
 # at all and is carried only for symmetry.
 MIN_RETURN_SITES = 16
 RETURN_SIGNATURES = {
-    "arm": ((b"\x1e\xff\x2f\xe1", b"\x0e\xf0\xa0\xe1", b"\xe1\x2f\xff\x1e", b"\xe1\xa0\xf0\x0e"), 4),
+    # little-endian ARM has a backend (smda.arm.definitions.looksLikeArm); a big-endian image
+    # does not, and it spells the same returns byte-swapped
+    "armeb": ((b"\xe1\x2f\xff\x1e", b"\xe1\xa0\xf0\x0e"), 4),
     "mips": ((b"\x03\xe0\x00\x08", b"\x08\x00\xe0\x03"), 4),
     "ppc": ((b"\x4e\x80\x00\x20", b"\x20\x00\x80\x4e"), 4),
     "sparc": ((b"\x81\xc3\xe0\x08", b"\x81\xc7\xe0\x08"), 4),

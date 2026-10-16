@@ -161,6 +161,13 @@ class RecursiveDisassembler:
         return 0xFFFFFFFF
 
     def getReferencedAddr(self, op_str):
+        if "0x" not in op_str:
+            return 0
+        if op_str.startswith("0x"):
+            try:
+                return int(op_str, 16)
+            except ValueError:
+                pass
         # preserve a leading sign so that negative displacements (e.g. "qword ptr [rip - 0x20]")
         # resolve to the correct address instead of being treated as positive
         referenced_addr = _REFERENCED_ADDR_RE.search(op_str)
@@ -364,6 +371,7 @@ class RecursiveDisassembler:
             data_map = self.disassembly.data_map
             ins2fn = self.disassembly.ins2fn
             raw_binary = binary_info.binary
+            base_addr = binary_info.base_addr
             analyze_instruction = self.backend.analyzeInstruction
             add_instruction = state.addInstruction
             processed_bytes = state.processed_bytes
@@ -382,7 +390,7 @@ class RecursiveDisassembler:
                         break
 
                     i_op_str = i_op_str.strip()
-                    i_relative_address = i_address - binary_info.base_addr
+                    i_relative_address = i_address - base_addr
                     i_bytes = raw_binary[i_relative_address : i_relative_address + i_size]
                     if debug_logging:
                         LOGGER.debug(

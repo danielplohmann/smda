@@ -1,6 +1,6 @@
 import hashlib
 import struct
-from typing import TYPE_CHECKING, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Iterator, List, Optional
 
 from smda.common.SmdaInstruction import SmdaInstruction
 
@@ -9,15 +9,24 @@ if TYPE_CHECKING:
 
 # sentinel distinguishing "hash not yet computed" from "hash computed as None (uncomputable)"
 _UNSET = object()
+_HASH_SLOTS = ("_picblockhash", "_opcblockhash")
 
 
 class SmdaBasicBlock:
-    smda_function: Optional["SmdaFunction"] = None
-    instructions: Optional[List[SmdaInstruction]] = None
-    _picblockhash = _UNSET
-    _opcblockhash = _UNSET
-    offset = None
-    length = None
+    __slots__ = (
+        "smda_function",
+        "instructions",
+        "_picblockhash",
+        "_opcblockhash",
+        "offset",
+        "length",
+    )
+    smda_function: Optional["SmdaFunction"]
+    instructions: Optional[List[SmdaInstruction]]
+    _picblockhash: Any
+    _opcblockhash: Any
+    offset: Optional[int]
+    length: Optional[int]
 
     def __init__(self, instructions, smda_function=None):
         assert isinstance(instructions, list)
@@ -27,6 +36,24 @@ class SmdaBasicBlock:
         self.length = len(instructions)
         self._picblockhash = _UNSET
         self._opcblockhash = _UNSET
+
+    def __getstate__(self):
+        # an uncomputed hash is left out: the _UNSET sentinel would not survive pickling as
+        # itself, and a copy of it would read as an already computed hash
+        state = {}
+        for slot in SmdaBasicBlock.__slots__:
+            value = getattr(self, slot, _UNSET if slot in _HASH_SLOTS else None)
+            if value is not _UNSET:
+                state[slot] = value
+        return state
+
+    def __setstate__(self, state):
+        for slot in SmdaBasicBlock.__slots__:
+            setattr(self, slot, state.get(slot))
+        for slot in _HASH_SLOTS:
+            value = state.get(slot, _UNSET)
+            # pickles written before __slots__ carry a copy of the sentinel as a bare object()
+            setattr(self, slot, _UNSET if type(value) is object else value)
 
     @property
     def picblockhash(self):

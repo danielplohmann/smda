@@ -71,23 +71,48 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(arm)** Add a 32-bit ARM backend for A32 and Thumb/T32 code in ELF, PE (ARMNT, Windows CE), Mach-O armv7 and raw
+  buffers, choosing the instruction set per function (`architecture_metadata["thumb"]`) from its strongest evidence:
+  the image's own statements, then decoded instructions, then linear scans. Starts come from symbols,
+  `.ARM.exidx`/`.pdata`, Go pclntab, calls and relocated pointers; switch tables, PLT/IAT stubs and veneers are
+  followed, IT conditions survive `getDetailed()` and `Exporter`, and `ArmInstructionEscaper` gives PicHash/OpcHash.
+  *Measured on `9b8d24c`:* 264 stripped Debian bookworm armhf/armel binaries against their dbgsym symbols, 97.3%/95.4%
+  of 91,686 functions found, 675/953 false starts, none in the wrong mode, 0.85 s per file; every instruction in the
+  three bundled lz4 ELF fixtures lands on a ground-truth instruction start. Not reproduced: the corpus is not bundled,
+  the 12 ARM fixtures are. *Cost:* a raw buffer has no symbols or unwind table to start from and finds fewer
+  functions. (#364)
 
 ### Changed
+- **(core)** Give `SmdaInstruction` and `SmdaBasicBlock` `__slots__` and trim per-instruction work: blocks are built
+  in one pass, block refs skip normalization without `try_ranges`, `getReferencedAddr` skips its regex without a `0x`,
+  Dalvik decode objects are slotted and its payload-range checks are plain loops, the AArch64 nibble formatter is
+  unrolled. *Measured on `ff722ac`,* callgrind instructions of a second analysis on the 8 benchmark-gate fixtures: -3.4%
+  on 3.13 (`pe_export` -0.2% to `blockblast` -7.8%), -1.7% on 3.11; heap held by the report (tracemalloc) -6% to -9%.
+  Wall time is inside noise. *Reproduced on bundled fixtures.* Cost: none in output, reports identical on 112 bundled
+  fixture and fuzz-corpus inputs; instructions and blocks no longer take attributes outside their slots. (#404)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- **(core)** Keep an uncomputed block hash uncomputed across pickle and `deepcopy`. The `_UNSET` sentinel came back as
+  a bare `object()`, which `getPicBlockHash()` and `getOpcBlockHash()` then returned as the hash. *Measured on
+  `ff722ac`:* `cutwail` (file mode) with blocks built but not hashed returned it on all 253 blocks, now on none.
+  *Reproduced on bundled fixtures.* No cost; pickles written before this change still load. (#404)
 - **(build)** Declare capstone's lower bound as `>=5.0.2`. `StringExtractor` imports `CS_GRP_BRANCH_RELATIVE`
   since #382, which capstone 4.x does not have, but only `capstone<6` was declared, so pip resolved 4.0.2 beside
   dumpulator (`capstone~=4.0.2`), `pip check` passed, and `import smda.Disassembler` raised ImportError. 5.0.0.post1
   and 5.0.1 import `distutils` and fail on Python 3.12+. *Measured on Python 3.14:* full suite 2397 passed on 5.0.2
-  and 5.0.9 alike; 4.0.2 fails at collection. Cost: smda no longer co-installs with dumpulator 0.2.6.
+  and 5.0.9 alike; 4.0.2 fails at collection. Cost: smda no longer co-installs with dumpulator 0.2.6. (#405)
 
 ### Security
 
 ### Compatibility
+- **(arm)** Little-endian 32-bit ARM ELF, PE and Mach-O files, and raw buffers the probe reads as ARM, now return an `arm`
+  report instead of the `status == "error"` report naming an unsupported instruction set. Big-endian ARM still
+  returns that error, now naming `armeb`. On ARM ELF images `ElfSymbolProvider` keys function symbols without the
+  Thumb bit, so labels land on the address the code starts at. (#364)
 
 ## [v4.11.0] - 2026-10-15
 

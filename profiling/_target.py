@@ -32,6 +32,7 @@ FIXTURES = {
     "komplex": {"filename": "komplex_xored", "base_addr": 0, "backend": "intel"},
     "njrat": {"filename": "njrat_xored", "base_addr": 0, "backend": "cil"},
     "pe_export": {"filename": "pe_export_label_test_xored", "base_addr": 0, "backend": "intel"},
+    "aarch64_static": {"filename": "aarch64_static_xored", "base_addr": 0, "backend": "aarch64"},
 }
 
 

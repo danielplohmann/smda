@@ -1,11 +1,14 @@
 """IDA Domain API adapter for IDA 9.1 and newer."""
 
 import importlib
+import logging
 import os
 import re
 
 from smda.export.BackendInterface import BackendInterface
 from smda.export.segment_mapping import assembleSegmentBuffer
+
+LOGGER = logging.getLogger(__name__)
 
 _IDA_DOMAIN_MISSING = (
     "ida-domain is not available. Install it with 'pip install \"smda[ida]\"' and "
@@ -45,6 +48,7 @@ class IdaDomainInterface(BackendInterface):
         super().__init__()
         self.version = "ida-domain (IDA Pro 9.1+)"
         self._owns_database = False
+        self._thumb_lookup_failed = False
         if database is not None:
             self.db = database
         else:
@@ -75,9 +79,12 @@ class IdaDomainInterface(BackendInterface):
             raise ValueError("Unsupported Architecture")
         normalized = procname.lower()
         if normalized in ("arm", "arm64", "aarch64"):
-            if self.getBitness() != 64:
-                raise ValueError(f"Unsupported Architecture: {procname} ({self.getBitness()}bit)")
-            return "aarch64"
+            bitness = self.getBitness()
+            if bitness == 64:
+                return "aarch64"
+            if bitness == 32 and normalized == "arm":
+                return "arm"
+            raise ValueError(f"Unsupported Architecture: {procname} ({bitness}bit)")
         if normalized in _INTEL_PROCESSORS or "x86" in normalized or normalized.startswith("metapc"):
             return "intel"
         raise ValueError(f"Unsupported Architecture: {procname}")
@@ -156,6 +163,18 @@ class IdaDomainInterface(BackendInterface):
                 api_name = f"{imported.module_name}!{api_name}"
             api_map[imported.address] = api_name
         return api_map
+
+    def isThumb(self, offset):
+        # IDA keeps the ARM instruction set in the ``T`` segment register (0 for A32, 1 for T32)
+        try:
+            import idc
+
+            return idc.get_sreg(offset, "T") == 1
+        except Exception as exc:
+            if not self._thumb_lookup_failed:
+                self._thumb_lookup_failed = True
+                LOGGER.warning("could not read the T segment register (%s), treating functions as A32", exc)
+            return False
 
     def isExternalFunction(self, function_offset):
         segment = self.db.segments.get_at(function_offset)

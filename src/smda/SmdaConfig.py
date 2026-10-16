@@ -36,7 +36,7 @@ class SmdaConfig:
     # extract strings during disassembly
     WITH_STRINGS = False
     # the options named USE_*, RESOLVE_*, RECORD_*, CANDIDATE_QUEUE and HIGH_ACCURACY steer
-    # recursive candidate discovery and are read by the intel and aarch64 backends only; the
+    # recursive candidate discovery and are read by the intel, aarch64 and arm backends only; the
     # cil and dalvik backends run their own analysis pipelines and ignore them
     # the queue to use for candidate management
     CANDIDATE_QUEUE = "PriorityQueue"  # choose from: ["BracketQueue", "PriorityQueue"]
@@ -78,6 +78,13 @@ class SmdaConfig:
     # the first figure comes from one of the three binaries, which is the tell before the second
     # is measured at all.
     USE_PE_ARM64_PDATA_CANDIDATES = True
+    # seed 32-bit ARM function candidates from the unwind index the image carries: the
+    # EHABI .ARM.exidx table of an ELF (one prel31 function start per entry, EHABI 5) and
+    # the .pdata records of an ARMNT PE (begin address with the Thumb bit set). Every
+    # compiler that emits either table emits one entry per function, including the
+    # EXIDX_CANTUNWIND entries of functions that cannot throw.
+    USE_ARM_EXIDX_CANDIDATES = True
+    USE_PE_ARM_PDATA_CANDIDATES = True
     # do not read `bti j` as a function entry on AArch64. The four BTI forms are not
     # interchangeable: J permits a target reached by `br` - an indirect jump, which is what a
     # switch dispatch does to a case block - while C permits one reached by `blr`, which is how
