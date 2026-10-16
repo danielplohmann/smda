@@ -239,7 +239,7 @@ class FunctionCandidateManager:
                 # interior-hole branch's prev_ins + 1 below. max_code is itself in code_map, so a
                 # gap starting at max_code leaves the gap-pointer on a code_map address;
                 # getNextGap()'s strict "gap[0] > gap_pointer" test then finds no further gap,
-                # returns the bitmask sentinel, and the scan terminates -- abandoning the whole tail
+                # returns the end-of-image sentinel, and the scan terminates -- abandoning the whole tail
                 # region unscanned. Section-derived code areas keep the legacy start (behavior-neutral).
                 tail_start = max_code + 1 if using_synthetic_area else max_code
                 gaps.append([tail_start, code_area[1], code_area[1] - tail_start])
@@ -249,10 +249,22 @@ class FunctionCandidateManager:
             prev_ins = ins
         self.function_gaps = sorted(gaps)
 
+    def _gapScanEnd(self):
+        """The gap pointer that means no gap is left: the first address past the image.
+
+        Not the address mask, which is past the image only while the image fits below it: a
+        32-bit image based at 4 GiB or above has the mask below its base, and one that ends at
+        4 GiB has it on its last byte, so the scan would keep offering it until the timeout.
+        """
+        binary_info = self.disassembly.binary_info if self.disassembly is not None else None
+        if binary_info is None:
+            return self.getBitMask()
+        return binary_info.base_addr + binary_info.binary_size
+
     def initGapSearch(self):
         if self.gap_pointer is None:
             LOGGER.debug("initGapSearch()")
-            self.gap_pointer = self.getBitMask()
+            self.gap_pointer = self._gapScanEnd()
             self.updateFunctionGaps()
             if self.function_gaps:
                 self.gap_pointer = self.function_gaps[0][0]
@@ -262,7 +274,7 @@ class FunctionCandidateManager:
         return
 
     def getNextGap(self, dont_skip=False):
-        next_gap = self.getBitMask()
+        next_gap = self._gapScanEnd()
         gap_index = bisect.bisect_right(
             self.function_gaps, self.gap_pointer if self.gap_pointer is not None else 0, key=lambda gap: gap[0]
         )

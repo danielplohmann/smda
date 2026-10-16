@@ -79,6 +79,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(intel)** End the gap scan at the image end, not at the address mask. With no gap left, `getNextGap()` returned
+  `0xFFFFFFFF` on a 32-bit image, which lies below an image based at 4 GiB or above and on the last byte of one ending
+  there, so the scan kept offering it until `TIMEOUT` (300 s by default). *Measured on `bff1bfd`:* as buffers at
+  0x140000000 the 8 bundled fixtures read as 32-bit went from `timeout` to `ok` in under 0.2 s, and so did `asprox`
+  ending at 4 GiB on a non-padding byte. *Reproduced on bundled fixtures.* No cost: reports identical on the 21 x86/x64
+  fixtures in file mode and at 0x400000 and on the 5 AArch64 ones.
 
 ### Security
 
