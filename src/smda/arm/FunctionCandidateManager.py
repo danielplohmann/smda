@@ -583,6 +583,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return False
         target = value & ~1
         thumb = bool(value & 1)
+        if self._mappingKind(target) == "d":
+            # a mapping symbol or LC_DATA_IN_CODE marks it data: a table or literal, not code
+            return False
         if not thumb and pc_relative and from_thumb and self._declaredThumb(target) is not False:
             # Thumb code's ``adr`` names its tables and literals, which sit at even addresses;
             # only an address something else states to be A32 is an A32 entry
@@ -831,6 +834,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 offset -= 0x80000000
             start = (table_start + index + offset) & 0xFFFFFFFF
             address = start & ~1
+            if self._holdsLinkerFill(address):
+                # lld closes the table with an EXIDX_CANTUNWIND entry for the end of the last
+                # code section, which is fill (or linker-made thunks after it), not a function
+                continue
             if self.disassembly.isAddrWithinMemoryImage(address) and self._passesCodeFilter(address):
                 self._addDeclaredStart(address)
             if start & 1:
@@ -1360,6 +1367,10 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         if value == 0:
             return True
         return value in (T16_NOPS if thumb else A32_NOPS) or self._isTrapValue(value, thumb)
+
+    def _holdsLinkerFill(self, addr):
+        data = self.disassembly.getBytes(addr, 2) if self.disassembly is not None else None
+        return bool(data) and len(data) == 2 and int.from_bytes(data, "little") == T16_LLD_FILL
 
     def isTrap(self, addr, thumb):
         """Whether `addr` holds the linker's fill, ``udf`` or ``bkpt``: nothing a compiler
