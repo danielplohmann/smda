@@ -2,10 +2,11 @@
 
 Mnemonics are reduced to their base operation (``addeq.w`` and ``adds`` are both ``add``)
 and classified into the same groups the AArch64 escaper uses. Binary escaping wildcards
-exactly the fields that change when code moves: branch and call offsets, the offsets of
-PC-relative literal loads and ``adr``, and the ``movw``/``movt`` immediates that carry
-absolute addresses in position-dependent code. The field positions are the encodings of
-the ARM Architecture Reference Manual (DDI 0406C), A5 for A32 and A6 for T32.
+exactly the fields that change when code is relinked: branch and call offsets and the
+offsets of PC-relative literal loads and ``adr``, which survive rebasing but change with
+link order, and the ``movw``/``movt`` immediates that carry absolute addresses in
+position-dependent code. The field positions are the encodings of the ARM Architecture
+Reference Manual (DDI 0406C), A5 for A32 and A6 for T32.
 
 The instruction set is read from the function's ``architecture_metadata["thumb"]``; a
 two-byte instruction is T16 whatever the metadata says.
@@ -109,9 +110,13 @@ def _a32KeepMask(word):
     if word & 0x0FB00000 == 0x03000000:
         # MOVW / MOVT: imm4 at 16..19, imm12 at 0..11 (A8.8.102, A8.8.106)
         return 0xE8
-    if word & 0x0E5F0000 == 0x041F0000 or word & 0x0FFF0000 in (0x028F0000, 0x024F0000):
-        # LDR (literal) and ADR: imm12 (A8.8.65, A8.8.12)
+    if word & 0x0E1F0000 == 0x041F0000 or word & 0x0FFF0000 in (0x028F0000, 0x024F0000):
+        # LDR and LDRB (literal) and ADR: imm12 (A8.8.65, A8.8.69, A8.8.12)
         return 0xF8
+    if word & 0x0E4F0090 == 0x004F0090 and word & 0x00100060 in (0x00100020, 0x00100040, 0x00100060, 0x00000040):
+        # LDRH, LDRSB, LDRSH and LDRD (literal): imm4H at 8..11, imm4L at 0..3 (A8.8.82, A8.8.90,
+        # A8.8.98, A8.8.73)
+        return 0xFA
     if word & 0x0F3F0E00 == 0x0D1F0A00:
         # VLDR (literal): imm8 (A8.8.333)
         return 0xFC
@@ -130,14 +135,24 @@ def _t16KeepMask(halfword):
     return None
 
 
+def _t32BranchAtZero(value):
+    """``value`` re-encoded with a zero offset if it is a B.W, BL, BLX or B<cond>.W (A6.3.4),
+    else None. J1 shares a nibble with the opcode bits and flips with distance (past 8 MiB
+    for B.W, BL and BLX, past 256 KiB or backwards for B<cond>.W), so the offset is zeroed
+    rather than that nibble wildcarded: the branch kinds stay apart whatever the distance."""
+    hw1, hw2 = value & 0xFFFF, value >> 16
+    if hw1 & 0xF800 != 0xF000 or not hw2 & 0x8000:
+        return None
+    if hw2 & 0x5000:
+        # B.W, BL, BLX: S:imm10 and J1:J2:imm11, I1 = NOT(J1 XOR S), so offset 0 is J1 = J2 = 1
+        return (value & ~0x2FFF07FF) | 0x28000000
+    if hw2 & 0xD000 == 0x8000 and (hw1 >> 6) & 0xE != 0xE:
+        # B<cond>.W: S:imm6 around the condition and J1:J2:imm11
+        return value & ~0x2FFF043F
+    return None
+
+
 def _t32KeepMask(hw1, hw2):
-    if (
-        hw1 & 0xF800 == 0xF000
-        and hw2 & 0x8000
-        and (hw2 & 0x5000 or (hw2 & 0xD000 == 0x8000 and (hw1 >> 6) & 0xE != 0xE))
-    ):
-        # B.W, BL, BLX and conditional B.W: S:imm10 and J1:J2:imm11 (A6.3.4)
-        return 0x88
     if hw1 & 0xFB70 == 0xF240 or hw1 & 0xFBFF in (0xF20F, 0xF2AF):
         # MOVW / MOVT and ADR.W: i:imm4 and imm3:imm8 around Rd (A8.8.102, A8.8.12)
         return 0x4A
@@ -146,6 +161,9 @@ def _t32KeepMask(hw1, hw2):
         return 0x8F
     if hw1 & 0xFF3F == 0xED1F:
         # VLDR (literal): imm8
+        return 0xCF
+    if hw1 & 0xFE5F == 0xE85F and hw1 & 0x0120:
+        # LDRD (literal): imm8 below Rt and Rt2 (A8.8.73)
         return 0xCF
     return None
 
@@ -266,12 +284,15 @@ class ArmInstructionEscaper:
         if size == 2:
             return _render(value, 2, 0x08 if control_flow else 0x0C)
         if ArmInstructionEscaper._isThumb(ins):
-            return _render(value, 4, 0x88 if control_flow else 0x0E)
+            if control_flow:
+                branch = _t32BranchAtZero(value)
+                return _render(value if branch is None else branch, 4, 0x88)
+            return _render(value, 4, 0x0E)
         return _render(value, 4, 0xC0 if control_flow else 0xE0)
 
     @staticmethod
     def escapeBinary(ins, escape_intraprocedural_jumps=False, lower_addr=None, upper_addr=None):
-        # every PC-relative field is position dependent and is wildcarded whether it stays
+        # every PC-relative field changes with link order and is wildcarded whether it stays
         # inside the function or not, so neither the flag nor the bounds change anything
         del escape_intraprocedural_jumps, lower_addr, upper_addr
         if not ins.bytes or len(ins.bytes) not in (4, 8):
@@ -280,6 +301,10 @@ class ArmInstructionEscaper:
         if size == 2:
             keep_mask = _t16KeepMask(value)
         elif ArmInstructionEscaper._isThumb(ins):
+            branch = _t32BranchAtZero(value)
+            if branch is not None:
+                # B<cond>.W keeps its condition, like the A32 and T16 conditional branches
+                return _render(branch, 4, 0x88 if branch & 0x50000000 else 0x8E)
             keep_mask = _t32KeepMask(value & 0xFFFF, value >> 16)
         else:
             keep_mask = _a32KeepMask(value)
