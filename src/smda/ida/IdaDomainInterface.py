@@ -1,11 +1,14 @@
 """IDA Domain API adapter for IDA 9.1 and newer."""
 
 import importlib
+import logging
 import os
 import re
 
 from smda.export.BackendInterface import BackendInterface
 from smda.export.segment_mapping import assembleSegmentBuffer
+
+LOGGER = logging.getLogger(__name__)
 
 _IDA_DOMAIN_MISSING = (
     "ida-domain is not available. Install it with 'pip install \"smda[ida]\"' and "
@@ -45,6 +48,7 @@ class IdaDomainInterface(BackendInterface):
         super().__init__()
         self.version = "ida-domain (IDA Pro 9.1+)"
         self._owns_database = False
+        self._thumb_lookup_failed = False
         if database is not None:
             self.db = database
         else:
@@ -166,7 +170,10 @@ class IdaDomainInterface(BackendInterface):
             import idc
 
             return idc.get_sreg(offset, "T") == 1
-        except Exception:
+        except Exception as exc:
+            if not self._thumb_lookup_failed:
+                self._thumb_lookup_failed = True
+                LOGGER.warning("could not read the T segment register (%s), treating functions as A32", exc)
             return False
 
     def isExternalFunction(self, function_offset):

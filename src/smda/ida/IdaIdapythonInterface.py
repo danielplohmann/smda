@@ -1,6 +1,7 @@
 """Legacy IDAPython adapters for supported IDA SDK generations."""
 
 import contextlib
+import logging
 import re
 
 from smda.export.BackendInterface import BackendInterface
@@ -25,12 +26,15 @@ except ImportError:
 with contextlib.suppress(ImportError):
     import idc
 
+LOGGER = logging.getLogger(__name__)
+
 
 class _ModernIdapythonInterface(BackendInterface):
     def __init__(self):
         self._processor_map = {"metapc": "intel"}
         self._api_map = {}
         self._import_module_name = ""
+        self._thumb_lookup_failed = False
 
     def getFunctions(self):
         return sorted(idautils.Functions())
@@ -97,7 +101,10 @@ class _ModernIdapythonInterface(BackendInterface):
             import idc
 
             return idc.get_sreg(offset, "T") == 1
-        except Exception:
+        except Exception as exc:
+            if not self._thumb_lookup_failed:
+                self._thumb_lookup_failed = True
+                LOGGER.warning("could not read the T segment register (%s), treating functions as A32", exc)
             return False
 
     def isExternalFunction(self, function_offset):
