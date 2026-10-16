@@ -24,6 +24,8 @@ class FunctionAnalysisState:
     # ret/trap instructions must.
     CALL_MNEMONICS = frozenset()
     END_MNEMONICS = frozenset()
+    #: optional ``(instruction, refs_from) -> bool`` for block ends a mnemonic cannot name
+    endsBlock = None
 
     def __init__(self, start_addr, disassembly):
         self.start_addr = start_addr
@@ -296,6 +298,7 @@ class FunctionAnalysisState:
         colliding_addresses = self.colliding_addresses
         call_mnemonics = self.CALL_MNEMONICS
         end_mnemonics = self.END_MNEMONICS
+        ends_block = self.endsBlock
         ins = {i[0]: ind for ind, i in enumerate(instructions)}
         potential_starts = {self.start_addr}
         potential_starts.update(self.jump_targets)
@@ -339,6 +342,8 @@ class FunctionAnalysisState:
                 ):
                     break
                 if current_mnemonic in end_mnemonics:
+                    break
+                if ends_block is not None and ends_block(current, refs_from):
                     break
             if block:
                 blocks.append(block)

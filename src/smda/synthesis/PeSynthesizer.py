@@ -37,6 +37,9 @@ DATA_DIR_BASE_PE32_PLUS = 112
 MACHINE_I386 = 0x014C
 MACHINE_AMD64 = 0x8664
 MACHINE_ARM64 = 0xAA64
+MACHINE_ARM = 0x01C0
+MACHINE_THUMB = 0x01C2
+MACHINE_ARMNT = 0x01C4
 
 IMAGE_BASE_ALIGNMENT = 0x10000
 
@@ -68,10 +71,40 @@ class PeSynthesizer(BinarySynthesizer):
     def _getBitness(self):
         return 64 if self.report.bitness == 64 else 32
 
-    def _getMachine(self):
+    def _getMachine(self, original_machine=None):
         if self.report.architecture == "aarch64":
             return MACHINE_ARM64
+        if self.report.architecture == "arm":
+            modes = [
+                bool((function.architecture_metadata or {}).get("thumb")) for function in self.report.xcfg.values()
+            ]
+            has_a32 = any(not thumb for thumb in modes)
+            if has_a32:
+                return MACHINE_ARM
+            if original_machine in (MACHINE_ARM, MACHINE_ARMNT, MACHINE_THUMB):
+                return original_machine
+            return MACHINE_ARMNT
         return MACHINE_AMD64 if self._getBitness() == 64 else MACHINE_I386
+
+    def _entryPointRva(self, base, fallback, fallback_mode_address=None):
+        oep = self._resolveEntryPoint()
+        candidate = fallback if oep is None else oep - base
+        if self.report.architecture == "arm" and oep is None and fallback_mode_address is not None:
+            candidate = fallback_mode_address - base
+        if not self._fitsUnsigned(candidate, 32):
+            if oep is not None:
+                self._warn("entry point 0x%x does not fit a 32-bit RVA; existing entry point used", oep)
+            return fallback
+        if self.report.architecture == "arm":
+            entry_address = oep if oep is not None else fallback_mode_address
+            if entry_address is None:
+                entry_address = base + fallback
+            entry_address &= ~1
+            function = self.report.xcfg.get(entry_address)
+            mode_marker = oep if oep is not None else candidate
+            is_thumb = bool((function.architecture_metadata or {}).get("thumb")) if function else bool(mode_marker & 1)
+            candidate = candidate | 1 if is_thumb else candidate & ~1
+        return candidate
 
     def _plantFunctions(self, regions, offsets, base):
         for offset in offsets:
@@ -388,13 +421,24 @@ class PeSynthesizer(BinarySynthesizer):
             struct.pack_into("<I", optional_header, dir_base + 8 * IMAGE_DIRECTORY_ENTRY_IMPORT, import_dir[0])
             struct.pack_into("<I", optional_header, dir_base + 8 * IMAGE_DIRECTORY_ENTRY_IMPORT + 4, import_dir[1])
 
+        struct.pack_into(
+            "<I",
+            optional_header,
+            16,
+            self._entryPointRva(base, struct.unpack_from("<I", optional_header, 16)[0]),
+        )
+
         raw_offset = size_of_headers
         for region in regions:
             region["ptr"] = raw_offset
             raw_offset += len(region["raw"])
 
         header = self._buildHeader(
-            regions, optional_header, int(pe_src.header.machine), int(pe_src.header.characteristics), size_of_headers
+            regions,
+            optional_header,
+            self._getMachine(int(pe_src.header.machine)),
+            int(pe_src.header.characteristics),
+            size_of_headers,
         )
         return bytes(header) + b"".join(bytes(r["raw"]) for r in regions)
 
@@ -557,13 +601,7 @@ class PeSynthesizer(BinarySynthesizer):
         size_of_headers = align_up(0x40 + 4 + 20 + size_opt + 40 * len(regions), file_alignment)
         image_end = align_up(max(r["vaddr"] + r["vsize"] for r in regions), section_alignment)
         entry_rva = text_vaddr
-        oep = self._resolveEntryPoint()
-        if oep is not None:
-            candidate = oep - base
-            if self._fitsUnsigned(candidate, 32):
-                entry_rva = candidate
-            else:
-                self._warn("entry point 0x%x does not fit a 32-bit RVA; .text used instead", oep)
+        entry_rva = self._entryPointRva(base, entry_rva, min(offsets))
 
         optional_header = self._buildMinimalOptionalHeader(
             regions, bitness, size_of_headers, image_end, entry_rva, import_dir, base

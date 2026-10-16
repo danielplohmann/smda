@@ -5,6 +5,7 @@ from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
+from smda.arm.definitions import IT_MNEMONICS
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
 LOGGER = logging.getLogger(__name__)
@@ -133,10 +134,16 @@ class SmdaInstruction:
         if self.smda_function is None or self.smda_function.smda_report is None:
             raise ValueError("SmdaFunction or SmdaReport not set on instruction")
         arch = self.smda_function.smda_report.architecture
-        if arch is not None and arch not in {"intel", "aarch64"}:
-            raise NotImplementedError(f"getDetailed() is only available for Intel and AArch64, not '{arch}'")
+        if arch is not None and arch not in {"intel", "aarch64", "arm"}:
+            raise NotImplementedError(f"getDetailed() is only available for Intel, AArch64 and ARM, not '{arch}'")
         if self.detailed is None:
-            capstone = self.smda_function.smda_report.getCapstone()
+            thumb = False
+            if arch == "arm":
+                metadata = self.smda_function.architecture_metadata or {}
+                thumb = len(self.bytes or "") == 4 or bool(metadata.get("thumb"))
+                capstone = self.smda_function.smda_report.getCapstone(thumb=thumb)
+            else:
+                capstone = self.smda_function.smda_report.getCapstone()
             with_details = list(capstone.disasm(bytes.fromhex(self.bytes or ""), self.offset))
             if not with_details:
                 raise ValueError(f"Capstone could not disassemble stored bytes '{self.bytes}' at 0x{self.offset:x}")
@@ -160,7 +167,40 @@ class SmdaInstruction:
                         ", ".join(insn.mnemonic for insn in with_details),
                         self.detailed.mnemonic,
                     )
+            if thumb and self.detailed.mnemonic != self.mnemonic:
+                self.detailed = self._decodeInItBlock(capstone) or self.detailed
         return self.detailed
+
+    def _decodeInItBlock(self, capstone):
+        """Decode this T32 instruction together with the ``it`` up to four instructions before it.
+
+        Capstone applies an IT instruction's conditions only to the instructions decoded in the
+        same call (see ArmCapstone), so decoded alone, ``moveq`` reads as ``movs``.
+        """
+        address = self.offset
+        smda_function = self.smda_function
+        if address is None or smda_function is None:
+            return None
+        code = bytes.fromhex(self.bytes or "")
+        for distance in range(1, 5):
+            previous = None
+            for size in (2, 4):
+                candidate = smda_function.getInstructionAt(address - size)
+                if candidate is not None and len(candidate.bytes or "") == 2 * size:
+                    previous = candidate
+                    address -= size
+                    break
+            if previous is None:
+                return None
+            try:
+                code = bytes.fromhex(previous.bytes or "") + code
+            except ValueError:
+                return None
+            if previous.mnemonic in IT_MNEMONICS:
+                if distance >= len(previous.mnemonic):
+                    return None
+                return next((insn for insn in capstone.disasm(code, address) if insn.address == self.offset), None)
+        return None
 
     def getMnemonicGroup(self, escaper):
         if escaper:

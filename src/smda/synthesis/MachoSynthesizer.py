@@ -18,6 +18,7 @@ MH_PIE = 0x200000
 CPU_TYPE_I386 = 7
 CPU_TYPE_X86_64 = 0x01000007
 CPU_TYPE_ARM64 = 0x0100000C
+CPU_TYPE_ARM = 12
 
 LC_SEGMENT = 0x1
 LC_SYMTAB = 0x2
@@ -123,6 +124,8 @@ class MachoSynthesizer(BinarySynthesizer):
                 return cpu_type
         if self.report.architecture == "aarch64":
             return CPU_TYPE_ARM64
+        if self.report.architecture == "arm":
+            return CPU_TYPE_ARM
         return CPU_TYPE_X86_64 if self._is64() else CPU_TYPE_I386
 
     def _getCpuSubtype(self):
@@ -473,7 +476,7 @@ class MachoSynthesizer(BinarySynthesizer):
 
         stubs_sections = [section for section in sections if self._isStubsSection(section) and section["raw"]]
         indirect = []
-        default_stub_size = 12 if self.report.architecture == "aarch64" else 6
+        default_stub_size = 12 if self.report.architecture in ("aarch64", "arm") else 6
         for section in stubs_sections:
             section["indirect_start"] = len(indirect)
             partner = self._findPartnerPointerSection(section, pointer_sections)

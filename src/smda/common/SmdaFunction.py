@@ -13,6 +13,11 @@ from smda.aarch64.definitions import EXCEPTION_RETURN_INS as AARCH64_EXCEPTION_R
 from smda.aarch64.definitions import INDIRECT_JUMP_INS as AARCH64_INDIRECT_JUMP_INS
 from smda.aarch64.definitions import RET_INS as AARCH64_RET_INS
 from smda.aarch64.definitions import UNCOND_JUMP_INS as AARCH64_UNCOND_JUMP_INS
+from smda.arm.analyzers import isImportStub as arm_is_import_stub
+from smda.arm.ArmInstructionEscaper import ArmInstructionEscaper
+from smda.arm.definitions import CALL_BASES as ARM_CALL_BASES
+from smda.arm.definitions import is_return_instruction as arm_is_return_instruction
+from smda.arm.definitions import split_mnemonic as arm_split_mnemonic
 from smda.cil.CilInstructionEscaper import CilInstructionEscaper
 from smda.common.CodeXref import CodeXref
 from smda.common.DominatorTree import build_dominator_tree, get_nesting_depth
@@ -204,6 +209,7 @@ class SmdaFunction:
     strongly_connected_components = None
     tfidf = None
     _basic_blocks: Optional[List["SmdaBasicBlock"]] = None
+    _instructions_by_offset: Optional[Dict[Optional[int], "SmdaInstruction"]] = None
 
     def __init__(self, disassembly=None, function_offset=None, config=None, smda_report=None):
         self.smda_report = smda_report
@@ -270,6 +276,8 @@ class SmdaFunction:
             return IntelInstructionEscaper
         if architecture == "aarch64":
             return AArch64InstructionEscaper
+        if architecture == "arm":
+            return ArmInstructionEscaper
         if architecture == "cil":
             return CilInstructionEscaper
         if architecture == "dalvik":
@@ -304,6 +312,13 @@ class SmdaFunction:
             return sum(
                 1 for block in self.blocks.values() for ins in block if (ins.mnemonic or "").startswith("invoke-")
             )
+        if architecture == "arm":
+            return sum(
+                1
+                for block in self.blocks.values()
+                for ins in block
+                if arm_split_mnemonic(ins.mnemonic)[0] in ARM_CALL_BASES
+            )
         if architecture == "aarch64":
             call_mnemonics = AARCH64_CALL_INS
         elif architecture == "cil":
@@ -320,6 +335,13 @@ class SmdaFunction:
         if architecture == "dalvik":
             return sum(
                 1 for block in self.blocks.values() for ins in block if (ins.mnemonic or "").startswith("return")
+            )
+        if architecture == "arm":
+            return sum(
+                1
+                for block in self.blocks.values()
+                for ins in block
+                if arm_is_return_instruction(ins.mnemonic, ins.operands or "")
             )
         if architecture == "aarch64":
             return_mnemonics = AARCH64_RET_INS | AARCH64_EXCEPTION_RETURN_INS
@@ -352,6 +374,8 @@ class SmdaFunction:
         architecture = self.smda_report.architecture if self.smda_report else ""
         if architecture == "aarch64":
             return self._isAArch64ApiThunk()
+        if architecture == "arm":
+            return self._isArmApiThunk()
         if self.num_instructions != 1:
             return False
         if self.offset is None:
@@ -383,6 +407,14 @@ class SmdaFunction:
             return False
         return all(self._baseMnemonic(ins.mnemonic) in self._AARCH64_API_THUNK_BODY for ins in block[:-1])
 
+    def _isArmApiThunk(self):
+        if self.num_blocks != 1:
+            return False
+        block = self.blocks.get(self.offset)
+        if not block or block[-1].offset not in self.apirefs:
+            return False
+        return arm_is_import_stub(block)
+
     def isExported(self):
         return self.is_exported
 
@@ -404,6 +436,12 @@ class SmdaFunction:
     def getInstructions(self) -> Iterator["SmdaInstruction"]:
         for block in self.getBlocks():
             yield from block.getInstructions()
+
+    def getInstructionAt(self, offset: int) -> Optional["SmdaInstruction"]:
+        index = self._instructions_by_offset
+        if index is None:
+            index = self._instructions_by_offset = {ins.offset: ins for block in self.blocks.values() for ins in block}
+        return index.get(offset)
 
     def getInstructionsForBlock(self, offset: Optional[int]) -> List["SmdaInstruction"]:
         if offset is None:
@@ -557,6 +595,7 @@ class SmdaFunction:
         self._sorted_block_keys = sorted(self.blocks.keys())
         # invalidate any cached SmdaBasicBlock objects built from a previous block set
         self._basic_blocks = None
+        self._instructions_by_offset = None
 
     @staticmethod
     def _normalizeDalvikStringRefs(stringrefs: Any):
@@ -781,6 +820,7 @@ class SmdaFunction:
             smda_function.blocks[int(addr)] = [SmdaInstruction.fromDict(ins, smda_function) for ins in block]
         smda_function._sorted_block_keys = sorted(smda_function.blocks.keys())
         smda_function._basic_blocks = None
+        smda_function._instructions_by_offset = None
         smda_function.apirefs = LazyIntKeyDict(function_dict["apirefs"])
         smda_function.blockrefs = LazyIntKeyDict(function_dict["blockrefs"])
         smda_function.inrefs = function_dict["inrefs"]
