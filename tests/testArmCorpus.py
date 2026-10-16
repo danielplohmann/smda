@@ -4,13 +4,15 @@ The fixtures are clang builds of the lz4 library with their symbol tables remove
 ``arm_lz4_mixed_O2`` interleaves A32 and T32 functions at -O2, ``arm_lz4_mixed_Os``
 alternates A32 and T32 object files at -Os, ``arm_lz4_thumb_Os`` is T32 at -Os, and ``armnt_lz4_dll`` is a Windows on ARM (ARMNT, T32 only) DLL importing
 from kernel32. ``arm_ground_truth.json`` holds the function starts and instruction sets
-the unstripped builds and the linker map name. ``arm_go_stripped`` is a Go 1.24 hello world
+the unstripped builds and the linker map name, and for the ld.lld builds the literal pools and jump
+tables inside those functions, which give every instruction start. ``arm_go_stripped`` is a Go 1.24 hello world
 (``println``) built with ``GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0``, ``-trimpath`` and
 ``-ldflags="-s -w -buildid= -R 0x1000"`` (4 KiB segment alignment instead of 64 KiB keeps the
 file small; the runtime is the rest); its own pclntab, which lists the same starts as the
 unstripped build's symbol table, is the truth.
 """
 
+import functools
 import json
 import struct
 import unittest
@@ -48,6 +50,26 @@ def _truth(name):
     return {int(address, 16): mode == "thumb" for address, mode in GROUND_TRUTH[name]["functions"].items()}
 
 
+@functools.cache
+def _instructionStarts(name):
+    """Each function decoded linearly in its mode up to the next start, its data skipped."""
+    text = lief.ELF.parse(list(_load(name))).get_section(".text")
+    code, base = bytes(text.content), text.virtual_address
+    data = dict(tuple(int(bound, 16) for bound in span.split("-")) for span in GROUND_TRUTH[name]["data_in_code"])
+    functions = sorted(_truth(name).items())
+    ends = [start for start, _ in functions[1:]] + [base + len(code)]
+    starts = {}
+    for (address, thumb), end in zip(functions, ends, strict=True):
+        while address < end:
+            if address in data:
+                address = data[address]
+                continue
+            starts[address] = thumb
+            halfword = int.from_bytes(code[address - base : address - base + 2], "little")
+            address += 2 if thumb and halfword >> 11 < 0x1D else 4
+    return starts
+
+
 class ArmCorpusRecoveryTest(unittest.TestCase):
     def _assertRecovery(self, name, report, recall, precision, truth=None):
         truth = _truth(name) if truth is None else truth
@@ -61,6 +83,18 @@ class ArmCorpusRecoveryTest(unittest.TestCase):
         self.assertGreaterEqual(len(matched) / len(in_text), precision)
         wrong_mode = [hex(a) for a in matched if found[a].architecture_metadata.get("thumb") != truth[a]]
         self.assertEqual(wrong_mode, [])
+        if "data_in_code" in GROUND_TRUTH.get(name, {}):
+            # every decoded instruction starts where the build put one, in the same mode
+            starts = _instructionStarts(name)
+            low, high = min(starts), max(starts)
+            misplaced = [
+                hex(instruction.offset)
+                for function in report.getFunctions()
+                for instruction in function.getInstructions()
+                if low <= instruction.offset <= high
+                and starts.get(instruction.offset) != function.architecture_metadata["thumb"]
+            ]
+            self.assertEqual(misplaced, [])
 
     def test_stripped_mixed_mode_shared_object(self):
         name = "arm_lz4_mixed_O2_xored"

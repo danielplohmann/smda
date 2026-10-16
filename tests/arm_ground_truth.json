@@ -1,5 +1,5 @@
 {
- "source": "clang 18 builds of the lz4 library (ld.lld and lld-link); function starts from the unstripped symbol tables and the lld-link map",
+ "source": "clang 18 builds of the lz4 library (ld.lld and lld-link); function starts from the unstripped symbol tables and the lld-link map. data_in_code lists the literal pools and jump tables inside the ld.lld builds' functions: with them skipped, decoding each function in its mode up to the next start gives the instruction starts llvm-objdump prints from the mapping symbols",
  "arm_lz4_mixed_O2_xored": {
   "functions": {
    "0x124c8": "arm",
@@ -682,6 +682,34 @@
    "0x29234": "thumb",
    "0x29240": "thumb",
    "0x2924c": "thumb"
-  }
+  },
+  "data_in_code": [
+   "0x128a0-0x128a4",
+   "0x1b794-0x1b79c",
+   "0x1bb80-0x1bb88",
+   "0x1c080-0x1c088",
+   "0x1c640-0x1c648",
+   "0x1cb28-0x1cb30",
+   "0x1d16c-0x1d174",
+   "0x1d568-0x1d570",
+   "0x1e150-0x1e160",
+   "0x1e50c-0x1e518",
+   "0x1e6c0-0x1e6cc",
+   "0x1e7d4-0x1e7dc",
+   "0x1e82c-0x1e830",
+   "0x1e948-0x1e94c",
+   "0x1eb3c-0x1eb40",
+   "0x1f608-0x1f60c",
+   "0x1f9a4-0x1f9bc",
+   "0x1faf0-0x1fb04",
+   "0x20010-0x2004c",
+   "0x20d34-0x20d38",
+   "0x21220-0x21224",
+   "0x215dc-0x215e0",
+   "0x21e20-0x21e2c",
+   "0x26dd8-0x26ddc",
+   "0x2827c-0x282bc",
+   "0x2843c-0x284bc"
+  ]
  }
 }
