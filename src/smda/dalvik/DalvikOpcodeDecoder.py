@@ -65,7 +65,7 @@ def parse_code_item_header(raw_data, header_offset):
     }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DalvikOpcode:
     mnemonic: str
     fmt: str
@@ -78,7 +78,7 @@ class DalvikOpcode:
     payload_kind: Optional[str] = None
 
 
-@dataclass
+@dataclass(slots=True)
 class DecodedDalvikInstruction:
     opcode: int
     mnemonic: str

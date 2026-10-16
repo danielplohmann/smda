@@ -45,7 +45,11 @@ dependencies = [
     # is partial - 6 of the 20 ARM64_* constants used here are absent from it, and the shim
     # only loads at all once capstone.arm64* has been imported - so 6.x is a port, not an
     # import-order fix. Measured against 6.0.0a10.
-    "capstone<6",
+    # The floor is 5.0.2: StringExtractor imports CS_GRP_BRANCH_RELATIVE, which 4.x lacks, and
+    # 5.0.0.post1/5.0.1 import distutils, which is gone from Python 3.12 on. Without the floor
+    # pip resolves capstone 4.0.2 next to a package pinning it (dumpulator: capstone~=4.0.2),
+    # pip check passes, and smda fails at import.
+    "capstone>=5.0.2,<6",
     # every label smda writes comes from demangle, so its output changes only through a
     # reviewed bump of this pin. smda never calls load_plugins(); a host application that
     # calls load_plugins() or register_language() in the same process can still replace a
