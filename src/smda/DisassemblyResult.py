@@ -4,6 +4,8 @@ import struct
 from smda.common.BasicBlock import BasicBlock
 
 _MISSING = object()
+_dict_get = dict.get
+_dict_setitem = dict.__setitem__
 
 
 class AddressRefs(dict):
@@ -55,20 +57,20 @@ class AddressRefs(dict):
     __hash__ = None
 
     def add(self, addr, ref):
-        refs = dict.get(self, addr)
+        refs = _dict_get(self, addr)
         if refs is None:
-            dict.__setitem__(self, addr, ref)
+            _dict_setitem(self, addr, ref)
         elif refs.__class__ is int:
             if refs != ref:
-                dict.__setitem__(self, addr, {refs, ref})
+                _dict_setitem(self, addr, {refs, ref})
         else:
             refs.add(ref)
 
     def discard(self, addr, ref):
         """Remove ref from addr's entry, leaving an empty set behind as a set.discard() would."""
-        refs = dict.get(self, addr)
+        refs = _dict_get(self, addr)
         if refs is None or refs == ref:
-            dict.__setitem__(self, addr, set())
+            _dict_setitem(self, addr, set())
         elif refs.__class__ is not int:
             refs.discard(ref)
 
@@ -312,12 +314,24 @@ class DisassemblyResult:
 
     def mergeCodeRefs(self, code_refs_from):
         """Add every edge of a function's {addr_from: {addr_to}} map."""
-        add_from = self.code_refs_from.add
+        code_refs_from_dict = self.code_refs_from
         add_to = self.code_refs_to.add
         for addr_from, dests in code_refs_from.items():
             for addr_to in dests:
-                add_from(addr_from, addr_to)
                 add_to(addr_to, addr_from)
+            existing = _dict_get(code_refs_from_dict, addr_from)
+            if existing is None:
+                if len(dests) == 1:
+                    (dest,) = dests
+                    _dict_setitem(code_refs_from_dict, addr_from, dest)
+                else:
+                    _dict_setitem(code_refs_from_dict, addr_from, set(dests))
+            elif existing.__class__ is int:
+                s = {existing}
+                s.update(dests)
+                _dict_setitem(code_refs_from_dict, addr_from, s)
+            else:
+                existing.update(dests)
 
     def removeCodeRefs(self, addr_from, addr_to):
         self.code_refs_from.discard(addr_from, addr_to)

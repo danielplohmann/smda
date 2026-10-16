@@ -1022,9 +1022,15 @@ class DalvikDisassembler:
         # advance by 2 on resync — stepping by 1 wastes a decode attempt at every
         # odd offset on adversarial input.
         while idx < len(bytecode):
-            if payload_ranges and any(start <= idx < end for start, end in payload_ranges):
-                idx += 2
-                continue
+            if payload_ranges:
+                in_payload = False
+                for start, end in payload_ranges:
+                    if start <= idx < end:
+                        in_payload = True
+                        break
+                if in_payload:
+                    idx += 2
+                    continue
             try:
                 size_bytes, payload_idx = decode_instruction_shallow(bytecode, idx)
             except ValueError:
@@ -1187,7 +1193,7 @@ class DalvikDisassembler:
         payload_ranges = list(seed_payload_ranges)
         payload_range_set = set(payload_ranges)
 
-        resolve_reference = lambda ref_kind, ref_index: self._resolveReference(resolver, ref_kind, ref_index)  # noqa: E731
+        resolve_reference = resolver.formatRef
 
         while state.hasUnprocessedBlocks():
             block_start_addr = state.chooseNextBlock()
@@ -1195,8 +1201,14 @@ class DalvikDisassembler:
                 break
             idx = block_start_addr - bytecode_offset
             while 0 <= idx < len(bytecode):
-                if any(start <= idx < end for start, end in payload_ranges):
-                    break
+                if payload_ranges:
+                    in_payload = False
+                    for start, end in payload_ranges:
+                        if start <= idx < end:
+                            in_payload = True
+                            break
+                    if in_payload:
+                        break
                 if idx in visited_offsets:
                     break
                 # Linear fall-through must land on a fixed-point-valid start (keeps

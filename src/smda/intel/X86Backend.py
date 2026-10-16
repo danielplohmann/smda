@@ -30,6 +30,8 @@ from .MnemonicTfIdf import MnemonicTfIdf
 
 LOGGER = logging.getLogger(__name__)
 
+GAP_SEQUENCE_FIRST_INTS = frozenset(b[0] for b in GAP_SEQUENCE_FIRST_BYTES)
+
 # what MSVC and a toolchain that emits CET landing pads align a function entry to
 _ENTRY_ALIGNMENT = 16
 # the filler a compiler pads up to an aligned function entry with
@@ -312,6 +314,12 @@ class X86Backend(ArchBackend):
         distance = -addr % 16
         if not distance:
             return False
+        bin_info = getattr(d, "binary_info", None)
+        if bin_info is not None and bin_info.binary is not None:
+            rel = addr - bin_info.base_addr
+            raw = bin_info.binary
+            if rel < 0 or rel >= len(raw) or raw[rel] not in GAP_SEQUENCE_FIRST_INTS:
+                return False
         window = d._getDisasmWindowBuffer(addr)
         if len(window) <= distance or window[:1] not in GAP_SEQUENCE_FIRST_BYTES:
             return False

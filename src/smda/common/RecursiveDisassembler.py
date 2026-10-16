@@ -161,6 +161,13 @@ class RecursiveDisassembler:
         return 0xFFFFFFFF
 
     def getReferencedAddr(self, op_str):
+        if "0x" not in op_str:
+            return 0
+        if op_str.startswith("0x"):
+            try:
+                return int(op_str, 16)
+            except ValueError:
+                pass
         # preserve a leading sign so that negative displacements (e.g. "qword ptr [rip - 0x20]")
         # resolve to the correct address instead of being treated as positive
         referenced_addr = _REFERENCED_ADDR_RE.search(op_str)
