@@ -141,12 +141,12 @@ class SmdaInstruction:
     def __getstate__(self):
         # the cached capstone CsInsn holds ctypes pointers and cannot be pickled, so it is left
         # out and getDetailed() re-creates it on demand
-        return {slot: getattr(self, slot, None) for slot in self.__slots__ if slot != "detailed"}
+        return {slot: getattr(self, slot, None) for slot in SmdaInstruction.__slots__ if slot != "detailed"}
 
     def __setstate__(self, state):
         # pickles written before __slots__ only carry the attributes that were set on the
         # instance, so a slot missing from the state falls back to None
-        for slot in self.__slots__:
+        for slot in SmdaInstruction.__slots__:
             setattr(self, slot, None if slot == "detailed" else state.get(slot))
 
     def getDetailed(self):

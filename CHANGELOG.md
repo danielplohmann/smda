@@ -73,12 +73,13 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
-- **(core)** Give `SmdaInstruction` and `SmdaBasicBlock` `__slots__` and cut per-instruction work in the hot paths:
-  block refs skip normalization when a function has no `try_ranges`, `getReferencedAddr` skips its regex without a `0x`,
-  Dalvik decode objects are slotted dataclasses and the AArch64 nibble formatter is unrolled. *Measured on `ff722ac`,*
-  callgrind instructions on the 8 profiling fixtures: -3.4% on 3.13 (`pe_export` -0.2% to `blockblast` -7.8%), -1.7% on
-  3.11; live report memory -6% to -9% (`blockblast` -2.4%). Wall time is inside noise. *Reproduced on bundled fixtures.*
-  Cost: none in output, reports identical on 112 fixture configurations; instructions and blocks take no new attributes.
+- **(core)** Give `SmdaInstruction` and `SmdaBasicBlock` `__slots__` and trim per-instruction work: blocks are built
+  in one pass, block refs skip normalization without `try_ranges`, `getReferencedAddr` skips its regex without a `0x`,
+  Dalvik decode objects are slotted and its payload-range checks are plain loops, the AArch64 nibble formatter is
+  unrolled. *Measured on `ff722ac`,* callgrind instructions of a second analysis on the 8 benchmark-gate fixtures: -3.4%
+  on 3.13 (`pe_export` -0.2% to `blockblast` -7.8%), -1.7% on 3.11; heap held by the report (tracemalloc) -6% to -9%.
+  Wall time is inside noise. *Reproduced on bundled fixtures.* Cost: none in output, reports identical on 112 bundled
+  fixture and fuzz-corpus inputs; instructions and blocks no longer take attributes outside their slots. (#404)
 
 ### Deprecated
 
@@ -87,8 +88,8 @@ past roughly six lines it belongs in the PR the entry links.
 ### Fixed
 - **(core)** Keep an uncomputed block hash uncomputed across pickle and `deepcopy`. The `_UNSET` sentinel came back as
   a bare `object()`, which `getPicBlockHash()` and `getOpcBlockHash()` then returned as the hash. *Measured on
-  `ff722ac`:* `cutwail` pickled with blocks built but not hashed returned it on 253 blocks, now on none. Pickles written
-  before this change still load. No cost.
+  `ff722ac`:* `cutwail` (file mode) with blocks built but not hashed returned it on all 253 blocks, now on none.
+  *Reproduced on bundled fixtures.* No cost; pickles written before this change still load. (#404)
 
 ### Security
 

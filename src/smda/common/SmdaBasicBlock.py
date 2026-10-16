@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 # sentinel distinguishing "hash not yet computed" from "hash computed as None (uncomputable)"
 _UNSET = object()
+_HASH_SLOTS = ("_picblockhash", "_opcblockhash")
 
 
 class SmdaBasicBlock:
@@ -39,16 +40,17 @@ class SmdaBasicBlock:
     def __getstate__(self):
         # an uncomputed hash is left out: the _UNSET sentinel would not survive pickling as
         # itself, and a copy of it would read as an already computed hash
-        state = {slot: getattr(self, slot, None) for slot in self.__slots__}
-        for slot in ("_picblockhash", "_opcblockhash"):
-            if state[slot] is _UNSET:
-                del state[slot]
+        state = {}
+        for slot in SmdaBasicBlock.__slots__:
+            value = getattr(self, slot, _UNSET if slot in _HASH_SLOTS else None)
+            if value is not _UNSET:
+                state[slot] = value
         return state
 
     def __setstate__(self, state):
-        for slot in self.__slots__:
+        for slot in SmdaBasicBlock.__slots__:
             setattr(self, slot, state.get(slot))
-        for slot in ("_picblockhash", "_opcblockhash"):
+        for slot in _HASH_SLOTS:
             value = state.get(slot, _UNSET)
             # pickles written before __slots__ carry a copy of the sentinel as a bare object()
             setattr(self, slot, _UNSET if type(value) is object else value)

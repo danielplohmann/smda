@@ -231,6 +231,8 @@ class SmdaFunction:
             self.outrefs = disassembly.getOutRefs(function_offset)
             self.is_exported = self.offset in disassembly.exported_functions
             self.architecture_metadata = disassembly.function_metadata.get(function_offset, {})
+            # getBlockRefs() is already sorted and keyed by block start; only the handler edges
+            # that try_ranges add need the normalization pass
             if self.architecture_metadata and "try_ranges" in self.architecture_metadata:
                 self.blockrefs = self.getNormalizedBlockRefs()
             else:
@@ -558,6 +560,8 @@ class SmdaFunction:
             block_bytes = 0
             for ins in block:
                 block_ins.append(from_tuple(ins, smda_function=self))
+                # ins[1] is len(ins[4]) for every backend; binweight is serialized, so it must
+                # stay that raw byte count and a float
                 block_bytes += ins[1]
             blocks[block_start] = block_ins
             total_bytes += block_bytes

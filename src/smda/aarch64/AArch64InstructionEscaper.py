@@ -509,7 +509,7 @@ class AArch64InstructionEscaper:
     @staticmethod
     def _wordWithNibbleKeepMaskToHex(word, keep_mask):
         """Render `word` (32-bit) as 8 hex chars in little-endian byte order
-        (byte 0 first, low nibble of each byte first), replacing nibbles
+        (byte 0 first, each byte as two hex digits, high nibble first), replacing nibbles
         whose corresponding bit in `keep_mask` is 0 with "?". `keep_mask`
         is 8 bits, bit n (LSB-first nibble index) = 1 means "keep this
         nibble from the original word".
