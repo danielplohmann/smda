@@ -4,9 +4,11 @@ The fixtures are clang builds of the lz4 library with their symbol tables remove
 ``arm_lz4_mixed_O2`` interleaves A32 and T32 functions at -O2, ``arm_lz4_mixed_Os``
 alternates A32 and T32 object files at -Os, ``arm_lz4_thumb_Os`` is T32 at -Os, and ``armnt_lz4_dll`` is a Windows on ARM (ARMNT, T32 only) DLL importing
 from kernel32. ``arm_ground_truth.json`` holds the function starts and instruction sets
-the unstripped builds and the linker map name. ``arm_go_stripped`` is a Go 1.24 program
-built with ``GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0`` and ``-ldflags="-s -w"``; its own
-pclntab, which lists the same starts as the unstripped build's symbol table, is the truth.
+the unstripped builds and the linker map name. ``arm_go_stripped`` is a Go 1.24 hello world
+(``println``) built with ``GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0``, ``-trimpath`` and
+``-ldflags="-s -w -buildid= -R 0x1000"`` (4 KiB segment alignment instead of 64 KiB keeps the
+file small; the runtime is the rest); its own pclntab, which lists the same starts as the
+unstripped build's symbol table, is the truth.
 """
 
 import json
