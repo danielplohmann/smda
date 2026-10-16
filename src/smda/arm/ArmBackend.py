@@ -8,9 +8,9 @@ from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 from smda.common.arch.ArchBackend import ArchBackend
 
 from .analyzers import ArmIndirectCallAnalyzer, ArmJumpTableAnalyzer, ArmTfIdf, resolveImportStub
+from .dataflow import pc_value
 from .definitions import (
     A32_INSTRUCTION_SIZE,
-    A32_NOPS,
     BRANCH_BASES,
     CALL_BASES,
     COMPARE_BRANCH_BASES,
@@ -20,7 +20,6 @@ from .definitions import (
     PC_WRITING_BASES,
     REGISTER_BRANCH_BASES,
     T16_INSTRUCTION_SIZE,
-    T16_NOPS,
     TABLE_BRANCH_BASES,
     TRAP_BASES,
     a32_branch_target,
@@ -30,7 +29,7 @@ from .definitions import (
     split_mnemonic,
 )
 from .FunctionAnalysisState import FunctionAnalysisState
-from .FunctionCandidateManager import FunctionCandidateManager
+from .FunctionCandidateManager import MODE_DECODED, FunctionCandidateManager
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +51,6 @@ _LITERAL_LOAD_SIZES = {
     "pli": 0,
 }
 _VLDR_SIZES = {"h": 2, "s": 4, "d": 8}
-_WIDTH_QUALIFIERS = (".w", ".n")
 
 
 class ArmCapstone:
@@ -190,6 +188,15 @@ class ArmBackend(ArchBackend):
         state.setBlockEndingInstruction(True)
 
     @staticmethod
+    def _entersOtherInstructionSet(d, address, size, thumb):
+        fc_manager = d.fc_manager
+        strong_starts = fc_manager.getStrongFunctionStarts()
+        for addr in range(address, address + size, T16_INSTRUCTION_SIZE):
+            if addr in strong_starts and fc_manager.notedThumb(addr, MODE_DECODED) is (not thumb):
+                return True
+        return False
+
+    @staticmethod
     def _isKnownFunctionStart(d, addr):
         return addr in d.disassembly.functions or addr in d.fc_manager.getStrongFunctionStarts()
 
@@ -203,25 +210,24 @@ class ArmBackend(ArchBackend):
         """
         if self._isKnownFunctionStart(d, addr):
             return addr
+        fc_manager = d.fc_manager
+        step = T16_INSTRUCTION_SIZE if thumb else A32_INSTRUCTION_SIZE
         cursor = addr
         skipped = False
         for _ in range(8):
-            if thumb:
-                halfword = self._halfwordAt(d, cursor)
-                if halfword not in T16_NOPS and halfword != 0:
-                    break
-                cursor += T16_INSTRUCTION_SIZE
-            else:
-                word = self._wordAt(d, cursor)
-                if word not in A32_NOPS and word != 0:
-                    break
-                cursor += A32_INSTRUCTION_SIZE
+            if not d.disassembly.isAddrWithinMemoryImage(cursor) or not fc_manager.isPadding(cursor, thumb):
+                break
+            cursor += step
             skipped = True
         if not skipped:
             return None
         if self._isKnownFunctionStart(d, cursor):
             return cursor
-        if thumb and cursor % 4 == 0 and is_t32_prologue(self._halfwordAt(d, cursor), self._halfwordAt(d, cursor + 2)):
+        if (
+            thumb
+            and cursor % 4 == 0
+            and is_t32_prologue(self._halfwordAt(d, cursor) or 0, self._halfwordAt(d, cursor + 2) or 0)
+        ):
             return cursor
         if not thumb and cursor % 4 == 0 and is_a32_prologue(self._wordAt(d, cursor) or 0):
             return cursor
@@ -272,7 +278,7 @@ class ArmBackend(ArchBackend):
                 if base == "vldr":
                     size = _VLDR_SIZES.get(i_op_str[:1], size)
                 offset = int(literal.group(1), 0) if literal.group(1) else 0
-                pool = ((i_address + 4) & ~3 if thumb else i_address + 8) + offset
+                pool = pc_value(i_address, thumb, aligned=True) + offset
                 if size and d.disassembly.isAddrWithinMemoryImage(pool):
                     # a table to the engine: a path decoded into the pool before this load was
                     # seen (blocks run last-in first-out) is decoded again with the pool known
@@ -292,7 +298,7 @@ class ArmBackend(ArchBackend):
         if base == "adr":
             immediate = _IMMEDIATE.search(i_op_str)
             if immediate is not None:
-                value = ((i_address + 4) & ~3 if thumb else i_address + 8) + int(immediate.group(1), 0)
+                value = pc_value(i_address, thumb, aligned=True) + int(immediate.group(1), 0)
                 self._recordValue(d, state, i_address, value, pc_relative=True)
             return
         if base in ("movw", "movt", "mov"):
@@ -340,7 +346,7 @@ class ArmBackend(ArchBackend):
         operands = [operand.strip() for operand in i_op_str.split(",")]
         if len(operands) == 3 and operands[1] == "pc" and operands[2].startswith("#"):
             immediate = int(operands[2][1:], 0)
-            value = (i_address + 4) & ~3 if thumb else i_address + 8
+            value = pc_value(i_address, thumb, aligned=True)
             value = value + immediate if base == "add" else value - immediate
             self._recordValue(d, state, i_address, value, pc_relative=True)
             pending.pop(operands[0], None)
@@ -359,7 +365,7 @@ class ArmBackend(ArchBackend):
         pending.pop(operands[0], None)
         if literal is None:
             return
-        value = (literal + (i_address + 4 if thumb else i_address + 8)) & 0xFFFFFFFF
+        value = (literal + pc_value(i_address, thumb)) & 0xFFFFFFFF
         self._recordValue(d, state, i_address, value, pc_relative=True)
         pending[operands[0]] = value
 
@@ -451,13 +457,14 @@ class ArmBackend(ArchBackend):
             if slot is not None and d._handleApiTarget(i_address, slot, slot, slot=slot):
                 state.setSanelyEnding(True)
             elif (
-                state.isFirstInstruction()
+                (state.isFirstInstruction() and target != i_address + instruction[1])
                 or target < state.start_addr
                 or self._restoresLinkRegister(previous_instruction)
                 or self._isPrologueCandidate(d, target)
                 or self._isVeneer(d, target, thumb)
             ):
-                # a lone branch is a stub into another function; so is a branch that follows
+                # a lone branch is a stub into another function (unless it only skips to the next
+                # instruction, as unoptimised code does); so is a branch that follows
                 # the frame teardown, or lands on code before the entry, on an entry
                 # prologue or in a linker veneer
                 d.fc_manager.addTailcallCandidate(target, thumb)
@@ -580,6 +587,8 @@ class ArmBackend(ArchBackend):
         if previous_instruction is None:
             state.arm_pending.clear()
             state.arm_movw.clear()
+            if state.arm_declared is None:
+                state.arm_declared = state.start_addr in d.fc_manager.getDeclaredFunctionStarts()
         go_image = d.fc_manager.isGoImage()
         if go_image:
             # Go's A32 nop is ``andeq r0, r0, r0``, the all-zero word: the compiler emits one
@@ -607,6 +616,16 @@ class ArmBackend(ArchBackend):
             self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
             return True
 
+        if (
+            previous_instruction is not None
+            and i_address != state.start_addr
+            and self._entersOtherInstructionSet(d, i_address, i_size, thumb)
+        ):
+            # a start a decoded call or the image puts in the other instruction set begins here:
+            # no function changes its instruction set without a branch, so this one has ended
+            self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
+            return True
+
         if previous_instruction is not None:
             previous_base, previous_condition, _ = split_mnemonic(previous_instruction[2])
             if (
@@ -631,12 +650,24 @@ class ArmBackend(ArchBackend):
                         d.fc_manager.addTailcallCandidate(boundary, thumb)
                     self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
                     return True
+                if d.fc_manager.isTrap(i_address, thumb):
+                    # the linker's fill or a trap right behind the call (lld pads to the next
+                    # section with ``0xd4d4``, which decodes as ``bmi``): the callee does not return
+                    self._cutFunctionBeforeInstruction(state, previous_instruction[0], i_address)
+                    return True
 
         if base in BRANCH_BASES:
             target = self._immediateTarget(i_op_str)
             if target is None:
                 return False
-            if conditional:
+            if not d.disassembly.isAddrWithinMemoryImage(target):
+                # nothing to follow; the function is refused when it is finalized
+                if conditional:
+                    self._endBlockKeepingFallthrough(state, i_address, i_size)
+                else:
+                    state.setNextInstructionReachable(False)
+                    state.setBlockEndingInstruction(True)
+            elif conditional:
                 self._analyzeCondBranch(d, instruction, state, target)
             else:
                 self._analyzeUncondBranch(d, instruction, state, target, thumb, previous_instruction)
@@ -721,7 +752,7 @@ class ArmBackend(ArchBackend):
             # ldr pc, [pc, #imm]: an absolute branch through the literal pool (veneers)
             thumb = d.capstone.is_thumb
             offset = _PC_LITERAL.fullmatch(operands[1]).group(1)
-            pool = ((i_address + 4) & ~3 if thumb else i_address + 8) + (int(offset, 0) if offset else 0)
+            pool = pc_value(i_address, thumb, aligned=True) + (int(offset, 0) if offset else 0)
             value = self._wordAt(d, pool)
             if value is not None and d.disassembly.isAddrWithinMemoryImage(value & ~1):
                 target = value & ~1

@@ -19,6 +19,8 @@ class FunctionAnalysisState(_CommonFunctionAnalysisState):
         self.arm_pending = {}
         self.arm_movw = {}
         self.arm_indirect_jumps = []
+        #: whether a symbol or unwind record states this start; set by the backend
+        self.arm_declared = None
 
     @staticmethod
     def endsBlock(instruction, refs_from):
@@ -35,13 +37,15 @@ class FunctionAnalysisState(_CommonFunctionAnalysisState):
                 target = int(op_str[1:], 0)
             except ValueError:
                 continue
-            if not self.disassembly.isAddrWithinMemoryImage(target):
+            if target and not self.disassembly.isAddrWithinMemoryImage(target):
+                # address 0 is where a static link resolves an undefined weak symbol: a
+                # ``b 0`` behind a null check is a tailcall the linker left there
                 return True
         return False
 
     def finalizeAnalysis(self, as_gap=False):
-        # a direct branch or call that leaves the image is data decoded as code; only a gap
-        # candidate has nothing but its own bytes to vouch for it
-        if as_gap and self._branchesOutsideImage():
+        # compilers and linkers emit no direct branch or call out of the image (but to 0): one
+        # that leaves it is data decoded as code, unless the image itself states the function
+        if (as_gap or not self.arm_declared) and self._branchesOutsideImage():
             return False
         return super().finalizeAnalysis(as_gap)

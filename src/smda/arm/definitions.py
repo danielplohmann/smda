@@ -86,11 +86,6 @@ def split_mnemonic(mnemonic):
     return result
 
 
-def is_conditional(mnemonic):
-    condition = split_mnemonic(mnemonic)[1]
-    return condition is not None and condition != "al"
-
-
 #: imported functions that never return to their caller. A call to one ends the block, and the
 #: compiler places whatever comes next (a literal pool, the next function) straight behind it:
 #: GCC's ``-fstack-protector`` epilogue is ``blx __stack_chk_fail`` followed by the pool.
@@ -208,10 +203,9 @@ A32_BL_BIT = 0x01000000
 #: BLX <label> (A8.8.25, encoding A2): 1111 101 H imm24
 A32_BLX_IMM_MASK = 0xFE000000
 A32_BLX_IMM_VALUE = 0xFA000000
-#: BX / BLX <Rm> (A8.8.27, A8.8.26)
+#: BX <Rm> (A8.8.27)
 A32_BX_MASK = 0x0FFFFFF0
 A32_BX_VALUE = 0x012FFF10
-A32_BLX_REG_VALUE = 0x012FFF30
 A32_BX_LR = 0xE12FFF1E
 A32_MOV_PC_LR = 0xE1A0F00E
 #: PUSH {..., lr} as STMDB sp!, <list> (A8.8.133), any condition bits masked out
@@ -231,6 +225,11 @@ A32_MOV_IP_SP = 0xE1A0C00D
 A32_NOPS = frozenset({0xE320F000, 0xE1A00000})
 #: the fill lld writes between sections and PLT entries of an ARM image
 A32_LLD_FILL = 0xD4D4D4D4
+#: UDF and BKPT (A8.8.247, A8.8.24): the condition field of UDF is ignored, BKPT's is AL
+A32_UDF_MASK = 0x0FF000F0
+A32_UDF_VALUE = 0x07F000F0
+A32_BKPT_MASK = 0xFFF000F0
+A32_BKPT_VALUE = 0xE1200070
 #: ``ldr pc, [ip, #imm]`` with bit 21 (writeback) clear: the last instruction of an A32 PLT entry
 A32_LDR_PC_IP = 0xE59CF000
 #: the A32 condition field meaning "always"
@@ -247,10 +246,9 @@ T16_PUSH_LR_BIT = 0x0100
 T16_POP_MASK = 0xFE00
 T16_POP_VALUE = 0xBC00
 T16_POP_PC_BIT = 0x0100
-#: BX / BLX <Rm> (A8.8.27 T1 / A8.8.26 T1)
+#: BX <Rm> (A8.8.27 T1)
 T16_BX_MASK = 0xFF87
 T16_BX_VALUE = 0x4700
-T16_BLX_REG_VALUE = 0x4780
 T16_BX_LR = 0x4770
 #: B <label> (A8.8.18 T2) and B<c> <label> (T1); cond 1110 is UDF and 1111 is SVC
 T16_B_MASK = 0xF800

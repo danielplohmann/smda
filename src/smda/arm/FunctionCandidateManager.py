@@ -35,7 +35,10 @@ from capstone import CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_THUMB, Cs
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as _CommonFunctionCandidateManager
 from smda.utility.MachoBinary import get_active_macho_binary, get_macho_address_adjustment
 
+from .dataflow import pc_value
 from .definitions import (
+    A32_BKPT_MASK,
+    A32_BKPT_VALUE,
     A32_BX_MASK,
     A32_BX_VALUE,
     A32_COND_AL,
@@ -44,6 +47,8 @@ from .definitions import (
     A32_LDR_PC_IP,
     A32_LLD_FILL,
     A32_NOPS,
+    A32_UDF_MASK,
+    A32_UDF_VALUE,
     IT_MNEMONICS,
     T16_BKPT_MASK,
     T16_BKPT_VALUE,
@@ -73,6 +78,12 @@ _MODE_POLL_SPANS = 64
 _MODE_POLL_BYTES = 0x40000
 #: bytes of surrounding code the instruction-set probe of an address without other evidence reads
 _MODE_BLOCK_SIZE = 0x1000
+#: how much a statement about an address's instruction set weighs: a stronger one replaces a
+#: weaker one, among equals the first stands (only the image's own statements replace each other)
+MODE_GUESS = 0  # the region the gap scan stands in
+MODE_SCAN = 1  # a linear scan read a call or a prologue there
+MODE_DECODED = 2  # an instruction decoded on a path, or bit 0 of an address the image holds
+MODE_STATED = 3  # a symbol, the entry point, an exception directory or pclntab
 _PE_MACHINE_ARM = 0x1C0
 _PE_MACHINE_THUMB = 0x1C2
 _PE_MACHINE_ARMNT = 0x1C4
@@ -143,6 +154,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
 
     def _resetModeState(self):
         self._modes = {}
+        self._mode_strengths = {}
+        #: functions already decoded in an instruction set a stronger statement then contradicted
+        self.mode_conflicts = []
         self._mapping_starts = []
         self._mapping_kinds = []
         self._default_thumb = False
@@ -262,7 +276,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         returns ``(address, thumb)`` of the function symbols."""
         mapping = []
         symbols = {}
-        base_adjust = 0
         for index, symbol in enumerate(self._elfSymbols(lief_binary)):
             if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return list(symbols.items())
@@ -270,20 +283,20 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             value = symbol.value
             # lief hands a name that is not valid UTF-8 back as bytes
             if isinstance(name, str) and name.startswith(("$a", "$t", "$d")) and (len(name) == 2 or name[2] == "."):
-                mapping.append((value + base_adjust, name[1]))
+                mapping.append((value, name[1]))
             elif symbol.type == lief.ELF.Symbol.TYPE.FUNC and value and symbol.shndx != 0:
-                symbols[self.noteMode(value, authoritative=True)] = bool(value & 1)
+                symbols[self.noteMode(value, strength=MODE_STATED)] = bool(value & 1)
                 self._addDeclaredStart(value & ~1)
         entry = lief_binary.header.entrypoint
         if entry:
-            self.noteMode(entry, authoritative=True)
+            self.noteMode(entry, strength=MODE_STATED)
         # _init and _fini come from glibc's A32 crti in a Thumb build too; the dynamic
         # section states them like every other code address, with bit 0 for Thumb
         for index, dynamic_entry in enumerate(lief_binary.dynamic_entries):
             if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return list(symbols.items())
             if dynamic_entry.tag in _INIT_FINI_TAGS and dynamic_entry.value:
-                self.noteMode(dynamic_entry.value, authoritative=True)
+                self.noteMode(dynamic_entry.value, strength=MODE_STATED)
         for index, section in enumerate(lief_binary.sections):
             if index and index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return list(symbols.items())
@@ -330,7 +343,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             if any(start <= value < end for start, end in code_sections):
                 thumb = bool(symbol.description & _MACHO_N_ARM_THUMB_DEF)
-                symbols[self.noteMode(value + adjustment, thumb, authoritative=True)] = thumb
+                symbols[self.noteMode(value + adjustment, thumb, strength=MODE_STATED)] = thumb
         if macho.has_data_in_code:
             segments = [
                 (segment.file_offset, segment.file_offset + segment.file_size, segment.virtual_address)
@@ -372,43 +385,74 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 seen.add(key)
                 yield symbol
 
-    def noteMode(self, addr, thumb=None, authoritative=False):
+    def noteMode(self, addr, thumb=None, strength=MODE_DECODED):
         """Record the instruction set of the code at ``addr``; returns the even address.
 
         With ``thumb`` omitted, bit 0 of ``addr`` decides it, which is the interworking
-        convention for every address the image stores or states. The first statement about an
-        address stands unless a later one is authoritative (a symbol or the entry point).
+        convention for every address the image stores or states. A statement replaces an
+        earlier one only if it is stronger, or both are the image's own (see ``MODE_*``).
         """
         if thumb is None:
             thumb = bool(addr & 1)
+        thumb = bool(thumb)
         addr &= ~1
         if (
-            not authoritative
+            strength < MODE_STATED
             and addr not in self._declared_starts
             and not self._canStoreCandidateMetadata(addr, self._modes)
         ):
             return addr
-        if authoritative or addr not in self._modes:
-            self._modes[addr] = bool(thumb)
-            candidate = self.candidates.get(addr)
-            if candidate is not None and candidate.is_thumb != bool(thumb):
-                if not candidate.isFinished():
-                    candidate.is_thumb = bool(thumb)
-                    candidate.function_start_score = None
-                    candidate._score = None
-                elif addr not in self.disassembly.functions and (
-                    candidate.analysis_aborted or not self.disassembly.isCode(addr)
-                ):
-                    # decoded in the instruction set a guess named, and rejected there or left
-                    # without a block: the statement now made about it earns it a second attempt
-                    candidate.is_thumb = bool(thumb)
-                    candidate.function_start_score = None
-                    candidate._score = None
-                    candidate.finished = False
-                    candidate.analysis_aborted = False
-                    candidate.abortion_reason = ""
-                    self.candidate_queue.add(candidate)
+        previous = self._modes.get(addr)
+        if previous is not None:
+            previous_strength = self._mode_strengths.get(addr, MODE_DECODED)
+            if strength < previous_strength or (strength == previous_strength < MODE_STATED):
+                return addr
+            self._mode_strengths[addr] = strength
+            if previous == thumb:
+                return addr
+        elif strength != MODE_DECODED:
+            self._mode_strengths[addr] = strength
+        self._modes[addr] = thumb
+        candidate = self.candidates.get(addr)
+        if candidate is not None and candidate.is_thumb != thumb:
+            if not candidate.isFinished():
+                candidate.is_thumb = thumb
+                candidate.function_start_score = None
+                candidate._score = None
+            elif addr in self.disassembly.functions:
+                # decoded in the instruction set a weaker statement named: the disassembler
+                # undoes it and decodes it again in this one
+                self.mode_conflicts.append(addr)
+            elif candidate.analysis_aborted or not self.disassembly.isCode(addr):
+                # decoded in the instruction set a guess named, and rejected there or left
+                # without a block: the statement now made about it earns it a second attempt
+                self._requeueInMode(candidate, thumb)
         return addr
+
+    def _requeueInMode(self, candidate, thumb):
+        candidate.is_thumb = thumb
+        candidate.function_start_score = None
+        candidate._score = None
+        candidate.finished = False
+        candidate.analysis_aborted = False
+        candidate.abortion_reason = ""
+        self.candidate_queue.add(candidate)
+
+    def takeModeConflicts(self):
+        """Hand over the conflicting functions noted so far, with their current instruction set."""
+        conflicts, self.mode_conflicts = self.mode_conflicts, []
+        return [(addr, self._modes[addr]) for addr in dict.fromkeys(conflicts)]
+
+    def requeueInMode(self, addr, thumb):
+        candidate = self.candidates.get(addr)
+        if candidate is not None:
+            self._requeueInMode(candidate, thumb)
+
+    def notedThumb(self, addr, strength=MODE_GUESS):
+        """The instruction set noted for `addr` itself by a statement at least that strong, or None."""
+        if strength > MODE_GUESS and self._mode_strengths.get(addr, MODE_DECODED) < strength:
+            return None
+        return self._modes.get(addr)
 
     def _mappingKind(self, addr):
         if self._data_in_code_starts:
@@ -628,7 +672,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         for index, addr in enumerate(starts):
             if index % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
-            self.noteMode(addr, False, authoritative=True)
+            self.noteMode(addr, False, strength=MODE_STATED)
             self._strong_starts.add(addr)
             self._block_modes[(addr - base) // _MODE_BLOCK_SIZE] = False
             self.addLanguageSpecCandidate(addr, "go")
@@ -802,7 +846,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if self._declaredThumb(start) is None:
                 thumb = self._entryThumb(start, following)
                 if thumb is not None:
-                    self.noteMode(start, thumb)
+                    self.noteMode(start, thumb, MODE_SCAN)
         for start in starts:
             if not self.disassembly.isAddrWithinMemoryImage(start) or not self._passesCodeFilter(start):
                 continue
@@ -856,14 +900,14 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 continue
             if armnt:
                 thumb = bool(begin & 1)
-                start = self.noteMode(base + begin, thumb, authoritative=True)
+                start = self.noteMode(base + begin, thumb, strength=MODE_STATED)
                 length = self._pdataFunctionLength(unwind)
             else:
                 # Windows CE: PrologLen:8 | FuncLen:22 | 32Bit:1 | ExceptionFlag:1, the length
                 # counted in instructions of the set the 32Bit flag names
                 a32 = bool(unwind >> 30 & 1)
                 thumb = not a32
-                start = self.noteMode(begin if begin >= base else base + begin, thumb, authoritative=True)
+                start = self.noteMode(begin if begin >= base else base + begin, thumb, strength=MODE_STATED)
                 length = (unwind >> 8 & 0x3FFFFF) * (A32_INSTRUCTION_SIZE if a32 else T16_INSTRUCTION_SIZE)
             if length:
                 self._pdata_ranges.append((start, start + length, False))
@@ -955,7 +999,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         self.addReferenceCandidate(target, source)
         if target not in self.candidates:
             return
-        self.noteMode(target, thumb)
+        self.noteMode(target, thumb, MODE_SCAN)
         self._addStrongStart(target)
         self.setInitialCandidate(target)
 
@@ -1138,12 +1182,12 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 if entry not in self._strong_starts and entry not in self.candidates:
                     added = self.addPrologueCandidate(entry)
                     if added or entry in self.candidates:
-                        self.noteMode(entry, thumb)
+                        self.noteMode(entry, thumb, MODE_SCAN)
                         self.setInitialCandidate(entry)
                 return
         added = self.addPrologueCandidate(addr)
         if added or addr in self.candidates:
-            self.noteMode(addr, thumb)
+            self.noteMode(addr, thumb, MODE_SCAN)
             self.setInitialCandidate(addr)
 
     def _splitsA32Prologue(self, addr, thumb):
@@ -1295,7 +1339,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                     offset = int(literal, 0)
                 except ValueError:
                     return False
-                pool = ((i_address + 4) & ~3 if thumb else i_address + 8) + offset
+                pool = pc_value(i_address, thumb, aligned=True) + offset
                 if pool < addr:
                     return False
                 evidence = True
@@ -1306,20 +1350,40 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         return None if flags_set else False
 
     # --- gap scan ---------------------------------------------------------------
-    def _isPadding(self, addr, thumb):
+    def isPadding(self, addr, thumb):
+        """Whether the instruction-sized unit at `addr` is fill between functions: zero, a nop
+        or a trap (the linker's fill, ``udf``, ``bkpt``). Past the image counts as padding."""
         data = self.disassembly.getBytes(addr, 4 if not thumb else 2)
         if not data:
             return True
         value = int.from_bytes(data, "little")
+        if value == 0:
+            return True
+        return value in (T16_NOPS if thumb else A32_NOPS) or self._isTrapValue(value, thumb)
+
+    def isTrap(self, addr, thumb):
+        """Whether `addr` holds the linker's fill, ``udf`` or ``bkpt``: nothing a compiler
+        places on a path that runs, so code that reaches it has already ended."""
+        if self.disassembly is None:
+            return False
+        data = self.disassembly.getBytes(addr, 4 if not thumb else 2)
+        if not data or len(data) != (2 if thumb else 4):
+            return False
+        return self._isTrapValue(int.from_bytes(data, "little"), thumb)
+
+    @staticmethod
+    def _isTrapValue(value, thumb):
         if thumb:
             return (
-                value == 0
-                or value == T16_LLD_FILL
-                or value in T16_NOPS
+                value == T16_LLD_FILL
                 or (value & T16_UDF_MASK) == T16_UDF_VALUE
                 or (value & T16_BKPT_MASK) == T16_BKPT_VALUE
             )
-        return value in (0, A32_LLD_FILL) or value in A32_NOPS or (value & 0x0FF000F0) == 0x07F000F0
+        return (
+            value == A32_LLD_FILL
+            or (value & A32_UDF_MASK) == A32_UDF_VALUE
+            or (value & A32_BKPT_MASK) == A32_BKPT_VALUE
+        )
 
     def nextGapCandidate(self, start_gap_pointer=None):
         """Linear sweep of unclaimed executable bytes, halfword or word stepped by instruction set.
@@ -1366,7 +1430,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             if addr in self.disassembly.data_map or self.isMappedData(addr):
                 self.gap_pointer += step
                 continue
-            if self._isPadding(addr, thumb):
+            if self.isPadding(addr, thumb):
                 self.gap_pointer += step
                 continue
             if self._go_span[0] <= addr < self._go_span[1]:
@@ -1386,6 +1450,6 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.gap_pointer += step
                 continue
             self.previously_analyzed_gap = addr
-            self.noteMode(addr, thumb)
+            self.noteMode(addr, thumb, MODE_GUESS)
             self.addGapCandidate(addr)
             return addr

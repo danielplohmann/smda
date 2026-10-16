@@ -1,7 +1,7 @@
 import types
 from unittest.mock import patch
 
-from smda.arm.FunctionCandidateManager import FunctionCandidateManager
+from smda.arm.FunctionCandidateManager import MODE_STATED, FunctionCandidateManager
 from smda.common.FunctionCandidateManager import FunctionCandidateManager as CommonFunctionCandidateManager
 from smda.SmdaConfig import SmdaConfig
 
@@ -46,7 +46,7 @@ class TestArmCandidateResources:
         assert len(manager._modes) <= 2
         assert len(manager._strong_starts) <= 2
         existing = next(iter(manager.candidates))
-        manager.noteMode(existing, True, authoritative=True)
+        manager.noteMode(existing, True, MODE_STATED)
         assert manager._modes[existing] is True
 
     def test_direct_call_scan_polls_and_stops_at_a_chunk_boundary(self):
@@ -165,7 +165,7 @@ class TestArmCandidateResources:
         manager = self._manager(b"\x00" * 64, cap=1)
         assert manager.addCallCandidate(self.base, False, self.base + 4)
         for addr in (self.base + 8, self.base + 16):
-            manager.noteMode(addr, True, authoritative=True)
+            manager.noteMode(addr, True, MODE_STATED)
             manager._addDeclaredStart(addr)
             assert not manager.addExceptionCandidate(addr)
             assert addr in manager.getDeclaredFunctionStarts()

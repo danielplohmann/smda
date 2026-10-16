@@ -21,6 +21,8 @@ class ArmDisassembler(RecursiveDisassembler):
 
     #: (disassembly, {(address, thumb): stub}) for :func:`~smda.arm.analyzers.resolveImportStub`
     import_stub_cache = None
+    _data_bytes_owner = None
+    _data_bytes = None
 
     def __init__(self, config, forced_bitness=None):
         super().__init__(config, ArmBackend(), forced_bitness=forced_bitness)
@@ -41,6 +43,42 @@ class ArmDisassembler(RecursiveDisassembler):
         self.capstone.binary_info = self.disassembly.binary_info
         self.capstone.setThumb(thumb)
         state = super().analyzeFunction(start_addr, as_gap=as_gap, known_table_bytes=known_table_bytes)
+        data_bytes = self._dataBytesByFunction()
         if start_addr in self.disassembly.functions:
             self.disassembly.function_metadata[start_addr] = {"thumb": thumb}
+            if state.data_bytes:
+                data_bytes[start_addr] = state.data_bytes
+        for addr, conflict_thumb in self.fc_manager.takeModeConflicts():
+            self._redecodeInMode(addr, conflict_thumb)
         return state
+
+    def _dataBytesByFunction(self):
+        # the literal pools each function booked, kept to take them back if it is undone
+        if self._data_bytes_owner is not self.disassembly:
+            self._data_bytes_owner = self.disassembly
+            self._data_bytes = {}
+        return self._data_bytes
+
+    def _redecodeInMode(self, addr, thumb):
+        """Undo a function decoded in the instruction set a weaker statement named, and queue
+        it again in the one a stronger statement since gave it."""
+        if self.fc_manager is None or self.tailcall_analyzer is None:
+            return
+        if (
+            addr not in self.disassembly.functions
+            or self.disassembly.function_metadata.get(addr, {}).get("thumb") is thumb
+        ):
+            return
+        self._revertStoredFunction(addr, with_refs=True)
+        self.tailcall_analyzer.discardFunction(addr)
+        self.disassembly.function_metadata.pop(addr, None)
+        data_bytes = self._dataBytesByFunction()
+        booked = data_bytes.pop(addr, None)
+        if booked:
+            # what its loads made data was read in the wrong instruction set; another
+            # function's own pool stays data
+            kept = set()
+            for other in data_bytes.values():
+                kept.update(booked.intersection(other))
+            self.disassembly.data_map.difference_update(booked - kept)
+        self.fc_manager.requeueInMode(addr, thumb)
