@@ -242,7 +242,7 @@ def _decodeImportStub(disassembler, start, thumb):
         base, condition, _ = split_mnemonic(mnemonic)
         if condition not in (None, "al") or base not in _STUB_BASES:
             return None
-        if base == "bx" or (base in ("ldr", "mov") and op_str.startswith("pc")):
+        if _isStubTransfer(base, op_str):
             break
     else:
         return None
@@ -270,6 +270,90 @@ def _decodeImportStub(disassembler, start, thumb):
             return end, slot, value
         tracker.step(ins)
     return None
+
+
+def _isStubTransfer(base, op_str):
+    """Whether a stub instruction is the branch that leaves it."""
+    return base == "bx" or (base in ("ldr", "mov") and op_str.startswith("pc"))
+
+
+def isImportStub(instructions):
+    """Whether a function's single block of :class:`SmdaInstruction` is an import stub.
+
+    The report-side counterpart of :func:`resolveImportStub`: a stored function carries no
+    image to read slots from, so the stub shapes it decodes are matched on their operands
+    instead - the PLT entry (``add ip, pc``; ``add ip, ip``; ``ldr pc, [ip]``), lld's literal
+    form, the MSVC ``movw``/``movt``/``ldr``/``bx`` thunk and the T32 ``bx pc`` prefix in
+    front of any of them. Both accept only :data:`_STUB_BASES`, unconditionally, up to the
+    branch :func:`_isStubTransfer` names, within :data:`MAX_STUB_INSTRUCTIONS`.
+    """
+    if len(instructions) > MAX_STUB_INSTRUCTIONS:
+        return False
+    if any(split_mnemonic(ins.mnemonic)[1] not in (None, "al") for ins in instructions):
+        return False
+    bases = [split_mnemonic(ins.mnemonic)[0].split(".", 1)[0] for ins in instructions]
+    operands = [(ins.operands or "").lower().replace(" ", "") for ins in instructions]
+    if any(base not in _STUB_BASES for base in bases):
+        return False
+    if bases and bases[0] == "bx" and operands[0] == "pc":
+        # the T32 prefix in front of an A32 entry
+        if len(bases) == 1:
+            return True
+        bases, operands = bases[1:], operands[1:]
+    body = [(base, op_str) for base, op_str in zip(bases, operands, strict=True) if base != "nop"]
+    if not body or not _isStubTransfer(*body[-1]):
+        return False
+    bases = [base for base, _ in body]
+    operands = [op_str for _, op_str in body]
+    final_base, final_operands = body[-1]
+    if final_base == "ldr":
+        if not final_operands.startswith("pc,"):
+            return False
+        if len(body) == 1:
+            return "[pc" in final_operands
+        if len(body) != 3 or bases not in (["add", "add", "ldr"], ["ldr", "add", "ldr"]):
+            return False
+        first, second = operands[0], operands[1]
+        if bases[0] == "add":
+            return (
+                first.startswith(("ip,pc", "r12,pc"))
+                and second.startswith(("ip,ip", "ip,r12", "r12,ip", "r12,r12"))
+                and ("[ip" in final_operands or "[r12" in final_operands)
+            )
+        return (
+            first.startswith(("ip,[pc", "r12,[pc"))
+            and second.startswith(("ip,pc", "r12,pc"))
+            and ("[ip" in final_operands or "[r12" in final_operands)
+        )
+    if final_base == "bx":
+        target = final_operands
+    elif final_operands.startswith("pc,"):
+        target = final_operands.split(",", 1)[1]
+    else:
+        return False
+    if target not in {f"r{index}" for index in range(13)} | {"ip"}:
+        return False
+    seeded_address = False
+    for base, op_str in body[:-1]:
+        parts = op_str.split(",", 1)
+        destination = parts[0]
+        source = parts[1] if len(parts) > 1 else ""
+        if destination != target:
+            return False
+        if base in ("movw", "movt") and source.startswith("#"):
+            seeded_address = seeded_address or base == "movw"
+            continue
+        if base == "adr" and source:
+            seeded_address = True
+            continue
+        if base == "ldr" and source.startswith(("[pc", f"[{target}")):
+            seeded_address = seeded_address or source.startswith("[pc")
+            continue
+        if base in ("add", "sub") and source.startswith(("pc", f"{target},")):
+            seeded_address = seeded_address or source.startswith("pc")
+            continue
+        return False
+    return seeded_address
 
 
 class ArmIndirectCallAnalyzer:
