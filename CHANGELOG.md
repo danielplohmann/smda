@@ -80,11 +80,12 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Fixed
 - **(common)** End the gap scan at the image end, not at the address mask. With no gap left, `getNextGap()` returned
-  `0xFFFFFFFF` on a 32-bit image, which lies below or inside an image based at, across or ending at 4 GiB, so the intel
-  and ARM scans kept offering it until `TIMEOUT` (300 s by default; never with `TIMEOUT = 0`). *Measured on
-  `8f15a1a`:* as buffers at 0x140000000 the 8 bundled fixtures read as 32-bit, and the ARM tests' idiom buffer, went
-  from `timeout` to `ok` in under 0.2 s. *Reproduced on bundled fixtures.* No cost: reports identical on the 21 x86/x64
-  fixtures, the 5 AArch64 ones and every report the ARM tests build.
+  `0xFFFFFFFF` on a 32-bit image, which lies below or inside one based at or above 4 GiB or across it, so the intel and
+  ARM scans ran until `TIMEOUT` (300 s by default; never with `TIMEOUT = 0`), as the intel scan did on an image ending
+  at 4 GiB in a non-padding byte. *Measured on `a23d395`:* as buffers at 0x140000000 the 12 fixtures of `tests/` and
+  `tests/msvc_smda384_corpus/` that read as 32-bit, and the ARM tests' idiom buffer, went from `timeout` to `ok` in
+  under 0.1 s. *Reproduced on bundled fixtures.* No cost: reports identical on the other 77 runs of the 32 x86/x64 and
+  AArch64 fixtures there and on every report the ARM tests build.
 
 ### Security
 

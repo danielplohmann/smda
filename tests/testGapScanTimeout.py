@@ -88,8 +88,9 @@ class IntelGapScanEndTest(unittest.TestCase):
     """The scan ends at the image end, wherever the image sits in the address space.
 
     It used to end at the address mask, 0xFFFFFFFF for a 32-bit image. That is below the base
-    of an image at 4 GiB or above, and the last byte of one that ends at 4 GiB, so the scan kept
-    coming back to it until the analysis timeout stopped it.
+    of an image at 4 GiB or above, where the scan kept coming back to it until the analysis
+    timeout stopped it, and the last byte of one that ends at 4 GiB, where it did the same
+    unless that byte was padding.
     """
 
     def _manager(self, image, base):
@@ -132,12 +133,13 @@ class GapScanEndReportTest(unittest.TestCase):
         return Disassembler(config).disassembleBuffer(self.CODE, base, bitness=32)
 
     def testA32BitBufferAt4GiBFinishes(self):
-        # 32-bit code cannot run there and capstone wraps its branch targets below 4 GiB, so
-        # there is nothing to recover; what is asserted is that the analysis says so promptly
+        # 32-bit seed addresses (prologues, call targets) are masked to 32 bits and land below
+        # 4 GiB, outside the image, so nothing is recovered; what is asserted is that the
+        # analysis says so promptly
         report = self._report(FOUR_GIB)
         self.assertEqual(report.status, "ok")
 
-    def testAnImageEndingAt4GiBRecoversWhatItDoesLower(self):
+    def testAnImageEndingAt4GiBFinishesWithWhatItFindsLower(self):
         top = FOUR_GIB - len(self.CODE)
         lower = top - 0x10000000
         top_report = self._report(top)
@@ -150,7 +152,11 @@ class GapScanEndReportTest(unittest.TestCase):
 
 
 class ArmGapScanEndReportTest(unittest.TestCase):
-    """The ARM scan rounds the old end marker up to 4 GiB, which is the base or inside the image here."""
+    """The ARM scan rounded the old end marker up to 4 GiB, inside an image based at or across it.
+
+    Above it, 4 GiB is below the base, and the scan walked the unmapped space up to the base a
+    word at a time.
+    """
 
     def _report(self, base):
         config = SmdaConfig()
