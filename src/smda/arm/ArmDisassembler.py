@@ -19,6 +19,8 @@ class ArmDisassembler(RecursiveDisassembler):
     report consumer decode the stored bytes the same way.
     """
 
+    decode_window_size = DECODE_WINDOW
+
     #: (disassembly, {(address, thumb): stub}) for :func:`~smda.arm.analyzers.resolveImportStub`
     import_stub_cache = None
     _data_bytes_owner = None

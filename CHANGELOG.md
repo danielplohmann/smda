@@ -73,7 +73,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
-- **(core)** Tune Capstone lookahead window and streamline graph traversals. Decouples the basic-block instruction decode window in `RecursiveDisassembler` with a 2x lookahead and adds `DECODE_WINDOW = 32` to `AArch64Disassembler`, eliminating over 237k Capstone C boundary crossings across multi-architecture targets; streamlines `DominatorTree.get_nesting_depth` set comprehension and `Tarjan.calculateScc` iterative loop. *Measured on v5.0.0 (commit a23d395):* 8 multi-arch benchmark targets (aarch64, x86/x64, CIL, Dalvik) -- 1.5390s -> 1.4530s (-5.59% net time, -17.07% on aarch64_static), -237,226 total calls eliminated, 100% cryptographic SHA-256 report hash parity preserved across all targets.
+- **(core)** Tune Capstone lookahead and streamline graph traversals. Block decoding uses 32-byte ARM/AArch64
+  windows and 30-byte x86 windows, preserving the 15-byte default used by x86 padding probes; simplify the dominator
+  node set and iterative Tarjan traversal. Add mixed ARM/Thumb and Thumb-only targets to the fixture benchmark.
+  *Measured against `a23d395`:* Debian dash AArch64 decoder calls fall from 20,030 to 4,958; ARM32 stays at 6,581.
+  Complete report hashes match on ARM32, AArch64, x86 and x64. Instruction-size bounds and padding semantics are
+  unchanged. (#408)
 
 ### Deprecated
 

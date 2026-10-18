@@ -40,6 +40,8 @@ class RecursiveDisassembler:
     injected :class:`~smda.common.arch.ArchBackend.ArchBackend`.
     """
 
+    decode_window_size = None
+
     def __init__(self, config, backend, forced_bitness=None):
         self.config = config
         self.backend = backend
@@ -361,7 +363,7 @@ class RecursiveDisassembler:
             state.chooseNextBlock()
             if debug_logging:
                 LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
-            decode_window_size = self.backend.max_instruction_size * 2
+            decode_window_size = self.decode_window_size or self.backend.max_instruction_size * 2
             cache = self.capstone.disasm_lite(
                 self._getDisasmWindowBuffer(state.block_start, size=decode_window_size),
                 state.block_start,

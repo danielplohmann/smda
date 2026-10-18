@@ -110,6 +110,8 @@ def run_benchmark(iterations, output_file, append=False, with_call_counts=False)
         {"name": "njrat", "filename": "njrat_xored", "base_addr": 0, "backend": "cil"},
         {"name": "pe_export", "filename": "pe_export_label_test_xored", "base_addr": 0, "backend": "intel"},
         {"name": "aarch64_static", "filename": "aarch64_static_xored", "base_addr": 0, "backend": "aarch64"},
+        {"name": "arm_mixed", "filename": "arm_lz4_mixed_O2_xored", "base_addr": 0, "backend": "arm"},
+        {"name": "arm_thumb", "filename": "arm_lz4_thumb_Os_xored", "base_addr": 0, "backend": "arm"},
     ]
 
     results = {}
