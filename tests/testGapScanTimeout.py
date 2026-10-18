@@ -113,6 +113,40 @@ class IntelGapScanEndTest(unittest.TestCase):
         self.assertIsNone(manager.nextGapCandidate(manager.getNextGap(dont_skip=True)))
         self.assertFalse(manager.disassembly.analysis_timeout)
 
+    def testTheInImageAddressMaskIsOfferedOnlyOnce(self):
+        manager = self._manager(b"\xcc" * 0x40, FOUR_GIB - 0x20)
+        manager.function_gaps = []
+        manager.gap_pointer = FOUR_GIB - 0x10
+        self.assertEqual(manager.getNextGap(), FOUR_GIB - 1)
+        manager.gap_pointer = FOUR_GIB - 1
+        self.assertEqual(manager.getNextGap(), FOUR_GIB + 0x20)
+
+    def testMissingBinaryInfoKeepsTheLegacyFallback(self):
+        manager = IntelCandidateManager(SmdaConfig())
+        manager.disassembly = DisassemblyResult()
+        manager.gap_pointer = BASE
+        self.assertEqual(manager.getNextGap(), FOUR_GIB - 1)
+
+    def testTheCheckpointPrecedesAFailedCandidateResumeAboveIt(self):
+        manager = self._manager(b"\x55\xcc\xcc\xcc" + b"\x55" * 0x40, FOUR_GIB - 4)
+        manager.function_gaps = []
+        manager.gap_pointer = FOUR_GIB - 4
+        self.assertEqual(manager.getNextGap(dont_skip=True), FOUR_GIB - 1)
+
+    def testAFailedNonPaddingCheckpointDoesNotRepeat(self):
+        manager = self._manager(b"\xcc" * 0x1F + b"\x55" + b"\xcc" * 0x20, FOUR_GIB - 0x20)
+        manager.function_gaps = []
+        manager.gap_pointer = FOUR_GIB - 0x10
+        self.assertEqual(manager.nextGapCandidate(manager.getNextGap()), FOUR_GIB - 1)
+        self.assertIsNone(manager.nextGapCandidate(manager.getNextGap(dont_skip=True)))
+        self.assertFalse(manager.disassembly.analysis_timeout)
+
+    def testTheCheckpointDoesNotSkipAnEarlierFailedCandidateResume(self):
+        manager = self._manager(b"\x55\xcc\xcc\xcc" + b"\x55" * 0x40, FOUR_GIB - 0x14)
+        manager.function_gaps = []
+        manager.gap_pointer = FOUR_GIB - 0x14
+        self.assertEqual(manager.getNextGap(dont_skip=True), FOUR_GIB - 0x10)
+
 
 class GapScanEndReportTest(unittest.TestCase):
     """The same, end to end: a short TIMEOUT is all the time the scan used to take."""
@@ -149,6 +183,18 @@ class GapScanEndReportTest(unittest.TestCase):
         self.assertEqual(offsets, [0, 0x10])
         self.assertEqual(offsets, sorted(function.offset - lower for function in lower_report.getFunctions()))
         self.assertEqual(top_report.num_instructions, lower_report.num_instructions)
+
+    def testAFailedGapBefore4GiBDoesNotLoseTheFunctionAboveIt(self):
+        code = self.CODE[:23] + b"\x55" + b"\x00" * 24 + bytes.fromhex("5589e531c05dc3")
+        reports = []
+        for base in (FOUR_GIB - 0x30, FOUR_GIB - 0x10000030):
+            config = SmdaConfig()
+            config.TIMEOUT = 5
+            report = Disassembler(config).disassembleBuffer(code, base, bitness=32)
+            self.assertEqual(report.status, "ok")
+            self.assertEqual(sorted(function.offset - base for function in report.getFunctions()), [0, 0x10, 0x30])
+            reports.append(report)
+        self.assertEqual(reports[0].num_instructions, reports[1].num_instructions)
 
 
 class ArmGapScanEndReportTest(unittest.TestCase):

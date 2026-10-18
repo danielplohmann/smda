@@ -281,6 +281,10 @@ class FunctionCandidateManager:
         )
         if gap_index < len(self.function_gaps):
             next_gap = self.function_gaps[gap_index][0]
+        elif self.gap_pointer is not None and self.disassembly is not None and self.disassembly.binary_info is not None:
+            address_mask = self.getBitMask()
+            if self.disassembly.binary_info.base_addr <= self.gap_pointer < address_mask < next_gap:
+                next_gap = address_mask
         LOGGER.debug(
             "getNextGap(%s) for 0x%08x based on gap_map: 0x%08x",
             dont_skip,
