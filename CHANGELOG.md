@@ -73,6 +73,7 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(core)** Tune Capstone lookahead window and streamline graph traversals. Decouples the basic-block instruction decode window in `RecursiveDisassembler` with a 2x lookahead and adds `DECODE_WINDOW = 32` to `AArch64Disassembler`, eliminating over 237k Capstone C boundary crossings across multi-architecture targets; streamlines `DominatorTree.get_nesting_depth` set comprehension and `Tarjan.calculateScc` iterative loop. *Measured on v5.0.0 (commit a23d395):* 8 multi-arch benchmark targets (aarch64, x86/x64, CIL, Dalvik) -- 1.5390s -> 1.4530s (-5.59% net time, -17.07% on aarch64_static), -237,226 total calls eliminated, 100% cryptographic SHA-256 report hash parity preserved across all targets.
 
 ### Deprecated
 

@@ -198,14 +198,15 @@ class RecursiveDisassembler:
     def _updateApiInformation(self, from_addr, to_addr, dll, api):
         self.disassembly.addApiReference(to_addr, from_addr, dll, api)
 
-    def _getDisasmWindowBuffer(self, addr):
+    def _getDisasmWindowBuffer(self, addr, size=None):
         binary_info = self.disassembly.binary_info
         if binary_info is None:
             return b""
         relative_start = addr - binary_info.base_addr
         if relative_start < 0 or relative_start >= len(binary_info.binary):
             return b""
-        relative_end = relative_start + self.backend.max_instruction_size
+        window_size = self.backend.max_instruction_size if size is None else size
+        relative_end = relative_start + window_size
         return binary_info.binary[relative_start:relative_end]
 
     def _revertGapFunction(self, colliding_addr, current_start_addr):
@@ -360,9 +361,11 @@ class RecursiveDisassembler:
             state.chooseNextBlock()
             if debug_logging:
                 LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
-            # in capstone, disassembly is more expensive than calling the function, so we use the maximum instruction
-            # size as look-ahead. disasm_lite() also provides faster disassembly than disasm(), so we work with tuples.
-            cache = self.capstone.disasm_lite(self._getDisasmWindowBuffer(state.block_start), state.block_start)
+            decode_window_size = self.backend.max_instruction_size * 2
+            cache = self.capstone.disasm_lite(
+                self._getDisasmWindowBuffer(state.block_start, size=decode_window_size),
+                state.block_start,
+            )
             cache_pos = 0
             previous_i = None
             # per-instruction locals: the maps are only ever mutated in place during
@@ -459,7 +462,7 @@ class RecursiveDisassembler:
                 else:
                     # if the inner loop did not break, we need to refill the cache in order to finish the block-analysis
                     cache = self.capstone.disasm_lite(
-                        self._getDisasmWindowBuffer(state.block_start + cache_pos),
+                        self._getDisasmWindowBuffer(state.block_start + cache_pos, size=decode_window_size),
                         state.block_start + cache_pos,
                     )
                     # a generator is always truthy, so emptiness has to be probed by consuming

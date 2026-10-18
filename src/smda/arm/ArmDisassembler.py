@@ -27,14 +27,15 @@ class ArmDisassembler(RecursiveDisassembler):
     def __init__(self, config, forced_bitness=None):
         super().__init__(config, ArmBackend(), forced_bitness=forced_bitness)
 
-    def _getDisasmWindowBuffer(self, addr):
+    def _getDisasmWindowBuffer(self, addr, size=None):
         binary_info = self.disassembly.binary_info
         if binary_info is None:
             return b""
         relative_start = addr - binary_info.base_addr
         if relative_start < 0 or relative_start >= len(binary_info.binary):
             return b""
-        return binary_info.binary[relative_start : relative_start + DECODE_WINDOW]
+        window_size = DECODE_WINDOW if size is None else size
+        return binary_info.binary[relative_start : relative_start + window_size]
 
     def analyzeFunction(self, start_addr, as_gap=False, known_table_bytes=None):
         if self.capstone is None or self.fc_manager is None:
