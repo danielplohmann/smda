@@ -79,6 +79,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(common)** End the gap scan at the image end, not at the address mask, preventing intel and ARM timeouts on
+  32-bit images at or across 4 GiB and intel timeouts on images ending there in a non-padding byte.
+  An in-image mask remains a forward-only checkpoint, preserving recovery above 4 GiB after a failed gap candidate.
+  *Measured against `a23d395`:* Debian dash i386 text ending at, crossing and above 4 GiB changes from `timeout` to
+  `ok` with the same 233, 27 and 0 functions; complete dash file reports match on ARM32, AArch64, x86 and x64.
+  The crossing-boundary regression retains all three functions. Branch-target address masking remains limited. (#407)
 
 ### Security
 
