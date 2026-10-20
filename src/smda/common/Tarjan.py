@@ -18,7 +18,6 @@ class Tarjan:
         self._stack_set = set()
         self._index = {}
         self._lowlink = {}
-        self._nonrecursive_stack = []
         self._result = []
 
     def calculateScc(self):

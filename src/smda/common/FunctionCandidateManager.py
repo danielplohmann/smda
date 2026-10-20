@@ -282,6 +282,8 @@ class FunctionCandidateManager:
         if gap_index < len(self.function_gaps):
             next_gap = self.function_gaps[gap_index][0]
         elif self.gap_pointer is not None and self.disassembly is not None and self.disassembly.binary_info is not None:
+            # no gap left: an address mask inside the image (32-bit image across 4 GiB) is offered once, while still
+            # ahead of the gap pointer, so a failed gap candidate can recover the upper part without looping back.
             address_mask = self.getBitMask()
             if self.disassembly.binary_info.base_addr <= self.gap_pointer < address_mask < next_gap:
                 next_gap = address_mask

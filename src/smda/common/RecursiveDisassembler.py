@@ -348,6 +348,9 @@ class RecursiveDisassembler:
                 f"inside the declared range of function 0x{declared_owner:08x}",
             )
             return state
+        # in capstone, disassembly is more expensive than calling the function, so we decode a window of several
+        # instructions per call. disasm_lite() also provides faster disassembly than disasm(), so we work with tuples.
+        decode_window_size = self.decode_window_size or self.backend.max_instruction_size * 2
         blocks_processed = 0
         reverted_gap_functions = []
         while state.hasUnprocessedBlocks():
@@ -363,7 +366,6 @@ class RecursiveDisassembler:
             state.chooseNextBlock()
             if debug_logging:
                 LOGGER.debug("  analyzeFunction() now processing block @0x%08x", state.block_start)
-            decode_window_size = self.decode_window_size or self.backend.max_instruction_size * 2
             cache = self.capstone.disasm_lite(
                 self._getDisasmWindowBuffer(state.block_start, size=decode_window_size),
                 state.block_start,
