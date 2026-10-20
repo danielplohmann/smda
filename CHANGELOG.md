@@ -73,6 +73,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(core)** Tune Capstone lookahead and streamline graph traversals. Block decoding uses 32-byte ARM/AArch64
+  windows and 30-byte x86 windows, preserving the 15-byte default used by x86 padding probes; simplify the dominator
+  node set and iterative Tarjan traversal. Add mixed ARM/Thumb and Thumb-only targets to the fixture benchmark.
+  *Measured against `a23d395`:* Debian dash AArch64 decoder calls fall from 20,030 to 4,958; ARM32 stays at 6,581.
+  Complete report hashes match on ARM32, AArch64, x86 and x64. Instruction-size bounds and padding semantics are
+  unchanged. (#408)
 
 ### Deprecated
 

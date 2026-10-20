@@ -21,45 +21,59 @@ class Tarjan:
         self._nonrecursive_stack = []
         self._result = []
 
-    def _tarjan_head(self, v):
-        self._index[v] = len(self._index)
-        self._lowlink[v] = self._index[v]
-        self._stack.append(v)
-        self._stack_set.add(v)
-        it = iter(self._graph.get(v, ()))
-        self._nonrecursive_stack.append((it, False, v, None))
-
-    def _tarjan_body(self, it, v):
-        for w in it:
-            if w not in self._index:
-                self._nonrecursive_stack.append((it, True, v, w))
-                self._tarjan_head(w)
-                return
-            if w in self._stack_set:
-                self._lowlink[v] = min(self._lowlink[v], self._index[w])
-        if self._lowlink[v] == self._index[v]:
-            scc = []
-            w = None
-            while v != w:
-                w = self._stack.pop()
-                scc.append(w)
-                self._stack_set.remove(w)
-            self._result.append(scc)
-
     def calculateScc(self):
-        main_iter = iter(self._graph)
-        while True:
-            try:
-                v = next(main_iter)
-            except StopIteration:
-                return self._result
-            if v not in self._index:
-                self._tarjan_head(v)
-            while self._nonrecursive_stack:
-                it, inside, v, w = self._nonrecursive_stack.pop()
-                if inside:
-                    self._lowlink[v] = min(self._lowlink[w], self._lowlink[v])
-                self._tarjan_body(it, v)
+        graph = self._graph
+        stack = self._stack
+        stack_set = self._stack_set
+        index = self._index
+        lowlink = self._lowlink
+        result = self._result
+        idx = 0
+
+        for root in graph:
+            if root in index:
+                continue
+            call_stack = [(root, iter(graph.get(root, ())))]
+            index[root] = lowlink[root] = idx
+            idx += 1
+            stack.append(root)
+            stack_set.add(root)
+
+            while call_stack:
+                v, it = call_stack[-1]
+                pushed = False
+                for w in it:
+                    if w not in index:
+                        index[w] = lowlink[w] = idx
+                        idx += 1
+                        stack.append(w)
+                        stack_set.add(w)
+                        call_stack.append((w, iter(graph.get(w, ()))))
+                        pushed = True
+                        break
+                    elif w in stack_set:
+                        if index[w] < lowlink[v]:
+                            lowlink[v] = index[w]
+                if pushed:
+                    continue
+
+                call_stack.pop()
+                if lowlink[v] == index[v]:
+                    scc = []
+                    while True:
+                        w = stack.pop()
+                        stack_set.remove(w)
+                        scc.append(w)
+                        if w == v:
+                            break
+                    result.append(scc)
+
+                if call_stack:
+                    p = call_stack[-1][0]
+                    if lowlink[v] < lowlink[p]:
+                        lowlink[p] = lowlink[v]
+
+        return result
 
     def closure(self):
         """Given a graph @g, returns the transitive closure of @g"""
