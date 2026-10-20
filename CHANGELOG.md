@@ -73,16 +73,26 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v5.0.1] - 2026-10-20
+
+### Changed
 - **(core)** Tune Capstone lookahead and streamline graph traversals. Block decoding uses 32-byte ARM/AArch64
   windows and 30-byte x86 windows, preserving the 15-byte default used by x86 padding probes; simplify the dominator
   node set and iterative Tarjan traversal. Add mixed ARM/Thumb and Thumb-only targets to the fixture benchmark.
   *Measured against `a23d395`:* Debian dash AArch64 decoder calls fall from 20,030 to 4,958; ARM32 stays at 6,581.
   Complete report hashes match on ARM32, AArch64, x86 and x64. Instruction-size bounds and padding semantics are
   unchanged. (#408)
-
-### Deprecated
-
-### Removed
 
 ### Fixed
 - **(common)** End the gap scan at the image end, not at the address mask, preventing intel and ARM timeouts on
@@ -91,10 +101,6 @@ past roughly six lines it belongs in the PR the entry links.
   *Measured against `a23d395`:* Debian dash i386 text ending at, crossing and above 4 GiB changes from `timeout` to
   `ok` with the same 233, 27 and 0 functions; complete dash file reports match on ARM32, AArch64, x86 and x64.
   The crossing-boundary regression retains all three functions. Branch-target address masking remains limited. (#407)
-
-### Security
-
-### Compatibility
 
 ## [v5.0.0] - 2026-10-16
 
@@ -1037,7 +1043,8 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v5.0.0...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v5.0.1...HEAD
+[v5.0.1]: https://github.com/danielplohmann/smda/compare/v5.0.0...v5.0.1
 [v5.0.0]: https://github.com/danielplohmann/smda/compare/v4.11.0...v5.0.0
 [v4.11.0]: https://github.com/danielplohmann/smda/compare/v4.10.0...v4.11.0
 [v4.10.0]: https://github.com/danielplohmann/smda/compare/v4.9.0...v4.10.0
