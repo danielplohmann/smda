@@ -7,6 +7,20 @@ live in [`.github/workflows/scripts/`](../.github/workflows/scripts/)
 [`perf_benchmark.yml`](../.github/workflows/perf_benchmark.yml) workflow. Use
 those for "is this PR slower?"; use this for "*where* is the time/memory going?".
 
+The timed gate only fails on a slowdown of 30% or more, because of runner noise. The
+instruction-count gate (`count_instructions.py`, the `Instruction Count Gate` job)
+runs each fixture under callgrind instead, where the count is deterministic, and
+fails at 2% growth. To compare two trees locally (Linux, needs valgrind):
+
+```bash
+python .github/workflows/scripts/count_instructions.py measure ../smda-base --output ic/base/results.json
+python .github/workflows/scripts/count_instructions.py measure . --output ic/pr/results.json
+python .github/workflows/scripts/count_instructions.py compare ic/pr/results.json ic/base/results.json
+```
+
+Callgrind sees the interpreter's C frames, not Python functions, so once a row
+moves, use `profile-cpu` below on both trees to find where.
+
 ## Install
 
 ```bash
