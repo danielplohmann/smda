@@ -3,7 +3,7 @@
 
 Wall time on a shared runner moves by tens of percent between identical runs, which is
 why the fixture gate cannot fail below 30%. The number of instructions executed does
-not depend on the runner: with hash randomization pinned and bytecode precompiled, the
+not depend on the runner: with hash randomization pinned and a warm-up pass run first, the
 same tree repeats to within a few parts per million, and the same code checked out at
 two different paths agrees to within half a percent. So it can flag a regression of a
 couple of percent that timing never would.
@@ -42,11 +42,16 @@ def read_total(callgrind_out):
     return int(match.group(1))
 
 
-def _callgrind(tree, out_file, python_args):
+def _run_env():
     env = dict(os.environ, PYTHONHASHSEED="0")
     # the tree's own profiling/_target.py puts its src/ first on sys.path, but an
     # inherited PYTHONPATH would still be searched ahead of the editable install
     env.pop("PYTHONPATH", None)
+    return env
+
+
+def _callgrind(tree, out_file, python_args):
+    env = _run_env()
     command = ["valgrind", "--tool=callgrind", f"--callgrind-out-file={out_file}", sys.executable, *python_args]
     result = subprocess.run(command, cwd=tree, env=env, capture_output=True, text=True, check=False)
     if result.returncode != 0:
@@ -60,12 +65,23 @@ def measure(tree, targets, out_dir, jobs):
     tree = os.path.abspath(tree)
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    # A fresh checkout has no bytecode cache, so the first run to import a module also
-    # compiles it, and with runs in parallel which one that is varies. Compiling up
-    # front keeps that cost out of every count.
-    subprocess.run(
-        [sys.executable, "-m", "compileall", "-q", "src", "profiling"], cwd=tree, check=True, capture_output=True
-    )
+    # The first process to import a module without a bytecode cache also compiles it.
+    # That covers the tree and any installed module no earlier run has imported, so
+    # whichever measured run got there first, on whichever side, paid for it. One
+    # unmeasured pass over every target leaves nothing to compile.
+    env = _run_env()
+    warmups = [
+        subprocess.Popen(
+            [sys.executable, "-m", "profiling.profile_smda", "run", "--target", target],
+            cwd=tree,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for target in targets
+    ]
+    for warmup in warmups:
+        warmup.wait()
 
     def run_one(target):
         out_file = os.path.join(out_dir, f"callgrind.{target}.out")
