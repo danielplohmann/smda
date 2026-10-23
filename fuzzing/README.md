@@ -84,3 +84,7 @@ selector bytes from the front of the input, and the profile prepends them.
 
 The corpus is cached per target in CI, so coverage accumulates across runs
 instead of restarting from the seeds every time.
+
+In CI each target runs one fuzzer process per runner core on a shared corpus
+directory (libFuzzer's `-jobs`/`-fork` cannot be used under atheris, for the
+same reason as `-merge`). Each worker's log is printed in its own group.
