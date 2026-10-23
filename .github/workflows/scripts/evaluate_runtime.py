@@ -41,6 +41,8 @@ RUNTIME_PATH = BASE_PATH / "runtime_measurements"
 CACHE_PATH = RUNTIME_PATH / "cache"
 
 SCHEMA_VERSION = 4
+# samples listed on their own in the report, by base time
+HEAVIEST_FILES = 10
 
 
 def compute_file_hash(filepath):
@@ -485,6 +487,30 @@ def build_paired(base_agg, pr_agg):
     }
 
 
+def heaviest_files(paired, base_agg, count=HEAVIEST_FILES):
+    """The `count` files that take longest on the base side, with their paired change.
+
+    The headline statistic is a median over every file, and most samples finish in a
+    fraction of a second, so a change whose cost grows with input size moves it very
+    little even when it doubles the time of the largest samples. Those samples are
+    listed on their own so such a change is visible. Informational, not gated.
+    """
+    rows = [
+        {
+            "file": filename,
+            "base_time": base_time,
+            "pr_time": pr_time,
+            "speedup": speedup,
+            "function_count": base_agg[filename]["function_count"],
+        }
+        for filename, base_time, pr_time, speedup in zip(
+            paired["timed_files"], paired["base_times"], paired["pr_times"], paired["speedups"], strict=True
+        )
+    ]
+    rows.sort(key=lambda row: row["base_time"], reverse=True)
+    return rows[:count]
+
+
 def build_pairwise_matrix(base_caches, pr_caches):
     """Compare every PR run against every base run for reviewer-visible context.
 
@@ -838,6 +864,26 @@ def generate_markdown_report(model, output_path):
         "is reported as inconclusive. Correctness and determinism are not timing-based and are "
         "unaffected either way.",
         "",
+    ]
+
+    heaviest = perf.get("heaviest_files", [])
+    if heaviest:
+        heavy_median = statistics.median(row["speedup"] for row in heaviest)
+        lines += [
+            f"**Heaviest {len(heaviest)} samples by base time** (median paired speedup {heavy_median:+.2f}%; "
+            "a change whose cost grows with input size shows here first):",
+            "",
+            "| File | Functions | Base (s) | PR (s) | Speedup |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {row['file']} | {row['function_count']} | {row['base_time']:.3f} | {row['pr_time']:.3f} | "
+            f"{row['speedup']:+.2f}% |"
+            for row in heaviest
+        ]
+        lines.append("")
+
+    lines += [
         "#### Determinism (self-check across repeated runs)",
         "| Side | Runs | Files | Deterministic | Median timing CV |",
         "| --- | --- | --- | --- | --- |",
@@ -1107,6 +1153,7 @@ def evaluate(runtime_path):
             "pr_summary": side_summary(pr_agg),
             "paired": paired_stats,
             "pairwise_runs": build_pairwise_matrix(base_caches, pr_caches),
+            "heaviest_files": heaviest_files(paired, base_agg),
             "degenerate_files": paired["degenerate"],
             "block_drift": paired["block_drift"],
         },
