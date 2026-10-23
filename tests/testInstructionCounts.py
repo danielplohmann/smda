@@ -50,7 +50,7 @@ class ReadTotalTest(unittest.TestCase):
 
 class CompareTest(unittest.TestCase):
     def _compare(self, base, pr):
-        return count_instructions.compare(base, pr, threshold_warn=0.005, threshold_fail=0.02)
+        return count_instructions.compare(base, pr, threshold_warn=0.01, threshold_fail=0.02)
 
     def test_identical_results_pass(self):
         base = _result(1000, asprox=10_000, komplex=20_000)
@@ -64,9 +64,9 @@ class CompareTest(unittest.TestCase):
         self.assertIn("| asprox | 10,000 | 10,300 | +3.00% | FAIL |", markdown)
 
     def test_growth_between_thresholds_warns(self):
-        markdown, failed = self._compare(_result(1000, asprox=10_000), _result(1000, asprox=10_100))
+        markdown, failed = self._compare(_result(1000, asprox=10_000), _result(1000, asprox=10_150))
         self.assertFalse(failed)
-        self.assertIn("| asprox | 10,000 | 10,100 | +1.00% | warn |", markdown)
+        self.assertIn("| asprox | 10,000 | 10,150 | +1.50% | warn |", markdown)
 
     def test_improvement_passes(self):
         _, failed = self._compare(_result(1000, asprox=10_000), _result(1000, asprox=5_000))
@@ -89,7 +89,7 @@ class CompareTest(unittest.TestCase):
     def test_small_growth_on_every_fixture_fails_the_total(self):
         base = _result(1000, a=10_000, b=10_000)
         pr = _result(1000, a=10_150, b=10_150)
-        markdown, _ = count_instructions.compare(base, pr, threshold_warn=0.005, threshold_fail=0.01)
+        markdown, _ = count_instructions.compare(base, pr, threshold_warn=0.0, threshold_fail=0.01)
         self.assertIn("| TOTAL | 20,000 | 20,300 | +1.50% | FAIL |", markdown)
 
 

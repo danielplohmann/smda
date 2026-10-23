@@ -2,9 +2,11 @@
 """Instruction-count benchmark for SMDA, measured under callgrind.
 
 Wall time on a shared runner moves by tens of percent between identical runs, which is
-why the fixture gate cannot fail below 30%. The number of instructions executed is
-deterministic to a few parts per million once hash randomization is pinned, so it can
-flag a regression of a percent or two that timing never would.
+why the fixture gate cannot fail below 30%. The number of instructions executed does
+not depend on the runner: with hash randomization pinned and bytecode precompiled, the
+same tree repeats to within a few parts per million, and the same code checked out at
+two different paths agrees to within half a percent. So it can flag a regression of a
+couple of percent that timing never would.
 
 ``measure`` runs each fixture once under ``valgrind --tool=callgrind`` from a given source
 tree, plus one import-only run of the same tree, and writes the totals as JSON. The
@@ -58,6 +60,12 @@ def measure(tree, targets, out_dir, jobs):
     tree = os.path.abspath(tree)
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
+    # A fresh checkout has no bytecode cache, so the first run to import a module also
+    # compiles it, and with runs in parallel which one that is varies. Compiling up
+    # front keeps that cost out of every count.
+    subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", "src", "profiling"], cwd=tree, check=True, capture_output=True
+    )
 
     def run_one(target):
         out_file = os.path.join(out_dir, f"callgrind.{target}.out")
@@ -143,7 +151,7 @@ def main():
     p_compare = sub.add_parser("compare", help="compare a PR result against a base result")
     p_compare.add_argument("pr_results")
     p_compare.add_argument("base_results")
-    p_compare.add_argument("--threshold-warn", type=float, default=0.005, help="growth that warns (0.005 = 0.5%%)")
+    p_compare.add_argument("--threshold-warn", type=float, default=0.01, help="growth that warns (0.01 = 1%%)")
     p_compare.add_argument("--threshold-fail", type=float, default=0.02, help="growth that fails (0.02 = 2%%)")
 
     args = parser.parse_args()
