@@ -30,6 +30,7 @@ from smda.arm.definitions import (
     split_mnemonic,
     t32_call_target,
 )
+from smda.common.SmdaInstruction import SmdaInstruction
 from smda.common.SmdaReport import SmdaReport
 from smda.Disassembler import Disassembler
 from smda.SmdaConfig import SmdaConfig
@@ -742,6 +743,10 @@ class ArmEscaperTest(unittest.TestCase):
         for mnemonic, expected in cases.items():
             with self.subTest(mnemonic=mnemonic):
                 self.assertEqual(ArmInstructionEscaper.escapeMnemonic(mnemonic), expected)
+        neon_q = SmdaInstruction([0, "000d02f2", "vadd.f32", "q0, q1, q2"])
+        vfp_s = SmdaInstruction([0, "000a30ee", "vadd.f32", "s0, s0, s0"])
+        self.assertEqual(neon_q.getMnemonicGroup(ArmInstructionEscaper), "V")
+        self.assertEqual(vfp_s.getMnemonicGroup(ArmInstructionEscaper), "F")
 
     def test_operand_escaping(self):
         cases = [

@@ -5,6 +5,7 @@ from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper
+from smda.arm.ArmInstructionEscaper import ArmInstructionEscaper
 from smda.arm.definitions import IT_MNEMONICS
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper
 
@@ -224,7 +225,7 @@ class SmdaInstruction:
 
     def getMnemonicGroup(self, escaper):
         if escaper:
-            if escaper is AArch64InstructionEscaper:
+            if escaper in (AArch64InstructionEscaper, ArmInstructionEscaper):
                 return escaper.escapeMnemonicForInstruction(self)
             return escaper.escapeMnemonic(self.mnemonic)
         return self.bytes
