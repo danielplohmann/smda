@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import smda.common.instruction_set_probe as probe
+from smda.common import instruction_set_probe as probe
 from smda.common.instruction_set_probe import (
     MIN_RETURN_SITES,
     NEIGHBOURHOOD_BYTES,
@@ -229,7 +229,7 @@ class UnsupportedBufferReportTestSuite(unittest.TestCase):
 
         self.assertEqual(report.status, "error")
         self.assertEqual(len(list(report.getFunctions())), 0)
-        self.assertIn("ppc", report.message)
+        self.assertIn("ppc", report.message or "")
 
     def test_an_explicitly_named_architecture_still_wins(self):
         """A caller that hands foreign bytes to a named backend on purpose - the buffer fuzz

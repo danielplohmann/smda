@@ -75,7 +75,7 @@ class RecognizedFormatWithoutAnArchitectureTest(unittest.TestCase):
     def testTheMessageNamesTheInstructionSetAsWhatIsMissing(self):
         report = Disassembler(SmdaConfig()).disassembleUnmappedBuffer(_elf_with_machine(EM_AVR))
         self.assertEqual(report.status, "error")
-        self.assertIn("names an instruction set SMDA has no backend for", report.message)
+        self.assertIn("names an instruction set SMDA has no backend for", report.message or "")
 
 
 class UnrecognizedInputReportTest(unittest.TestCase):
@@ -85,7 +85,7 @@ class UnrecognizedInputReportTest(unittest.TestCase):
         self.assertEqual(loader.getData(), loader.getRawData())
         report = Disassembler(SmdaConfig()).disassembleFile(str(path))
         self.assertEqual(report.status, "error")
-        self.assertIn("has to be passed to disassembleBuffer() with its base address", report.message)
+        self.assertIn("has to be passed to disassembleBuffer() with its base address", report.message or "")
 
 
 if __name__ == "__main__":
