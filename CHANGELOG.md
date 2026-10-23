@@ -79,6 +79,11 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(arm)** Pass the instruction's operands when escaping ARM mnemonic groups through `SmdaInstruction.getMnemonicGroup()`.
+  `getMnemonicGroup()` only dispatched to `escapeMnemonicForInstruction()` for `AArch64InstructionEscaper` and fell back to
+  `escapeMnemonic(self.mnemonic)` without operands for `ArmInstructionEscaper`, so 128-bit NEON vector instructions with
+  float type suffixes (`vadd.f32 q0, q1, q2`) were classified as `"F"` instead of `"V"`. *Reproduced in
+  `tests/testArmDisassembler.py`.* No cost: function and block recovery and `pic_hash`/`opc_hash` are unchanged.
 
 ### Security
 
