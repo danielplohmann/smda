@@ -86,6 +86,20 @@ class CompareTest(unittest.TestCase):
         self.assertIn("| aarch64_static | - | 50,000 | n/a | only on one side |", markdown)
         self.assertIn("| TOTAL | 10,000 | 10,000 | +0.00% | ok |", markdown)
 
+    def test_growth_below_the_absolute_floor_does_not_count(self):
+        # pe_export in CI: identical code, +1.5M instructions from allocator state
+        base = _result(1000, pe_export=45_619_183, asprox=2_355_805_669)
+        pr = _result(1000, pe_export=47_159_148, asprox=2_355_805_669)
+        markdown, failed = count_instructions.compare(base, pr, 0.01, 0.02, min_absolute=5_000_000)
+        self.assertFalse(failed)
+        self.assertIn("| pe_export | 45,619,183 | 47,159,148 | +3.38% | ok |", markdown)
+
+    def test_growth_above_the_absolute_floor_still_fails(self):
+        base = _result(1000, asprox=2_355_805_669)
+        pr = _result(1000, asprox=2_450_000_000)
+        _, failed = count_instructions.compare(base, pr, 0.01, 0.02, min_absolute=5_000_000)
+        self.assertTrue(failed)
+
     def test_small_growth_on_every_fixture_fails_the_total(self):
         base = _result(1000, a=10_000, b=10_000)
         pr = _result(1000, a=10_150, b=10_150)

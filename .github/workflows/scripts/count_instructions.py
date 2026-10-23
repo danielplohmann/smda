@@ -5,8 +5,9 @@ Wall time on a shared runner moves by tens of percent between identical runs, wh
 why the fixture gate cannot fail below 30%. The number of instructions executed does
 not depend on the runner: with hash randomization pinned and a warm-up pass run first, the
 same tree repeats to within a few parts per million, and the same code checked out at
-two different paths agrees to within half a percent. So it can flag a regression of a
-couple of percent that timing never would.
+two different paths agrees to within about a million instructions, a fraction of a
+percent on every fixture but the smallest. So it can flag a regression of a couple of
+percent that timing never would.
 
 ``measure`` runs each fixture once under ``valgrind --tool=callgrind`` from a given source
 tree, plus one import-only run of the same tree, and writes the totals as JSON. The
@@ -26,7 +27,18 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-DEFAULT_TARGETS = ["asprox", "cutwail", "bashlite", "blockblast", "komplex", "njrat", "pe_export", "aarch64_static"]
+DEFAULT_TARGETS = [
+    "asprox",
+    "cutwail",
+    "bashlite",
+    "blockblast",
+    "komplex",
+    "njrat",
+    "pe_export",
+    "aarch64_static",
+    "arm_mixed",
+    "arm_thumb",
+]
 IMPORT_ROW = "(import)"
 TOTAL_ROW = "TOTAL"
 
@@ -109,8 +121,14 @@ def measure(tree, targets, out_dir, jobs):
     return {"python": sys.version.split()[0], "import": baseline, "fixtures": fixtures}
 
 
-def compare(base, pr, threshold_warn, threshold_fail):
-    """Return (markdown, failed) for a base and a PR result."""
+def compare(base, pr, threshold_warn, threshold_fail, min_absolute=0):
+    """Return (markdown, failed) for a base and a PR result.
+
+    A row other than TOTAL also has to grow by `min_absolute` instructions before its
+    percentage counts: allocator state differs slightly between two checkouts, which
+    moves every run by around a million instructions, and on the smallest fixture
+    that alone is a few percent.
+    """
     rows = [(IMPORT_ROW, base["import"], pr["import"])]
     base_sum = pr_sum = 0
     for target in sorted(set(base["fixtures"]) | set(pr["fixtures"])):
@@ -138,10 +156,11 @@ def compare(base, pr, threshold_warn, threshold_fail):
             lines.append(f"| {target} | {_fmt(b)} | {_fmt(p)} | n/a | only on one side |")
             continue
         change = (p - b) / b if b else 0.0
-        if change > threshold_fail:
+        significant = target == TOTAL_ROW or p - b > min_absolute
+        if significant and change > threshold_fail:
             status = "FAIL"
             failed = True
-        elif change > threshold_warn:
+        elif significant and change > threshold_warn:
             status = "warn"
         else:
             status = "ok"
@@ -169,6 +188,12 @@ def main():
     p_compare.add_argument("base_results")
     p_compare.add_argument("--threshold-warn", type=float, default=0.01, help="growth that warns (0.01 = 1%%)")
     p_compare.add_argument("--threshold-fail", type=float, default=0.02, help="growth that fails (0.02 = 2%%)")
+    p_compare.add_argument(
+        "--min-absolute",
+        type=int,
+        default=5_000_000,
+        help="instructions a row other than TOTAL must also grow by before its percentage counts",
+    )
 
     args = parser.parse_args()
 
@@ -184,7 +209,7 @@ def main():
         pr = json.load(f)
     with open(args.base_results) as f:
         base = json.load(f)
-    markdown, failed = compare(base, pr, args.threshold_warn, args.threshold_fail)
+    markdown, failed = compare(base, pr, args.threshold_warn, args.threshold_fail, args.min_absolute)
     print(markdown)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
