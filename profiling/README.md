@@ -46,6 +46,15 @@ python -m profiling.profile_smda run  --target asprox
 Outputs land in `profiling/output/` (git-ignored): `*.cpu.prof`, `*.mem.bin`,
 `*.mem.html`, `*.cpu.svg`.
 
+### Base vs PR
+
+`python -m profiling.diff_profiles base.cpu.prof pr.cpu.prof` compares two `cpu`
+profiles of the same target function by function: the largest own-time changes
+and the largest call-count changes. Call counts are exact for a given input, so a
+changed count is a real change in the work done; own-time changes carry timing
+noise. The `profile` label on a pull request runs this against the base branch and
+puts the tables in the run summary and the PR comment.
+
 ### Viewing results
 
 | Output | View with |
