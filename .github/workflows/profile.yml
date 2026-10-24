@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Fixture name (asprox, cutwail, bashlite, blockblast, komplex, njrat, pe_export) or a path"
+        description: "Fixture name (asprox, cutwail, bashlite, blockblast, komplex, njrat, pe_export, aarch64_static, arm_mixed, arm_thumb) or a path"
         type: string
         default: "asprox"
       profiler:

@@ -7,6 +7,20 @@ live in [`.github/workflows/scripts/`](../.github/workflows/scripts/)
 [`perf_benchmark.yml`](../.github/workflows/perf_benchmark.yml) workflow. Use
 those for "is this PR slower?"; use this for "*where* is the time/memory going?".
 
+The timed gate only fails on a slowdown of 30% or more, because of runner noise. The
+instruction-count gate (`count_instructions.py`, the `Instruction Count Gate` job)
+runs each fixture under callgrind instead, where the count is deterministic, and
+fails at 2% growth (a single fixture must also grow by 5M instructions). To compare two trees locally (Linux, needs valgrind):
+
+```bash
+python .github/workflows/scripts/count_instructions.py measure ../smda-base --output ic/base/results.json
+python .github/workflows/scripts/count_instructions.py measure . --output ic/pr/results.json
+python .github/workflows/scripts/count_instructions.py compare ic/pr/results.json ic/base/results.json
+```
+
+Callgrind sees the interpreter's C frames, not Python functions, so once a row
+moves, use `profile-cpu` below on both trees to find where.
+
 ## Install
 
 ```bash
@@ -22,7 +36,8 @@ Every profiler wraps the **same** unit of work — one disassembly of one target
 so results are comparable. A target is either:
 
 - a **fixture name**: `asprox`, `cutwail`, `bashlite`, `blockblast`, `komplex`,
-  `njrat`, `pe_export` (the same XOR-encrypted fixtures the benchmark gate uses), or
+  `njrat`, `pe_export`, `aarch64_static`, `arm_mixed`, `arm_thumb` (the same
+  XOR-encrypted fixtures the benchmark gate uses), or
 - a **path** to any binary on disk.
 
 > Fixtures are XOR-decrypted into an in-memory buffer and handed to the analyzer.
