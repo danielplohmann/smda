@@ -239,3 +239,132 @@ jobs:
         with:
           path: corpus
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+  # The Python-level fuzzers only notice a memory error in capstone when it happens to
+  # crash the process. This job rebuilds capstone with AddressSanitizer and libFuzzer
+  # edge counters and runs the targets that feed it machine code, so an out-of-bounds
+  # read in a decoder is reported where it happens and the fuzzer is also guided by
+  # coverage inside capstone. lief is left uninstrumented: building it from source
+  # takes longer than the fuzzing itself.
+  fuzz_sanitized:
+    name: Fuzz with ASan capstone (${{ matrix.target }})
+    needs: changes
+    if: needs.changes.outputs.any == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fuzz_buffer
+            seed_profile: buffer
+            max_len: 65536
+          - target: fuzz_disassembler
+            seed_profile: binary
+            max_len: 65536
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install SMDA and atheris
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install "atheris==${ATHERIS_VERSION}"
+
+      - name: Restore accumulated corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Add the corpus floor and seeds
+        env:
+          TARGET: ${{ matrix.target }}
+          SEED_PROFILE: ${{ matrix.seed_profile }}
+        run: |
+          # these targets run about two inputs a second, and libFuzzer replays the whole
+          # corpus before it mutates anything: a full cache (up to 5000 files) would use
+          # the entire budget on replay, so only its smallest 400 files are kept here
+          python fuzzing/prune_corpus.py corpus --max-files 400
+          python fuzzing/restore_corpus.py "${TARGET#fuzz_}" corpus
+          python fuzzing/generate_seeds.py corpus --profile "$SEED_PROFILE"
+
+      - name: Rebuild capstone with AddressSanitizer
+        # Same version pip resolved for SMDA. The library is compiled with ASan but
+        # not linked against its runtime: the runtime comes from atheris'
+        # asan_with_fuzzer.so via LD_PRELOAD, together with libFuzzer. From here on,
+        # importing capstone without that preload fails, so this runs after the seeds.
+        run: |
+          set -euo pipefail
+          # the distribution version: capstone.__version__ can lag behind it
+          version="$(python -c 'from importlib.metadata import version; print(version("capstone"))')"
+          CC=clang CXX=clang++ \
+          CFLAGS="-fsanitize=address,fuzzer-no-link -fno-omit-frame-pointer -g -O1" \
+            python -m pip install --force-reinstall --no-deps --no-cache-dir --no-binary capstone "capstone==${version}"
+          # found without importing capstone: the instrumented library only loads with
+          # the sanitizer runtime preloaded
+          library="$(python -c 'import glob, importlib.util, os; print(glob.glob(os.path.join(os.path.dirname(importlib.util.find_spec("capstone").origin), "lib", "libcapstone.so*"))[0])')"
+          # an uninstrumented build would fuzz exactly as the main job does while
+          # looking like it checks memory safety
+          nm -D "$library" | grep -q " U __asan_report_load" || { echo "capstone is not ASan-instrumented" >&2; exit 1; }
+          echo "capstone ${version} instrumented: ${library}"
+
+      - name: Determine fuzzing duration
+        id: duration
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_SECONDS: ${{ inputs.max_total_time }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [[ ! "$REQUESTED_SECONDS" =~ ^[0-9]{1,4}$ ]] || [ "$REQUESTED_SECONDS" -lt 10 ]; then
+              echo "max_total_time must be an integer between 10 and 9999" >&2
+              exit 1
+            fi
+            seconds="$REQUESTED_SECONDS"
+          else
+            # includes the corpus replay, which takes several minutes
+            seconds=1500
+          fi
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+
+      - name: Run fuzz target
+        env:
+          MAX_TOTAL_TIME: ${{ steps.duration.outputs.seconds }}
+          MAX_LEN: ${{ matrix.max_len }}
+          TARGET: ${{ matrix.target }}
+          # Python itself leaks by design at exit, and the interpreter's allocator is
+          # not instrumented; only capstone's memory errors are the point here
+          ASAN_OPTIONS: detect_leaks=0:allocator_may_return_null=1
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          LD_PRELOAD="$(python -c 'import atheris; print(atheris.path())')/asan_with_fuzzer.so" \
+          python "fuzzing/${TARGET}.py" corpus \
+            -dict=fuzzing/smda.dict \
+            -max_total_time="${MAX_TOTAL_TIME}" \
+            -max_len="${MAX_LEN}" \
+            -timeout=60 \
+            -rss_limit_mb=4096 \
+            -malloc_limit_mb=2048 \
+            -artifact_prefix=artifacts/ \
+            -print_final_stats=1
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-sanitized-artifacts-${{ matrix.target }}
+          path: artifacts/
+          if-no-files-found: ignore
