@@ -342,7 +342,11 @@ class DelphiPythiaProvider(AbstractLabelProvider):
             function_offset += self._ptr_size
 
     def _extract_method_table_symbols(
-        self, class_info: DelphiClassInfo, function_offsets: set, name_mapping: Dict[int, str], seen_tables: Optional[set] = None
+        self,
+        class_info: DelphiClassInfo,
+        function_offsets: set,
+        name_mapping: Dict[int, str],
+        seen_tables: Optional[set] = None,
     ) -> None:
         """Parse the classic Delphi method table and recover symbol names."""
         if not class_info.method_table_addr:
@@ -359,16 +363,10 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         for _ in range(entry_count):
             entry_size = self._read_word(entry_offset)
             minimum_entry_size = 2 + self._ptr_size + 1
-            if (
-                entry_size is None
-                or entry_size < minimum_entry_size
-                or entry_offset + entry_size > len(self._binary)
-            ):
+            if entry_size is None or entry_size < minimum_entry_size or entry_offset + entry_size > len(self._binary):
                 break
             method_addr = self._read_ptr(entry_offset + 2, self._ptr_size)
-            method_name = self._read_pascal_string(
-                entry_offset + 2 + self._ptr_size, entry_offset + entry_size
-            )
+            method_name = self._read_pascal_string(entry_offset + 2 + self._ptr_size, entry_offset + entry_size)
             if method_addr and self._binary_info.isInCodeAreas(method_addr):
                 function_offsets.add(method_addr)
                 if method_name:

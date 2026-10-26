@@ -272,9 +272,10 @@ def test_pythia_parses_shared_method_table_once():
         DelphiClassInfo(method_table_addr=base + table),
         DelphiClassInfo(method_table_addr=base + table),
     ]
-    with patch.object(provider, "_scan_code_range", return_value=classes), patch.object(
-        provider, "_read_word", wraps=provider._read_word
-    ) as read_word:
+    with (
+        patch.object(provider, "_scan_code_range", return_value=classes),
+        patch.object(provider, "_read_word", wraps=provider._read_word) as read_word,
+    ):
         provider._parse_delphi_objects()
     assert read_word.call_count == 2
     assert provider.getFunctionSymbols() == {target: "Run"}
@@ -325,9 +326,7 @@ def test_pythia_method_name_cannot_read_past_entry():
     provider._bitness = 32
     offsets = set()
     names = {}
-    provider._extract_method_table_symbols(
-        DelphiClassInfo(method_table_addr=info.base_addr + table), offsets, names
-    )
+    provider._extract_method_table_symbols(DelphiClassInfo(method_table_addr=info.base_addr + table), offsets, names)
     assert offsets == {target}
     assert names == {}
 
@@ -353,9 +352,7 @@ def test_pythia_bounds_interface_method_walk():
     provider._binary = bytes(data)
     offsets = set()
     with patch.object(provider, "_read_ptr", wraps=provider._read_ptr) as read_ptr:
-        provider._extract_interface_methods(
-            DelphiClassInfo(interface_table_addr=base + table), offsets
-        )
+        provider._extract_interface_methods(DelphiClassInfo(interface_table_addr=base + table), offsets)
     assert offsets == {target}
     assert read_ptr.call_count == MAX_INTERFACE_METHOD_SCAN + 1
 

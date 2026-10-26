@@ -74,8 +74,7 @@ def provider_profile(path, provider_type):
                 "seconds": entry.totaltime,
             }
             for entry in profiler.getstats()
-            if isinstance(entry.code, types.CodeType)
-            and "Delphi" in entry.code.co_filename
+            if isinstance(entry.code, types.CodeType) and "Delphi" in entry.code.co_filename
         ),
         key=lambda entry: entry["seconds"],
         reverse=True,
@@ -153,7 +152,11 @@ def ghidra_result(path, install, disabled_analyzers=()):
                         if not edge.getFlowType().isCall()
                     ]
                     blocks.append(
-                        [int(block.getFirstStartAddress().getOffset()), int(block.getMaxAddress().getOffset()) + 1, edges]
+                        [
+                            int(block.getFirstStartAddress().getOffset()),
+                            int(block.getMaxAddress().getOffset()) + 1,
+                            edges,
+                        ]
                     )
                 functions[int(function.getEntryPoint().getOffset())] = {
                     "name": str(function.getName(True)),
