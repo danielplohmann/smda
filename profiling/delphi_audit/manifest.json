@@ -1,0 +1,81 @@
+{
+  "smda_baseline": "04652e6",
+  "delphiresym_commit": "22ad5f7cbe2b5f07487df96a9dfec1566e9a96b5",
+  "ghidra_release": "12.2",
+  "ghidra_sha256": "2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67",
+  "binaries": [
+    {
+      "name": "HeidiSQL_12.10_32_Portable.exe",
+      "sha256": "cb1c66ff68230f08e07bb8018d1c8c91cc8b389d1aee8ed6ba2441caf4d51a56",
+      "size": 18209768,
+      "source_url": "https://www.heidisql.com/downloads/releases/HeidiSQL_12.10_32_Portable.zip",
+      "compiler": "modern Delphi; exact build compiler not independently established",
+      "archive_member": "heidisql.exe",
+      "source_sha256": "670558b198f6f89c1fffa31b00c21de34e0c9bd2c0b1b4b9909a708509744ca6"
+    },
+    {
+      "name": "HeidiSQL_12.10_64_Portable.exe",
+      "sha256": "c17982e753d24fb9f90212e2d11e01e08cca0641372e146b1e32d087fb9a9659",
+      "size": 25056744,
+      "source_url": "https://www.heidisql.com/downloads/releases/HeidiSQL_12.10_64_Portable.zip",
+      "compiler": "modern Delphi; exact build compiler not independently established",
+      "archive_member": "heidisql.exe",
+      "source_sha256": "a7b0e40acc85900ff5ca63769e702acaa06e81ae658b7958e1bc794ae635fd7a"
+    },
+    {
+      "name": "UPSPowerMTR_V2.03_C.exe",
+      "sha256": "738c6a3b0b70e7de8494cf28a78254e0dfe4d644901a1c55cfcb8b1868af058e",
+      "size": 2948608,
+      "source_url": "https://github.com/user-attachments/files/24620994/UPSPowerMTR_V2.03_C.zip",
+      "archive_member": "UPSPowerMTR_V2.03_C.exe",
+      "compiler": "Delphi 7, identified by upstream maintainer in issue #5",
+      "source_sha256": "a4b4c43a011b94a6f570f5e95f033ee90e45964e53f7999b9edbdf0bff94c92d"
+    },
+    {
+      "name": "innosetup-5.6.1.exe",
+      "sha256": "96fd6a5eaab473c61a19affff89618764b940ee3f15837c2944a5595aed5fde6",
+      "size": 1963136,
+      "source_url": "https://files.jrsoftware.org/is/5/innosetup-5.6.1.exe",
+      "compiler": "Delphi 2009 Update 3 (Unicode builds), per tagged upstream README",
+      "compiler_evidence": "https://github.com/jrsoftware/issrc/blob/is-5_6_1/README.md",
+      "source_sha256": "96fd6a5eaab473c61a19affff89618764b940ee3f15837c2944a5595aed5fde6"
+    },
+    {
+      "name": "innosetup-6.2.2.exe",
+      "sha256": "8117d10d00a2ad33a1390978ea3872861c330e087914410a6377b22c4c5b8563",
+      "size": 4722512,
+      "source_url": "https://github.com/jrsoftware/issrc/releases/download/is-6_2_2/innosetup-6.2.2.exe",
+      "compiler": "Delphi 10.3.3 Rio, per tagged upstream README",
+      "compiler_evidence": "https://github.com/jrsoftware/issrc/blob/is-6_2_2/README.md",
+      "source_sha256": "8117d10d00a2ad33a1390978ea3872861c330e087914410a6377b22c4c5b8563"
+    },
+    {
+      "name": "innosetup-7.1.0-x64.exe",
+      "sha256": "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f",
+      "size": 14304168,
+      "source_url": "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe",
+      "compiler": "Delphi 12.3 Athens with May Patch, per tagged upstream README",
+      "compiler_evidence": "https://github.com/jrsoftware/issrc/blob/is-7_1_0/README.md",
+      "source_sha256": "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f"
+    },
+    {
+      "name": "innosetup-7.1.0-x86.exe",
+      "sha256": "f9671174e0d15ba9b4f6b56564c6aed32ea8db9c3cb9bf6f2af0850fe7894f60",
+      "size": 13119232,
+      "source_url": "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x86.exe",
+      "compiler": "Delphi 12.3 Athens with May Patch, per tagged upstream README",
+      "compiler_evidence": "https://github.com/jrsoftware/issrc/blob/is-7_1_0/README.md",
+      "source_sha256": "f9671174e0d15ba9b4f6b56564c6aed32ea8db9c3cb9bf6f2af0850fe7894f60"
+    }
+  ],
+  "private_binaries": [
+    {
+      "name": "1d4e54529feef53850f97f39029a906d53f3d4b2aea8373e27c413324a55681c.exe",
+      "sha256": "1d4e54529feef53850f97f39029a906d53f3d4b2aea8373e27c413324a55681c",
+      "source": "user upload, not publicly redistributed",
+      "archive_sha256": "68882c848f75ac8e81fb0c4d0a7cdcec28f8aad22e37842db8373f987910b2af",
+      "size": 3447808,
+      "compiler": "modern 32-bit Delphi; exact compiler version unconfirmed"
+    }
+  ]
+}

@@ -545,6 +545,13 @@ class X86Backend(ArchBackend):
                     state.addBlockToQueue(jump_destination)
             state.addCodeRef(i_address, jump_destination, by_jump=True)
         else:
+            continuation = self._resolveDelphiFinallyContinuation(d, i, state) if i_op_str == "eax" else None
+            if continuation is not None:
+                state.addBlockToQueue(continuation)
+                state.addCodeRef(i_address, continuation, by_jump=True)
+                state.setNextInstructionReachable(False)
+                state.setBlockEndingInstruction(True)
+                return
             self._collectMemRegSlot(state, i_address, i_op_str)
             jumptable_targets = d.jumptable_analyzer.getJumpTargets(i, state)
             for target in jumptable_targets:
@@ -553,6 +560,43 @@ class X86Backend(ArchBackend):
                     state.addCodeRef(i_address, target, by_jump=True)
         state.setNextInstructionReachable(False)
         state.setBlockEndingInstruction(True)
+
+    @staticmethod
+    def _resolveDelphiFinallyContinuation(d, instruction, state):
+        """Recover the saved continuation past a Delphi HandleFinally thunk."""
+        address, size, _, operand = instruction
+        if (
+            operand != "eax"
+            or d.disassembly.binary_info.bitness != 32
+            or not getattr(d.fc_manager, "_delphi_detected", False)
+        ):
+            return None
+        block = state.current_block
+        if not block or block[-1][2:4] != ("pop", "eax") or block[-1][0] + block[-1][1] != address:
+            return None
+        handler = d.disassembly.getBytes(address + size, 7)
+        if not handler or len(handler) != 7 or handler[0] != 0xE9 or handler[5] != 0xEB:
+            return None
+        handler_target = (address + size + 5 + int.from_bytes(handler[1:5], "little", signed=True)) & 0xFFFFFFFF
+        if not d.disassembly.binary_info.isInCodeAreas(handler_target):
+            return None
+        continuation = address + size + 7
+        displacement = handler[6] - 256 if handler[6] >= 128 else handler[6]
+        cleanup = continuation + displacement
+        for index in range(len(block) - 2, -1, -1):
+            previous = block[index]
+            if previous[0] >= cleanup:
+                if previous[2] in ("push", "pop", "enter", "leave") or "esp" in previous[3]:
+                    return None
+                continue
+            if previous[0] + previous[1] != cleanup:
+                return None
+            if previous[2] != "push" or previous[1] != 5 or previous[3] != hex(continuation):
+                return None
+            if d.disassembly.binary_info.isInCodeAreas(continuation):
+                return continuation
+            return None
+        return None
 
     @staticmethod
     def _handleApiJumpTarget(d, state, instruction_addr, import_slot, dereferenced):

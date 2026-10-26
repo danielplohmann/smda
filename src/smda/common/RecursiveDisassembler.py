@@ -76,11 +76,11 @@ class RecursiveDisassembler:
         self._registerLabelProvider(DelphiKbSymbolProvider(self.config))
         self._registerLabelProvider(DelphiReSymProvider(self.config))
         self._registerLabelProvider(DelphiPythiaProvider(self.config))
+        self._registerLabelProvider(PdbSymbolProvider(self.config))
         # Generic binary format providers (fallback)
         self._registerLabelProvider(ElfSymbolProvider(self.config))
         self._registerLabelProvider(PeSymbolProvider(self.config))
         self._registerLabelProvider(MachoSymbolProvider(self.config))
-        self._registerLabelProvider(PdbSymbolProvider(self.config))
 
     def _registerLabelProvider(self, provider):
         self.label_providers.append(provider)
@@ -89,8 +89,10 @@ class RecursiveDisassembler:
         if provider.isSymbolProvider():
             self.symbol_providers.append(provider)
 
-    def _runLabelProviderUpdate(self, binary_info):
+    def _runLabelProviderUpdate(self, binary_info, pdb_only=False):
         for provider in self.label_providers:
+            if pdb_only and not isinstance(provider, PdbSymbolProvider):
+                continue
             try:
                 provider.update(binary_info)
             except Exception as exc:
@@ -103,7 +105,7 @@ class RecursiveDisassembler:
         # analysis would be wiped by this pass; re-apply it afterwards instead
         pdb_info = getattr(self, "_pdb_info", None)
         if pdb_info is not None:
-            self._runLabelProviderUpdate(pdb_info)
+            self._runLabelProviderUpdate(pdb_info, pdb_only=True)
         self.active_api_providers = [p for p in self.api_providers if p.is_active()]
         self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
@@ -114,7 +116,7 @@ class RecursiveDisassembler:
             pdb_info.file_path = pdb_path
             pdb_info.base_addr = binary_info.base_addr
             self._pdb_info = pdb_info
-            self._runLabelProviderUpdate(pdb_info)
+            self._runLabelProviderUpdate(pdb_info, pdb_only=True)
             self.active_api_providers = [p for p in self.api_providers if p.is_active()]
             self.active_symbol_providers = [p for p in self.symbol_providers if p.is_active()]
 
@@ -566,6 +568,11 @@ class RecursiveDisassembler:
         self.jumptable_analyzer = self.backend.createJumpTableAnalyzer(self)
 
         self.fc_manager = self.backend.createCandidateManager(self.config)
+        self.fc_manager.delphi_resolvers = {
+            type(provider): provider
+            for provider in self.symbol_providers
+            if isinstance(provider, (DelphiReSymProvider, DelphiPythiaProvider))
+        }
         if self.config.USE_SYMBOLS_AS_CANDIDATES:
             self.fc_manager.symbol_addresses = self.getSymbolCandidates()
         # once we are initialized, add OEP

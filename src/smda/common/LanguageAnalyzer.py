@@ -21,13 +21,15 @@ _BORLAND_LOCALES = b"borland\\locales"
 
 
 class LanguageAnalyzer:
-    def __init__(self, disassembly):
+    def __init__(self, disassembly, delphi_resolvers=None):
         self.disassembly = disassembly
+        delphi_resolvers = delphi_resolvers or {}
+        self._updated_resolvers = set(delphi_resolvers.values())
         self.go_resolver = GoSymbolProvider(None)
         self.rust_resolver = RustSymbolProvider(None)
         self.delphi_kb_resolver = DelphiKbSymbolProvider(None)
-        self.delphi_pythia_resolver = DelphiPythiaProvider(None)
-        self.delphi_resym_resolver = DelphiReSymProvider(None)
+        self.delphi_pythia_resolver = delphi_resolvers.get(DelphiPythiaProvider) or DelphiPythiaProvider(None)
+        self.delphi_resym_resolver = delphi_resolvers.get(DelphiReSymProvider) or DelphiReSymProvider(None)
         self.strings = None
         self._cpp_symbol_count = 0
         self._guess = None
@@ -161,6 +163,8 @@ class LanguageAnalyzer:
                 delphi_score = max(delphi_score, 0.9)
             elif delphi_objects:
                 delphi_score = max(delphi_score, 0.6)
+            if delphi_score < 0.6 and self.getDelphiReSymObjects():
+                delphi_score = 0.6
         return delphi_score
 
     def getGoScore(self):
@@ -257,8 +261,12 @@ class LanguageAnalyzer:
         return parsed_string
 
     def _safeResolverUpdate(self, resolver):
+        if resolver in self._updated_resolvers:
+            return
         try:
             resolver.update(self.disassembly.binary_info)
+            if isinstance(resolver, (DelphiReSymProvider, DelphiPythiaProvider)):
+                self._updated_resolvers.add(resolver)
         except Exception as exc:
             reraise_non_operational_exception(exc)
             LOGGER.error("Symbol resolver %s failed to update: %r", resolver.__class__.__name__, exc)

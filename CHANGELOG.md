@@ -79,10 +79,24 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(labels)** Repair Delphi class RTTI offsets, published/extended method-table traversal, record bounds,
+  Unicode names, executable-target validation and Pythia table bounds; preserve Delphi labels when
+  supplementing a PDB, and prefer explicit PDB names over generic PE entry-point labels. Cache shared
+  legacy tables, share provider results and use a dependency-free pointer-suffix scan. *Measured on the supplied
+  `1d4e5452…5681c` sample against `04652e6`:* 292 usable labels become 7,969; five-run median provider
+  time falls from 1.100s to 0.084s, with lower peak Python allocation. Real metadata excerpts and
+  malformed-input tests are bundled; the full binary is private. See `profiling/delphi_audit/`.
+- **(intel)** Recover normal-flow continuations from the validated 32-bit Delphi finally-dispatch idiom.
+  Constructor tails previously ended at `pop eax; jmp eax`; match the saved continuation and linked
+  handler thunk before following the missing edge. Real and generated regression fixtures are bundled.
 
 ### Security
 
 ### Compatibility
+- **(labels)** Delphi names gain correct unit/class qualification and validated signatures.
+- **(labels)** An explicit PDB symbol now takes precedence over PE's synthetic `original_entry_point` label
+  at the same address.
+- **(intel)** Delphi finally continuations extend owning function bodies and can change CFG fingerprints.
 
 ## [v5.0.1] - 2026-10-20
 
