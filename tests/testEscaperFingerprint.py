@@ -4,8 +4,8 @@ MCRIT (and anything else that persists escaped-operand signatures) consults
 SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY to decide whether stored hashes are
 stale. That marker did not move when 4.4.5 changed Intel escaping, so this
 test hashes a committed corpus of escaped representations. If the digest
-moves, bump ESCAPER_DOWNWARD_COMPATIBILITY to the current SmdaConfig.VERSION
-in the same change.
+moves, set ESCAPER_DOWNWARD_COMPATIBILITY to the release that will ship the
+change, the one after the current SmdaConfig.VERSION, in the same change.
 """
 
 import hashlib
@@ -90,12 +90,13 @@ class EscaperFingerprintTestSuite(unittest.TestCase):
         self.assertEqual(
             actual,
             ESCAPER_OUTPUT_FINGERPRINT,
-            "escaper output changed; bump SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY "
-            f"to the current package version and set ESCAPER_OUTPUT_FINGERPRINT to {actual}",
+            "escaper output changed; set SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY "
+            f"to the next release and ESCAPER_OUTPUT_FINGERPRINT to {actual}",
         )
 
     def test_arm_group_change_has_a_compatibility_marker(self):
-        self.assertGreaterEqual(tuple(map(int, SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY.split("."))), (5, 0, 1))
+        # 5.0.1 shipped the old NEON grouping; MCRIT selects stale reports with a strict `<`.
+        self.assertGreaterEqual(tuple(map(int, SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY.split("."))), (5, 0, 2))
 
     def test_the_4_4_5_intel_cases_in_the_corpus_escape_as_ptr_not_const(self):
         for operands in (

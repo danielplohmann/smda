@@ -81,13 +81,14 @@ past roughly six lines it belongs in the PR the entry links.
 ### Fixed
 - **(arm)** Pass operands through `SmdaInstruction.getMnemonicGroup()` for ARM.
   Float-suffixed NEON instructions using `q` registers now classify as vector (`V`); scalar VFP stays float (`F`).
-  This changes escaped-block signatures: `ESCAPER_DOWNWARD_COMPATIBILITY` is now `5.0.1`, and stored ARM
-  escaped-block signatures need recomputing, including reports already labelled `5.0.1`. Recovery and PIC/opcode hashes are unchanged.
-  Covered by `testArmDisassembler` and the fingerprint corpus's new ARM cases.
+  This changes ARM escaped-block signatures, so stored ones need recomputing; recovery and PIC/opcode hashes are
+  unchanged. Covered by `testArmDisassembler` and the fingerprint corpus's new ARM cases.
 
 ### Security
 
 ### Compatibility
+- **(arm)** `ESCAPER_DOWNWARD_COMPATIBILITY` moves from `4.4.5` to `5.0.2`, the release that ships the NEON
+  grouping change, so ARM reports from 5.0.1 and earlier compare as stale.
 
 ## [v5.0.1] - 2026-10-20
 
