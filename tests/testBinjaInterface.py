@@ -355,6 +355,30 @@ class BinjaInterfaceArmTest(unittest.TestCase):
         self.assertEqual(self.interface.getCodeOutRefs(0x10004), [(0x10004, 0x10006)])
         self.assertEqual(self.interface.getCodeInRefs(0x10004), [])
 
+    def test_a_function_rejected_only_by_a_rejected_rival_is_kept(self):
+        # A32 a and c each overlap T32 b, not each other; c outranks b, which outranks a
+        self.bv.functions = [
+            _FakeFunction(0x10000, "a", [_FakeBlock(0x10000, [4, 4], arch=A32)], arch=A32),
+            _FakeFunction(0x10004, "b", [_FakeBlock(0x10004, [2, 4, 2], arch=T32)], arch=T32),
+            _FakeFunction(0x10008, "c", [_FakeBlock(0x10008, [4, 4], arch=A32)], arch=A32),
+        ]
+        references = {0x10004: 1, 0x10008: 2}
+        self.bv.get_code_refs = lambda address: [SimpleNamespace(address=0)] * references.get(address, 0)
+        self.assertEqual(self.interface.getFunctions(), [0x10000, 0x10008])
+        self.assertEqual(self.interface.getFunctionSymbols(), {0x10000: "a", 0x10008: "c"})
+
+    def test_blocks_in_the_other_instruction_set_add_no_code_refs(self):
+        # thumb_helper's A32 PLT block at 0x10020 continues to 0x10030; a T32 function also starts there
+        self.bv.functions[2].basic_blocks[1] = _FakeBlock(0x10020, [4], successors=[0x10030], arch=A32)
+        self.bv.functions.append(
+            _FakeFunction(0x10020, "thumb_tail", [_FakeBlock(0x10020, [2, 2], arch=T32)], arch=T32)
+        )
+        self.bv.T32_LENGTHS = {**self.bv.T32_LENGTHS, 0x10020: 2, 0x10022: 2}
+        self.assertEqual(self.interface.getFunctions(), [0x10000, 0x10010, 0x10020])
+        self.assertEqual(self.interface.getBlocks(0x10020), [[0x10020, 0x10022]])
+        self.assertEqual(self.interface.getCodeOutRefs(0x10020), [(0x10020, 0x10022)])
+        self.assertEqual(self.interface.getCodeInRefs(0x10030), [])
+
     def test_blocks_in_the_other_instruction_set_are_left_out(self):
         self.assertEqual(self.interface.getBlocks(0x10010), [[0x10010, 0x10012]])
         self.assertEqual(self.interface.getInstructionBytes(0x10012), bytes.fromhex("7047"))

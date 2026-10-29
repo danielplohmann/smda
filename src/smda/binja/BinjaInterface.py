@@ -11,8 +11,14 @@ _DEFAULT_NAME = re.compile("(j_)?sub_[0-9a-fA-F]+$")
 _ARM_ARCHITECTURES = {"armv7", "thumb2"}
 
 
+def _ownBlocks(function):
+    # Binary Ninja keeps a T32 function's branch into an A32 PLT entry inside that function, but
+    # SMDA decodes a function in one instruction set, so blocks in the other one are left out
+    return [block for block in function.basic_blocks if block.arch == function.arch]
+
+
 def _hasInvalidInstructions(function):
-    return any(block.has_invalid_instructions for block in function.basic_blocks)
+    return any(block.has_invalid_instructions for block in _ownBlocks(function))
 
 
 class BinjaInterface(BackendInterface):
@@ -53,17 +59,16 @@ class BinjaInterface(BackendInterface):
         return self._functions
 
     def _modeOverlapLosers(self, functions):
-        """Of an A32 and a T32 function claiming the same bytes, the indices of those left out, since
-        SmdaReport keeps one instruction and one set of code refs per address. The one kept has no
-        invalid instructions, then more code references to its start, then the earlier start."""
+        """Indices of functions left out so that no A32 and T32 function claim the same bytes, since
+        SmdaReport keeps one instruction and one set of code refs per address. Functions are kept in
+        order of evidence: no invalid instructions, more code references to the start, earlier start."""
         if len({function.arch for function in functions}) < 2:
             return set()
         spans = sorted(
             (
                 (block.start, block.end, function.arch, index)
                 for index, function in enumerate(functions)
-                for block in function.basic_blocks
-                if block.arch == function.arch
+                for block in _ownBlocks(function)
             ),
             key=lambda span: span[:2],
         )
@@ -79,10 +84,16 @@ class BinjaInterface(BackendInterface):
             references = len(list(self.bv.get_code_refs(function.start)))
             return (not _hasInvalidInstructions(function), references, -function.start, -index)
 
-        losers = set()
-        for pair in sorted(conflicts):
-            if not losers.intersection(pair):
-                losers.add(min(pair, key=evidence))
+        rivals = {}
+        for first, second in conflicts:
+            rivals.setdefault(first, set()).add(second)
+            rivals.setdefault(second, set()).add(first)
+        kept, losers = set(), set()
+        for index in sorted(rivals, key=evidence, reverse=True):
+            if rivals[index] & kept:
+                losers.add(index)
+            else:
+                kept.add(index)
         return losers
 
     def getFunctions(self):
@@ -113,9 +124,7 @@ class BinjaInterface(BackendInterface):
         self._current_arch = function.arch if function is not None else None
         if function is None:
             return []
-        # Binary Ninja keeps a T32 function's branch into an A32 PLT entry inside that function, but
-        # SMDA decodes a function in one instruction set, so blocks in the other one are left out
-        blocks = [self._instructionAddresses(block) for block in function.basic_blocks if block.arch == function.arch]
+        blocks = [self._instructionAddresses(block) for block in _ownBlocks(function)]
         return sorted(block for block in blocks if block)
 
     def getInstructionBytes(self, offset):
@@ -136,7 +145,7 @@ class BinjaInterface(BackendInterface):
         refs_from = {}
         for function in self._functionMap().values():
             call_sites = {reference.address for reference in function.call_sites}
-            for block in function.basic_blocks:
+            for block in _ownBlocks(function):
                 addresses = self._instructionAddresses(block)
                 for index, address in enumerate(addresses):
                     targets = set()
