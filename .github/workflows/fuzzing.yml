@@ -184,18 +184,47 @@ jobs:
           MAX_TOTAL_TIME: ${{ steps.duration.outputs.seconds }}
           MAX_LEN: ${{ matrix.max_len }}
           TARGET: ${{ matrix.target }}
+        # One fuzzer process uses one core of the runner. libFuzzer's own -jobs/-fork
+        # re-execute argv[0], which under atheris is the bare interpreter, so one
+        # process per core is started here instead. They share the corpus directory
+        # and pick up each other's finds through libFuzzer's periodic corpus reload.
+        # The RSS limit is split so that all of them together stay inside the runner's
+        # RAM; the single-allocation limit stays at 2 GiB unless that split is lower.
         run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          python "fuzzing/${TARGET}.py" corpus \
-            -dict=fuzzing/smda.dict \
-            -max_total_time="${MAX_TOTAL_TIME}" \
-            -max_len="${MAX_LEN}" \
-            -timeout=60 \
-            -rss_limit_mb=4096 \
-            -malloc_limit_mb=2048 \
-            -artifact_prefix=artifacts/ \
-            -print_final_stats=1
+          set -uo pipefail
+          mkdir -p artifacts logs
+          workers="$(nproc)"
+          mem_mb="$(awk '/MemTotal/ {print int($2 / 1024)}' /proc/meminfo)"
+          rss_mb=$(( mem_mb * 3 / 4 / workers ))
+          if [ "$rss_mb" -gt 4096 ]; then rss_mb=4096; fi
+          malloc_mb=$(( rss_mb < 2048 ? rss_mb : 2048 ))
+          echo "workers=${workers} rss_limit_mb=${rss_mb} malloc_limit_mb=${malloc_mb}"
+          pids=()
+          for worker in $(seq 1 "$workers"); do
+            python "fuzzing/${TARGET}.py" corpus \
+              -dict=fuzzing/smda.dict \
+              -max_total_time="${MAX_TOTAL_TIME}" \
+              -max_len="${MAX_LEN}" \
+              -timeout=60 \
+              -rss_limit_mb="${rss_mb}" \
+              -malloc_limit_mb="${malloc_mb}" \
+              -artifact_prefix=artifacts/ \
+              -print_final_stats=1 \
+              > "logs/worker-${worker}.log" 2>&1 &
+            pids+=("$!")
+          done
+          status=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || status=1
+          done
+          for log in logs/worker-*.log; do
+            echo "::group::${log}"
+            cat "$log"
+            echo "::endgroup::"
+          done
+          grep -h "^stat::number_of_executed_units" logs/worker-*.log \
+            | awk '{sum += $2} END {print "executed units, all workers:", sum}'
+          exit "$status"
 
       - name: Bound the cached corpus
         if: always()
