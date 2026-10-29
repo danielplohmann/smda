@@ -83,8 +83,8 @@ jobs:
           for spec in \
             "fuzz_loaders:binary:262144:^src/smda/utility/" \
             "fuzz_formats:formats:262144:^src/smda/utility/" \
-            "fuzz_disassembler:binary:65536:^src/smda/(utility|intel|aarch64|cil|dalvik)/" \
-            "fuzz_buffer:buffer:65536:^src/smda/(utility|intel|aarch64|cil|dalvik)/" \
+            "fuzz_disassembler:binary:65536:^src/smda/(utility|intel|aarch64|arm|cil|dalvik)/" \
+            "fuzz_buffer:buffer:65536:^src/smda/(utility|intel|aarch64|arm|cil|dalvik)/" \
             "fuzz_report:report:1048576:^src/smda/common/" \
             "fuzz_synthesis:synthesis:1048576:^src/smda/(synthesis|utility)/"; do
             IFS=':' read -r target profile max_len region <<<"$spec"
@@ -239,3 +239,115 @@ jobs:
         with:
           path: corpus
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+  # libFuzzer reports how many edges a run found, not where they are. Outside pull
+  # requests this replays each target's accumulated corpus under coverage.py, so code
+  # that no input reaches shows up by file and can be given seeds or a target.
+  coverage:
+    name: Corpus coverage (${{ matrix.target }})
+    needs: [changes, fuzz]
+    if: ${{ !cancelled() && needs.changes.outputs.any == 'true' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install SMDA and coverage
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . coverage
+
+      - name: Restore this run's corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Add the corpus floor and seeds
+        env:
+          TARGET: ${{ matrix.target }}
+          SEED_PROFILE: ${{ matrix.seed_profile }}
+        run: |
+          python fuzzing/restore_corpus.py "${TARGET#fuzz_}" corpus
+          python fuzzing/generate_seeds.py corpus --profile "$SEED_PROFILE"
+
+      - name: Replay corpus under coverage
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          name="${TARGET#fuzz_}"
+          python fuzzing/corpus_coverage.py "$name" corpus --data-file ".coverage.${name}" --report coverage-report.txt
+          {
+            echo "### ${name}"
+            echo '```'
+            tail -n 1 coverage-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-coverage-data-${{ matrix.target }}
+          path: .coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  coverage_summary:
+    name: Corpus coverage summary
+    needs: coverage
+    if: ${{ !cancelled() && needs.coverage.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: python -m pip install coverage
+
+      - name: Download coverage data
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fuzz-coverage-data-*
+          merge-multiple: true
+
+      - name: Combine and report
+        # least-reached files first; the suite's fail_under does not apply to a corpus
+        run: |
+          set -euo pipefail
+          python -m coverage combine
+          {
+            echo "## Code reached by all fuzz corpora"
+            python -m coverage report --format=markdown --sort=cover --fail-under=0
+          } >> "$GITHUB_STEP_SUMMARY"
+          python -m coverage html --fail-under=0 -d fuzz-coverage-html
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-coverage-html
+          path: fuzz-coverage-html/

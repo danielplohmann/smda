@@ -33,6 +33,8 @@ FIXTURES = {
     "njrat": {"filename": "njrat_xored", "base_addr": 0, "backend": "cil"},
     "pe_export": {"filename": "pe_export_label_test_xored", "base_addr": 0, "backend": "intel"},
     "aarch64_static": {"filename": "aarch64_static_xored", "base_addr": 0, "backend": "aarch64"},
+    "arm_mixed": {"filename": "arm_lz4_mixed_O2_xored", "base_addr": 0, "backend": "arm"},
+    "arm_thumb": {"filename": "arm_lz4_thumb_Os_xored", "base_addr": 0, "backend": "arm"},
 }
 
 

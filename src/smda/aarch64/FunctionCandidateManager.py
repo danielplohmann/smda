@@ -25,6 +25,7 @@ The x86-only PLT/stub-chain pass does not apply and remains a future
 iterate-step; for a statically linked ELF there is no PLT to recover.
 """
 
+import bisect
 import contextlib
 import logging
 import struct
@@ -1028,6 +1029,18 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             self._exec_ranges = ranges
         return ranges
 
+    @staticmethod
+    def _mergedRanges(ranges):
+        """`ranges` sorted by start with overlaps merged, so a bisect on the starts answers
+        containment and names the next range. Section headers need not be in address order."""
+        merged = []
+        for start, end in sorted(ranges):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return merged
+
     def _wordsView(self):
         """Zero-copy little-endian 4-byte word view of the mapped image, shared by
         the word-at-a-time scan passes (reference/prologue discovery, gap sweep).
@@ -1199,11 +1212,13 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
             return None
         base = self.disassembly.binary_info.base_addr
         size = self.disassembly.binary_info.binary_size or 0
-        exec_ranges = self._cachedExecutableSectionRanges()
+        exec_ranges = self._mergedRanges(self._cachedExecutableSectionRanges())
+        exec_starts = [start for start, _ in exec_ranges]
         words = self._wordsView()
 
         def in_exec(addr):
-            return any(start <= addr < end for start, end in exec_ranges)
+            index = bisect.bisect_right(exec_starts, addr) - 1
+            return index >= 0 and addr < exec_ranges[index][1]
 
         scanned = 0
         while True:
@@ -1233,7 +1248,9 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
                 self.gap_pointer += INSTRUCTION_SIZE
                 continue
             if exec_ranges and not in_exec(self.gap_pointer):
-                self.gap_pointer += INSTRUCTION_SIZE
+                # nothing up to the next executable section can be a candidate
+                following = bisect.bisect_right(exec_starts, self.gap_pointer)
+                self.gap_pointer = exec_starts[following] if following < len(exec_starts) else base + size
                 continue
             word = words[offset // INSTRUCTION_SIZE]
             if word in (0, NOP):  # inter-function padding

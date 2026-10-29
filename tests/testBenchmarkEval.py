@@ -166,6 +166,26 @@ class TestNoiseAwareVerdict(unittest.TestCase):
         self.assertEqual(stats["verdict"], "PR is faster")
 
 
+class TestHeaviestFiles(unittest.TestCase):
+    def test_listed_by_base_time_with_their_own_change(self):
+        # twelve small files unchanged and the two largest slowed down: the median over
+        # every file barely moves, the heaviest-files list shows the slowdown
+        base_agg, pr_agg = {}, {}
+        for i in range(12):
+            base_agg[f"small{i}.smda"] = {"time_min": 0.1, "function_addrs": frozenset({"0x1"}), "function_count": 1}
+            pr_agg[f"small{i}.smda"] = {"time_min": 0.1, "function_addrs": frozenset({"0x1"}), "function_count": 1}
+        for name, base_time in (("big.smda", 30.0), ("bigger.smda", 60.0)):
+            base_agg[name] = {"time_min": base_time, "function_addrs": frozenset({"0x1"}), "function_count": 900}
+            pr_agg[name] = {"time_min": base_time * 2, "function_addrs": frozenset({"0x1"}), "function_count": 900}
+        paired = er.build_paired(base_agg, pr_agg)
+
+        self.assertEqual(er.compute_paired_stats(paired)["median_speedup"], 0.0)
+        heaviest = er.heaviest_files(paired, base_agg, count=3)
+        self.assertEqual([row["file"] for row in heaviest], ["bigger.smda", "big.smda", "small0.smda"])
+        self.assertEqual(heaviest[0]["speedup"], -100.0)
+        self.assertEqual(heaviest[0]["function_count"], 900)
+
+
 class TestEndToEnd(unittest.TestCase):
     def _run(self, root, extra_args=None):
         args = ["--runtime-path", str(root)] + (extra_args or [])
@@ -192,6 +212,8 @@ class TestEndToEnd(unittest.TestCase):
             self.assertIn("<summary>Pairwise run matrix (individual run medians, diagnostic)</summary>", md)
             self.assertIn("Diagnostic only", md)
             self.assertIn("pr_0 vs base_0", md)
+            self.assertIn("**Heaviest 4 samples by base time**", md)
+            self.assertEqual(len(model["performance"]["heaviest_files"]), 4)
 
     def test_correctness_regression_exit_1(self):
         with tempfile.TemporaryDirectory() as d:
