@@ -206,8 +206,8 @@ def build_parser():
         p.add_argument(
             "--target",
             default="asprox",
-            help="Fixture name (asprox, cutwail, bashlite, blockblast, komplex, njrat, pe_export) "
-            "or a path to a binary.",
+            help="Fixture name (asprox, cutwail, bashlite, blockblast, komplex, njrat, pe_export, "
+            "aarch64_static, arm_mixed, arm_thumb) or a path to a binary.",
         )
         p.add_argument("--iterations", type=int, default=1, help="Number of disassembly passes.")
         p.add_argument("--strings", action="store_true", help="Enable string extraction (config.WITH_STRINGS).")

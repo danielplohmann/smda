@@ -62,7 +62,7 @@ VALID_STATUS = frozenset({"ok", "timeout", "error"})
 
 SYNTHESIS_FORMATS = (FORMAT_PE, FORMAT_ELF, FORMAT_MACHO)
 
-ARCHITECTURES = ("intel", "aarch64", "cil", "dalvik", "unsupported")
+ARCHITECTURES = ("intel", "aarch64", "arm", "cil", "dalvik", "unsupported")
 BITNESSES = (None, 16, 32, 64)
 
 FORMAT_LOADERS = (

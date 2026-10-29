@@ -25,6 +25,7 @@ coverage-html/
 
 # Profiling artifacts
 profiling/output/
+instruction_counts/
 # Benchmark results
 *results.json
 

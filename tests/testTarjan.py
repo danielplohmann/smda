@@ -33,6 +33,15 @@ class TarjanTestSuite(unittest.TestCase):
                 tarjan.calculateScc()
                 self.assertEqual([[0x100]], tarjan.getResult())
 
+    def testClosureHandlesSuccessorOnlyVertex(self):
+        """Vertices that are only successors have no key in the graph (#411)."""
+        closure = Tarjan({1: [2], 3: [1, 4], 4: [3]}).closure()
+        self.assertEqual({1, 2, 3, 4}, set(closure))
+        self.assertEqual((), closure[2])
+        self.assertEqual({2}, set(closure[1]))
+        self.assertEqual({1, 2, 3, 4}, set(closure[3]))
+        self.assertEqual({1, 2, 3, 4}, set(closure[4]))
+
 
 if __name__ == "__main__":
     unittest.main()

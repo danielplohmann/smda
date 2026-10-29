@@ -3,7 +3,7 @@
 # override it, and CI has no .venv so it falls through to python3 as before.
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
-.PHONY: init package publish ruff-check ruff-format ruff-fix lint format typecheck test test-all test-coverage clean benchmark benchmark-determinism profile-cpu profile-mem profile-flame
+.PHONY: init package publish ruff-check ruff-format ruff-fix lint format typecheck test test-all test-coverage clean benchmark benchmark-determinism benchmark-instructions profile-cpu profile-mem profile-flame
 
 # Default profiling target fixture; override e.g. `make profile-cpu TARGET=komplex`
 TARGET ?= asprox
@@ -44,6 +44,9 @@ benchmark:
 	$(PYTHON) .github/workflows/scripts/run_perf_check.py --output benchmark_results.json
 benchmark-determinism:
 	$(PYTHON) .github/workflows/scripts/run_perf_check.py --iterations 2 --call-counts --output benchmark_determinism.json
+# Needs valgrind. Compare two trees with `count_instructions.py compare` (see profiling/README.md).
+benchmark-instructions:
+	$(PYTHON) .github/workflows/scripts/count_instructions.py measure . --output instruction_counts/results.json
 profile-cpu:
 	$(PYTHON) -m profiling.profile_smda cpu --target $(TARGET) --line
 profile-mem:

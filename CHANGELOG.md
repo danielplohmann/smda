@@ -71,14 +71,30 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(binja)** Export 32-bit ARM views (`armv7` and `thumb2`) as `arm` reports. Each function is decoded in
+  its own instruction set and carries `thumb` metadata like the file-based backend. A T32 function's blocks in A32
+  (PLT veneers) are left out. Where an A32 and a T32 function claim the same bytes, only the one with more evidence
+  is exported: no invalid instructions, then more references to its start. `binja_analyze.py` creates T32 functions
+  as T32. *Measured on `04652e66` with Binary Ninja 6.0.10905 on the bundled `arm_lz4_mixed_O2`, `arm_lz4_thumb_Os`,
+  `armnt_lz4_dll` and `mirai_arm`:* 479 of 491 ground-truth starts exported, all in their ground-truth instruction
+  set. Cost: four `udf #0xf9` in the ARMNT DLL that Capstone cannot decode. Big-endian ARM stays unsupported.
 
 ### Changed
+- **(aarch64)** Jump the gap scan over non-executable sections instead of stepping through them a word at a time.
+  `nextGapCandidate` now bisects into the sorted, merged executable section ranges and resumes at the next one, as
+  the ARM backend already does. *Measured on `04652e6`:* gap scan time on a 50 MB Go ELF (gh 2.62.0 linux/arm64)
+  11.8 s to 3.2 s, about 5% of the whole run, and 25-60% less on three numpy/pydantic-core wheel libraries. Recovered
+  functions, blocks, instructions and PIC hashes are identical on all four. *Not bundled; the behaviour is covered by
+  `testAArch64GapScanExecSkip`.*
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- **(common)** Read successors in `Tarjan.closure()` with `graph.get(v, ())`, as `calculateScc()` already does.
+  A vertex that only appears as a successor raised `KeyError`. Nothing in SMDA calls `closure()`, so no report
+  output changes. (#414)
 
 ### Security
 
