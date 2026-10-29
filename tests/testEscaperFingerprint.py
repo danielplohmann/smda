@@ -4,8 +4,8 @@ MCRIT (and anything else that persists escaped-operand signatures) consults
 SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY to decide whether stored hashes are
 stale. That marker did not move when 4.4.5 changed Intel escaping, so this
 test hashes a committed corpus of escaped representations. If the digest
-moves, bump ESCAPER_DOWNWARD_COMPATIBILITY to the current SmdaConfig.VERSION
-in the same change.
+moves, set ESCAPER_DOWNWARD_COMPATIBILITY to the release that will ship the
+change, the one after the current SmdaConfig.VERSION, in the same change.
 """
 
 import hashlib
@@ -15,14 +15,16 @@ import unittest
 logging.disable(logging.CRITICAL)
 
 from smda.aarch64.AArch64InstructionEscaper import AArch64InstructionEscaper  # noqa: E402
+from smda.arm.ArmInstructionEscaper import ArmInstructionEscaper  # noqa: E402
 from smda.cil.CilInstructionEscaper import CilInstructionEscaper  # noqa: E402
 from smda.common.SmdaInstruction import SmdaInstruction  # noqa: E402
 from smda.dalvik.DalvikInstructionEscaper import DalvikInstructionEscaper  # noqa: E402
 from smda.intel.IntelInstructionEscaper import IntelInstructionEscaper  # noqa: E402
+from smda.SmdaConfig import SmdaConfig  # noqa: E402
 
 # SHA-256 of the canonical escaped lines below. Update together with the
 # compatibility marker when any InstructionEscaper changes its output.
-ESCAPER_OUTPUT_FINGERPRINT = "3a0a318f568d282734a8879898d564b91914b25105f122c05f4efd657fca4233"
+ESCAPER_OUTPUT_FINGERPRINT = "d6a4a33fe9c17f118cdb69d39207e76c2d1a89ddd47491f530f982f39b1f1930"
 
 # (escaper, offset, bytes, mnemonic, operands) — bytes are unused; the
 # fingerprint is mnemonic-group + escaped operands, the same pair MCRIT's
@@ -55,6 +57,8 @@ _CORPUS = [
     (AArch64InstructionEscaper, (0, "", "ldr", "x0, [x1, #0x10]")),
     (AArch64InstructionEscaper, (0, "", "bl", "#0x400800")),
     (AArch64InstructionEscaper, (0, "", "cbz", "w0, #0x14")),
+    (ArmInstructionEscaper, (0, "000d02f2", "vadd.f32", "q0, q1, q2")),
+    (ArmInstructionEscaper, (0, "000a30ee", "vadd.f32", "s0, s0, s0")),
     (CilInstructionEscaper, (0, "", "ldarg.0", "")),
     (CilInstructionEscaper, (0, "", "call", "0x06000001")),
     (CilInstructionEscaper, (0, "", "ldstr", "0x70000001")),
@@ -86,9 +90,13 @@ class EscaperFingerprintTestSuite(unittest.TestCase):
         self.assertEqual(
             actual,
             ESCAPER_OUTPUT_FINGERPRINT,
-            "escaper output changed; bump SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY "
-            f"to the current package version and set ESCAPER_OUTPUT_FINGERPRINT to {actual}",
+            "escaper output changed; set SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY "
+            f"to the next release and ESCAPER_OUTPUT_FINGERPRINT to {actual}",
         )
+
+    def test_arm_group_change_has_a_compatibility_marker(self):
+        # 5.0.1 shipped the old NEON grouping; MCRIT selects stale reports with a strict `<`.
+        self.assertGreaterEqual(tuple(map(int, SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY.split("."))), (5, 0, 2))
 
     def test_the_4_4_5_intel_cases_in_the_corpus_escape_as_ptr_not_const(self):
         for operands in (

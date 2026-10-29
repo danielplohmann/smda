@@ -60,11 +60,14 @@ class TestPackageMetadata(unittest.TestCase):
     def test_the_escaper_compatibility_marker_is_a_three_part_release(self):
         self.assertRegex(SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY, r"^\d+\.\d+\.\d+$")
 
-    def test_the_escaper_compatibility_marker_is_not_newer_than_the_package(self):
-        self.assertLessEqual(
-            _version_tuple(SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY),
-            _version_tuple(SmdaConfig.VERSION),
-        )
+    def test_the_escaper_compatibility_marker_is_at_most_the_next_release(self):
+        # An escaper output change sets the marker to the release that will ship it, so
+        # until that release is cut the marker leads the package by one step. A marker
+        # further ahead would keep marking the reports of later releases stale.
+        (major, minor, patch), _ = _version_tuple(SmdaConfig.VERSION)
+        marker, _ = _version_tuple(SmdaConfig.ESCAPER_DOWNWARD_COMPATIBILITY)
+        next_releases = {(major, minor, patch + 1), (major, minor + 1, 0), (major + 1, 0, 0)}
+        self.assertTrue(marker <= (major, minor, patch) or marker in next_releases, marker)
 
     def test_the_escaper_compatibility_marker_covers_the_4_4_5_output_change(self):
         # 4.4.5 changed Intel escaped operands (segment-qualified memory, AVX-512)

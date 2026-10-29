@@ -121,6 +121,10 @@ past roughly six lines it belongs in the PR the entry links.
   handler thunk before following the missing edge. Real and generated regression fixtures are bundled.
   *Measured against `bfe39ec`:* complete reports bit-identical on 18 bundled non-Delphi x86/x64 PE, ELF and
   PE+PDB fixtures. *Reproduced by reviewer on 16.*
+- **(arm)** Pass operands through `SmdaInstruction.getMnemonicGroup()` for ARM.
+  Float-suffixed NEON instructions using `q` registers now classify as vector (`V`); scalar VFP stays float (`F`).
+  This changes ARM escaped-block signatures, so stored ones need recomputing; recovery and PIC/opcode hashes are
+  unchanged. Covered by `testArmDisassembler` and the fingerprint corpus's new ARM cases.
 
 ### Security
 
@@ -129,6 +133,8 @@ past roughly six lines it belongs in the PR the entry links.
 - **(labels)** An explicit PDB symbol now takes precedence over PE's synthetic `original_entry_point` label
   at the same address.
 - **(intel)** Delphi finally continuations extend owning function bodies and can change CFG fingerprints.
+- **(arm)** `ESCAPER_DOWNWARD_COMPATIBILITY` moves from `4.4.5` to `5.0.2`, the release that ships the NEON
+  grouping change, so ARM reports from 5.0.1 and earlier compare as stale.
 
 ## [v5.0.1] - 2026-10-20
 
