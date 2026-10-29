@@ -264,6 +264,7 @@ class SmdaConfig:
     # backstops against memory usage explosion during candidate identification on pathological/junk samples
     # maximum number of function candidates to track; 0 == unlimited. Normal binaries have orders of magnitude fewer.
     MAX_FUNCTION_CANDIDATES = 200000
+    MAX_DELPHI_METADATA_ENTRIES = 1000000
     # maximum number of inbound call references tracked per candidate; 0 == unlimited. Bounds set growth and rescoring.
     MAX_CALL_REFS_PER_CANDIDATE = 2000
     # backstops for batch mode, where peak worker RSS scales with input size. The factor is

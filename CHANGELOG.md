@@ -71,6 +71,8 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(labels)** `MAX_DELPHI_METADATA_ENTRIES` (default 1,000,000) caps the metadata entries the ReSym provider
+  reads per image, so a corrupt or hostile image cannot drive VMT and method-table parsing without bound.
 - **(binja)** Export 32-bit ARM views (`armv7` and `thumb2`) as `arm` reports. Each function is decoded in
   its own instruction set and carries `thumb` metadata like the file-based backend. A T32 function's blocks in A32
   (PLT veneers) are left out. Where an A32 and a T32 function claim the same bytes, only the one with more evidence
@@ -80,6 +82,12 @@ past roughly six lines it belongs in the PR the entry links.
   set. Cost: four `udf #0xf9` in the ARMNT DLL that Capstone cannot decode. Big-endian ARM stays unsupported.
 
 ### Changed
+- **(labels)** Delphi detection is looser. `_computeDelphiScore` now reaches the 0.6 that `checkDelphi()` needs
+  when ReSym validates at least two self-referencing VMTs (one can occur by chance; a real image has one per class,
+  dozens from the RTL alone), which turns on the Delphi candidates and finally recovery. Pythia no longer requires
+  `_validate_metadata_addresses`, and Pascal strings decode as cp1252, so 0x80-0x9F count as printable. Cost: a
+  non-Delphi image is somewhat more likely to be classed as Delphi. *Not measured on non-Delphi samples:* none of
+  the bundled non-Delphi fixtures contains `TObject`, so they never reach these checks.
 - **(aarch64)** Jump the gap scan over non-executable sections instead of stepping through them a word at a time.
   `nextGapCandidate` now bisects into the sorted, merged executable section ranges and resumes at the next one, as
   the ARM backend already does. *Measured on `04652e6`:* gap scan time on a 50 MB Go ELF (gh 2.62.0 linux/arm64)
@@ -95,6 +103,24 @@ past roughly six lines it belongs in the PR the entry links.
 - **(common)** Read successors in `Tarjan.closure()` with `graph.get(v, ())`, as `calculateScc()` already does.
   A vertex that only appears as a successor raised `KeyError`. Nothing in SMDA calls `closure()`, so no report
   output changes. (#414)
+- **(labels)** Repair Delphi class RTTI offsets, published/extended method-table traversal, record bounds,
+  Unicode names, executable-target validation and Pythia table bounds, and prefer explicit PDB names over generic
+  PE entry-point labels. Cache shared legacy tables, share provider results and use a dependency-free
+  pointer-suffix scan. *Measured on the supplied `1d4e5452…5681c` sample against `04652e6`:* 292 usable labels
+  become 7,969; five-run median provider time falls from 1.100s to 0.084s, with lower peak Python allocation.
+  Real metadata excerpts and malformed-input tests are bundled; the full binary is private. See
+  `profiling/delphi_audit/`.
+- **(labels)** PE export and entry-point labels (and their candidates) are no longer dropped when a PDB is
+  supplied. The PDB pass re-ran every label provider on the PDB's empty `BinaryInfo`, which cleared
+  `PeSymbolProvider`; it now updates only `PdbSymbolProvider`. With `USE_SYMBOLS_AS_CANDIDATES` on by default,
+  exports and the OEP are candidates again on PE+PDB runs, so the function set can grow where the PDB does not
+  already name an export. *Measured against `bfe39ec`:* `msvc_cxx_pdb_pe` with its PDB keeps 3 PE symbols instead
+  of 0; the function sets of `msvc_cxx_pdb_pe` and `rust_pe_msvc_i686` with their PDBs are unchanged.
+- **(intel)** Recover normal-flow continuations from the validated 32-bit Delphi finally-dispatch idiom.
+  Constructor tails previously ended at `pop eax; jmp eax`; match the saved continuation and linked
+  handler thunk before following the missing edge. Real and generated regression fixtures are bundled.
+  *Measured against `bfe39ec`:* complete reports bit-identical on 18 bundled non-Delphi x86/x64 PE, ELF and
+  PE+PDB fixtures. *Reproduced by reviewer on 16.*
 - **(arm)** Pass operands through `SmdaInstruction.getMnemonicGroup()` for ARM.
   Float-suffixed NEON instructions using `q` registers now classify as vector (`V`); scalar VFP stays float (`F`).
   This changes ARM escaped-block signatures, so stored ones need recomputing; recovery and PIC/opcode hashes are
@@ -103,6 +129,10 @@ past roughly six lines it belongs in the PR the entry links.
 ### Security
 
 ### Compatibility
+- **(labels)** Delphi names gain correct unit/class qualification and validated signatures.
+- **(labels)** An explicit PDB symbol now takes precedence over PE's synthetic `original_entry_point` label
+  at the same address.
+- **(intel)** Delphi finally continuations extend owning function bodies and can change CFG fingerprints.
 - **(arm)** `ESCAPER_DOWNWARD_COMPATIBILITY` moves from `4.4.5` to `5.0.2`, the release that ships the NEON
   grouping change, so ARM reports from 5.0.1 and earlier compare as stale.
 

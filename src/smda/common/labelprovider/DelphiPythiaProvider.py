@@ -18,12 +18,12 @@ Pythia-style workflow summary
    * the instance size must be reasonable,
    * the class name pointer must decode to a plausible Pascal string,
    * the fixed VMT method slots must point into executable code areas,
-   * metadata pointers must stay inside the mapped image.
-4. Extract the class name, parent VMT pointer, method table, dynamic table,
-   and virtual method slots directly from the mapped image.
-5. Compare child and parent VMT slots to identify inherited vs. overridden
-   methods. SMDA's public API still only returns ``{address: function_name}``,
-   but the provider keeps this relationship internally for future use.
+   * mapped metadata is read only within image bounds; external optional tables
+     do not invalidate otherwise usable VMT methods.
+4. Extract method table, dynamic table, interface methods and virtual method
+   slots directly from the mapped image.
+5. Merge recovered addresses and names into SMDA's public
+   ``{address: function_name}`` contract.
 
 Compared to the historic implementation, this is significantly faster on large
 inputs because it scans only code sections, advances in pointer-sized steps, and
@@ -36,13 +36,12 @@ compatible with the documented self-pointer scheme.
 import logging
 import struct
 from dataclasses import dataclass, field
-from itertools import compress
-from operator import eq, itemgetter
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import lief
 
 from .AbstractLabelProvider import AbstractLabelProvider
+from .DelphiVmtScanner import iter_vmt_self_references
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,9 +49,10 @@ IMAGE_SCN_CNT_CODE = 0x00000020
 VMT_HEADER_FIELD_COUNT = 11
 MAX_INSTANCE_SIZE = 1024 * 500
 MAX_VIRTUAL_SLOT_SCAN = 512
+MAX_INTERFACE_METHOD_SCAN = 4096
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DelphiVmtProfile:
     """Static layout information for a Delphi VMT profile."""
 
@@ -82,10 +82,6 @@ class DelphiVmtProfile:
         return self.ptr_size * 9
 
     @property
-    def parent_field_offset(self) -> int:
-        return self.ptr_size * 10
-
-    @property
     def interface_table_field_offset(self) -> int:
         return self.ptr_size
 
@@ -98,21 +94,14 @@ class DelphiVmtProfile:
         return self.ptr_size * 7
 
 
-@dataclass
+@dataclass(slots=True)
 class DelphiClassInfo:
-    """Internal representation of a Delphi class recovered from a VMT."""
+    """Metadata tables and code slots recovered from a Delphi VMT."""
 
-    profile_name: str
-    candidate_offset: int
-    vmt_offset: int
-    class_name: str
-    parent_vmt_addr: int = 0
     method_table_addr: int = 0
     dynamic_table_addr: int = 0
     interface_table_addr: int = 0
     method_slots: List[int] = field(default_factory=list)
-    inherited_slots: List[int] = field(default_factory=list)
-    overridden_slots: List[int] = field(default_factory=list)
 
 
 class DelphiPythiaProvider(AbstractLabelProvider):
@@ -143,7 +132,6 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         self._bitness = 0
         self._scan_ranges: List[Tuple[int, int]] = []
         self._func_symbols: Dict[int, str] = {}
-        self._classes: Dict[int, DelphiClassInfo] = {}
 
     def update(self, binary_info):
         """Parse Delphi metadata from the given binary info."""
@@ -152,9 +140,12 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         self._base_addr = binary_info.base_addr
         self._bitness = binary_info.bitness
         self._func_symbols = {}
-        self._classes = {}
 
-        if not self._binary or self._bitness not in self._profiles:
+        if (
+            not self._binary
+            or self._bitness not in self._profiles
+            or getattr(binary_info, "architecture", "") not in ("", "intel")
+        ):
             return
 
         # Cheap Delphi signature check
@@ -170,19 +161,17 @@ class DelphiPythiaProvider(AbstractLabelProvider):
     def _parse_delphi_objects(self) -> None:
         function_offsets = set()
         name_mapping: Dict[int, str] = {}
-        classes_by_vmt_addr: Dict[int, DelphiClassInfo] = {}
+        seen_dynamic_tables = set()
+        seen_method_tables = set()
+        seen_interface_tables = set()
 
         for profile in self._profiles.get(self._bitness, ()):
             for start_offset, end_offset in self._scan_ranges:
                 for class_info in self._scan_code_range(profile, start_offset, end_offset):
-                    classes_by_vmt_addr[self._offset_to_addr(class_info.vmt_offset)] = class_info
                     function_offsets.update(class_info.method_slots)
-                    self._extract_dynamic_methods(class_info, function_offsets)
-                    self._extract_interface_methods(class_info, function_offsets)
-                    self._extract_method_table_symbols(class_info, function_offsets, name_mapping)
-
-        self._classes = classes_by_vmt_addr
-        self._resolve_inheritance()
+                    self._extract_dynamic_methods(class_info, function_offsets, seen_dynamic_tables)
+                    self._extract_interface_methods(class_info, function_offsets, seen_interface_tables)
+                    self._extract_method_table_symbols(class_info, function_offsets, name_mapping, seen_method_tables)
 
         for function_addr in sorted(function_offsets):
             if self._binary_info.isInCodeAreas(function_addr):
@@ -235,31 +224,12 @@ class DelphiPythiaProvider(AbstractLabelProvider):
     ) -> Iterable[DelphiClassInfo]:
         """Yield validated VMTs from a single code range."""
         ptr_size = profile.ptr_size
-        first_offset = self._align_offset(start_offset, ptr_size)
-        scan_end = first_offset + max(0, min(end_offset, len(self._binary)) - first_offset) // ptr_size * ptr_size
-        # a slot is a candidate when it holds its own address plus the self-pointer distance.
-        # The slots are compared in C: one Python-level read per slot made this scan dominate
-        # the analysis of large images that are not Delphi but contain the string "TObject".
-        slot_values = map(
-            itemgetter(0),
-            struct.iter_unpack("<I" if ptr_size == 4 else "<Q", memoryview(self._binary)[first_offset:scan_end]),
-        )
-        self_ptr_values = range(
-            self._offset_to_addr(first_offset + profile.self_ptr_distance),
-            self._offset_to_addr(scan_end + profile.self_ptr_distance),
-            ptr_size,
-        )
-        candidate_offsets = range(first_offset, scan_end, ptr_size)
-        for candidate_offset in compress(candidate_offsets, map(eq, slot_values, self_ptr_values)):
+        for candidate_offset in iter_vmt_self_references(
+            self._binary, self._base_addr, ptr_size, profile.self_ptr_distance, start_offset, end_offset, ptr_size
+        ):
             class_info = self._build_class_info(profile, candidate_offset, end_offset)
             if class_info is not None:
                 yield class_info
-
-    @staticmethod
-    def _align_offset(offset: int, alignment: int) -> int:
-        """Align the given offset upwards."""
-        remainder = offset % alignment
-        return offset if remainder == 0 else offset + (alignment - remainder)
 
     def _build_class_info(
         self, profile: DelphiVmtProfile, candidate_offset: int, range_end_offset: int
@@ -267,7 +237,6 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         """Validate a VMT candidate and extract its metadata."""
         class_name_addr = self._read_ptr(candidate_offset + profile.class_name_field_offset, profile.ptr_size) or 0
         instance_size = self._read_ptr(candidate_offset + profile.instance_size_field_offset, profile.ptr_size)
-        parent_vmt_addr = self._read_ptr(candidate_offset + profile.parent_field_offset, profile.ptr_size) or 0
         method_table_addr = self._read_ptr(candidate_offset + profile.method_table_field_offset, profile.ptr_size) or 0
         dynamic_table_addr = (
             self._read_ptr(candidate_offset + profile.dynamic_table_field_offset, profile.ptr_size) or 0
@@ -286,16 +255,6 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         if not self._is_probable_class_name(class_name):
             return None
 
-        metadata_addresses = (
-            class_name_addr,
-            parent_vmt_addr,
-            method_table_addr,
-            dynamic_table_addr,
-            interface_table_addr,
-        )
-        if not self._validate_metadata_addresses(metadata_addresses):
-            return None
-
         fixed_methods = self._read_fixed_methods(profile, candidate_offset)
         if not self._validate_fixed_methods(profile, fixed_methods):
             return None
@@ -305,21 +264,12 @@ class DelphiPythiaProvider(AbstractLabelProvider):
             return None
 
         class_info = DelphiClassInfo(
-            profile_name=profile.name,
-            candidate_offset=candidate_offset,
-            vmt_offset=vmt_offset,
-            class_name=class_name,
-            parent_vmt_addr=parent_vmt_addr,
             method_table_addr=method_table_addr,
             dynamic_table_addr=dynamic_table_addr,
             interface_table_addr=interface_table_addr,
             method_slots=fixed_methods + virtual_methods,
         )
         return class_info
-
-    def _validate_metadata_addresses(self, addresses: Sequence[int]) -> bool:
-        """Ensure optional metadata pointers remain inside the mapped image."""
-        return all(not (address and not self._is_mapped_address(address)) for address in addresses)
 
     def _read_fixed_methods(self, profile: DelphiVmtProfile, candidate_offset: int) -> List[int]:
         """Read the fixed compiler-emitted method slots preceding vmtSelfPtr."""
@@ -368,10 +318,16 @@ class DelphiPythiaProvider(AbstractLabelProvider):
             slots_read += 1
         return methods
 
-    def _extract_dynamic_methods(self, class_info: DelphiClassInfo, function_offsets: set) -> None:
+    def _extract_dynamic_methods(
+        self, class_info: DelphiClassInfo, function_offsets: set, seen_tables: Optional[set] = None
+    ) -> None:
         """Recover method pointers from a dynamic table when present."""
         if not class_info.dynamic_table_addr:
             return
+        if seen_tables is not None:
+            if class_info.dynamic_table_addr in seen_tables:
+                return
+            seen_tables.add(class_info.dynamic_table_addr)
         dynamic_offset = self._addr_to_offset(class_info.dynamic_table_addr)
         table_length = self._read_word(dynamic_offset)
         if table_length is None or table_length == 0:
@@ -386,11 +342,19 @@ class DelphiPythiaProvider(AbstractLabelProvider):
             function_offset += self._ptr_size
 
     def _extract_method_table_symbols(
-        self, class_info: DelphiClassInfo, function_offsets: set, name_mapping: Dict[int, str]
+        self,
+        class_info: DelphiClassInfo,
+        function_offsets: set,
+        name_mapping: Dict[int, str],
+        seen_tables: Optional[set] = None,
     ) -> None:
         """Parse the classic Delphi method table and recover symbol names."""
         if not class_info.method_table_addr:
             return
+        if seen_tables is not None:
+            if class_info.method_table_addr in seen_tables:
+                return
+            seen_tables.add(class_info.method_table_addr)
         entry_offset = self._addr_to_offset(class_info.method_table_addr)
         entry_count = self._read_word(entry_offset)
         if entry_count is None or entry_count == 0:
@@ -398,45 +362,40 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         entry_offset += 2
         for _ in range(entry_count):
             entry_size = self._read_word(entry_offset)
+            minimum_entry_size = 2 + self._ptr_size + 1
+            if entry_size is None or entry_size < minimum_entry_size or entry_offset + entry_size > len(self._binary):
+                break
             method_addr = self._read_ptr(entry_offset + 2, self._ptr_size)
-            method_name = self._read_pascal_string(entry_offset + 2 + self._ptr_size)
+            method_name = self._read_pascal_string(entry_offset + 2 + self._ptr_size, entry_offset + entry_size)
             if method_addr and self._binary_info.isInCodeAreas(method_addr):
                 function_offsets.add(method_addr)
                 if method_name:
                     name_mapping[method_addr] = method_name
-            if not entry_size or entry_size < 2 + self._ptr_size:
-                break
             entry_offset += entry_size
 
-    def _extract_interface_methods(self, class_info: DelphiClassInfo, function_offsets: set) -> None:
+    def _extract_interface_methods(
+        self, class_info: DelphiClassInfo, function_offsets: set, seen_tables: Optional[set] = None
+    ) -> None:
         """Parse interface tables conservatively for classic 32-bit Delphi layouts."""
         if self._bitness != 32 or not class_info.interface_table_addr:
             return
+        if seen_tables is not None:
+            if class_info.interface_table_addr in seen_tables:
+                return
+            seen_tables.add(class_info.interface_table_addr)
         interface_offset = self._addr_to_offset(class_info.interface_table_addr)
         start_interface_addr = self._read_ptr(interface_offset + 20, self._ptr_size)
         if not start_interface_addr:
             return
         current_offset = self._addr_to_offset(start_interface_addr)
-        while 0 <= current_offset + self._ptr_size <= len(self._binary):
+        for _ in range(MAX_INTERFACE_METHOD_SCAN):
+            if not 0 <= current_offset + self._ptr_size <= len(self._binary):
+                break
             method_addr = self._read_ptr(current_offset, self._ptr_size)
             if not method_addr or not self._binary_info.isInCodeAreas(method_addr):
                 break
             function_offsets.add(method_addr)
             current_offset += self._ptr_size
-
-    def _resolve_inheritance(self) -> None:
-        """Mark inherited versus overridden VMT slots using Delphi's single inheritance."""
-        for class_info in self._classes.values():
-            parent = self._classes.get(class_info.parent_vmt_addr)
-            if not parent:
-                continue
-            for index, method_addr in enumerate(class_info.method_slots):
-                if index >= len(parent.method_slots):
-                    break
-                if method_addr == parent.method_slots[index]:
-                    class_info.inherited_slots.append(index)
-                else:
-                    class_info.overridden_slots.append(index)
 
     @property
     def _ptr_size(self) -> int:
@@ -447,37 +406,42 @@ class DelphiPythiaProvider(AbstractLabelProvider):
         if offset < 0 or offset + ptr_size > len(self._binary):
             return None
         if ptr_size == 4:
-            return struct.unpack("<I", self._binary[offset : offset + 4])[0]
-        return struct.unpack("<Q", self._binary[offset : offset + 8])[0]
+            return int(struct.unpack_from("<I", self._binary, offset)[0])
+        return int(struct.unpack_from("<Q", self._binary, offset)[0])
 
     def _read_word(self, offset: int) -> Optional[int]:
         """Read a little-endian 16-bit value from the mapped image."""
         if offset < 0 or offset + 2 > len(self._binary):
             return None
-        return struct.unpack("<H", self._binary[offset : offset + 2])[0]
+        return int(struct.unpack_from("<H", self._binary, offset)[0])
 
-    def _read_pascal_string(self, offset: int) -> str:
+    def _read_pascal_string(self, offset: int, end: Optional[int] = None) -> str:
         """Read a Pascal-style string from the mapped image."""
         if offset < 0 or offset >= len(self._binary):
             return ""
         length = self._binary[offset]
         end_offset = offset + 1 + length
-        if length == 0 or end_offset > len(self._binary):
+        limit = len(self._binary) if end is None else min(end, len(self._binary))
+        if length == 0 or end_offset > limit:
             return ""
-        return self._binary[offset + 1 : end_offset].decode("latin-1", errors="ignore")
+        data = self._binary[offset + 1 : end_offset]
+        try:
+            value = data.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                value = data.decode("cp1252")
+            except UnicodeDecodeError:
+                value = data.decode("latin-1")
+        return value if value.isprintable() else ""
 
     @staticmethod
     def _is_probable_class_name(class_name: str) -> bool:
         """Heuristic rejection for obviously invalid class names."""
         if not class_name or len(class_name) > 255:
             return False
-        if not all(character.isprintable() for character in class_name):
+        if not class_name.isprintable():
             return False
         return any(character.isalpha() for character in class_name)
-
-    def _is_mapped_address(self, address: int) -> bool:
-        """Check whether an address can be resolved into the mapped image."""
-        return self._base_addr <= address < self._base_addr + len(self._binary)
 
     def _offset_to_addr(self, offset: int) -> int:
         """Convert mapped-image offset to absolute address."""
