@@ -18,6 +18,7 @@ works anywhere without atheris.
 | `replay.py` | runs a target over files on disk, no atheris needed |
 | `minimize.py` | delta-debugs a crashing input to a small reproducer |
 | `prune_corpus.py` | bounds the cached corpus by file count and total size |
+| `corpus_coverage.py` | replays a corpus under coverage.py to show which code it reaches |
 
 ## Targets
 
@@ -84,3 +85,42 @@ selector bytes from the front of the input, and the profile prepends them.
 
 The corpus is cached per target in CI, so coverage accumulates across runs
 instead of restarting from the seeds every time.
+
+In CI each target runs one fuzzer process per runner core on a shared corpus
+directory (libFuzzer's `-jobs`/`-fork` cannot be used under atheris, for the
+same reason as `-merge`). Each worker's log is printed in its own group.
+
+## Corpus coverage
+
+libFuzzer's `cov:` figure counts edges but does not say where they are. On the
+weekly and manual runs, the `coverage` jobs replay each target's accumulated
+corpus under coverage.py, and `Corpus coverage summary` combines them into one
+table, least-reached files first, plus an HTML report artifact
+(`fuzz-coverage-html`). A file that stays near 0% is a gap to fill with seeds or
+a target. Locally, without atheris:
+
+```
+python fuzzing/corpus_coverage.py disassembler corpus_disassembler --report report.txt
+```
+
+## Memory errors in capstone
+
+The targets above see a memory error inside capstone only if it happens to crash
+the process. On the weekly and manual runs, `Fuzz with ASan capstone` rebuilds
+capstone with AddressSanitizer and libFuzzer edge counters and runs the `buffer`
+and `disassembler` targets with atheris' `asan_with_fuzzer.so` preloaded, so an
+out-of-bounds access in a decoder is reported where it happens, and coverage
+inside capstone guides the fuzzer as well. lief is not rebuilt: compiling it from
+source takes longer than the fuzzing. These targets manage only a few inputs a
+second under ASan and libFuzzer replays the corpus before mutating, so the job
+starts from the 400 smallest cached inputs plus the floor and seeds rather than
+the whole cache.
+
+A finding from this job reproduces only against the same instrumented build:
+
+```
+CC=clang CFLAGS="-fsanitize=address,fuzzer-no-link -fno-omit-frame-pointer -g -O1" \
+  pip install --force-reinstall --no-deps --no-binary capstone "capstone==<version>"
+LD_PRELOAD="$(python -c 'import atheris; print(atheris.path())')/asan_with_fuzzer.so" \
+ASAN_OPTIONS=detect_leaks=0 python fuzzing/fuzz_buffer.py artifacts/crash-<hash>
+```

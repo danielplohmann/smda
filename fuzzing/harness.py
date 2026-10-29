@@ -5,9 +5,16 @@ what instruments them and hands them to libFuzzer.
 """
 
 import logging
+import os
 import sys
 
 import atheris
+
+# capstone opens its library with RTLD_DEEPBIND when the platform has it, and the
+# sanitizer runtime cannot run a library bound that way; the sanitized job preloads
+# ASan, so there capstone has to fall back to ordinary binding
+if "asan" in os.environ.get("LD_PRELOAD", "") and hasattr(os, "RTLD_DEEPBIND"):
+    del os.RTLD_DEEPBIND
 
 
 def instrumented_target(name):
