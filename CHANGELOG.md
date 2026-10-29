@@ -71,6 +71,22 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Compatibility
+
+## [v5.0.2] - 2026-10-29
+
+### Added
 - **(labels)** `MAX_DELPHI_METADATA_ENTRIES` (default 1,000,000) caps the metadata entries the ReSym provider
   reads per image, so a corrupt or hostile image cannot drive VMT and method-table parsing without bound.
 - **(binja)** Export 32-bit ARM views (`armv7` and `thumb2`) as `arm` reports. Each function is decoded in
@@ -94,10 +110,6 @@ past roughly six lines it belongs in the PR the entry links.
   11.8 s to 3.2 s, about 5% of the whole run, and 25-60% less on three numpy/pydantic-core wheel libraries. Recovered
   functions, blocks, instructions and PIC hashes are identical on all four. *Not bundled; the behaviour is covered by
   `testAArch64GapScanExecSkip`.*
-
-### Deprecated
-
-### Removed
 
 ### Fixed
 - **(common)** Read successors in `Tarjan.closure()` with `graph.get(v, ())`, as `calculateScc()` already does.
@@ -125,8 +137,6 @@ past roughly six lines it belongs in the PR the entry links.
   Float-suffixed NEON instructions using `q` registers now classify as vector (`V`); scalar VFP stays float (`F`).
   This changes ARM escaped-block signatures, so stored ones need recomputing; recovery and PIC/opcode hashes are
   unchanged. Covered by `testArmDisassembler` and the fingerprint corpus's new ARM cases.
-
-### Security
 
 ### Compatibility
 - **(labels)** Delphi names gain correct unit/class qualification and validated signatures.
@@ -1095,7 +1105,8 @@ the very bottom predate versioned releases entirely.
  * 2018-11-26: Better handling of multibyte NOPs, ELF loader now provides base addr.
  * 2018-09-28: We now have functional PE/ELF loaders.
 
-[Unreleased]: https://github.com/danielplohmann/smda/compare/v5.0.1...HEAD
+[Unreleased]: https://github.com/danielplohmann/smda/compare/v5.0.2...HEAD
+[v5.0.2]: https://github.com/danielplohmann/smda/compare/v5.0.1...v5.0.2
 [v5.0.1]: https://github.com/danielplohmann/smda/compare/v5.0.0...v5.0.1
 [v5.0.0]: https://github.com/danielplohmann/smda/compare/v4.11.0...v5.0.0
 [v4.11.0]: https://github.com/danielplohmann/smda/compare/v4.10.0...v4.11.0
