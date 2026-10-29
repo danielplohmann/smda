@@ -4,11 +4,14 @@ It runs in a subprocess because it starts its own coverage.py measurement, which
 would collide with pytest-cov's tracer in this process.
 """
 
+import ast
+import inspect
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -45,8 +48,10 @@ class TestCorpusCoverage(unittest.TestCase):
             measured = {Path(f).name for f in data.measured_files()}
             self.assertIn("SmdaReport.py", measured)
             report_file = next(f for f in data.measured_files() if Path(f).name == "SmdaReport.py")
-            entry = -SmdaReport.fromDict.__func__.__code__.co_firstlineno
-            self.assertTrue(any(start == entry for start, _ in data.arcs(report_file)), "fromDict was never invoked")
+            source, start = inspect.getsourcelines(SmdaReport.fromDict)
+            function = ast.parse(textwrap.dedent("".join(source))).body[0]
+            body = function.body[1:] if ast.get_docstring(function) is not None else function.body
+            self.assertIn(start + body[0].lineno - 1, data.lines(report_file), "fromDict body was never executed")
 
     def test_unknown_target_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
