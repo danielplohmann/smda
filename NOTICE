@@ -63,3 +63,14 @@ Lengauer-Tarjan dominator tree
 --------------------------------------------------------------------------------
 src/smda/common/DominatorTree.py is based on the implementation by Armin Rigo
 (https://bitbucket.org/arigo/arigo/src/default/hack/pypy-hack/heapstats/dominator.py).
+
+================================================================================
+Delphi test fixtures
+--------------------------------------------------------------------------------
+tests/delphi_corpus/ holds sparse, modified metadata and code excerpts from the
+official Inno Setup 7.1.0 installers, used only to test the Delphi label
+providers. Inno Setup is Copyright (C) 1997-2026 Jordan Russell, portions
+Copyright (C) 2000-2026 Martijn Laan; its license is in
+tests/delphi_corpus/INNO-LICENSE.txt. The TObject VMT, the System unit RTTI and
+the _HandleFinally sequence in these excerpts are Delphi run-time library code
+compiled into Inno Setup, Copyright (C) Embarcadero Technologies, Inc.

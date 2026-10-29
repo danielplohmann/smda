@@ -13,6 +13,8 @@ https://github.com/jrsoftware/issrc/blob/is-7_1_0/README.md
 Original software: Copyright (C) 1997–2026 Jordan Russell; portions Copyright (C) 2000–2026
 Martijn Laan. https://jrsoftware.org/ . See [INNO-LICENSE.txt](INNO-LICENSE.txt).
 The SMDA project did not write the original software. The excerpts are modified for parser testing.
+The TObject VMT, the System unit RTTI and the `_HandleFinally` sequence are Delphi run-time library code
+compiled into Inno Setup rather than Inno Setup's own: Copyright (C) Embarcadero Technologies, Inc.
 
 `testDelphiReSymProvider.py` reconstructs these images and verifies the entire recovered symbol map.
 Additional generated layouts cover published entries preceding extended RTTI, metadata outside code,
