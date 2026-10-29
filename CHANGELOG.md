@@ -73,6 +73,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Added
 
 ### Changed
+- **(aarch64)** Jump the gap scan over non-executable sections instead of stepping through them a word at a time.
+  `nextGapCandidate` now bisects into the sorted, merged executable section ranges and resumes at the next one, as
+  the ARM backend already does. *Measured on `04652e6`:* gap scan time on a 50 MB Go ELF (gh 2.62.0 linux/arm64)
+  11.8 s to 3.2 s, about 5% of the whole run, and 25-60% less on three numpy/pydantic-core wheel libraries. Recovered
+  functions, blocks, instructions and PIC hashes are identical on all four. *Not bundled; the behaviour is covered by
+  `testAArch64GapScanExecSkip`.*
 
 ### Deprecated
 

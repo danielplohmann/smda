@@ -30,14 +30,13 @@ LOGGER_NAME = "smda.aarch64.FunctionCandidateManager"
 #: The declared `.pdata` extent, the LSDA landing pad, the BTI interior pad, the trap word
 #: and the code filter are reachable in the loop but not on an ELF the size of this one.
 #:
-#: The sweep over bytes outside every executable section is deliberately not logged. It
-#: refuses no candidate -- it steps over what is not code at all -- it has no intel
-#: counterpart, and on this fixture alone it would emit 156,758 identical lines, which is
-#: 91% of everything the loop would say.
+#: The jump over bytes outside every executable section is deliberately not logged. It
+#: refuses no candidate -- it steps over what is not code at all -- and it has no intel
+#: counterpart. Every data map entry of this fixture sits outside `.text`, so that jump
+#: also steps over all of them, and the data map refusal is driven directly below.
 EXPECTED = (
     "nextGapCandidate() found padding word - gap_ptr += %d: 0x%08x",
     "nextGapCandidate() gap_ptr is already inside code map: 0x%08x",
-    "nextGapCandidate() gap_ptr is already inside data map: 0x%08x",
     "nextGapCandidate() gap_ptr is inside a declared FDE range: 0x%08x",
     "nextGapCandidate() gap run flows into the interior of a mapped function: 0x%08x",
     "nextGapCandidate() using 0x%08x as candidate",
@@ -108,11 +107,13 @@ AARCH64_NOP = b"\x1f\x20\x03\xd5"
 FRAME_PROLOGUE = b"\xfd\x7b\xbf\xa9"
 
 
-class AArch64GapScanRepeatedPointerLoggingTest(unittest.TestCase):
-    """The branch that meets a gap pointer the scan already handed out once.
+class AArch64GapScanDirectLoggingTest(unittest.TestCase):
+    """The branches no bundled fixture reaches, driven directly.
 
-    No bundled fixture reaches it: it needs the caller to ask again from the same address
-    rather than from where the previous candidate ended, so it is driven directly.
+    A gap pointer the scan already handed out once needs the caller to ask again from the
+    same address rather than from where the previous candidate ended. A data map entry
+    inside an executable section needs data the analysis found in `.text`, which the
+    static fixture has none of.
     """
 
     def setUp(self):
@@ -149,6 +150,20 @@ class AArch64GapScanRepeatedPointerLoggingTest(unittest.TestCase):
             "--- HRM, nextGapCandidate() gap_ptr at: 0x%08x was previously analyzed",
             {record.msg for record in captured.records},
         )
+
+    def testADataAddressInsideCodeIsRecorded(self):
+        manager = self.manager()
+        manager.disassembly.data_map.add(BASE)
+        with self.assertLogs(LOGGER_NAME, level=logging.DEBUG) as captured:
+            candidate = manager.nextGapCandidate(BASE)
+        # control: the scan stepped past the data word and went on to the prologue
+        self.assertEqual(candidate, BASE + PADDING_WORDS * INSTRUCTION_SIZE)
+        refused = [
+            record.args[-1]
+            for record in captured.records
+            if record.msg == "nextGapCandidate() gap_ptr is already inside data map: 0x%08x"
+        ]
+        self.assertEqual(refused, [BASE])
 
 
 if __name__ == "__main__":
