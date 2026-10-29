@@ -7,6 +7,12 @@ from smda.export.segment_mapping import assembleSegmentBuffer
 _SYNTHETIC_SECTIONS = {".extern", ".synthetic_builtins"}
 _IMPORT_SYMBOL_TYPES = {"ImportAddressSymbol", "ImportedFunctionSymbol"}
 _DEFAULT_NAME = re.compile("(j_)?sub_[0-9a-fA-F]+$")
+# little-endian only: smda.export.Exporter decodes 32-bit ARM with little-endian Capstone
+_ARM_ARCHITECTURES = {"armv7", "thumb2"}
+
+
+def _hasInvalidInstructions(function):
+    return any(block.has_invalid_instructions for block in function.basic_blocks)
 
 
 class BinjaInterface(BackendInterface):
@@ -15,9 +21,11 @@ class BinjaInterface(BackendInterface):
     def __init__(self, bv):
         super().__init__()
         self.bv = bv
+        self._functions = None
         self._code_refs = None
         self._block_addresses = {}
         self._instruction_bytes = {}
+        self._uncached_archs = {}
 
     def getArchitecture(self):
         name = self.bv.arch.name
@@ -25,13 +33,26 @@ class BinjaInterface(BackendInterface):
             return "intel"
         if name == "aarch64":
             return "aarch64"
+        if name in _ARM_ARCHITECTURES:
+            return "arm"
         raise ValueError(f"Unsupported Architecture: {name}")
 
     def getBitness(self):
         return self.bv.arch.address_size * 8
 
+    def _functionMap(self):
+        if self._functions is None:
+            self._functions = {}
+            for function in self.bv.functions:
+                # Binary Ninja can define both an A32 and a T32 function at one start; the wrong
+                # instruction set shows as invalid instructions
+                chosen = self._functions.get(function.start)
+                if chosen is None or (_hasInvalidInstructions(chosen) and not _hasInvalidInstructions(function)):
+                    self._functions[function.start] = function
+        return self._functions
+
     def getFunctions(self):
-        return sorted(function.start for function in self.bv.functions)
+        return sorted(self._functionMap())
 
     def _instructionAddresses(self, block):
         key = (block.start, block.end)
@@ -49,22 +70,26 @@ class BinjaInterface(BackendInterface):
                 instruction = data[address - block.start : address - block.start + length]
                 if len(instruction) == length:
                     self._instruction_bytes[address] = instruction
+                else:
+                    self._uncached_archs[address] = arch
                 address += length
             self._block_addresses[key] = addresses
         return addresses
 
     def getBlocks(self, function_offset):
-        function = self.bv.get_function_at(function_offset)
+        function = self._functionMap().get(function_offset)
         if function is None:
             return []
-        blocks = [self._instructionAddresses(block) for block in function.basic_blocks]
+        # Binary Ninja keeps a T32 function's branch into an A32 PLT entry inside that function, but
+        # SMDA decodes a function in one instruction set, so blocks in the other one are left out
+        blocks = [self._instructionAddresses(block) for block in function.basic_blocks if block.arch == function.arch]
         return sorted(block for block in blocks if block)
 
     def getInstructionBytes(self, offset):
         cached = self._instruction_bytes.get(offset)
         if cached is not None:
             return cached
-        length = self.bv.get_instruction_length(offset)
+        length = self.bv.get_instruction_length(offset, self._uncached_archs.get(offset))
         return self.bv.read(offset, length) if length else b""
 
     def _codeRefs(self):
@@ -76,7 +101,7 @@ class BinjaInterface(BackendInterface):
         # IDA's flow xrefs include fall-through; Binary Ninja's get_code_refs_from also returns data
         # refs, so edges come from block successors and call targets instead.
         refs_from = {}
-        for function in self.bv.functions:
+        for function in self._functionMap().values():
             call_sites = {reference.address for reference in function.call_sites}
             for block in function.basic_blocks:
                 addresses = self._instructionAddresses(block)
@@ -156,18 +181,33 @@ class BinjaInterface(BackendInterface):
             api_map[symbol.address] = name
         return api_map
 
+    def isThumb(self, offset):
+        function = self._functionMap().get(offset)
+        return function is not None and function.arch.name == "thumb2"
+
+    def _platformAt(self, offset, thumb=False):
+        """(platform, address) of code at *offset*, T32 when *thumb* or the ARM interworking low bit is set."""
+        if self.bv.arch.name not in _ARM_ARCHITECTURES:
+            return None, offset
+        return self.bv.platform.get_associated_platform_by_address(offset | 1 if thumb else offset)
+
     def getFilePath(self):
         return self.bv.file.filename or self.bv.file.original_filename
 
-    def makeFunction(self, offset):
+    def makeFunction(self, offset, thumb=False):
+        # without a platform, Binary Ninja creates an A32 function even at an odd address
+        platform, offset = self._platformAt(offset, thumb)
         if self.bv.get_function_at(offset) is not None:
             return False
+        self._functions = None
         self._code_refs = None
         self._block_addresses.clear()
         self._instruction_bytes.clear()
-        return self.bv.create_user_function(offset) is not None
+        self._uncached_archs.clear()
+        return self.bv.create_user_function(offset, platform) is not None
 
     def makeName(self, offset, name):
+        _, offset = self._platformAt(offset)
         function = self.bv.get_function_at(offset)
         if function is not None and not _DEFAULT_NAME.match(function.name):
             return False

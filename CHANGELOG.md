@@ -71,6 +71,14 @@ past roughly six lines it belongs in the PR the entry links.
 ## [Unreleased]
 
 ### Added
+- **(binja)** Export 32-bit ARM views (`armv7` and `thumb2`) as `arm` reports. Each function is decoded in
+  its own instruction set and carries `thumb` metadata like the file-based backend; a T32 function's blocks in A32
+  (PLT veneers) are left out, a start Binary Ninja defined in both sets keeps the one without invalid instructions,
+  and `binja_analyze.py` creates T32 functions as T32. *Measured on `04652e66` with Binary Ninja 6.0.10905 on the
+  bundled `arm_lz4_mixed_O2`, `arm_lz4_thumb_Os`, `armnt_lz4_dll` and `mirai_arm`:* 479 of 491 ground-truth starts
+  exported, all in their ground-truth instruction set. Cost: five instructions Capstone cannot decode (four
+  `udf #0xf9` in the ARMNT DLL, one in a function Binary Ninja placed over PLT padding). Big-endian ARM stays
+  unsupported.
 
 ### Changed
 

@@ -10,10 +10,11 @@ from smda.SmdaConfig import SmdaConfig
 
 
 class _FakeBlock:
-    def __init__(self, start, lengths, successors=()):
+    def __init__(self, start, lengths, successors=(), arch="block-arch", invalid=False):
         self.start = start
         self.end = start + sum(lengths)
-        self.arch = "block-arch"
+        self.arch = arch
+        self.has_invalid_instructions = invalid
         self.outgoing_edges = [SimpleNamespace(target=SimpleNamespace(start=target)) for target in successors]
 
     def __iter__(self):
@@ -21,8 +22,9 @@ class _FakeBlock:
 
 
 class _FakeFunction:
-    def __init__(self, start, name, blocks, call_sites=()):
+    def __init__(self, start, name, blocks, call_sites=(), arch="block-arch"):
         self.start = start
+        self.arch = arch
         self.name = name
         self.symbol = SimpleNamespace(raw_name=name)
         self.basic_blocks = blocks
@@ -103,8 +105,11 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.assertEqual(self.interface.getArchitecture(), "intel")
         self.assertEqual(self.interface.getBitness(), 64)
         self.assertEqual(BinjaInterface(_FakeBinaryView("aarch64")).getArchitecture(), "aarch64")
-        with self.assertRaises(ValueError):
-            BinjaInterface(_FakeBinaryView("mips32")).getArchitecture()
+        self.assertEqual(BinjaInterface(_FakeBinaryView("armv7")).getArchitecture(), "arm")
+        self.assertEqual(BinjaInterface(_FakeBinaryView("thumb2")).getArchitecture(), "arm")
+        for unsupported in ("mips32", "armv7eb", "thumb2eb"):
+            with self.assertRaises(ValueError):
+                BinjaInterface(_FakeBinaryView(unsupported)).getArchitecture()
 
     def test_functions_and_blocks(self):
         self.assertEqual(self.interface.getFunctions(), [0x401000, 0x40100A])
@@ -132,12 +137,12 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.bv.CODE = {**self.bv.CODE, 0x40100D: b""}
         self.assertEqual(self.interface.getBlocks(0x40100A), [[0x40100A, 0x40100C]])
 
-    def test_instruction_crossing_the_block_end_is_listed_and_read_with_the_default_architecture(self):
+    def test_instruction_crossing_the_block_end_is_listed_and_read_with_the_block_architecture(self):
         self.bv.functions[0].basic_blocks = [_FakeBlock(0x401000, [3])]
         self.assertEqual(self.interface.getBlocks(0x401000), [[0x401000]])
         self.bv.length_queries.clear()
         self.assertEqual(self.interface.getInstructionBytes(0x401000), bytes.fromhex("e805000000"))
-        self.assertEqual(self.bv.length_queries, [(0x401000, None)])
+        self.assertEqual(self.bv.length_queries, [(0x401000, "block-arch")])
 
     def test_short_block_read_leaves_instructions_uncached(self):
         read = self.bv.read
@@ -147,10 +152,10 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.bv.length_queries.clear()
         self.assertEqual(self.interface.getInstructionBytes(0x401000), bytes.fromhex("e805000000"))
         self.assertEqual(self.interface.getInstructionBytes(0x401005), b"\xc3")
-        self.assertEqual(self.bv.length_queries, [(0x401000, None), (0x401005, None)])
+        self.assertEqual(self.bv.length_queries, [(0x401000, "block-arch"), (0x401005, "block-arch")])
 
     def test_make_function_drops_decoded_blocks(self):
-        self.bv.create_user_function = lambda offset: object()
+        self.bv.create_user_function = lambda offset, platform: object()
         self.interface.getBlocks(0x40100A)
         self.bv.CODE = {**self.bv.CODE, 0x40100A: b"\x90", 0x40100B: b"\x31\xc0"}
         self.assertEqual(self.interface.getBlocks(0x40100A), [[0x40100A, 0x40100C]])
@@ -237,6 +242,102 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.assertTrue(self.interface.isExternalFunction(0x401000))
 
 
+A32 = SimpleNamespace(name="armv7")
+T32 = SimpleNamespace(name="thumb2")
+
+
+class _FakeArmBinaryView(_FakeBinaryView):
+    """ARM image at 0x10000: arm_main() (A32) calls thumb_helper() (T32), which branches into an A32
+    PLT entry, and Binary Ninja also defined an A32 function over thumb_helper's start."""
+
+    CODE = {
+        0x10000: bytes.fromhex("0100a0e3"),  # mov r0, #1
+        0x10004: bytes.fromhex("1eff2fe1"),  # bx lr
+        0x10010: bytes.fromhex("0120"),  # movs r0, #1
+        0x10012: bytes.fromhex("7047"),  # bx lr
+        0x10020: bytes.fromhex("1eff2fe1"),  # bx lr
+    }
+
+    def __init__(self):
+        super().__init__("armv7")
+        self.arch.address_size = 4
+        self.platform = mock.Mock()
+        self.platform.get_associated_platform_by_address.side_effect = lambda address: (
+            "thumb2-platform" if address & 1 else "armv7-platform",
+            address & ~1,
+        )
+        self.functions = [
+            _FakeFunction(0x10000, "arm_main", [_FakeBlock(0x10000, [4, 4], arch=A32)], call_sites=[0x10000], arch=A32),
+            _FakeFunction(0x10010, "sub_10010", [_FakeBlock(0x10010, [4], arch=A32, invalid=True)], arch=A32),
+            _FakeFunction(
+                0x10010,
+                "thumb_helper",
+                [_FakeBlock(0x10010, [2, 2], successors=[0x10020], arch=T32), _FakeBlock(0x10020, [4], arch=A32)],
+                arch=T32,
+            ),
+        ]
+        self.segments = [SimpleNamespace(start=0x10000, end=0x10024, data_length=0x24)]
+
+    def get_instruction_length(self, offset, arch=None):
+        self.length_queries.append((offset, arch))
+        return 4 if arch is A32 else len(self.CODE.get(offset, b""))
+
+    def read(self, offset, length):
+        image = bytearray(0x24)
+        for address, code in self.CODE.items():
+            image[address - 0x10000 : address - 0x10000 + len(code)] = code
+        return bytes(image[offset - 0x10000 : offset - 0x10000 + length]).ljust(length, b"\x00")
+
+    def get_callees(self, address, func=None):
+        return [0x10010] if address == 0x10000 else []
+
+    def get_symbols(self):
+        return []
+
+
+class BinjaInterfaceArmTest(unittest.TestCase):
+    def setUp(self):
+        self.bv = _FakeArmBinaryView()
+        self.interface = BinjaInterface(self.bv)
+
+    def test_architecture_and_bitness(self):
+        self.assertEqual(self.interface.getArchitecture(), "arm")
+        self.assertEqual(self.interface.getBitness(), 32)
+
+    def test_a_start_defined_in_both_instruction_sets_is_the_valid_one(self):
+        self.assertEqual(self.interface.getFunctions(), [0x10000, 0x10010])
+        self.assertFalse(self.interface.isThumb(0x10000))
+        self.assertTrue(self.interface.isThumb(0x10010))
+        self.assertFalse(self.interface.isThumb(0x10030))
+
+    def test_blocks_in_the_other_instruction_set_are_left_out(self):
+        self.assertEqual(self.interface.getBlocks(0x10010), [[0x10010, 0x10012]])
+        self.assertEqual(self.interface.getInstructionBytes(0x10012), bytes.fromhex("7047"))
+        self.assertEqual(self.interface.getCodeOutRefs(0x10012), [(0x10012, 0x10020)])
+
+    def test_make_function_picks_the_instruction_set(self):
+        self.bv.create_user_function = mock.Mock(return_value=object())
+        self.assertTrue(self.interface.makeFunction(0x10040, thumb=True))
+        self.assertTrue(self.interface.makeFunction(0x10051))
+        self.assertTrue(self.interface.makeFunction(0x10060))
+        self.assertFalse(self.interface.makeFunction(0x10011))
+        self.bv.create_user_function.assert_has_calls(
+            [
+                mock.call(0x10040, "thumb2-platform"),
+                mock.call(0x10050, "thumb2-platform"),
+                mock.call(0x10060, "armv7-platform"),
+            ]
+        )
+        self.assertEqual(self.bv.create_user_function.call_count, 3)
+
+    def test_make_name_drops_the_thumb_bit(self):
+        self.bv.define_user_symbol = mock.Mock()
+        symbol = mock.Mock(return_value="symbol")
+        with mock.patch.dict(sys.modules, {"binaryninja": types.SimpleNamespace(Symbol=symbol)}):
+            self.assertTrue(self.interface.makeName(0x10041, "helper"))
+        symbol.assert_called_once_with("FunctionSymbol", 0x10040, "helper")
+
+
 class BinjaInterfaceWriteTest(unittest.TestCase):
     def setUp(self):
         self.bv = _FakeBinaryView()
@@ -254,7 +355,7 @@ class BinjaInterfaceWriteTest(unittest.TestCase):
         self.bv.create_user_function.assert_not_called()
         self.interface.getCodeOutRefs(0x401000)
         self.assertTrue(self.interface.makeFunction(0x401020))
-        self.bv.create_user_function.assert_called_once_with(0x401020)
+        self.bv.create_user_function.assert_called_once_with(0x401020, None)
         self.assertIsNone(self.interface._code_refs)
         self.bv.create_user_function.return_value = None
         self.assertFalse(self.interface.makeFunction(0x401030))
