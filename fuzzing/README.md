@@ -102,3 +102,25 @@ a target. Locally, without atheris:
 ```
 python fuzzing/corpus_coverage.py disassembler corpus_disassembler --report report.txt
 ```
+
+## Memory errors in capstone
+
+The targets above see a memory error inside capstone only if it happens to crash
+the process. On the weekly and manual runs, `Fuzz with ASan capstone` rebuilds
+capstone with AddressSanitizer and libFuzzer edge counters and runs the `buffer`
+and `disassembler` targets with atheris' `asan_with_fuzzer.so` preloaded, so an
+out-of-bounds access in a decoder is reported where it happens, and coverage
+inside capstone guides the fuzzer as well. lief is not rebuilt: compiling it from
+source takes longer than the fuzzing. These targets manage only a few inputs a
+second under ASan and libFuzzer replays the corpus before mutating, so the job
+starts from the 400 smallest cached inputs plus the floor and seeds rather than
+the whole cache.
+
+A finding from this job reproduces only against the same instrumented build:
+
+```
+CC=clang CFLAGS="-fsanitize=address,fuzzer-no-link -fno-omit-frame-pointer -g -O1" \
+  pip install --force-reinstall --no-deps --no-binary capstone "capstone==<version>"
+LD_PRELOAD="$(python -c 'import atheris; print(atheris.path())')/asan_with_fuzzer.so" \
+ASAN_OPTIONS=detect_leaks=0 python fuzzing/fuzz_buffer.py artifacts/crash-<hash>
+```
