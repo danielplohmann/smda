@@ -94,3 +94,36 @@ def test_real_inno_cleanup_dispatch():
         d, (fixture["jump"], 2, "jmp", "eax"), SimpleNamespace(current_block=block)
     )
     assert target == fixture["continuation"]
+
+
+@pytest.mark.parametrize("mutation", ["9c", "669c", "9d", "669d", "60", "6660", "61", "6661", "6683c402"])
+def test_rejects_implicit_and_partial_stack_pointer_changes(mutation):
+    import struct
+
+    body = bytes.fromhex(mutation)
+    dispatch = BASE + 5 + len(body)
+    continuation = dispatch + 10
+    code = (
+        b"\x68"
+        + struct.pack("<I", continuation)
+        + body
+        + b"\x58\xff\xe0\xe9"
+        + struct.pack("<i", BASE + 0x100 - (dispatch + 8))
+        + b"\xeb"
+        + struct.pack("b", BASE + 5 - continuation)
+        + b"\xc3"
+    )
+    block = list(X86Backend().createCapstone(32).disasm_lite(code[: dispatch - BASE + 1], BASE))
+    d = SimpleNamespace(
+        fc_manager=SimpleNamespace(_delphi_detected=True),
+        disassembly=SimpleNamespace(
+            binary_info=SimpleNamespace(bitness=32, isInCodeAreas=lambda addr: BASE <= addr < BASE + 0x200),
+            getBytes=lambda addr, size: code[addr - BASE : addr - BASE + size],
+        ),
+    )
+    assert (
+        X86Backend._resolveDelphiFinallyContinuation(
+            d, (dispatch + 1, 2, "jmp", "eax"), SimpleNamespace(current_block=block)
+        )
+        is None
+    )

@@ -586,7 +586,12 @@ class X86Backend(ArchBackend):
         for index in range(len(block) - 2, -1, -1):
             previous = block[index]
             if previous[0] >= cleanup:
-                if previous[2] in ("push", "pop", "enter", "leave") or "esp" in previous[3]:
+                mnemonic = previous[2].rpartition(" ")[2]
+                if (
+                    mnemonic.startswith(("push", "pop"))
+                    or mnemonic in ("enter", "leave")
+                    or re.search(r"\b(?:esp|sp)\b", previous[3])
+                ):
                     return None
                 continue
             if previous[0] + previous[1] != cleanup:

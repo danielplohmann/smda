@@ -151,7 +151,7 @@ Ghidra's process exit status as proof that a script succeeded. The upstream READ
 asks users to run its mutating script twice; this audit's extraction comparison
 requires no second mutation pass.
 
-Machine-readable counts and disagreement examples are in [results.json](results.json).
+The audit CLI writes machine-readable measurements to the directory passed with `--output`.
 Function-count differences are **not** automatically false positives or negatives.
 For example, the supplied sample's compressed switch tables contain real cases
 missing from Ghidra's recovered bodies; conversely, Ghidra exposed the constructor
