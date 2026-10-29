@@ -34,7 +34,7 @@ def mapImage(data):
         content = bytes(segment.content)
         image[segment.virtual_address : segment.virtual_address + len(content)] = content
     dynamic = next(segment for segment in binary.segments if segment.type == lief.ELF.Segment.TYPE.DYNAMIC)
-    return bytes(image), dynamic
+    return bytes(image), (dynamic.virtual_address, dynamic.physical_size)
 
 
 def disassemble(data, as_buffer):
@@ -72,11 +72,10 @@ class ElfMappedBufferTestSuite(unittest.TestCase):
         self.assertIsNone(ElfFileLoader.unmapImage(data, lief.ELF.parse(list(data))))
 
     def testCorruptDynamicTableDegrades(self):
-        image, dynamic = mapImage(loadFixture(EXPORTS_FIXTURE))
-        start = dynamic.virtual_address
+        image, (start, size) = mapImage(loadFixture(EXPORTS_FIXTURE))
         variants = {
-            "no DT_NULL": image[:start] + b"\x41" * dynamic.physical_size + image[start + dynamic.physical_size :],
-            "zeroed": image[:start] + bytes(dynamic.physical_size) + image[start + dynamic.physical_size :],
+            "no DT_NULL": image[:start] + b"\x41" * size + image[start + size :],
+            "zeroed": image[:start] + bytes(size) + image[start + size :],
             "truncated": image[: start + 8],
             "truncated before": image[:start],
         }
