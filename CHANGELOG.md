@@ -79,6 +79,9 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(common)** Read successors in `Tarjan.closure()` with `graph.get(v, ())`, as `calculateScc()` already does.
+  A vertex that only appears as a successor raised `KeyError`. Nothing in SMDA calls `closure()`, so no report
+  output changes. (#414)
 
 ### Security
 
