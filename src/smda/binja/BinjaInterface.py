@@ -25,7 +25,9 @@ class BinjaInterface(BackendInterface):
         self._code_refs = None
         self._block_addresses = {}
         self._instruction_bytes = {}
-        self._uncached_archs = {}
+        # an address can hold both an A32 and a T32 instruction; the Exporter reads a function's
+        # instruction bytes right after its getBlocks, so they resolve in that function's architecture
+        self._current_arch = None
 
     def getArchitecture(self):
         name = self.bv.arch.name
@@ -55,11 +57,11 @@ class BinjaInterface(BackendInterface):
         return sorted(self._functionMap())
 
     def _instructionAddresses(self, block):
-        key = (block.start, block.end)
+        arch = block.arch
+        key = (block.start, block.end, arch)
         addresses = self._block_addresses.get(key)
         if addresses is None:
             addresses = []
-            arch = block.arch
             data = self.bv.read(block.start, block.end - block.start)
             address = block.start
             while address < block.end:
@@ -69,15 +71,14 @@ class BinjaInterface(BackendInterface):
                 addresses.append(address)
                 instruction = data[address - block.start : address - block.start + length]
                 if len(instruction) == length:
-                    self._instruction_bytes[address] = instruction
-                else:
-                    self._uncached_archs[address] = arch
+                    self._instruction_bytes[(address, arch)] = instruction
                 address += length
             self._block_addresses[key] = addresses
         return addresses
 
     def getBlocks(self, function_offset):
         function = self._functionMap().get(function_offset)
+        self._current_arch = function.arch if function is not None else None
         if function is None:
             return []
         # Binary Ninja keeps a T32 function's branch into an A32 PLT entry inside that function, but
@@ -86,10 +87,10 @@ class BinjaInterface(BackendInterface):
         return sorted(block for block in blocks if block)
 
     def getInstructionBytes(self, offset):
-        cached = self._instruction_bytes.get(offset)
+        cached = self._instruction_bytes.get((offset, self._current_arch))
         if cached is not None:
             return cached
-        length = self.bv.get_instruction_length(offset, self._uncached_archs.get(offset))
+        length = self.bv.get_instruction_length(offset, self._current_arch)
         return self.bv.read(offset, length) if length else b""
 
     def _codeRefs(self):
@@ -197,13 +198,12 @@ class BinjaInterface(BackendInterface):
     def makeFunction(self, offset, thumb=False):
         # without a platform, Binary Ninja creates an A32 function even at an odd address
         platform, offset = self._platformAt(offset, thumb)
-        if self.bv.get_function_at(offset) is not None:
+        if self.bv.get_function_at(offset, platform) is not None:
             return False
         self._functions = None
         self._code_refs = None
         self._block_addresses.clear()
         self._instruction_bytes.clear()
-        self._uncached_archs.clear()
         return self.bv.create_user_function(offset, platform) is not None
 
     def makeName(self, offset, name):

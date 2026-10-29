@@ -55,7 +55,7 @@ class _FakeBinaryView:
         self.calls = 0
         self.length_queries = []
 
-    def get_function_at(self, offset):
+    def get_function_at(self, offset, plat=None):
         return next((function for function in self.functions if function.start == offset), None)
 
     def get_instruction_length(self, offset, arch=None):
@@ -242,21 +242,22 @@ class BinjaInterfaceTest(unittest.TestCase):
         self.assertTrue(self.interface.isExternalFunction(0x401000))
 
 
-A32 = SimpleNamespace(name="armv7")
-T32 = SimpleNamespace(name="thumb2")
+class _FakeArch:
+    def __init__(self, name):
+        self.name = name
+
+
+A32 = _FakeArch("armv7")
+T32 = _FakeArch("thumb2")
 
 
 class _FakeArmBinaryView(_FakeBinaryView):
     """ARM image at 0x10000: arm_main() (A32) calls thumb_helper() (T32), which branches into an A32
     PLT entry, and Binary Ninja also defined an A32 function over thumb_helper's start."""
 
-    CODE = {
-        0x10000: bytes.fromhex("0100a0e3"),  # mov r0, #1
-        0x10004: bytes.fromhex("1eff2fe1"),  # bx lr
-        0x10010: bytes.fromhex("0120"),  # movs r0, #1
-        0x10012: bytes.fromhex("7047"),  # bx lr
-        0x10020: bytes.fromhex("1eff2fe1"),  # bx lr
-    }
+    # A32 mov r0, #1; bx lr | T32 movs r0, #1; bx lr | A32 bx lr
+    IMAGE = bytes.fromhex("0100a0e3 1eff2fe1" + "00" * 8 + "0120 7047" + "00" * 12 + "1eff2fe1")
+    T32_LENGTHS = {0x10010: 2, 0x10012: 2}
 
     def __init__(self):
         super().__init__("armv7")
@@ -276,17 +277,24 @@ class _FakeArmBinaryView(_FakeBinaryView):
                 arch=T32,
             ),
         ]
-        self.segments = [SimpleNamespace(start=0x10000, end=0x10024, data_length=0x24)]
+        self.segments = [SimpleNamespace(start=0x10000, end=0x10000 + len(self.IMAGE), data_length=len(self.IMAGE))]
+
+    def get_function_at(self, offset, plat=None):
+        return next(
+            (
+                function
+                for function in self.functions
+                if function.start == offset and plat in (None, f"{function.arch.name}-platform")
+            ),
+            None,
+        )
 
     def get_instruction_length(self, offset, arch=None):
         self.length_queries.append((offset, arch))
-        return 4 if arch is A32 else len(self.CODE.get(offset, b""))
+        return 4 if arch is A32 else self.T32_LENGTHS.get(offset, 0)
 
     def read(self, offset, length):
-        image = bytearray(0x24)
-        for address, code in self.CODE.items():
-            image[address - 0x10000 : address - 0x10000 + len(code)] = code
-        return bytes(image[offset - 0x10000 : offset - 0x10000 + length]).ljust(length, b"\x00")
+        return self.IMAGE[offset - 0x10000 : offset - 0x10000 + length].ljust(length, b"\x00")
 
     def get_callees(self, address, func=None):
         return [0x10010] if address == 0x10000 else []
@@ -321,6 +329,7 @@ class BinjaInterfaceArmTest(unittest.TestCase):
         self.assertTrue(self.interface.makeFunction(0x10051))
         self.assertTrue(self.interface.makeFunction(0x10060))
         self.assertFalse(self.interface.makeFunction(0x10011))
+        self.assertFalse(self.interface.makeFunction(0x10000))
         self.bv.create_user_function.assert_has_calls(
             [
                 mock.call(0x10040, "thumb2-platform"),
@@ -329,6 +338,11 @@ class BinjaInterfaceArmTest(unittest.TestCase):
             ]
         )
         self.assertEqual(self.bv.create_user_function.call_count, 3)
+
+    def test_make_function_adds_the_other_instruction_set_at_a_start(self):
+        self.bv.create_user_function = mock.Mock(return_value=object())
+        self.assertTrue(self.interface.makeFunction(0x10000, thumb=True))
+        self.bv.create_user_function.assert_called_once_with(0x10000, "thumb2-platform")
 
     def test_make_name_drops_the_thumb_bit(self):
         self.bv.define_user_symbol = mock.Mock()
