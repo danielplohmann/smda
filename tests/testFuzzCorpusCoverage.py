@@ -14,6 +14,8 @@ from pathlib import Path
 
 import coverage
 
+from smda.common.SmdaReport import SmdaReport
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "fuzzing" / "corpus_coverage.py"
 
@@ -42,6 +44,9 @@ class TestCorpusCoverage(unittest.TestCase):
             data.read()
             measured = {Path(f).name for f in data.measured_files()}
             self.assertIn("SmdaReport.py", measured)
+            report_file = next(f for f in data.measured_files() if Path(f).name == "SmdaReport.py")
+            entry = -SmdaReport.fromDict.__func__.__code__.co_firstlineno
+            self.assertTrue(any(start == entry for start, _ in data.arcs(report_file)), "fromDict was never invoked")
 
     def test_unknown_target_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
