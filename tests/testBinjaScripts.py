@@ -12,7 +12,7 @@ import binja_export
 from smda.binja import BinjaExporter
 from smda.binja.BinjaExporter import exportBinaryView
 from smda.binja.BinjaInterface import BinjaInterface
-from tests.testBinjaInterface import A32, T32, _FakeArmBinaryView
+from tests.testBinjaInterface import _FakeArmBinaryView
 
 
 class _FakeBlock:
@@ -133,27 +133,15 @@ class BinjaExporterTest(unittest.TestCase):
         )
         self.assertEqual(arm_main.outrefs, {0x10000: [0x10010]})
 
-    def test_overlapping_a32_and_t32_functions_keep_their_own_bytes(self):
-        bv = _FakeArmBinaryView()
-        # A32 mov r0, r0; vhadd.s8 d18, d0, d1; ... overlapping T32 movs r0, #1; movw r0, #0; bx lr from 0x10004
-        bv.IMAGE = bytes.fromhex("0000a0e1 012040f2 00007047")
-        bv.T32_LENGTHS = {0x10004: 2, 0x10006: 4, 0x1000A: 2}
-        bv.functions = [
-            _FakeFunction(0x10000, "sub_10000", [_FakeBlock(0x10000, [4, 4, 4])]),
-            _FakeFunction(0x10004, "sub_10004", [_FakeBlock(0x10004, [2, 4, 2])]),
-        ]
-        for function, arch in zip(bv.functions, (A32, T32), strict=True):
-            function.arch = function.basic_blocks[0].arch = arch
-        report = exportBinaryView(bv)
+    def test_overlapping_a32_and_t32_functions_export_one_instruction_set(self):
+        report = exportBinaryView(_FakeArmBinaryView().overlap())
         self.assertEqual(report.disassembly_errors, {})
+        self.assertEqual(report.num_functions, 1)
+        function = report.getFunction(0x10000)
         self.assertEqual(
-            [(i.offset, i.mnemonic) for i in report.getFunction(0x10000).getInstructions()][:2],
-            [(0x10000, "mov"), (0x10004, "vhadd.s8")],
+            [(i.offset, i.mnemonic) for i in function.getInstructions()][:2], [(0x10000, "mov"), (0x10004, "vhadd.s8")]
         )
-        self.assertEqual(
-            [(i.offset, i.mnemonic) for i in report.getFunction(0x10004).getInstructions()],
-            [(0x10004, "movs"), (0x10006, "movw"), (0x1000A, "bx")],
-        )
+        self.assertEqual(function.outrefs, {})
 
 
 class BinjaHeadlessTest(unittest.TestCase):

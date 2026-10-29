@@ -44,14 +44,46 @@ class BinjaInterface(BackendInterface):
 
     def _functionMap(self):
         if self._functions is None:
+            functions = list(self.bv.functions)
+            rejected = self._modeOverlapLosers(functions)
             self._functions = {}
-            for function in self.bv.functions:
-                # Binary Ninja can define both an A32 and a T32 function at one start; the wrong
-                # instruction set shows as invalid instructions
-                chosen = self._functions.get(function.start)
-                if chosen is None or (_hasInvalidInstructions(chosen) and not _hasInvalidInstructions(function)):
-                    self._functions[function.start] = function
+            for index, function in enumerate(functions):
+                if index not in rejected:
+                    self._functions.setdefault(function.start, function)
         return self._functions
+
+    def _modeOverlapLosers(self, functions):
+        """Of an A32 and a T32 function claiming the same bytes, the indices of those left out, since
+        SmdaReport keeps one instruction and one set of code refs per address. The one kept has no
+        invalid instructions, then more code references to its start, then the earlier start."""
+        if len({function.arch for function in functions}) < 2:
+            return set()
+        spans = sorted(
+            (
+                (block.start, block.end, function.arch, index)
+                for index, function in enumerate(functions)
+                for block in function.basic_blocks
+                if block.arch == function.arch
+            ),
+            key=lambda span: span[:2],
+        )
+        conflicts = set()
+        active = []
+        for start, end, arch, index in spans:
+            active = [span for span in active if span[1] > start]
+            conflicts.update((other, index) for _, _, other_arch, other in active if other_arch != arch)
+            active.append((start, end, arch, index))
+
+        def evidence(index):
+            function = functions[index]
+            references = len(list(self.bv.get_code_refs(function.start)))
+            return (not _hasInvalidInstructions(function), references, -function.start, -index)
+
+        losers = set()
+        for pair in sorted(conflicts):
+            if not losers.intersection(pair):
+                losers.add(min(pair, key=evidence))
+        return losers
 
     def getFunctions(self):
         return sorted(self._functionMap())
@@ -142,7 +174,7 @@ class BinjaInterface(BackendInterface):
     def getFunctionSymbols(self, demangle=False):
         demangler = self._demangler() if demangle else None
         symbols = {}
-        for function in self.bv.functions:
+        for function in self._functionMap().values():
             name = self._functionName(function, demangler)
             if name and not _DEFAULT_NAME.match(name):
                 symbols[function.start] = name

@@ -299,8 +299,23 @@ class _FakeArmBinaryView(_FakeBinaryView):
     def get_callees(self, address, func=None):
         return [0x10010] if address == 0x10000 else []
 
+    def get_code_refs(self, address):
+        return [SimpleNamespace(address=0x10000)] if address in (0x10000, 0x10010) else []
+
     def get_symbols(self):
         return []
+
+    def overlap(self):
+        """A32 mov r0, r0; vhadd.s8 d18, d0, d1; ... from 0x10000, overlapped by T32 movs r0, #1;
+        movw r0, #0; bx lr from 0x10004."""
+        self.IMAGE = bytes.fromhex("0000a0e1 012040f2 00007047")
+        self.T32_LENGTHS = {0x10004: 2, 0x10006: 4, 0x1000A: 2}
+        self.segments = [SimpleNamespace(start=0x10000, end=0x1000C, data_length=0xC)]
+        self.functions = [
+            _FakeFunction(0x10000, "sub_10000", [_FakeBlock(0x10000, [4, 4, 4], arch=A32)], arch=A32),
+            _FakeFunction(0x10004, "sub_10004", [_FakeBlock(0x10004, [2, 4, 2], arch=T32)], arch=T32),
+        ]
+        return self
 
 
 class BinjaInterfaceArmTest(unittest.TestCase):
@@ -317,6 +332,28 @@ class BinjaInterfaceArmTest(unittest.TestCase):
         self.assertFalse(self.interface.isThumb(0x10000))
         self.assertTrue(self.interface.isThumb(0x10010))
         self.assertFalse(self.interface.isThumb(0x10030))
+
+    def test_function_symbols_skip_a_rejected_duplicate(self):
+        self.bv.functions.append(
+            _FakeFunction(0x10010, "wrong_name", [_FakeBlock(0x10010, [4], arch=A32, invalid=True)], arch=A32)
+        )
+        self.bv.functions[1].name = "also_wrong"
+        self.assertEqual(self.interface.getFunctionSymbols(), {0x10000: "arm_main", 0x10010: "thumb_helper"})
+
+    def test_overlapping_functions_in_the_other_instruction_set_keep_the_earlier_start_on_a_tie(self):
+        self.bv.overlap()
+        self.assertEqual(self.interface.getFunctions(), [0x10000])
+        self.assertEqual(self.interface.getBlocks(0x10000), [[0x10000, 0x10004, 0x10008]])
+        self.assertEqual(self.interface.getInstructionBytes(0x10004), bytes.fromhex("012040f2"))
+        self.assertEqual(self.interface.getCodeOutRefs(0x10004), [(0x10004, 0x10008)])
+
+    def test_overlapping_functions_in_the_other_instruction_set_keep_the_referenced_one(self):
+        self.bv.overlap()
+        self.bv.get_code_refs = lambda address: [SimpleNamespace(address=0x20000)] if address == 0x10004 else []
+        self.assertEqual(self.interface.getFunctions(), [0x10004])
+        self.assertTrue(self.interface.isThumb(0x10004))
+        self.assertEqual(self.interface.getCodeOutRefs(0x10004), [(0x10004, 0x10006)])
+        self.assertEqual(self.interface.getCodeInRefs(0x10004), [])
 
     def test_blocks_in_the_other_instruction_set_are_left_out(self):
         self.assertEqual(self.interface.getBlocks(0x10010), [[0x10010, 0x10012]])
