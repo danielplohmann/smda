@@ -81,7 +81,7 @@ class Tarjan:
             ws = set()
             ews = set()
             for v in scc:
-                ws.update(self._graph[v])
+                ws.update(self._graph.get(v, ()))
             for w in ws:
                 assert w in ret or w in scc
                 ews.add(w)

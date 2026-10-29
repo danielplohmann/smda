@@ -7,6 +7,18 @@ from smda.export.segment_mapping import assembleSegmentBuffer
 _SYNTHETIC_SECTIONS = {".extern", ".synthetic_builtins"}
 _IMPORT_SYMBOL_TYPES = {"ImportAddressSymbol", "ImportedFunctionSymbol"}
 _DEFAULT_NAME = re.compile("(j_)?sub_[0-9a-fA-F]+$")
+# little-endian only: smda.export.Exporter decodes 32-bit ARM with little-endian Capstone
+_ARM_ARCHITECTURES = {"armv7", "thumb2"}
+
+
+def _ownBlocks(function):
+    # Binary Ninja keeps a T32 function's branch into an A32 PLT entry inside that function, but
+    # SMDA decodes a function in one instruction set, so blocks in the other one are left out
+    return [block for block in function.basic_blocks if block.arch == function.arch]
+
+
+def _hasInvalidInstructions(function):
+    return any(block.has_invalid_instructions for block in _ownBlocks(function))
 
 
 class BinjaInterface(BackendInterface):
@@ -15,9 +27,13 @@ class BinjaInterface(BackendInterface):
     def __init__(self, bv):
         super().__init__()
         self.bv = bv
+        self._functions = None
         self._code_refs = None
         self._block_addresses = {}
         self._instruction_bytes = {}
+        # an address can hold both an A32 and a T32 instruction; the Exporter reads a function's
+        # instruction bytes right after its getBlocks, so they resolve in that function's architecture
+        self._current_arch = None
 
     def getArchitecture(self):
         name = self.bv.arch.name
@@ -25,20 +41,70 @@ class BinjaInterface(BackendInterface):
             return "intel"
         if name == "aarch64":
             return "aarch64"
+        if name in _ARM_ARCHITECTURES:
+            return "arm"
         raise ValueError(f"Unsupported Architecture: {name}")
 
     def getBitness(self):
         return self.bv.arch.address_size * 8
 
+    def _functionMap(self):
+        if self._functions is None:
+            functions = list(self.bv.functions)
+            rejected = self._modeOverlapLosers(functions)
+            self._functions = {}
+            for index, function in enumerate(functions):
+                if index not in rejected:
+                    self._functions.setdefault(function.start, function)
+        return self._functions
+
+    def _modeOverlapLosers(self, functions):
+        """Indices of functions left out so that no A32 and T32 function claim the same bytes, since
+        SmdaReport keeps one instruction and one set of code refs per address. Functions are kept in
+        order of evidence: no invalid instructions, more code references to the start, earlier start."""
+        if len({function.arch for function in functions}) < 2:
+            return set()
+        spans = sorted(
+            (
+                (block.start, block.end, function.arch, index)
+                for index, function in enumerate(functions)
+                for block in _ownBlocks(function)
+            ),
+            key=lambda span: span[:2],
+        )
+        conflicts = set()
+        active = []
+        for start, end, arch, index in spans:
+            active = [span for span in active if span[1] > start]
+            conflicts.update((other, index) for _, _, other_arch, other in active if other_arch != arch)
+            active.append((start, end, arch, index))
+
+        def evidence(index):
+            function = functions[index]
+            references = len(list(self.bv.get_code_refs(function.start)))
+            return (not _hasInvalidInstructions(function), references, -function.start, -index)
+
+        rivals = {}
+        for first, second in conflicts:
+            rivals.setdefault(first, set()).add(second)
+            rivals.setdefault(second, set()).add(first)
+        kept, losers = set(), set()
+        for index in sorted(rivals, key=evidence, reverse=True):
+            if rivals[index] & kept:
+                losers.add(index)
+            else:
+                kept.add(index)
+        return losers
+
     def getFunctions(self):
-        return sorted(function.start for function in self.bv.functions)
+        return sorted(self._functionMap())
 
     def _instructionAddresses(self, block):
-        key = (block.start, block.end)
+        arch = block.arch
+        key = (block.start, block.end, arch)
         addresses = self._block_addresses.get(key)
         if addresses is None:
             addresses = []
-            arch = block.arch
             data = self.bv.read(block.start, block.end - block.start)
             address = block.start
             while address < block.end:
@@ -48,23 +114,24 @@ class BinjaInterface(BackendInterface):
                 addresses.append(address)
                 instruction = data[address - block.start : address - block.start + length]
                 if len(instruction) == length:
-                    self._instruction_bytes[address] = instruction
+                    self._instruction_bytes[(address, arch)] = instruction
                 address += length
             self._block_addresses[key] = addresses
         return addresses
 
     def getBlocks(self, function_offset):
-        function = self.bv.get_function_at(function_offset)
+        function = self._functionMap().get(function_offset)
+        self._current_arch = function.arch if function is not None else None
         if function is None:
             return []
-        blocks = [self._instructionAddresses(block) for block in function.basic_blocks]
+        blocks = [self._instructionAddresses(block) for block in _ownBlocks(function)]
         return sorted(block for block in blocks if block)
 
     def getInstructionBytes(self, offset):
-        cached = self._instruction_bytes.get(offset)
+        cached = self._instruction_bytes.get((offset, self._current_arch))
         if cached is not None:
             return cached
-        length = self.bv.get_instruction_length(offset)
+        length = self.bv.get_instruction_length(offset, self._current_arch)
         return self.bv.read(offset, length) if length else b""
 
     def _codeRefs(self):
@@ -76,9 +143,9 @@ class BinjaInterface(BackendInterface):
         # IDA's flow xrefs include fall-through; Binary Ninja's get_code_refs_from also returns data
         # refs, so edges come from block successors and call targets instead.
         refs_from = {}
-        for function in self.bv.functions:
+        for function in self._functionMap().values():
             call_sites = {reference.address for reference in function.call_sites}
-            for block in function.basic_blocks:
+            for block in _ownBlocks(function):
                 addresses = self._instructionAddresses(block)
                 for index, address in enumerate(addresses):
                     targets = set()
@@ -116,7 +183,7 @@ class BinjaInterface(BackendInterface):
     def getFunctionSymbols(self, demangle=False):
         demangler = self._demangler() if demangle else None
         symbols = {}
-        for function in self.bv.functions:
+        for function in self._functionMap().values():
             name = self._functionName(function, demangler)
             if name and not _DEFAULT_NAME.match(name):
                 symbols[function.start] = name
@@ -156,18 +223,32 @@ class BinjaInterface(BackendInterface):
             api_map[symbol.address] = name
         return api_map
 
+    def isThumb(self, offset):
+        function = self._functionMap().get(offset)
+        return function is not None and function.arch.name == "thumb2"
+
+    def _platformAt(self, offset, thumb=False):
+        """(platform, address) of code at *offset*, T32 when *thumb* or the ARM interworking low bit is set."""
+        if self.bv.arch.name not in _ARM_ARCHITECTURES:
+            return None, offset
+        return self.bv.platform.get_associated_platform_by_address(offset | 1 if thumb else offset)
+
     def getFilePath(self):
         return self.bv.file.filename or self.bv.file.original_filename
 
-    def makeFunction(self, offset):
-        if self.bv.get_function_at(offset) is not None:
+    def makeFunction(self, offset, thumb=False):
+        # without a platform, Binary Ninja creates an A32 function even at an odd address
+        platform, offset = self._platformAt(offset, thumb)
+        if self.bv.get_function_at(offset, platform) is not None:
             return False
+        self._functions = None
         self._code_refs = None
         self._block_addresses.clear()
         self._instruction_bytes.clear()
-        return self.bv.create_user_function(offset) is not None
+        return self.bv.create_user_function(offset, platform) is not None
 
     def makeName(self, offset, name):
+        _, offset = self._platformAt(offset)
         function = self.bv.get_function_at(offset)
         if function is not None and not _DEFAULT_NAME.match(function.name):
             return False

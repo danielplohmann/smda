@@ -21,7 +21,9 @@ def analyze(bv):
     smda_name_count = 0
     with bv.undoable_transaction():
         for smda_function in report.getFunctions():
-            smda_function_count += interface.makeFunction(smda_function.offset)
+            smda_function_count += interface.makeFunction(
+                smda_function.offset, thumb=smda_function.architecture_metadata.get("thumb", False)
+            )
             if smda_function.function_name != "":
                 smda_name_count += interface.makeName(smda_function.offset, smda_function.function_name)
     bv.update_analysis_and_wait()

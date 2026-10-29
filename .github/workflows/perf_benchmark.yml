@@ -143,6 +143,67 @@ jobs:
         env:
           MALPEDIA_ZIP_PASSWORD: ${{ secrets.MALPEDIA_ZIP_PASSWORD }}
 
+  # Instruction counts under callgrind. Unlike the timed gate above, the count does not
+  # depend on the runner, so one pass per side is enough and the threshold can sit at a
+  # couple of percent instead of thirty.
+  instruction_counts:
+    name: Instruction Count Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout base code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'master' }}
+          path: base-repo
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q valgrind
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./base-repo
+          python -m pip install -e ".[dev]"
+
+      - name: Verify measured trees
+        run: |
+          (cd base-repo && python -c "import os, profiling._target, smda; assert smda.__file__.startswith(os.path.abspath('src') + os.sep), smda.__file__")
+          python -c "import os, profiling._target, smda; assert smda.__file__.startswith(os.path.abspath('src') + os.sep), smda.__file__"
+
+      - name: Count instructions
+        run: |
+          python .github/workflows/scripts/count_instructions.py measure base-repo --output instruction_counts/base/results.json
+          python .github/workflows/scripts/count_instructions.py measure . --output instruction_counts/pr/results.json
+
+      - name: Compare counts
+        run: |
+          python .github/workflows/scripts/count_instructions.py compare \
+            instruction_counts/pr/results.json instruction_counts/base/results.json
+
+      - name: Upload callgrind outputs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: instruction-counts
+          path: instruction_counts/
+          if-no-files-found: ignore
+
   # Malpedia disassembly. Both sides are timed here, in one job on one runner, in
   # base/PR/PR/base/base/PR order — the same reason the fixture gate above runs its
   # passes that way. The paired statistic compares the two sides file by file, so a

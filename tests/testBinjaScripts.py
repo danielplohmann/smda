@@ -12,6 +12,7 @@ import binja_export
 from smda.binja import BinjaExporter
 from smda.binja.BinjaExporter import exportBinaryView
 from smda.binja.BinjaInterface import BinjaInterface
+from tests.testBinjaInterface import _FakeArmBinaryView
 
 
 class _FakeBlock:
@@ -25,6 +26,7 @@ class _FakeBlock:
 class _FakeFunction:
     def __init__(self, start, name, blocks, call_sites=()):
         self.start = start
+        self.arch = None
         self.name = name
         self.symbol = SimpleNamespace(raw_name=name)
         self.basic_blocks = blocks
@@ -113,6 +115,34 @@ class BinjaExporterTest(unittest.TestCase):
         self.assertEqual(main.outrefs, {0x401000: [0x40100A]})
         self.assertEqual(report.getFunction(0x40100A).inrefs, [0x401000])
 
+    def test_arm_report_decodes_each_function_in_its_instruction_set(self):
+        report = exportBinaryView(_FakeArmBinaryView())
+        self.assertEqual(report.architecture, "arm")
+        self.assertEqual(report.bitness, 32)
+        self.assertEqual(report.num_functions, 2)
+        arm_main, thumb_helper = report.getFunction(0x10000), report.getFunction(0x10010)
+        self.assertEqual(arm_main.architecture_metadata, {"thumb": False})
+        self.assertEqual(thumb_helper.architecture_metadata, {"thumb": True})
+        self.assertEqual(
+            [(instruction.mnemonic, instruction.operands) for instruction in arm_main.getInstructions()],
+            [("mov", "r0, #1"), ("bx", "lr")],
+        )
+        self.assertEqual(
+            [(instruction.mnemonic, instruction.operands) for instruction in thumb_helper.getInstructions()],
+            [("movs", "r0, #1"), ("bx", "lr")],
+        )
+        self.assertEqual(arm_main.outrefs, {0x10000: [0x10010]})
+
+    def test_overlapping_a32_and_t32_functions_export_one_instruction_set(self):
+        report = exportBinaryView(_FakeArmBinaryView().overlap())
+        self.assertEqual(report.disassembly_errors, {})
+        self.assertEqual(report.num_functions, 1)
+        function = report.getFunction(0x10000)
+        self.assertEqual(
+            [(i.offset, i.mnemonic) for i in function.getInstructions()][:2], [(0x10000, "mov"), (0x10004, "vhadd.s8")]
+        )
+        self.assertEqual(function.outrefs, {})
+
 
 class BinjaHeadlessTest(unittest.TestCase):
     def test_load_binary_view_opens_through_binary_ninja(self):
@@ -166,8 +196,8 @@ class BinjaAnalyzeTest(unittest.TestCase):
         bv.update_analysis_and_wait = mock.Mock()
         report = mock.Mock()
         report.getFunctions.return_value = [
-            types.SimpleNamespace(offset=0x401000, function_name="entry"),
-            types.SimpleNamespace(offset=0x401020, function_name=""),
+            types.SimpleNamespace(offset=0x401000, function_name="entry", architecture_metadata={}),
+            types.SimpleNamespace(offset=0x401020, function_name="", architecture_metadata={"thumb": True}),
         ]
         disassembler = mock.Mock()
         disassembler.disassembleBuffer.return_value = report
@@ -183,7 +213,7 @@ class BinjaAnalyzeTest(unittest.TestCase):
         disassembler.disassembleBuffer.assert_called_once_with(
             BinjaInterface(bv).getBinary(), 0x400000, bitness=64, architecture="intel"
         )
-        self.assertEqual(make_function.call_count, 2)
+        make_function.assert_has_calls([mock.call(0x401000, thumb=False), mock.call(0x401020, thumb=True)])
         make_name.assert_called_once_with(0x401000, "entry")
         transaction.__enter__.assert_called_once()
         transaction.__exit__.assert_called_once()
