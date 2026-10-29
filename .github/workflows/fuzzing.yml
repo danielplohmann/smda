@@ -83,8 +83,8 @@ jobs:
           for spec in \
             "fuzz_loaders:binary:262144:^src/smda/utility/" \
             "fuzz_formats:formats:262144:^src/smda/utility/" \
-            "fuzz_disassembler:binary:65536:^src/smda/(utility|intel|aarch64|cil|dalvik)/" \
-            "fuzz_buffer:buffer:65536:^src/smda/(utility|intel|aarch64|cil|dalvik)/" \
+            "fuzz_disassembler:binary:65536:^src/smda/(utility|intel|aarch64|arm|cil|dalvik)/" \
+            "fuzz_buffer:buffer:65536:^src/smda/(utility|intel|aarch64|arm|cil|dalvik)/" \
             "fuzz_report:report:1048576:^src/smda/common/" \
             "fuzz_synthesis:synthesis:1048576:^src/smda/(synthesis|utility)/"; do
             IFS=':' read -r target profile max_len region <<<"$spec"

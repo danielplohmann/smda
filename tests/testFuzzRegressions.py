@@ -16,8 +16,10 @@ import logging
 import os
 import re
 import struct
+import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -166,6 +168,29 @@ class SmdaFuzzTargetSmokeTest(unittest.TestCase):
         workflow = (REPO_ROOT / ".github" / "workflows" / "fuzzing.yml").read_text(encoding="utf-8")
         for target_name in TARGETS:
             self.assertIn(f"fuzz_{target_name}", workflow, f"target {target_name} is not fuzzed in CI")
+
+    @unittest.skipUnless(os.name == "posix", "workflow uses Bash on Linux")
+    def test_arm_only_change_selects_machine_code_fuzzers(self):
+        workflow = (REPO_ROOT / ".github" / "workflows" / "fuzzing.yml").read_text(encoding="utf-8")
+        selector = workflow.split("      - name: Select fuzz targets", 1)[1].split("\n  fuzz:", 1)[0]
+        script = textwrap.dedent(selector.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            env = dict(
+                os.environ, EVENT_NAME="pull_request", REPOSITORY="owner/repo", PR_NUMBER="1", GITHUB_OUTPUT=str(output)
+            )
+            result = subprocess.run(
+                ["bash", "-c", "gh() { echo src/smda/arm/ArmBackend.py; }\n" + script],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            selected = output.read_text()
+        self.assertIn("any=true", selected)
+        self.assertIn('"target":"fuzz_buffer"', selected)
+        self.assertIn('"target":"fuzz_disassembler"', selected)
 
 
 class SmdaFuzzToolingTest(unittest.TestCase):
