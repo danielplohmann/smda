@@ -57,6 +57,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # On a pull request the base tree is profiled too, so the run shows what changed
+      # and not only where the time goes.
+      - name: Checkout base code
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref }}
+          path: base-repo
+          persist-credentials: false
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -81,6 +91,10 @@ jobs:
           # the .bin/.svg paths here always match what the tool wrote.
           LABEL="$(python -c "from profiling._target import resolve_label; print(resolve_label('$TARGET'))")"
           run_cpu() {
+            # an unprofiled pass first: a module first imported inside the profiled run
+            # (a stdlib codec, here) has its .pyc written there, which the base-vs-PR
+            # diff would show as dozens of changed call counts on the side that ran first
+            python -m profiling.profile_smda run --target "$TARGET" --iterations 1 > /dev/null
             python -m profiling.profile_smda cpu --target "$TARGET" --iterations "$ITERATIONS" --line
           }
           run_mem() {
@@ -91,11 +105,26 @@ jobs:
             py-spy record --native -o "profiling/output/$LABEL.cpu.svg" -- \
               python -m profiling.profile_smda run --target "$TARGET" --iterations "$ITERATIONS"
           }
+          run_cpu_diff() {
+            [ -d base-repo ] || return 0
+            # the base tree's own profiling/_target.py puts base-repo/src first on sys.path
+            if ! (cd base-repo && python -m profiling.profile_smda cpu --target "$TARGET" --iterations "$ITERATIONS"); then
+              echo "::warning::profiling the base tree failed, no base-vs-PR diff"
+              return 0
+            fi
+            python -m profiling.diff_profiles \
+              "base-repo/profiling/output/$LABEL.cpu.prof" "profiling/output/$LABEL.cpu.prof" \
+              > "profiling/output/$LABEL.cpu.diff.md"
+            {
+              echo "## CPU profile, base vs PR ($TARGET x$ITERATIONS)"
+              cat "profiling/output/$LABEL.cpu.diff.md"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
           case "$PROFILER" in
-            cpu)   run_cpu ;;
+            cpu)   run_cpu; run_cpu_diff ;;
             mem)   run_mem ;;
             flame) run_flame ;;
-            all)   run_cpu; run_mem; run_flame ;;
+            all)   run_cpu; run_cpu_diff; run_mem; run_flame ;;
             *) echo "Unknown profiler: $PROFILER" >&2; exit 1 ;;
           esac
 
@@ -109,6 +138,7 @@ jobs:
             profiling/output/*.html
             profiling/output/*.prof
             profiling/output/*.bin
+            profiling/output/*.md
           if-no-files-found: warn
 
       # Only on the PR-label path: post/refresh a single comment pointing to the
@@ -135,6 +165,10 @@ jobs:
           or open \`<name>.cpu.svg\` (py-spy native flamegraph) in a browser.
           EOF
           )"
+          diff_file="profiling/output/$(python -c "from profiling._target import resolve_label; print(resolve_label('$TARGET'))").cpu.diff.md"
+          if [ -f "$diff_file" ]; then
+            comment_body="$(printf '%s\n\n#### CPU profile, base vs PR\n\n%s\n' "$comment_body" "$(cat "$diff_file")")"
+          fi
           existing_ids="$(
             gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
               --jq ".[] | select(.user.login == \"github-actions[bot]\" and ((.body // \"\") | contains(\"$marker\"))) | .id"
