@@ -18,6 +18,7 @@ works anywhere without atheris.
 | `replay.py` | runs a target over files on disk, no atheris needed |
 | `minimize.py` | delta-debugs a crashing input to a small reproducer |
 | `prune_corpus.py` | bounds the cached corpus by file count and total size |
+| `corpus_coverage.py` | replays a corpus under coverage.py to show which code it reaches |
 
 ## Targets
 
@@ -84,3 +85,16 @@ selector bytes from the front of the input, and the profile prepends them.
 
 The corpus is cached per target in CI, so coverage accumulates across runs
 instead of restarting from the seeds every time.
+
+## Corpus coverage
+
+libFuzzer's `cov:` figure counts edges but does not say where they are. On the
+weekly and manual runs, the `coverage` jobs replay each target's accumulated
+corpus under coverage.py, and `Corpus coverage summary` combines them into one
+table, least-reached files first, plus an HTML report artifact
+(`fuzz-coverage-html`). A file that stays near 0% is a gap to fill with seeds or
+a target. Locally, without atheris:
+
+```
+python fuzzing/corpus_coverage.py disassembler corpus_disassembler --report report.txt
+```
