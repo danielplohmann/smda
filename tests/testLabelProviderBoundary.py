@@ -82,11 +82,12 @@ class LabelProviderBoundaryTestSuite(unittest.TestCase):
 class PdbSeedSurvivalTestSuite(unittest.TestCase):
     def test_a_supplied_pdb_is_reapplied_after_the_binary_pass(self):
         from smda.common.BinaryInfo import BinaryInfo
+        from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
         from smda.common.RecursiveDisassembler import RecursiveDisassembler
 
         updated_with = []
 
-        class _RecordingProvider:
+        class _RecordingProvider(PdbSymbolProvider):
             def update(self, binary_info):
                 updated_with.append(binary_info.file_path)
 
@@ -94,7 +95,7 @@ class PdbSeedSurvivalTestSuite(unittest.TestCase):
                 return True
 
         disassembler = RecursiveDisassembler.__new__(RecursiveDisassembler)
-        disassembler.label_providers = [_RecordingProvider()]
+        disassembler.label_providers = [_RecordingProvider(None)]
         disassembler.api_providers = []
         disassembler.symbol_providers = []
         binary_info = BinaryInfo(b"")

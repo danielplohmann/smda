@@ -35,6 +35,7 @@ class FunctionCandidateManager:
     def __init__(self, config):
         self.config = config
         self.lang_analyzer = None
+        self.delphi_resolvers = None
         self.disassembly = None
         self.bitness = None
         self._code_areas = []
@@ -86,7 +87,7 @@ class FunctionCandidateManager:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
         self._cb_analysis_timeout = cbAnalysisTimeout
-        self.lang_analyzer = LanguageAnalyzer(disassembly)
+        self.lang_analyzer = LanguageAnalyzer(disassembly, self.delphi_resolvers)
         self.disassembly.language = self.lang_analyzer.identify()
         self.disassembly.language_guess = self.lang_analyzer.getGuess()
         self.bitness = disassembly.binary_info.bitness
