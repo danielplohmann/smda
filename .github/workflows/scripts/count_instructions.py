@@ -82,6 +82,19 @@ def measure(tree, targets, out_dir, jobs):
     # whichever measured run got there first, on whichever side, paid for it. One
     # unmeasured pass over every target leaves nothing to compile.
     env = _run_env()
+    known_targets = json.loads(
+        subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                "import json; from profiling._target import FIXTURES; print(json.dumps(list(FIXTURES)))",
+            ],
+            cwd=tree,
+            env=env,
+            text=True,
+        )
+    )
+    available = [target for target in targets if target in known_targets or os.path.isfile(os.path.join(tree, target))]
     warmups = [
         subprocess.Popen(
             [sys.executable, "-m", "profiling.profile_smda", "run", "--target", target],
@@ -90,33 +103,29 @@ def measure(tree, targets, out_dir, jobs):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for target in targets
+        for target in available
     ]
-    for warmup in warmups:
-        warmup.wait()
+    warmup_statuses = [warmup.wait() for warmup in warmups]
+    for target, status in zip(available, warmup_statuses, strict=True):
+        if status:
+            raise RuntimeError(f"warm-up failed for {target} in {tree} (exit {status})")
 
     def run_one(target):
         out_file = os.path.join(out_dir, f"callgrind.{target}.out")
         if target == IMPORT_ROW:
             out_file = os.path.join(out_dir, "callgrind.import.out")
             return target, _callgrind(tree, out_file, ["-c", "import profiling._target"])
-        try:
-            return target, _callgrind(tree, out_file, ["-m", "profiling.profile_smda", "run", "--target", target])
-        except RuntimeError as exc:
-            # a fixture this tree does not know yet (the base of a PR adding one)
-            # is reported as missing rather than failing the whole measurement
-            print(exc, file=sys.stderr)
-            return target, None
+        return target, _callgrind(tree, out_file, ["-m", "profiling.profile_smda", "run", "--target", target])
 
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-        raw = dict(pool.map(run_one, [IMPORT_ROW, *targets]))
+        raw = dict(pool.map(run_one, [IMPORT_ROW, *available]))
 
     baseline = raw[IMPORT_ROW]
     if baseline is None:
         raise RuntimeError(f"import baseline failed in {tree}")
     fixtures = {}
     for target in targets:
-        total = raw[target]
+        total = raw.get(target)
         fixtures[target] = None if total is None else {"total": total, "net": total - baseline}
     return {"python": sys.version.split()[0], "import": baseline, "fixtures": fixtures}
 

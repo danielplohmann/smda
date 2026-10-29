@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _SCRIPT = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "scripts" / "count_instructions.py"
 _spec = importlib.util.spec_from_file_location("count_instructions", _SCRIPT)
@@ -46,6 +47,43 @@ class ReadTotalTest(unittest.TestCase):
         path = self._write("events: Ir\nfn=(1) main\n0 5\n")
         with self.assertRaises(ValueError):
             count_instructions.read_total(path)
+
+
+class MeasureTest(unittest.TestCase):
+    def test_failure_of_a_known_fixture_is_fatal(self):
+        with (
+            tempfile.TemporaryDirectory() as output,
+            mock.patch.object(count_instructions.subprocess, "check_output", return_value='["asprox"]'),
+            mock.patch.object(count_instructions.subprocess, "Popen") as popen,
+            mock.patch.object(count_instructions, "_callgrind", side_effect=[1000, RuntimeError("fixture crashed")]),
+        ):
+            popen.return_value.wait.return_value = 0
+            with self.assertRaisesRegex(RuntimeError, "fixture crashed"):
+                count_instructions.measure(".", ["asprox"], output, jobs=1)
+
+    def test_fixture_unknown_to_the_tree_is_not_measured(self):
+        with (
+            tempfile.TemporaryDirectory() as output,
+            mock.patch.object(count_instructions.subprocess, "check_output", return_value="[]"),
+            mock.patch.object(count_instructions.subprocess, "Popen") as popen,
+            mock.patch.object(count_instructions, "_callgrind", return_value=1000) as callgrind,
+        ):
+            result = count_instructions.measure(".", ["new_fixture"], output, jobs=1)
+            self.assertIsNone(result["fixtures"]["new_fixture"])
+            popen.assert_not_called()
+            self.assertEqual(callgrind.call_count, 1)
+
+    def test_warmup_failure_is_fatal(self):
+        with (
+            tempfile.TemporaryDirectory() as output,
+            mock.patch.object(count_instructions.subprocess, "check_output", return_value='["asprox"]'),
+            mock.patch.object(count_instructions.subprocess, "Popen") as popen,
+            mock.patch.object(count_instructions, "_callgrind") as callgrind,
+        ):
+            popen.return_value.wait.return_value = 1
+            with self.assertRaisesRegex(RuntimeError, "warm-up.*asprox"):
+                count_instructions.measure(".", ["asprox"], output, jobs=1)
+            callgrind.assert_not_called()
 
 
 class CompareTest(unittest.TestCase):
