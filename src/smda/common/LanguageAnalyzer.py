@@ -18,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 _PRINTABLE_STRINGS_RE = re.compile(b"[ -~]{6,128}")
 _BORLAND_LOCALES = b"borland\\locales"
+_MIN_RESYM_VMTS = 2
 
 
 class LanguageAnalyzer:
@@ -163,7 +164,12 @@ class LanguageAnalyzer:
                 delphi_score = max(delphi_score, 0.9)
             elif delphi_objects:
                 delphi_score = max(delphi_score, 0.6)
-            if delphi_score < 0.6 and self.getDelphiReSymObjects():
+            # One self-referencing VMT can occur by chance; the RTL alone puts dozens in a real image.
+            if (
+                delphi_score < 0.6
+                and self.getDelphiReSymObjects()
+                and self.delphi_resym_resolver.getVmtCount() >= _MIN_RESYM_VMTS
+            ):
                 delphi_score = 0.6
         return delphi_score
 

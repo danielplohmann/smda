@@ -88,6 +88,17 @@ def mutate(info, layout):
     return info
 
 
+def add_bare_vmt(info, layout, vmt=0xA00):
+    """Add a second validated VMT with no RTTI or method table, sharing the first one's name and code."""
+    size = info.bitness // 8
+    jump = 88 if size == 4 else 200
+    layout.ptr(vmt, info.base_addr + vmt + jump)
+    layout.ptr(vmt + 8 * size, info.base_addr + 0x380)
+    for field in range(11, 22):
+        layout.ptr(vmt + field * size, 0 if field == 14 else info.base_addr + 0x1100)
+    return mutate(info, layout)
+
+
 @pytest.mark.parametrize("bitness", [32, 64])
 def test_real_tobject_metadata(bitness):
     info, fixture = load_fixture(bitness)
@@ -488,11 +499,21 @@ def test_named_tkunknown_type_is_preserved():
     assert provider.getSymbol(info.base_addr + 0x1100).endswith(": TOther")
 
 
-def test_structural_resym_metadata_is_delphi_language_evidence():
-    info, _ = image()
+@pytest.mark.parametrize("bitness", [32, 64])
+def test_structural_resym_metadata_is_delphi_language_evidence(bitness):
+    info = add_bare_vmt(*image(bitness))
     analyzer = LanguageAnalyzer(SimpleNamespace(binary_info=info))
     assert analyzer.getDelphiObjects() == {}
     assert analyzer.checkDelphi()
+    assert analyzer.delphi_resym_resolver.getVmtCount() == 2
+
+
+def test_single_resym_vmt_is_not_delphi_language_evidence():
+    info, _ = image()
+    analyzer = LanguageAnalyzer(SimpleNamespace(binary_info=info))
+    assert analyzer.getDelphiReSymObjects()
+    assert analyzer.delphi_resym_resolver.getVmtCount() == 1
+    assert not analyzer.checkDelphi()
 
 
 def test_pdb_supplement_does_not_erase_delphi_symbols():

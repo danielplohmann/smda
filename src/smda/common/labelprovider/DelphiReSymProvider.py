@@ -112,6 +112,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
     def __init__(self, config):
         self._config = config
         self._func_symbols: dict[int, str] = {}
+        self._vmt_count = 0
         self._binary: bytes = b""
         self._base_addr: int = 0
         self._settings = ArchitectureSettings(4, VMT_JUMP_DIST_32BIT)
@@ -121,6 +122,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def update(self, binary_info):
         self._func_symbols = {}
+        self._vmt_count = 0
         self._binary = binary_info.binary
         self._base_addr = binary_info.base_addr
         self._settings = ArchitectureSettings(4, VMT_JUMP_DIST_32BIT)
@@ -361,6 +363,7 @@ class DelphiReSymProvider(AbstractLabelProvider):
         for vmt in self._find_vmts():
             if not self._take_entry():
                 break
+            self._vmt_count += 1
             mdt_addr = self._read_ptr(vmt + self._settings.mdt_offset)
             if not mdt_addr:
                 continue
@@ -393,6 +396,10 @@ class DelphiReSymProvider(AbstractLabelProvider):
 
     def getFunctionSymbols(self):
         return self._func_symbols
+
+    def getVmtCount(self):
+        """Number of validated VMTs in the last update, with or without method tables."""
+        return self._vmt_count
 
     def getRelocations(self):
         return {}
