@@ -5,10 +5,19 @@ from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
 from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.MachoFileLoader import MachoFileLoader
-from smda.utility.ObjectFileLoader import load_object
 from smda.utility.PeFileLoader import PeFileLoader
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _load_object(data):
+    # import the object loader only for ELF ET_REL or i386/AMD64 COFF input
+    is_elf_rel = data[:4] == b"\x7fELF" and len(data) >= 18 and data[16:18] in (b"\x01\x00", b"\x00\x01")
+    if is_elf_rel or data[:2] in (b"\x4c\x01", b"\x64\x86"):
+        from smda.utility.ObjectFileLoader import load_object
+
+        return load_object(data)
+    return None
 
 
 class FileLoader:
@@ -59,7 +68,7 @@ class FileLoader:
         self._object_image = None
         self._raw_data = buffer if buffer is not None else self._loadRawFileContent()
         if self._map_file:
-            self._object_image = load_object(self._raw_data)
+            self._object_image = _load_object(self._raw_data)
             if self._object_image is not None:
                 image = self._object_image
                 if not image.code_areas:
