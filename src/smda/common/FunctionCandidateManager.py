@@ -31,6 +31,7 @@ class FunctionCandidateManager:
     CANDIDATE_CLASS = None
     #: instruction-start alignment a recovered candidate address has to satisfy
     CANDIDATE_ALIGNMENT = 1
+    _object_image = None
 
     def __init__(self, config):
         self.config = config
@@ -86,6 +87,7 @@ class FunctionCandidateManager:
         if disassembly.binary_info.code_areas:
             self._code_areas = disassembly.binary_info.code_areas
         self.disassembly = disassembly
+        self._object_image = getattr(disassembly.binary_info, "object_image", None)
         self._cb_analysis_timeout = cbAnalysisTimeout
         self.lang_analyzer = LanguageAnalyzer(disassembly, self.delphi_resolvers)
         self.disassembly.language = self.lang_analyzer.identify()
@@ -95,11 +97,11 @@ class FunctionCandidateManager:
         self.disassembly.identified_alignment = self.identified_alignment
         self._buildQueue()
 
-    def _passesCodeFilter(self, addr):
+    def _passesCodeFilter(self, addr, allow_function_interior=False):
         if addr is None:
             return False
-        image = getattr(getattr(self.disassembly, "binary_info", None), "object_image", None)
-        if image is not None and image.is_function_interior(addr):
+        image = self._object_image
+        if image is not None and not allow_function_interior and image.is_function_interior(addr):
             return False
         areas = self._code_areas
         if not areas:

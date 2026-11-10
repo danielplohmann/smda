@@ -15,9 +15,19 @@ from smda.utility.MemoryFileLoader import MemoryFileLoader
 from smda.utility.ObjectFileLoader import ObjectImage, ObjectSection, ObjectSymbol, load_object
 
 
-def elf_object(bits=64, padding=False, external=False, common=False, relocation=None, alpha_name="alpha"):
+def elf_object(
+    bits=64,
+    padding=False,
+    external=False,
+    common=False,
+    relocation=None,
+    alpha_name="alpha",
+    alpha_body=None,
+    alpha_size=None,
+    call_offset=1,
+):
     wide = bits == 64
-    body = bytes.fromhex("e800000000554889e531c05dc3" if wide else "e8000000005589e531c05dc3")
+    body = alpha_body or bytes.fromhex("e800000000554889e531c05dc3" if wide else "e8000000005589e531c05dc3")
     prefix = bytes([0x90]) * 16 if padding else b""
     alpha = prefix + body
     beta = bytes.fromhex("8b0500000000c3" if wide else "a100000000c3")
@@ -40,7 +50,7 @@ def elf_object(bits=64, padding=False, external=False, common=False, relocation=
         section_names += label.encode() + b"\0"
     symbols = [
         ("", 0, 0, 0, 0),
-        (alpha_name, 1, len(prefix), len(body), 0x12),
+        (alpha_name, 1, len(prefix), alpha_size or len(body), 0x12),
         ("beta", 2, 0, len(beta), 0x12),
         ("data", 3, 0, 4, 0x11),
         ("bss", 4, 0, 32, 0x11),
@@ -64,7 +74,7 @@ def elf_object(bits=64, padding=False, external=False, common=False, relocation=
     call_symbol = 5 if external else 2
     call_kind = relocation if relocation is not None else (4 if wide else 2)
     if wide:
-        call = struct.pack("<QQq", len(prefix) + 1, (call_symbol << 32) | call_kind, -4)
+        call = struct.pack("<QQq", len(prefix) + call_offset, (call_symbol << 32) | call_kind, -4)
         read = struct.pack("<QQq", 2, (3 << 32) | 2, -4)
     else:
         alpha = bytearray(alpha)
@@ -125,7 +135,9 @@ def elf_object(bits=64, padding=False, external=False, common=False, relocation=
     return bytes(data)
 
 
-def coff_object(bits=64, external=False, relocation=None, alpha_name="alpha", directive=False):
+def coff_object(
+    bits=64, external=False, relocation=None, alpha_name="alpha", directive=False, call_symbol=None, extra_symbols=()
+):
     wide = bits == 64
     alpha = bytes.fromhex("e800000000554889e531c05dc3" if wide else "e8000000005589e531c05dc3")
     beta = bytes.fromhex("8b0500000000c3" if wide else "a100000000c3")
@@ -147,7 +159,7 @@ def coff_object(bits=64, external=False, relocation=None, alpha_name="alpha", di
             kind = (4 if wide else 0x14) if index == 0 else (4 if wide else 6)
             if relocation is not None and index == 0:
                 kind = relocation
-            symbol = (5 if external else 2) if index == 0 else 4
+            symbol = (call_symbol or (5 if external else 2)) if index == 0 else 4
             data.extend(struct.pack("<IIH", 1 if index == 0 or not wide else 2, symbol, kind))
         headers.append((name.ljust(8, b"\0"), 0, 0, len(content), offset, reloff, 0, relcount, 0, flags))
     strings = bytearray(4)
@@ -164,12 +176,22 @@ def coff_object(bits=64, external=False, relocation=None, alpha_name="alpha", di
         if aux:
             data.extend(struct.pack("<IIIIH", 0, len(alpha) if section == 1 else len(beta), 0, 0, 0))
         symbol_count += 1 + aux
+    for name, value, section, storage, weak_target in extra_symbols:
+        aux = 0 if weak_target is None else 1
+        data.extend(struct.pack("<8sIhHBB", name.encode().ljust(8, b"\0"), value, section, 0, storage, aux))
+        if aux:
+            data.extend(struct.pack("<II10x", weak_target, 3))
+        symbol_count += 1 + aux
     struct.pack_into("<I", strings, 0, len(strings))
     data.extend(strings)
     struct.pack_into("<HHIIIHH", data, 0, 0x8664 if wide else 0x14C, len(sections), 0, symoff, symbol_count, 0, 0)
     for index, header in enumerate(headers):
         struct.pack_into("<8sIIIIIIHHI", data, 20 + index * 40, *header)
     return bytes(data)
+
+
+def functions_by_name(report):
+    return {f.function_name: f.offset for f in report.getFunctions()}
 
 
 @pytest.mark.parametrize("builder", [elf_object, coff_object])
@@ -180,7 +202,7 @@ def test_section_relative_zero_symbols_resolve_and_relocations_match_targets(bui
     functions = {name: address for address, name in image.functions.items()}
     assert set(functions) == {"alpha", "beta"}
     assert functions["alpha"] != functions["beta"]
-    assert image.relocations[0]["target"] == functions["beta"]
+    assert image.relocations[0].target == functions["beta"]
     start = functions["alpha"] - image.base
     displacement = int.from_bytes(image.data[start + 1 : start + 5], "little", signed=True)
     assert functions["alpha"] + 5 + displacement == functions["beta"]
@@ -213,7 +235,7 @@ def test_padding_names_never_absorb_the_real_function_and_aliases_are_preserved(
 @pytest.mark.parametrize("bits", [32, 64])
 def test_unresolved_external_calls_are_named_without_mapping_executable_stubs(builder, bits):
     image = load_object(builder(bits, external=True))
-    target = image.relocations[0]["target"]
+    target = image.relocations[0].target
     assert image.imports[target] == "outside"
     assert target >= image.base + len(image.data)
     assert all(not start <= target < end for start, end in image.code_areas)
@@ -243,7 +265,7 @@ def test_unsupported_relocations_are_explicit_errors(builder):
 @pytest.mark.parametrize("length", [2, 18, 40, 64, 100])
 def test_truncated_object_tables_are_refused(builder, length):
     raw = builder()[:length]
-    if builder is elf_object and length < 18:
+    if builder is coff_object or length < 18:
         assert load_object(raw) is None
     else:
         with pytest.raises(ValueError):
@@ -296,6 +318,8 @@ def test_object_abi_preserves_the_elf_os_identifier():
     raw = bytearray(elf_object())
     raw[7] = 9
     assert MemoryFileLoader(raw, map_file=True).getAbi() == "FREEBSD"
+    raw[7] = 200
+    assert MemoryFileLoader(raw, map_file=True).getAbi() == ""
     assert MemoryFileLoader(coff_object(), map_file=True).getAbi() == ""
 
 
@@ -360,6 +384,98 @@ def test_noop_relocations_still_count_towards_the_record_limit(monkeypatch):
     monkeypatch.setattr(SmdaConfig, "MAX_OBJECT_RELOCATIONS", 1)
     with pytest.raises(ValueError, match="relocation count"):
         load_object(elf_object(relocation=0))
+
+
+def test_calls_inside_sized_functions_still_seed_unnamed_callees():
+    body = bytes.fromhex("554889e5e800000000e8020000005dc3b80100000083c002c3")
+    raw = elf_object(alpha_body=body, alpha_size=16, call_offset=5)
+    disassembler = Disassembler()
+    report = disassembler.disassembleFile("probe.o", buffer=raw)
+    assert report.status == "ok", report.message
+    functions = {f.offset: f for f in report.getFunctions()}
+    alpha = next(f for f in functions.values() if f.function_name == "alpha")
+    assert alpha.num_instructions == 6
+    assert functions[alpha.offset + 16].function_name == ""
+    candidates = disassembler.disassembler.fc_manager.candidates
+    assert candidates[alpha.offset + 16].call_ref_sources == {alpha.offset + 9}
+    assert alpha.offset + 4 in candidates[functions_by_name(report)["beta"]].call_ref_sources
+    assert not any(alpha.offset < address < alpha.offset + 16 for address in candidates)
+
+
+def test_i386_plt_calls_are_relocated_like_pc_relative_calls():
+    image = load_object(elf_object(32, relocation=4))
+    functions = {name: address for address, name in image.functions.items()}
+    start = functions["alpha"] - image.base
+    displacement = int.from_bytes(image.data[start + 1 : start + 5], "little", signed=True)
+    assert functions["alpha"] + 5 + displacement == functions["beta"]
+
+
+def test_coff_absolute_relocations_wrap_negative_inline_addends():
+    raw = bytearray(coff_object(32))
+    position = raw.index(bytes.fromhex("a100000000c3"))
+    struct.pack_into("<i", raw, position + 1, -4)
+    image = load_object(bytes(raw))
+    relocation = image.relocations[1]
+    assert relocation.symbol == "data"
+    stored = int.from_bytes(image.data[relocation.address - image.base :][:4], "little")
+    assert stored == relocation.target - 4
+
+
+def test_coff_debug_symbols_are_not_placed_as_common_storage():
+    plain = load_object(coff_object())
+    image = load_object(coff_object(extra_symbols=[(".file", 0x25, -2, 103, None)]))
+    assert len(image.data) == len(plain.data)
+    assert image.functions == plain.functions
+    with pytest.raises(ValueError, match="unavailable symbol"):
+        load_object(coff_object(call_symbol=6, extra_symbols=[(".file", 0, -2, 103, None)]))
+
+
+def test_coff_weak_externals_resolve_to_their_default_without_an_import():
+    chain = 2000
+    weak = [(f"w{index}", 0, 0, 105, 6 + 2 * (index + 1) if index + 1 < chain else 2) for index in range(chain)]
+    image = load_object(coff_object(call_symbol=6, extra_symbols=weak))
+    functions = {name: address for address, name in image.functions.items()}
+    assert image.relocations[0].symbol == "w0"
+    assert image.relocations[0].target == functions["beta"]
+    assert set(image.imports.values()) == {"outside"}
+    for cycle in ([("w0", 0, 0, 105, 6)], [("w0", 0, 0, 105, 8), ("w1", 0, 0, 105, 6)]):
+        with pytest.raises(ValueError, match="Cyclic"):
+            load_object(coff_object(extra_symbols=cycle))
+    with pytest.raises(ValueError, match="weak external symbol index"):
+        load_object(coff_object(extra_symbols=[("w0", 0, 0, 105, 7)]))
+
+
+@pytest.mark.parametrize("prefix", ["4c01c0c3", "6486c0c3"])
+def test_raw_code_with_a_coff_machine_prefix_is_not_claimed_as_an_object(prefix):
+    raw = bytes.fromhex(prefix) + bytes(60)
+    assert load_object(raw) is None
+    report = Disassembler(backend="intel").disassembleFile("code.bin", buffer=raw)
+    assert report.status == "ok", report.message
+    damaged = bytearray(coff_object())
+    struct.pack_into("<I", damaged, 20 + 20, len(damaged))
+    with pytest.raises(ValueError, match="Truncated"):
+        load_object(bytes(damaged))
+
+
+@pytest.mark.parametrize("builder", [elf_object, coff_object])
+@pytest.mark.parametrize("bits", [32, 64])
+def test_external_addresses_follow_the_image_instead_of_the_size_limit(builder, bits, monkeypatch):
+    monkeypatch.setattr(SmdaConfig, "MAX_IMAGE_SIZE", 1 << 31)
+    image = load_object(builder(bits, external=True))
+    target = image.relocations[0].target
+    assert image.imports[target] == "outside"
+    assert image.base + len(image.data) <= target < image.base + len(image.data) + 0x10000
+
+
+def test_object_metadata_is_a_detached_summary():
+    image = load_object(elf_object(external=True))
+    metadata = image.metadata()
+    assert metadata["relocation_count"] == len(image.relocations) == 2
+    assert "relocations" not in metadata
+    metadata["unresolved_symbols"].clear()
+    metadata["function_sizes"].clear()
+    metadata["symbol_aliases"].clear()
+    assert image.imports and image.function_sizes and image.aliases
 
 
 @pytest.mark.skipif(

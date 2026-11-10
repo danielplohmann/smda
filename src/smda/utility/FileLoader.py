@@ -77,7 +77,7 @@ class FileLoader:
                 self._base_addr = image.base
                 self._bitness = image.bitness
                 self._architecture = "intel"
-                self._abi = ElfFileLoader.getAbi(bytes(self._raw_data)) if image.format == "ELF_REL" else ""
+                self._abi = image.abi
                 self._code_areas = image.code_areas
                 self._has_backend = True
                 self._format_recognized = True

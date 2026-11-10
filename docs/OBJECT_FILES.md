@@ -14,10 +14,11 @@ analysis image. Addresses and bytes in the mapped view are not those of an
 upstream final linked image.
 
 `report.xmetadata["object_image"]` records the input format, layout policy,
-section addresses, symbol aliases, known function sizes, applied relocations
-and unresolved external symbols. Unknown externals receive analysis-only
-addresses outside the mapped image; no executable stub or implementation is
-supplied. Aliases share one recovered body. Ordinary C++ decorations use the
+section addresses, symbol aliases, known function sizes, the number of applied
+relocations and unresolved external symbols. The individual relocation records
+stay on `binary_info.object_image.relocations` and are not serialized. Unknown
+externals receive analysis-only addresses directly after the mapped image; no
+executable stub or implementation is supplied. Aliases share one recovered body. Ordinary C++ decorations use the
 same readable-name logic as linked images.
 
 Sized ELF symbols of at most 64 bytes containing only decoded NOP padding and ending at another
@@ -25,7 +26,8 @@ declared function entry are preserved as symbol aliases but are not seeded as
 function entries. Trap-only bodies remain eligible. This is based on bytes
 and extents rather than a `__pfx_` naming rule. For objects, known function
 extents prevent a guessed interior prologue from splitting an existing body;
-explicit function-symbol starts remain eligible. COFF function-definition
+explicit function-symbol starts remain eligible, and calls located inside a
+known extent still count as references to their targets. COFF function-definition
 auxiliary sizes are used when present. Objects without such sizes still depend
 on the normal recovery heuristics and may have fragmented/unnamed code.
 
@@ -33,7 +35,7 @@ on the normal recovery heuristics and may have fragmented/unnamed code.
 
 Supported ELF relocations:
 
-* x86: `R_386_32`, `PC32`, `GOT32`, `GOTOFF`, `GOTPC`, `GOT32X`.
+* x86: `R_386_32`, `PC32`, `PLT32`, `GOT32`, `GOTOFF`, `GOTPC`, `GOT32X`.
 * x64: `R_X86_64_64`, `PC32`, `PLT32`, `GOTPCREL`, `32`, `32S`, `PC64`,
   `GOTPCRELX`, `REX_GOTPCRELX`.
 
@@ -43,7 +45,10 @@ Supported COFF relocations:
 * x64: `ADDR64`, `ADDR32`, `ADDR32NB`, `REL32` through `REL32_5`, `SECTION`,
   `SECREL`.
 
-Absolute/no-op relocation entries are skipped. TLS, compressed allocated ELF
+Absolute/no-op relocation entries are skipped. COFF weak externals resolve to
+their default symbol and are not listed as unresolved. COFF debug symbols such
+as `.file` are ignored. Input that starts with a COFF machine value but whose
+section or symbol table does not fit the file is not treated as an object. TLS, compressed allocated ELF
 sections, ELF extended section numbering, unsupported architectures/relocations,
 COFF relocation-overflow tables, and unsupported weak-external modes are
 explicit errors. Bigobj and COFF import-object variants are not recognized by
@@ -66,7 +71,7 @@ there is no new hash-escape version or report-format version.
 
 `tests/testObjectFileLoader.py` constructs harmless ELF32/ELF64 and COFF32/COFF64
 objects in memory. Tests cover section-relative zero symbols, call and data
-relocations, BSS/common alignment, external references, padding and aliases,
+relocations, negative addends, weak externals, debug symbols, BSS/common alignment, external references, padding and aliases,
 known function extents, readable names, report serialization, malformed input,
 allocation bounds and the continued exclusion of archives.
 

@@ -1,12 +1,17 @@
 import struct
 from bisect import bisect_right
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
+import lief
 from capstone import CS_ARCH_X86, CS_MODE_32, CS_MODE_64, Cs
 
 from smda.SmdaConfig import SmdaConfig
 
 _MAX_PADDING_BYTES = 64
+_ABSOLUTE = -1
+_COMMON = -2
+_DEBUG = -3
 
 
 def _slice(data, offset, size):
@@ -53,6 +58,16 @@ class ObjectSymbol:
     size: int = 0
     function: bool = False
     address: int = 0
+    alias: bool = False
+
+
+class ObjectRelocation(NamedTuple):
+    address: int
+    width: int
+    addend: int
+    type: int
+    symbol: str
+    target: int
 
 
 @dataclass
@@ -66,6 +81,7 @@ class ObjectImage:
     function_sizes: dict = field(default_factory=dict)
     imports: dict = field(default_factory=dict)
     relocations: list = field(default_factory=list)
+    abi: str = ""
     base: int = 0x10000000
     data: bytearray = field(default_factory=bytearray)
     got: int = 0
@@ -117,9 +133,9 @@ class ObjectImage:
                         self.function_sizes[symbol.address] = max(
                             self.function_sizes.get(symbol.address, 0), symbol.size
                         )
-            elif symbol.section == -1:
+            elif symbol.section == _ABSOLUTE:
                 symbol.address = symbol.value
-            elif symbol.section == -2:
+            elif symbol.section == _COMMON:
                 symbol.address = self.allocate(symbol.size, symbol.value or 1)
         for start, size in sorted(self.function_sizes.items()):
             if not size:
@@ -130,19 +146,17 @@ class ObjectImage:
             else:
                 self._function_intervals.append([start, end])
         self._function_interval_starts = [start for start, _end in self._function_intervals]
-        self.got = self.allocate(self.bitness // 8, self.bitness // 8)
+        pointer = self.bitness // 8
+        self.got = self.allocate(pointer, pointer)
+        import_base = self.base + ((len(self.data) + len(self.symbols) * pointer + 0xFFF) & -0x1000) + 0x1000
         imports_by_name = {}
         for symbol in self.symbols.values():
-            if symbol.section == 0 and symbol.name:
+            if symbol.section == 0 and symbol.name and not symbol.alias:
                 if symbol.name == "_GLOBAL_OFFSET_TABLE_":
                     symbol.address = self.got
                     continue
                 existing = imports_by_name.get(symbol.name)
-                symbol.address = (
-                    existing
-                    if existing is not None
-                    else self.base + SmdaConfig.MAX_IMAGE_SIZE + 0x1000 + len(self.imports) * 16
-                )
+                symbol.address = existing if existing is not None else import_base + len(self.imports) * 16
                 self.imports[symbol.address] = symbol.name
                 imports_by_name[symbol.name] = symbol.address
 
@@ -182,10 +196,10 @@ class ObjectImage:
                 {"index": s.index, "name": s.name, "address": s.address, "size": s.size, "executable": s.executable}
                 for s in self.sections.values()
             ],
-            "symbol_aliases": self.aliases,
-            "function_sizes": self.function_sizes,
-            "unresolved_symbols": self.imports,
-            "relocations": self.relocations,
+            "symbol_aliases": {address: list(names) for address, names in self.aliases.items()},
+            "function_sizes": dict(self.function_sizes),
+            "unresolved_symbols": dict(self.imports),
+            "relocation_count": len(self.relocations),
         }
 
 
@@ -204,6 +218,10 @@ def _elf_object(data):
     sections = [_unpack(section_fmt, data, shoff + i * shentsize) for i in range(shnum)]
     names = _slice(data, sections[shstr][4], sections[shstr][5])
     image = ObjectImage("ELF_REL", 64 if is64 else 32)
+    try:
+        image.abi = lief.ELF.Header.OS_ABI(data[7]).name
+    except ValueError:
+        image.abi = ""
     for index, (name, kind, flags, _addr, offset, size, _link, _info, alignment, _entsize) in enumerate(sections):
         if not flags & 2:
             continue
@@ -235,7 +253,7 @@ def _elf_object(data):
                 raise ValueError("Unsupported ELF special symbol section index")
             if shndx < 0xFF00 and shndx >= shnum:
                 raise ValueError("Invalid ELF symbol section index")
-            mapped_section = {0xFFF1: -1, 0xFFF2: -2}.get(shndx, shndx)
+            mapped_section = {0xFFF1: _ABSOLUTE, 0xFFF2: _COMMON}.get(shndx, shndx)
             image.symbols[table_index, index] = ObjectSymbol(
                 _string(strings, name), mapped_section, value, sym_size, (info & 15) == 2
             )
@@ -270,7 +288,7 @@ def _elf_object(data):
             widths = (
                 {1: 8, 2: 4, 4: 4, 9: 4, 10: 4, 11: 4, 24: 8, 41: 4, 42: 4}
                 if is64
-                else {1: 4, 2: 4, 3: 4, 9: 4, 10: 4, 43: 4}
+                else {1: 4, 2: 4, 3: 4, 4: 4, 9: 4, 10: 4, 43: 4}
             )
             width = widths.get(relocation)
             if width is None:
@@ -297,9 +315,13 @@ def _elf_object(data):
                     signed = True
                 elif relocation == 11:
                     signed = True
-            elif relocation == 2:
+                elif relocation == 1:
+                    value &= 0xFFFFFFFFFFFFFFFF
+            elif relocation in (2, 4):
                 value -= address
                 signed = True
+            elif relocation == 1:
+                value &= 0xFFFFFFFF
             elif relocation in (3, 43):
                 value = image.got_slot(symbol) - image.got + addend
             elif relocation == 9:
@@ -309,27 +331,21 @@ def _elf_object(data):
                 value = image.got + addend - address
                 signed = True
             image.write(address, width, value, signed)
-            image.relocations.append(
-                {
-                    "address": address,
-                    "width": width,
-                    "addend": addend,
-                    "type": relocation,
-                    "symbol": symbol.name,
-                    "target": symbol.address,
-                }
-            )
+            image.relocations.append(ObjectRelocation(address, width, addend, relocation, symbol.name, symbol.address))
     return image
 
 
+def _is_coff_object(data):
+    if len(data) < 20:
+        return False
+    _machine, count, _timestamp, symoff, symcount, optional, _flags = struct.unpack_from("<HHIIIHH", data, 0)
+    if optional or not count or (symcount and not symoff):
+        return False
+    return 20 + count * 40 <= len(data) and symoff + symcount * 18 <= len(data)
+
+
 def _coff_object(data):
-    machine, count, _timestamp, symoff, symcount, optional, _flags = _unpack("<HHIIIHH", data, 0)
-    if optional or not count:
-        raise ValueError("Invalid COFF object header")
-    if symcount and not symoff:
-        raise ValueError("Invalid COFF symbol-table offset")
-    _slice(data, 20, count * 40)
-    _slice(data, symoff, symcount * 18)
+    machine, count, _timestamp, symoff, symcount, _optional, _flags = _unpack("<HHIIIHH", data, 0)
     _check_record_count(symcount, SmdaConfig.MAX_OBJECT_SYMBOLS, "symbol")
     strings_start = symoff + symcount * 18
     string_size = _unpack("<I", data, strings_start)[0] if symoff else 0
@@ -381,31 +397,40 @@ def _coff_object(data):
             raise ValueError("Invalid COFF symbol section index")
         if symbol.function and aux:
             symbol.size = _unpack("<I", data, symoff + (index + 1) * 18 + 4)[0]
-        if section == 0 and value:
-            symbol.section, symbol.size, symbol.value = -2, value, image.bitness // 8
-        if storage == 105 and aux:
+        if section == -2:
+            symbol.section = _DEBUG
+        elif section == 0 and value:
+            symbol.section, symbol.size, symbol.value = _COMMON, value, image.bitness // 8
+        elif section == 0 and storage == 105 and aux:
             target, search = _unpack("<II", data, symoff + (index + 1) * 18)
             if search != 3:
                 raise ValueError("Unsupported COFF weak external search mode")
             weak_aliases[index] = target
+            symbol.alias = True
         image.symbols[index] = symbol
         index += aux + 1
     image.place()
-    for index, target in weak_aliases.items():
-        visited = {index}
-        while target in weak_aliases:
-            if target in visited:
-                raise ValueError("Cyclic COFF weak external aliases")
-            visited.add(target)
+    resolved = {}
+    for index in weak_aliases:
+        chain = []
+        target = index
+        while target in weak_aliases and target not in resolved:
+            resolved[target] = None
+            chain.append(target)
             target = weak_aliases[target]
+        target = resolved.get(target, target)
+        if target is None:
+            raise ValueError("Cyclic COFF weak external aliases")
         if target not in image.symbols:
             raise ValueError("Invalid COFF weak external symbol index")
+        for link in chain:
+            resolved[link] = target
         image.symbols[index].address = image.symbols[target].address
     for section_index, offset, symbol_index, kind in relocations:
         if kind == 0:
             continue
         symbol = image.symbols.get(symbol_index)
-        if symbol is None or (symbol.section > 0 and symbol.section not in image.sections):
+        if symbol is None or symbol.section == _DEBUG or (symbol.section > 0 and symbol.section not in image.sections):
             raise ValueError("COFF relocation references an unavailable symbol")
         relative = (machine == 0x8664 and 4 <= kind <= 9) or (machine == 0x14C and kind == 0x14)
         width = 8 if machine == 0x8664 and kind == 1 else 2 if kind == 10 else 4
@@ -426,17 +451,10 @@ def _coff_object(data):
             value = symbol.value + addend
         else:
             raise ValueError(f"Unsupported COFF object relocation {kind}")
+        if not relative:
+            value &= (1 << width * 8) - 1
         image.write(place, width, value, signed=relative)
-        image.relocations.append(
-            {
-                "address": place,
-                "width": width,
-                "addend": addend,
-                "type": kind,
-                "symbol": symbol.name,
-                "target": symbol.address,
-            }
-        )
+        image.relocations.append(ObjectRelocation(place, width, addend, kind, symbol.name, symbol.address))
     return image
 
 
@@ -445,6 +463,6 @@ def load_object(data):
         endian = "little" if data[5] == 1 else "big"
         if int.from_bytes(data[16:18], endian) == 1:
             return _elf_object(data)
-    if data[:2] in (b"\x4c\x01", b"\x64\x86"):
+    if data[:2] in (b"\x4c\x01", b"\x64\x86") and _is_coff_object(data):
         return _coff_object(data)
     return None
