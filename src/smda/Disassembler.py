@@ -243,6 +243,7 @@ class Disassembler:
         binary_info.code_areas = loader.getCodeAreas()
         binary_info.has_backend = loader.getHasBackend()
         binary_info.format_recognized = loader.getFormatRecognized()
+        binary_info.object_image = loader.getObjectImage()
         return binary_info
 
     def _ensureHashes(self, binary_info):

@@ -5,6 +5,7 @@ from smda.utility.DelphiKbFileLoader import DelphiKbFileLoader
 from smda.utility.DexFileLoader import DexFileLoader
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.MachoFileLoader import MachoFileLoader
+from smda.utility.ObjectFileLoader import load_object
 from smda.utility.PeFileLoader import PeFileLoader
 
 LOGGER = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class FileLoader:
         self._map_file = map_file
         self._code_areas = []
         self._has_backend = False
+        self._object_image = None
         if load_file:
             self._loadFile(buffer)
 
@@ -54,8 +56,23 @@ class FileLoader:
         self._has_backend = False
         self._format_recognized = False
         self._code_areas = []
+        self._object_image = None
         self._raw_data = buffer if buffer is not None else self._loadRawFileContent()
         if self._map_file:
+            self._object_image = load_object(self._raw_data)
+            if self._object_image is not None:
+                image = self._object_image
+                if not image.code_areas:
+                    raise ValueError("Object contains no executable sections to disassemble")
+                self._data = bytes(image.data)
+                self._base_addr = image.base
+                self._bitness = image.bitness
+                self._architecture = "intel"
+                self._abi = ElfFileLoader.getAbi(bytes(self._raw_data)) if image.format == "ELF_REL" else ""
+                self._code_areas = image.code_areas
+                self._has_backend = True
+                self._format_recognized = True
+                return
             for loader in self.file_loaders:
                 if loader.isCompatible(self._raw_data):
                     # PE/ELF/MachO loaders expose parseBinary() so we can
@@ -97,6 +114,9 @@ class FileLoader:
 
     def getData(self):
         return self._data
+
+    def getObjectImage(self):
+        return self._object_image
 
     def getRawData(self):
         return self._raw_data

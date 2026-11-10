@@ -98,6 +98,9 @@ class FunctionCandidateManager:
     def _passesCodeFilter(self, addr):
         if addr is None:
             return False
+        image = getattr(getattr(self.disassembly, "binary_info", None), "object_image", None)
+        if image is not None and image.is_function_interior(addr):
+            return False
         areas = self._code_areas
         if not areas:
             return True

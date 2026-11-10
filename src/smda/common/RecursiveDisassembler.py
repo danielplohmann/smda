@@ -16,6 +16,7 @@ from smda.common.labelprovider.ElfApiResolver import ElfApiResolver
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.GoLabelProvider import GoSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
+from smda.common.labelprovider.ObjectSymbolProvider import ObjectSymbolProvider
 from smda.common.labelprovider.PdbSymbolProvider import PdbSymbolProvider
 from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
 from smda.common.labelprovider.RustSymbolProvider import RustSymbolProvider
@@ -68,6 +69,7 @@ class RecursiveDisassembler:
         self._cb_analysis_timeout = None
 
     def _addLabelProviders(self):
+        self._registerLabelProvider(ObjectSymbolProvider(self.config))
         self._registerLabelProvider(WinApiResolver(self.config))
         self._registerLabelProvider(ElfApiResolver(self.config))
         # Language-specific symbol providers (checked first for proper demangling)

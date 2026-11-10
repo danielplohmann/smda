@@ -32,6 +32,9 @@ class SmdaConfig:
     TIMEOUT = 300
     # maximum number of bytes to allocate while loading
     MAX_IMAGE_SIZE = 100 * 1024 * 1024
+    MAX_OBJECT_SYMBOLS = 250000
+    MAX_OBJECT_RELOCATIONS = 1000000
+    MAX_OBJECT_NAME_LENGTH = 4096
     # store raw binary buffer in SmdaReport to enable carving data from refs
     STORE_BUFFER = False
     # extract strings during disassembly
