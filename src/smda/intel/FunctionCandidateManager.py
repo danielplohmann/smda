@@ -691,7 +691,7 @@ class FunctionCandidateManager(_CommonFunctionCandidateManager):
         for match_count, call_match in enumerate(re.finditer(b"\xe8", self.disassembly.binary_info.binary)):
             if match_count % _TIMEOUT_POLL_INTERVAL == 0 and self._candidateTimeoutTripped():
                 return
-            if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + call_match.start()):
+            if not self._passesCodeFilter(self.disassembly.binary_info.base_addr + call_match.start(), True):
                 continue
             if len(self.disassembly.binary_info.binary) - call_match.start() >= 5:
                 packed_call = self.disassembly.getRawBytes(call_match.start() + 1, 4)
