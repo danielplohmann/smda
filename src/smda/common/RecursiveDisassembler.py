@@ -355,6 +355,11 @@ class RecursiveDisassembler:
         # in capstone, disassembly is more expensive than calling the function, so we decode a window of several
         # instructions per call. disasm_lite() also provides faster disassembly than disasm(), so we work with tuples.
         decode_window_size = self.decode_window_size or self.backend.max_instruction_size * 2
+        # an object's symbol table sizes its functions: falling through the declared end means
+        # the last instruction was a call that does not return, not that the padding is code
+        object_image = getattr(binary_info, "object_image", None)
+        declared_size = object_image.function_sizes.get(start_addr, 0) if object_image is not None else 0
+        declared_end = start_addr + declared_size if declared_size else None
         blocks_processed = 0
         reverted_gap_functions = []
         while state.hasUnprocessedBlocks():
@@ -392,7 +397,9 @@ class RecursiveDisassembler:
                     i_address, i_size, i_mnemonic, i_op_str = i
                     # a table this function reads (a switch's jump table) is not code, however
                     # its bytes decode: the block ran into it past a call that does not return
-                    if table_bytes and not table_bytes.isdisjoint(range(i_address, i_address + i_size)):
+                    if (table_bytes and not table_bytes.isdisjoint(range(i_address, i_address + i_size))) or (
+                        i_address == declared_end and previous_i is not None
+                    ):
                         if previous_i is not None and previous_i[0] + previous_i[1] == i_address:
                             state.removeCodeRef(previous_i[0], i_address)
                         state.setBlockEndingInstruction(True)

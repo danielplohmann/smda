@@ -402,6 +402,15 @@ def test_calls_inside_sized_functions_still_seed_unnamed_callees():
     assert not any(alpha.offset < address < alpha.offset + 16 for address in candidates)
 
 
+def test_a_trailing_call_that_does_not_return_ends_at_the_symbol_extent():
+    body = bytes.fromhex("85ff7401c3e800000000")
+    report = Disassembler().disassembleFile("probe.o", buffer=elf_object(alpha_body=body, call_offset=6))
+    assert report.status == "ok", report.message
+    alpha = next(f for f in report.getFunctions() if f.function_name == "alpha")
+    assert alpha.num_instructions == 4
+    assert max(i.offset + len(i.bytes) // 2 for i in alpha.getInstructions()) == alpha.offset + len(body)
+
+
 def test_i386_plt_calls_are_relocated_like_pc_relative_calls():
     image = load_object(elf_object(32, relocation=4))
     functions = {name: address for address, name in image.functions.items()}
