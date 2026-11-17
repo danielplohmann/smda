@@ -79,6 +79,12 @@ past roughly six lines it belongs in the PR the entry links.
 ### Removed
 
 ### Fixed
+- **(labels)** Apply the per-DLL `aslr_offset` of an ApiScout DB in `WinApiResolver`, as ApiScout does. The
+  offset was ignored, so a DB built with ASLR offsets mapped every rebased DLL to its file ImageBase, where most
+  64-bit system DLLs collide at `0x180000000`. *Measured on apiscout's `win10_prof_1803_example.json` (`668c981`):*
+  5,706 of 86,703 resolver addresses matched ApiScout's before, all 97,516 after. Cost: none, DBs without offsets
+  (the bundled Win7 and XP ones) load bit-identical. *Not bundled; the behaviour is covered by
+  `test_win_api_resolver_applies_aslr_offsets_of_the_database`.*
 
 ### Security
 

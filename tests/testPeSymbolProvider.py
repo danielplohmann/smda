@@ -171,6 +171,45 @@ class TestPeSymbolProviderImports(unittest.TestCase):
             self.assertEqual(resolver._os_name, "testos")
             self.assertIsNone(resolver._deferred_dbs)
 
+    def test_win_api_resolver_applies_aslr_offsets_of_the_database(self):
+        api_db = {
+            "os_name": "testos",
+            "aslr_offsets": True,
+            "dlls": {
+                "64_10.0.17134.1_first.dll_0x180000000": {
+                    "bitness": 64,
+                    "base_address": 0x180000000,
+                    "aslr_offset": 0x180000000 - 0x7FF8D5930000,
+                    "exports": [{"name": "FirstApi", "address": 0x1000, "ordinal": 1}],
+                },
+                "64_10.0.17134.1_second.dll_0x180000000": {
+                    "bitness": 64,
+                    "base_address": 0x180000000,
+                    "aslr_offset": 0x180000000 - 0x7FF8D7520000,
+                    "exports": [{"name": "SecondApi", "address": 0x1000, "ordinal": 1}],
+                },
+                "64_10.0.17134.1_unrebased.dll_0x10000000": {
+                    "bitness": 64,
+                    "base_address": 0x10000000,
+                    "aslr_offset": 0,
+                    "exports": [{"name": "UnrebasedApi", "address": 0x1000, "ordinal": 1}],
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "apiscout_aslr.json")
+            with open(db_path, "w", encoding="utf-8") as f_json:
+                json.dump(api_db, f_json)
+            config = SimpleNamespace(API_COLLECTION_FILES={"testos": db_path})
+            with mock.patch.object(WinApiResolver, "_db_cache", {}):
+                resolver = WinApiResolver(config)
+                resolver.update(SimpleNamespace(is_buffer=True))
+
+                self.assertEqual(resolver.getApi(0, 0x7FF8D5931000), ("first.dll_0x180000000", "FirstApi"))
+                self.assertEqual(resolver.getApi(0, 0x7FF8D7521000), ("second.dll_0x180000000", "SecondApi"))
+                self.assertEqual(resolver.getApi(0, 0x10001000), ("unrebased.dll_0x10000000", "UnrebasedApi"))
+                self.assertEqual(resolver.getApi(0, 0x180001000), (None, None))
+
     def test_win_api_resolver_keeps_an_explicit_os_name_across_deferred_loading(self):
         api_db = {
             "os_name": "present",

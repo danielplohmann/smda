@@ -100,7 +100,7 @@ class WinApiResolver(AbstractLabelProvider):
             dll = api_db["dlls"][dll_entry]
             dll_name = "_".join(dll_entry.split("_")[2:])
             has_64bit |= dll["bitness"] == 64
-            base_address = dll["base_address"]
+            base_address = dll["base_address"] - dll.get("aslr_offset", 0)
             for export in dll["exports"]:
                 num_apis_loaded += 1
                 api_name = str(export["name"])
