@@ -10,13 +10,13 @@ from smda.utility.PeFileLoader import PeFileLoader
 LOGGER = logging.getLogger(__name__)
 
 
-def _load_object(data):
+def _load_object(data, config=None):
     # import the object loader only for ELF ET_REL or i386/AMD64 COFF input
     is_elf_rel = data[:4] == b"\x7fELF" and len(data) >= 18 and data[16:18] in (b"\x01\x00", b"\x00\x01")
     if is_elf_rel or data[:2] in (b"\x4c\x01", b"\x64\x86"):
         from smda.utility.ObjectFileLoader import load_object
 
-        return load_object(data)
+        return load_object(data, config)
     return None
 
 
@@ -35,8 +35,10 @@ class FileLoader:
     _code_areas = None
     file_loaders = [PeFileLoader, ElfFileLoader, MachoFileLoader, DelphiKbFileLoader, DexFileLoader]
 
-    def __init__(self, file_path, load_file=True, map_file=False, buffer=None):
+    def __init__(self, file_path, load_file=True, map_file=False, buffer=None, config=None):
         self._file_path = file_path
+        # an SmdaConfig instance whose limits apply to object files; None uses the class defaults
+        self._config = config
         self._map_file = map_file
         self._code_areas = []
         self._has_backend = False
@@ -68,7 +70,7 @@ class FileLoader:
         self._object_image = None
         self._raw_data = buffer if buffer is not None else self._loadRawFileContent()
         if self._map_file:
-            self._object_image = _load_object(self._raw_data)
+            self._object_image = _load_object(self._raw_data, self._config)
             if self._object_image is not None:
                 image = self._object_image
                 if not image.code_areas:

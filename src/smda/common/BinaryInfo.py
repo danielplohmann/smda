@@ -8,7 +8,8 @@ import lief
 
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
-from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider, _readable_name
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.common.labelprovider.symbol_names import readable_name
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.lief_helper import lief_name, safe_lief_parse
 from smda.utility.MachoFileLoader import MachoFileLoader
@@ -223,7 +224,7 @@ class BinaryInfo:
 
     def getSymbols(self):
         if self.object_image is not None:
-            return {address: _readable_name(name) for address, name in self.object_image.functions.items()}
+            return {address: readable_name(name) for address, name in self.object_image.functions.items()}
         if self.symbols is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()

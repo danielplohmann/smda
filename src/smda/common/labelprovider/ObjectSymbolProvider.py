@@ -1,5 +1,5 @@
 from smda.common.labelprovider.AbstractLabelProvider import AbstractLabelProvider
-from smda.common.labelprovider.PeSymbolProvider import _readable_name
+from smda.common.labelprovider.symbol_names import readable_name
 
 
 class ObjectSymbolProvider(AbstractLabelProvider):
@@ -11,7 +11,7 @@ class ObjectSymbolProvider(AbstractLabelProvider):
     def update(self, binary_info):
         self.image = getattr(binary_info, "object_image", None)
         self.functions = (
-            {address: _readable_name(name) for address, name in self.image.functions.items()}
+            {address: readable_name(name) for address, name in self.image.functions.items()}
             if self.image is not None
             else {}
         )

@@ -92,6 +92,14 @@ past roughly six lines it belongs in the PR the entry links.
   5,706 of 86,703 resolver addresses matched ApiScout's before, all 97,516 after. Cost: none, DBs without offsets
   (the bundled Win7 and XP ones) load bit-identical. *Not bundled; the behaviour is covered by
   `test_win_api_resolver_applies_aslr_offsets_of_the_database`.*
+- **(loaders)** Read the object-file limits from the caller's `SmdaConfig` instance. `MAX_OBJECT_SYMBOLS`,
+  `MAX_OBJECT_RELOCATIONS`, `MAX_OBJECT_NAME_LENGTH` and the `MAX_IMAGE_SIZE` of `ObjectImage.allocate()` were read
+  from the class, so a value set on the config passed to `Disassembler` was ignored for ELF ET_REL and COFF input.
+  `FileLoader` and `MemoryFileLoader` take an optional `config` and hand it to `load_object()`; without one the class
+  defaults apply as before. The PE, ELF and Mach-O loaders still read `MAX_IMAGE_SIZE` from the class. Cost: none,
+  default-config output is unchanged. The shared demangling dispatch moves to the public
+  `labelprovider.symbol_names.readable_name`, so `BinaryInfo` and `ObjectSymbolProvider` no longer import a private
+  helper of `PeSymbolProvider`. (follow-up to #435)
 
 ### Security
 

@@ -24,10 +24,9 @@ def _unpack(fmt, data, offset):
     return struct.unpack(fmt, _slice(data, offset, struct.calcsize(fmt)))
 
 
-def _string(data, offset):
+def _string(data, offset, limit):
     if offset < 0 or offset >= len(data):
         raise ValueError("Invalid object string-table offset")
-    limit = SmdaConfig.MAX_OBJECT_NAME_LENGTH
     end = data.find(b"\0", offset, offset + limit + 1) if limit > 0 else data.find(b"\0", offset)
     if end < 0:
         raise ValueError("Unterminated or oversized object symbol name")
@@ -88,12 +87,14 @@ class ObjectImage:
     _got_slots: dict = field(default_factory=dict)
     _function_intervals: list = field(default_factory=list)
     _function_interval_starts: list = field(default_factory=list)
+    # the caller's SmdaConfig instance; None reads the class defaults
+    config: object = field(default=None, repr=False, compare=False)
 
     def allocate(self, size, alignment=1):
         if alignment < 1 or alignment & (alignment - 1):
             raise ValueError("Invalid object section alignment")
         offset = (len(self.data) + alignment - 1) & -alignment
-        if size < 0 or offset + size > SmdaConfig.MAX_IMAGE_SIZE:
+        if size < 0 or offset + size > (self.config or SmdaConfig).MAX_IMAGE_SIZE:
             raise ValueError("Object image larger than MAX_IMAGE_SIZE")
         self.data.extend(bytes(offset + size - len(self.data)))
         return self.base + offset
@@ -203,7 +204,7 @@ class ObjectImage:
         }
 
 
-def _elf_object(data):
+def _elf_object(data, config):
     if data[5] != 1 or data[4] not in (1, 2):
         raise ValueError("Only little-endian ELF32/ELF64 relocatable objects are supported")
     is64 = data[4] == 2
@@ -217,7 +218,7 @@ def _elf_object(data):
     _slice(data, shoff, shnum * shentsize)
     sections = [_unpack(section_fmt, data, shoff + i * shentsize) for i in range(shnum)]
     names = _slice(data, sections[shstr][4], sections[shstr][5])
-    image = ObjectImage("ELF_REL", 64 if is64 else 32)
+    image = ObjectImage("ELF_REL", 64 if is64 else 32, config=config)
     try:
         image.abi = lief.ELF.Header.OS_ABI(data[7]).name
     except ValueError:
@@ -231,7 +232,7 @@ def _elf_object(data):
             raise ValueError("TLS and compressed ELF object sections are not supported")
         content = b"" if kind == 8 else _slice(data, offset, size)
         image.sections[index] = ObjectSection(
-            index, _string(names, name), size, alignment or 1, content, bool(flags & 4)
+            index, _string(names, name, config.MAX_OBJECT_NAME_LENGTH), size, alignment or 1, content, bool(flags & 4)
         )
     for table_index, section in enumerate(sections):
         if section[1] != 2:
@@ -242,7 +243,7 @@ def _elf_object(data):
             raise ValueError("Invalid ELF object symbol table")
         strings = _slice(data, sections[link][4], sections[link][5])
         _slice(data, offset, size)
-        _check_record_count(len(image.symbols) + size // entsize, SmdaConfig.MAX_OBJECT_SYMBOLS, "symbol")
+        _check_record_count(len(image.symbols) + size // entsize, config.MAX_OBJECT_SYMBOLS, "symbol")
         for index in range(size // entsize):
             values = _unpack(symbol_fmt, data, offset + index * entsize)
             if is64:
@@ -255,7 +256,7 @@ def _elf_object(data):
                 raise ValueError("Invalid ELF symbol section index")
             mapped_section = {0xFFF1: _ABSOLUTE, 0xFFF2: _COMMON}.get(shndx, shndx)
             image.symbols[table_index, index] = ObjectSymbol(
-                _string(strings, name), mapped_section, value, sym_size, (info & 15) == 2
+                _string(strings, name, config.MAX_OBJECT_NAME_LENGTH), mapped_section, value, sym_size, (info & 15) == 2
             )
     image.place()
     relocation_count = 0
@@ -275,7 +276,7 @@ def _elf_object(data):
             raise ValueError("Invalid ELF object relocation table")
         _slice(data, offset, size)
         relocation_count += size // entsize
-        _check_record_count(relocation_count, SmdaConfig.MAX_OBJECT_RELOCATIONS, "relocation")
+        _check_record_count(relocation_count, config.MAX_OBJECT_RELOCATIONS, "relocation")
         for index in range(size // entsize):
             fields = _unpack(fmt, data, offset + index * entsize)
             place, info = fields[:2]
@@ -344,9 +345,9 @@ def _is_coff_object(data):
     return 20 + count * 40 <= len(data) and symoff + symcount * 18 <= len(data)
 
 
-def _coff_object(data):
+def _coff_object(data, config):
     machine, count, _timestamp, symoff, symcount, _optional, _flags = _unpack("<HHIIIHH", data, 0)
-    _check_record_count(symcount, SmdaConfig.MAX_OBJECT_SYMBOLS, "symbol")
+    _check_record_count(symcount, config.MAX_OBJECT_SYMBOLS, "symbol")
     strings_start = symoff + symcount * 18
     string_size = _unpack("<I", data, strings_start)[0] if symoff else 0
     strings = _slice(data, strings_start, string_size) if string_size else b""
@@ -356,10 +357,10 @@ def _coff_object(data):
     def name(raw):
         if raw[:4] == bytes(4):
             offset = int.from_bytes(raw[4:], "little")
-            return _string(strings, offset) if offset else ""
+            return _string(strings, offset, config.MAX_OBJECT_NAME_LENGTH) if offset else ""
         return raw.split(b"\0", 1)[0].decode("utf-8", errors="replace")
 
-    image = ObjectImage("COFF", 32 if machine == 0x14C else 64)
+    image = ObjectImage("COFF", 32 if machine == 0x14C else 64, config=config)
     relocations = []
     for index in range(1, count + 1):
         raw_name, _vsize, _vaddr, size, offset, reloff, _lineoff, relcount, _linecount, flags = _unpack(
@@ -368,7 +369,7 @@ def _coff_object(data):
         section_name = name(raw_name)
         if section_name.startswith("/"):
             try:
-                section_name = _string(strings, int(section_name[1:]))
+                section_name = _string(strings, int(section_name[1:]), config.MAX_OBJECT_NAME_LENGTH)
             except ValueError as exc:
                 raise ValueError("Invalid COFF long section name") from exc
         if flags & 0xA00 or section_name.startswith((".debug", ".drectve", ".llvm")):
@@ -384,7 +385,7 @@ def _coff_object(data):
         content = b"" if not offset else _slice(data, offset, size)
         image.sections[index] = ObjectSection(index, section_name, size, alignment, content, bool(flags & 0x20000020))
         _slice(data, reloff, relcount * 10)
-        _check_record_count(len(relocations) + relcount, SmdaConfig.MAX_OBJECT_RELOCATIONS, "relocation")
+        _check_record_count(len(relocations) + relcount, config.MAX_OBJECT_RELOCATIONS, "relocation")
         relocations.extend((index, *_unpack("<IIH", data, reloff + i * 10)) for i in range(relcount))
     index = 0
     weak_aliases = {}
@@ -458,11 +459,15 @@ def _coff_object(data):
     return image
 
 
-def load_object(data):
+def load_object(data, config=None):
+    """Load an ELF ET_REL or i386/AMD64 COFF object, None for anything else. The limits
+    (MAX_IMAGE_SIZE, MAX_OBJECT_*) come from config, an SmdaConfig instance, or from the
+    SmdaConfig class when it is None."""
+    config = config or SmdaConfig
     if data[:4] == b"\x7fELF" and len(data) >= 18:
         endian = "little" if data[5] == 1 else "big"
         if int.from_bytes(data[16:18], endian) == 1:
-            return _elf_object(data)
+            return _elf_object(data, config)
     if data[:2] in (b"\x4c\x01", b"\x64\x86") and _is_coff_object(data):
-        return _coff_object(data)
+        return _coff_object(data, config)
     return None
