@@ -50,9 +50,8 @@ class Tarjan:
                         call_stack.append((w, iter(graph.get(w, ()))))
                         pushed = True
                         break
-                    elif w in stack_set:
-                        if index[w] < lowlink[v]:
-                            lowlink[v] = index[w]
+                    elif w in stack_set and index[w] < lowlink[v]:
+                        lowlink[v] = index[w]
                 if pushed:
                     continue
 
