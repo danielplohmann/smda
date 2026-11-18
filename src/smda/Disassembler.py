@@ -262,7 +262,7 @@ class Disassembler:
     def disassembleFile(self, file_path: str, pdb_path: str = "", buffer: Optional[bytes] = None) -> SmdaReport:
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
-            loader = FileLoader(file_path, map_file=True, buffer=buffer)
+            loader = FileLoader(file_path, map_file=True, buffer=buffer, config=self.config)
             binary_info = self._populateBinaryInfo(loader, file_path)
             self.initDisassembler(binary_info.architecture)
             if self.disassembler:
@@ -285,7 +285,7 @@ class Disassembler:
     def disassembleUnmappedBuffer(self, file_content: bytes) -> SmdaReport:
         start = datetime.datetime.now(datetime.timezone.utc)
         try:
-            loader = MemoryFileLoader(file_content, map_file=True)
+            loader = MemoryFileLoader(file_content, map_file=True, config=self.config)
             binary_info = self._populateBinaryInfo(loader)
             self.initDisassembler(binary_info.architecture)
             smda_report = self._disassemble(binary_info, timeout=self.config.TIMEOUT)

@@ -386,6 +386,46 @@ def test_noop_relocations_still_count_towards_the_record_limit(monkeypatch):
         load_object(elf_object(relocation=0))
 
 
+def _instance_config(**limits):
+    """an SmdaConfig instance with the limits set on it only, the class keeps its defaults"""
+    config = SmdaConfig()
+    for name, value in limits.items():
+        setattr(config, name, value)
+    return config
+
+
+@pytest.mark.parametrize("builder", [elf_object, coff_object])
+@pytest.mark.parametrize(
+    "setting,limit,match",
+    [
+        ("MAX_OBJECT_SYMBOLS", 1, "symbol count"),
+        ("MAX_OBJECT_RELOCATIONS", 1, "relocation count"),
+        ("MAX_OBJECT_NAME_LENGTH", 32, "oversized.*name"),
+        ("MAX_IMAGE_SIZE", 16, "MAX_IMAGE_SIZE"),
+    ],
+)
+def test_object_limits_are_read_from_the_config_instance(builder, setting, limit, match):
+    raw = builder(alpha_name="long_symbol_name_" * 8) if setting == "MAX_OBJECT_NAME_LENGTH" else builder()
+    assert load_object(raw) is not None
+    with pytest.raises(ValueError, match=match):
+        load_object(raw, _instance_config(**{setting: limit}))
+    with pytest.raises(ValueError, match=match):
+        MemoryFileLoader(raw, map_file=True, config=_instance_config(**{setting: limit}))
+
+
+def test_object_image_allocation_is_bounded_by_its_config_instance():
+    image = ObjectImage("ELF_REL", 64, config=_instance_config(MAX_IMAGE_SIZE=128))
+    with pytest.raises(ValueError, match="MAX_IMAGE_SIZE"):
+        image.allocate(129)
+    image.allocate(128)
+
+
+def test_disassembler_passes_its_config_to_the_object_loader():
+    report = Disassembler(config=_instance_config(MAX_OBJECT_SYMBOLS=1)).disassembleUnmappedBuffer(elf_object())
+    assert report.status == "error"
+    assert Disassembler().disassembleUnmappedBuffer(elf_object()).status == "ok"
+
+
 def test_calls_inside_sized_functions_still_seed_unnamed_callees():
     body = bytes.fromhex("554889e5e800000000e8020000005dc3b80100000083c002c3")
     raw = elf_object(alpha_body=body, alpha_size=16, call_offset=5)
