@@ -196,6 +196,8 @@ class SmdaReport:
                 "imported_functions": self._mergeImportedFunctions(disassembly),
                 "symbols": disassembly.binary_info.getSymbols(),
             }
+            if getattr(disassembly.binary_info, "object_image", None) is not None:
+                self.xmetadata["object_image"] = disassembly.binary_info.object_image.metadata()
 
     @staticmethod
     def _mergeImportedFunctions(disassembly):

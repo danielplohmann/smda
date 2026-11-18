@@ -72,6 +72,13 @@ past roughly six lines it belongs in the PR the entry links.
 
 ### Added
 
+- **(loaders)** Analyze ordinary x86/x64 ELF relocatable and COFF objects with deterministic section placement,
+  section-relative symbols and supported relocations. Preserve the original input hash and record the derived layout,
+  aliases and unresolved external references in `xmetadata.object_image`; no archive support is added.
+  Synthetic fixtures cover both architectures. A pinned Ubuntu CRC32 kernel module additionally checks nine recovered
+  bodies against its symbol addresses, extents and independent instruction counts, including the padding-label case.
+  Unsupported relocations, TLS and extended object variants remain errors; linked-image recovery is unchanged by design.
+
 ### Changed
 
 ### Deprecated

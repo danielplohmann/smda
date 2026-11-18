@@ -8,7 +8,7 @@ import lief
 
 from smda.common.labelprovider.ElfSymbolProvider import ElfSymbolProvider
 from smda.common.labelprovider.MachoSymbolProvider import MachoSymbolProvider
-from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider
+from smda.common.labelprovider.PeSymbolProvider import PeSymbolProvider, _readable_name
 from smda.utility.ElfFileLoader import ElfFileLoader
 from smda.utility.lief_helper import lief_name, safe_lief_parse
 from smda.utility.MachoFileLoader import MachoFileLoader
@@ -83,6 +83,7 @@ class BinaryInfo:
         self._lief_type = None
         self._position_independent_elf = None
         self._symbol_provider = None
+        self.object_image = None
         self.abi = ""
 
     def _getLiefType(self):
@@ -136,6 +137,8 @@ class BinaryInfo:
         return data
 
     def getLiefBinary(self):
+        if self.object_image is not None:
+            return None
         binary_data = self.getBinaryData()
         if self._lief_binary is None and binary_data:
             if MachoFileLoader.isCompatible(binary_data):
@@ -150,6 +153,8 @@ class BinaryInfo:
         return self._lief_binary
 
     def getOep(self):
+        if self.object_image is not None:
+            return None
         if self.oep is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
@@ -171,6 +176,8 @@ class BinaryInfo:
         return self.oep
 
     def getExportedFunctions(self):
+        if self.object_image is not None:
+            return {}
         if self.exported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
@@ -184,6 +191,8 @@ class BinaryInfo:
         return self.exported_functions
 
     def getExportedSymbols(self):
+        if self.object_image is not None:
+            return {}
         if self.exported_symbols is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
@@ -198,6 +207,8 @@ class BinaryInfo:
         return self.exported_symbols
 
     def getImportedFunctions(self):
+        if self.object_image is not None:
+            return {address: ("", name) for address, name in self.object_image.imports.items()}
         if self.imported_functions is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
@@ -211,6 +222,8 @@ class BinaryInfo:
         return self.imported_functions
 
     def getSymbols(self):
+        if self.object_image is not None:
+            return {address: _readable_name(name) for address, name in self.object_image.functions.items()}
         if self.symbols is None:
             lief_result = self.getLiefBinary()
             lief_type = self._getLiefType()
@@ -233,6 +246,10 @@ class BinaryInfo:
         PE uses ``base_addr + section.virtual_address``; ELF uses LIEF absolute
         ``section.virtual_address``; Mach-O applies the Mach-O base/adjustment offset.
         """
+        if self.object_image is not None:
+            for section in self.object_image.sections.values():
+                yield section.name, section.address, section.address + section.size
+            return
         parsed_binary = self.getLiefBinary()
         if not parsed_binary:
             return
