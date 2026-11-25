@@ -54,7 +54,7 @@ dependencies = [
     # reviewed bump of this pin. smda never calls load_plugins(); a host application that
     # calls load_plugins() or register_language() in the same process can still replace a
     # built-in scheme and change or drop Itanium, MSVC and Swift labels without an error.
-    "demangle==0.6.0",
+    "demangle==0.9.0",
     "dncil",
     "dnfile",
     "lief>=0.16.0",
